@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {allowedPublicationPath as allowed} from './queue-paths.mjs';
+test('ordinary publications retain src/public limits',()=>{assert.ok(allowed(undefined,'src/server.mjs'));assert.ok(allowed(undefined,'public/app.js'));assert.equal(allowed(undefined,'/usr/local/lib/nextech-cicd/dispatcher.py'),false);assert.equal(allowed(undefined,'src/../secret'),false);});
+test('infrastructure requests allow only the reviewed publisher and bridge targets',()=>{assert.ok(allowed('infrastructure-cicd','/usr/local/lib/nextech-cicd/dispatcher.py'));assert.ok(allowed('infrastructure-cicd','/usr/local/lib/nextech-cicd/queue_bridge.py'));for(const p of ['/etc/nextech/application.env','/etc/sudoers','/usr/local/lib/nextech-cicd/../../evil','/usr/local/lib/nextech-cicd/extra.sh','src/server.mjs'])assert.equal(allowed('infrastructure-cicd',p),false);});

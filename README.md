@@ -1,14 +1,15 @@
 # NEXTECH LOGISTIC V3
 
-Sources de l'application actuellement publiée, récupérées le 10 octobre 2026 et vérifiées par empreintes SHA-256 contre le serveur.
+Sources Node.js24 de l'application. `npm ci --ignore-scripts`, `npm run check` et `npm test` exécutent les contrôles isolés. Données, documents, étiquettes, coffres et identifiants de production sont exclus du dépôt.
 
-Le dossier `src/` contient le backend et les connecteurs ; `public/` contient l'interface. Node.js 24 ou supérieur est requis. Installation des dépendances : `npm ci`. Démarrage : `npm start`, après configuration d'un environnement isolé approprié.
+Après initialisation de l'exécuteur Section7, chaque push sur `main` déclenche tests puis publication automatique, sous contrôle de la file commune et du verrou serveur. Configuration et retour arrière : [deploy/README.md](deploy/README.md).
 
+La copie publique contient des sources épurées. Ne jamais écraser une différence privée ni les développements serveur concurrents. Ne pas connecter le développement aux services métier réels sans autorisation spécifique.
 Les bases de données, documents, étiquettes, journaux et identifiants de production sont volontairement exclus. Ne jamais connecter un environnement de développement aux services métier réels sans autorisation spécifique.
 
 L'export initial du serveur ne contenait pas les dossiers `scripts/` et `test/`. Ils ont depuis été ajoutés : `npm run check` vérifie la syntaxe JavaScript, `npm test` vérifie les filtres de problèmes et les contrôles de publication, et `npm run test:tracking` vérifie la synchronisation et l'export Excel après installation des dépendances. Ces tests isolés ne valident pas les connexions de production.
 
-La publication GitHub ne déclenche pas de déploiement serveur. Les publications et redémarrages V3 restent exclusivement centralisés par la Section 7 via la file commune du projet.
+Après activation CI/CD, chaque push main est publié par l’exécuteur Section7 : tests, file commune, preuves et verrou serveur restent obligatoires.
 
 Les instantanés métier margin-published-snapshot.json et temu-reading-reports.json sont exclus. Le périmètre privé de réimport TEMU est vide dans cette copie : aucun réimport de ce lot ne peut être autorisé par cette copie. Le service de marges nécessite son fichier de configuration privé pour démarrer. Ces exclusions concernent seulement le dépôt public ; le serveur reste inchangé.
 Les identifiants privés du lot cancelled-import-reimport sont aussi retirés ; ce lot reste désactivé dans la copie publique.
