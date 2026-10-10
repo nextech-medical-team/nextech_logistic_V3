@@ -1,5 +1,17 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {createHash}from'node:crypto';
 import {validatePublicationReadiness}from'./publication-readiness.mjs';
+import {spawnSync} from 'node:child_process';
+test('queue CLI rejects an unready change without creating a request',async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'v3-queue-test-'));
+ try{
+  const queueDir=path.join(dir,'coordination-deploiement');await fs.mkdir(queueDir);
+  for(const file of ['queue.mjs','publication-readiness.mjs'])await fs.copyFile(new URL(file,import.meta.url),path.join(queueDir,file));
+  await fs.writeFile(path.join(dir,'candidate.js'),'test');
+  await fs.writeFile(path.join(dir,'manifest.json'),JSON.stringify({section:2,summary:'isolated test',ready:false,files:[{serverPath:'src/test.js',baselineSha256:'NEW',preparedPath:'candidate.js'}],tests:{},restartRequired:false}));
+  const result=spawnSync(process.execPath,[path.join(queueDir,'queue.mjs'),'enqueue','manifest.json'],{cwd:dir,encoding:'utf8'});
+  assert.notEqual(result.status,0);assert.match(result.stderr,/non prêt/);assert.deepEqual(await fs.readdir(path.join(queueDir,'requests')),[]);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
 test('a pending manifest cannot enter the ready queue',async()=>{await assert.rejects(validatePublicationReadiness('.',{ready:false}),/non prêt/);});
 test('open gates and missing Git evidence are rejected',async()=>{
  await assert.rejects(validatePublicationReadiness('.',{ready:true,openGates:['test']}),/blocages/);
