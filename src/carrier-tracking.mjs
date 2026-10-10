@@ -22,7 +22,7 @@ export function normalizeTracking(carrier,tracking,payload){
 }
 
 // Dedicated read-only client: only OAuth and the two tracking GET routes exist.
-export function trackingClient(directory,{fetchImpl=fetch,now=()=>Date.now()}={}){
+export function trackingClient(directory,{fetchImpl=fetch,now=()=>Date.now(),loadConfig=async file=>JSON.parse(await readFile(path.join(directory,file),'utf8'))}={}){
  const tokens=new Map();
  async function request(url,options){
   let r;try{r=await fetchImpl(url,{...options,redirect:'error',signal:AbortSignal.timeout(20000)});}catch{throw Error('API suivi · Connexion impossible ou délai dépassé');}
@@ -32,8 +32,8 @@ export function trackingClient(directory,{fetchImpl=fetch,now=()=>Date.now()}={}
  return {async read(carrier,environment,tracking){
   if(!['gls','gofo'].includes(carrier)||!['production','test'].includes(environment)||!/^[a-zA-Z0-9-]{4,80}$/.test(tracking))throw Error('Suivi · Transporteur, environnement ou numéro invalide');
   await apiSlot('tracking:'+carrier+':'+environment,1000);
-  const c=JSON.parse(await readFile(path.join(directory,'carriers-'+environment+'.json'),'utf8'));
-  if(carrier==='gls'){try{Object.assign(c,JSON.parse(await readFile(path.join(directory,'tracking-'+environment+'.json'),'utf8')));}catch(e){if(e.code!=='ENOENT')throw e;}}
+  const c={...await loadConfig('carriers-'+environment+'.json')};
+  if(carrier==='gls'){try{Object.assign(c,await loadConfig('tracking-'+environment+'.json'));}catch(e){if(e.code!=='ENOENT')throw e;}}
   // Production endpoint supplied by the user on 2026-10-04; preserve explicit configuration.
   if(carrier==='gls'&&environment==='production'){c.GLS_TRACK_TRACE_BASE_URL ||= 'https://api.gls-group.net/track-and-trace-v1';c.GLS_TRACK_TRACE_AUTH_BASE_URL ||= 'https://api.gls-group.net';}
   const base=carrier==='gofo'?c.GOFO_BASE_URL:c.GLS_TRACK_TRACE_BASE_URL;
