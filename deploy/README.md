@@ -10,7 +10,7 @@ La clé ne permet qu'une commande `deploy <SHA>` ; aucun shell, transfert de fic
 
 ## Initialisation par la Section 7
 
-La Section 7 installe une seule fois les quatre fichiers de confiance dans `/usr/local/lib/nextech-cicd`, avec `bootstrap.py` et un inventaire SHA récent du serveur. Cette installation conserve les sources, les services et l'environnement existants. Elle s'effectue sous `/var/lock/nextech-deploy.lock`, via la file et les preuves partagées. Les mises à jour de cet exécuteur privilégié suivent le même circuit ; du code provenant du dépôt n'est jamais automatiquement exécuté en tant que root.
+La Section 7 installe une seule fois les sept fichiers de confiance dans `/usr/local/lib/nextech-cicd`, avec `bootstrap.py` et un inventaire SHA récent du serveur. Cette installation conserve les sources, les services et l'environnement existants. Elle s'effectue sous `/var/lock/nextech-deploy.lock`, via la file et les preuves partagées. Les mises à jour de cet exécuteur privilégié suivent le même circuit ; du code provenant du dépôt n'est jamais automatiquement exécuté en tant que root.
 
 Le fichier `/var/lib/nextech-cicd/baseline.json` relie le commit publié aux empreintes serveur. Les données, PDF, étiquettes, configurations privées et fichiers non suivis restent en place. La copie Git comporte des sources épurées : une modification touchant une source privée divergente est refusée et doit être rapprochée par Section 7, jamais écrasée. Tout conflit avec une modification serveur postérieure bloque aussi la publication avec le chemin exact.
 
@@ -28,7 +28,7 @@ Pour un changement backend, l'exécuteur suspend temporairement l'ordonnancement
 
 En cas d'échec après installation, seuls les fichiers/dépendances concernés sont restaurés, puis les services et HTTP sont contrôlés. Un échec de restauration ou de reprise des contrôles signale une intervention nécessaire dans le rapport ; il ne doit pas être présenté comme un déploiement réussi. Le rollback concerne le code, pas les données ni les écritures externes. Toute migration de données irréversible nécessite un plan spécifique avant fusion ; ce mécanisme ne restaure pas la base et ne rejoue aucune écriture métier.
 
-Les rapports sans secrets sont stockés dans `/var/lib/nextech-cicd/reports` et dans les artefacts GitHub Actions. Consulter le job rouge en cas d'échec. Pour réessayer après résolution, relancer le workflow sur `main` ; le même commit est idempotent si les fichiers publiés n'ont pas changé. Pour suspendre les publications, désactiver le workflow GitHub ; ne pas arrêter les services de l'application.
+Les rapports sans secrets sont stockés dans `/var/lib/nextech-cicd/reports` et dans les artefacts GitHub Actions. Consulter le job rouge en cas d'échec. Après un échec, une demande ultérieure reste bloquée jusqu’à résolution prouvée sur le serveur par Section7. Une nouvelle version corrigée exige un nouveau commit. Une exécution simplement bloquée avant publication peut être relancée après levée de sa dépendance. Le certificat de restauration vérifie les fichiers, l’environnement, les services, HTTP et les contrôles suspendus ; le client local ne peut pas déclarer seul la restauration réussie. Pour suspendre les publications, désactiver le workflow GitHub ; ne pas arrêter les services de l'application.
 
 ## File commune FIFO et preuves de chaque push
 
