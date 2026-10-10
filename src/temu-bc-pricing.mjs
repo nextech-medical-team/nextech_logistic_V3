@@ -1,5 +1,5 @@
 import {temuCommercialSource} from './temu-commercial-source.mjs';
-import {temuCountryAmounts,temuFixedVat} from './temu-country-vat.mjs';
+import {temuCountryAmounts} from './temu-country-vat.mjs';
 import {temuLocalService} from './temu-local.mjs';
 import {temuApi} from './temu-api.mjs';
 import {readFile} from 'node:fs/promises';
@@ -28,6 +28,18 @@ export function temuPricingIssue(order,lines){
  return null;
 }
 export function temuPricingComplete(order,lines){return !temuPricingIssue(order,lines);}
+export async function refreshTemuOrderPricing(db,order,refresh){
+ if(order.channel!=='temu')throw Error('Cette commande ne provient pas de TEMU');
+ const result=await refresh(order.reference);
+ if(result?.error)throw Error(result.error);
+ const latest=(await db.query('SELECT source_payload FROM orders WHERE id=$1',[order.id])).rows[0];
+ if(!latest?.source_payload)throw Error('TEMU · Commande absente après récupération API');
+ const current={...order,source_payload:latest.source_payload};
+ const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line',[order.id])).rows;
+ const issue=temuPricingIssue(current,lines);if(issue)throw Error(issue);
+ const pricing=temuCommercialSource(current,temuCountryAmounts(current));
+ return {readOnly:true,pricing,amountsReadAt:current.source_payload.temuAmounts.at,message:'Prix actualisés depuis TEMU. Vérifiez les montants puis reprenez la préparation.'};
+}
 export function temuBcPricingLoader(db,directory){
  let service;
  return async reference=>{
@@ -38,7 +50,7 @@ export function temuBcPricingLoader(db,directory){
 export async function ensureTemuBcPricing(db,order,lines,refresh){
  if(order.channel!=='temu'||temuPricingComplete(order,lines))return false;
  if(order.source_payload?.visibilityHold||!lines.length)throw Error(temuPricingIssue(order,lines));
- try{await refresh(order.reference);}catch(e){throw Error(temuFixedVat(order)!==null?'TEMU · Prix et frais de livraison indisponibles · TVA 25 % automatique'+(String(e.message).includes('3000032')?' · Accès aux montants refusé (3000032)':' · Échec de lecture des montants'):'TEMU · Récupération prix et TVA par API impossible : '+String(e.message).slice(0,350));}
+ try{await refresh(order.reference);}catch(e){throw Error('TEMU · Prix et frais de livraison indisponibles · '+String(e.message).slice(0,350));}
  const latest=(await db.query('SELECT source_payload FROM orders WHERE id=$1',[order.id])).rows[0];
  if(!latest?.source_payload)throw Error('TEMU · Commande absente après récupération API');
  order.source_payload=latest.source_payload;

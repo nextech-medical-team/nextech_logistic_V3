@@ -75,7 +75,7 @@ const resolutionViews={
 
 
 
- 'temu-pricing':{title:'TEMU · Renseigner les prix et quantités',view:'temu-pricing'},
+ 'temu-pricing':{title:'TEMU · Actualiser les prix depuis TEMU',view:'temu-pricing'},
 
 
 
@@ -446,7 +446,7 @@ function resolutionDialog(title,reference){
 
 
     const recorded=r.result?.readOnly!==true&&recordedResolution(effectiveAction,r.result);
-    if(r.result?.readOnly===true)renderProviderDiagnostic(body,r.result);
+    if(r.result?.readOnly===true&&!r.result?.pricing)renderProviderDiagnostic(body,r.result);
     if(recorded)delete modal.dataset.unsavedEquivalent;
     if(recorded&&!r.error&&!['review','complete'].includes(r.status))state.textContent=(r.result.message||'Correction enregistrée.')+' Suite du traitement : '+(r.stage||r.status)+'. Aucun nouvel enregistrement nécessaire.';
 
@@ -766,79 +766,28 @@ function renderResolution(ctx,problem){
 
 
  if(spec.view==='temu-pricing'){
-  const pricingReason=String(problem.detail||'');
-  if(pricingReason.trim()){const reason=document.createElement('p');reason.dataset.pricingReason='';reason.style.whiteSpace='pre-wrap';reason.style.overflowWrap='anywhere';reason.textContent=pricingReason;scope.before(reason);}
-
-
-
-
-  if(ctx.order.channel!=='temu'||!['HR','SE'].includes(String(ctx.order.address?.country).toUpperCase())){scope.textContent='Les montants TEMU doivent être récupérés pour cette boutique. La saisie manuelle concerne la Croatie et la Suède.';return;}
-
-
-
-  scope.textContent='Saisissez les montants de cette commande dans TEMU. Vérifiez le taux de TVA prérempli avant de valider. Les prix unitaires sont hors taxes ; les frais de livraison sont TTC.';
-
-
-
-  if(ctx.order.erp_live?.bc?.id||ctx.order.erp_live?.bl?.id){fields.textContent='Un document Erplain existe déjà. Les prix et quantités ne peuvent plus être modifiés dans cette fenêtre.';return;}
-
-
-
-  const data=ctx.order.source_payload?.temuManualPricing?.data||ctx.order.source_payload?.temuAmounts?.data;
-
-
-
-  const form=document.createElement('form');fields.append(form);
-
-
-
-  form.innerHTML='<label>Devise<select name="currency" required><option value="">Choisir la devise</option><option value="EUR">EUR</option><option value="SEK">SEK</option></select></label><label>TVA (%)<input name="vatRate" type="number" required min="0" max="100" step="0.01" value="25"></label><p>Ce taux s’applique aux produits et aux frais de livraison de cette commande.</p><div data-price-lines></div><p data-price-total role="status"></p><button type="submit">Enregistrer et reprendre la commande</button>';
-
-
-
-  form.elements.currency.value=data?.parentOrderMap?.basePriceTotal?.currency||(ctx.order.address?.country==='HR'?'EUR':'');
-
-
-
-  form.elements.vatRate.value=ctx.order.source_payload?.temuManualPricing?.vatRate??25;
-
-
-
-  const rows=ctx.lines.map(l=>{const a=data?.orderList?.find(x=>String(x.orderSn)===String(l.source_payload?.temuOrderSn||l.source_line)),box=document.createElement('fieldset');box.innerHTML='<legend>'+esc(l.source_sku)+' — '+esc(sourceProductName(l)||'Produit de la commande')+'</legend><p>Quantité actuellement enregistrée : '+esc(l.quantity)+'</p><label>Quantité à commander<input name="quantity" type="number" required min="1" step="1" value="'+esc(l.quantity)+'"></label><label>Prix unitaire HT<input name="unit" type="number" required min="0" step="0.01"></label><label>Frais de livraison TTC pour cette ligne<input name="shipping" type="number" required min="0" step="0.01"></label>';form.querySelector('[data-price-lines]').append(box);
-
-
-
-  if(a?.unitBasePrice?.amount!=null)box.querySelector('[name=unit]').value=Number(a.unitBasePrice.amount)/100;
-
-
-
-  if(a?.shipAmountTotalTaxIncl?.amount!=null)box.querySelector('[name=shipping]').value=Number(a.shipAmountTotalTaxIncl.amount)/100;
-
-
-
-  else if(ctx.order.source_payload?.temuOrderDetail?.parentOrderMap?.hasShippingFee===false)box.querySelector('[name=shipping]').value='0';
-
-
-
-  return {id:l.id,box};});
-
-
-
-  function values(){return rows.map(({id,box})=>({id,quantity:box.querySelector('[name=quantity]').value,unitPriceHt:box.querySelector('[name=unit]').value,shippingTtc:box.querySelector('[name=shipping]').value}));}
-
-
-
-  form.oninput=()=>{const rows=values(),rate=Number(form.elements.vatRate.value),factor=1+rate/100;if(form.elements.vatRate.value===''||!Number.isFinite(rate)||rate<0||rate>100||rows.some(x=>!x.quantity||x.unitPriceHt===''||x.shippingTtc==='')){form.querySelector('[data-price-total]').textContent='Complétez tous les montants pour afficher le total.';return;}let total=0,tax=0;for(const x of rows){const net=Math.round(Number(x.unitPriceHt)*100)*Number(x.quantity),ship=Math.round(Number(x.shippingTtc)*100),vat=Math.round(net*rate/100);total+=net+vat+ship;tax+=vat+Math.round(ship-ship/factor);}form.querySelector('[data-price-total]').textContent='Total TTC : '+(total/100).toFixed(2)+' '+form.elements.currency.value+' · TVA : '+(tax/100).toFixed(2);};form.oninput();
-
-
-
-  form.onsubmit=async e=>{e.preventDefault();if(!form.reportValidity())return;try{await saved(await task('manual-temu-pricing',{currency:form.elements.currency.value,vatRate:form.elements.vatRate.value,priceLines:values(),priceFingerprint:ctx.priceFingerprint}));}catch{}};return;
-
-
-
+  scope.textContent='Récupérez les prix et frais de livraison officiels de cette commande depuis TEMU. Si l’accès est refusé (3000032), réautorisez la boutique dans Seller Center puis relancez l’actualisation.';
+  const reason=document.createElement('p');reason.textContent=String(problem.detail||'');scope.before(reason);
+  const amounts=document.createElement('div');amounts.setAttribute('aria-live','polite');fields.append(amounts);
+  let verified=false;
+  button('Actualiser les prix depuis TEMU',async()=>{
+   verified=false;resume.disabled=true;amounts.replaceChildren();
+   const r=await task('refresh',{provider:'TEMU',resumeAfter:false});
+   if(!r?.pricing||d.closed)return;
+   reason.textContent='Montants récupérés depuis TEMU le '+new Date(r.amountsReadAt).toLocaleString('fr-FR');
+   const money=v=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:v.currency}).format(Number(v.amount)/100);
+   for(const l of r.pricing.orderList){
+    const line=ctx.lines.find(x=>String(x.source_payload?.temuOrderSn||x.source_line)===String(l.orderSn));
+    const p=document.createElement('p');
+    p.textContent=(line?.source_sku||l.orderSn)+' · Quantité TEMU : '+l.quantity+' · Prix unitaire HT : '+money(l.unitBasePrice)+' · Livraison TTC : '+money(l.shipAmountTotalTaxIncl)+' · TVA : '+Number(l.productTaxRate)/1000000+' %';amounts.append(p);
+   }
+   const total=document.createElement('p');total.textContent='Total vendeur TTC : '+money(r.pricing.parentOrderMap.estimatedRevenue)+' · TVA : '+money(r.pricing.parentOrderMap.taxTotal);amounts.append(total);
+   verified=true;resume.disabled=false;
+  });
+  const resume=button('Reprendre la préparation',async()=>{if(verified)await saved(await d.job(ctx,'resume','resolved',{}));});
+  resume.disabled=true;
+  return;
  }
-
-
 
  if(spec.view==='platform'){
 

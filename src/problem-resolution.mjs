@@ -20,6 +20,7 @@ import {reconcileCompletedErpReviews} from './resolution-erp-review-completion.m
 import {reconcileMonetaryPreviews} from './financial-review-recovery.mjs';
 import {reconcileResolvedStockReviews} from './resolved-stock-review.mjs';
 import {saveManualPricing,pricingFingerprint} from './temu-manual-pricing.mjs';
+import {refreshTemuOrderPricing,temuBcPricingLoader} from './temu-bc-pricing.mjs';
 import {assertManualLabelOrder,assertTemuManualLabel} from './manual-label-policy.mjs';
 import {erplainWeightInput} from './erplain-weight-input.mjs';
 import {attachEquivalentDiagnostics} from './equivalent-diagnostics.mjs';
@@ -62,7 +63,7 @@ const actionTypes={
  'create-product':['mapping','missing'],'activate-product':['inactive'],
  'weight':['weight','weight-unit'],'address':['address','city'],
  'relay':['relay','relay-search'],'compare-bc':['bc','stock','api-stock'],'resume-erp':['stock','api-stock'],'force-stock-label':['stock'],
- 'refresh':['preparation','unknown','routing','stock','bc',...productTypes,'api-access','api-limit','api-server','api-timeout','api-network','api-stock','api-incomplete','api-http','uncertain','pdf'],
+ 'refresh':['temu-pricing','preparation','unknown','routing','stock','bc',...productTypes,'api-access','api-limit','api-server','api-timeout','api-network','api-stock','api-incomplete','api-http','uncertain','pdf'],
  'recover-pdf':['pdf','uncertain'],'resume':['resolved']
 };
 export async function initializeResolutions(db){await initializePriority(db);
@@ -77,6 +78,7 @@ function assertRefreshProvider(provider){
 }
 export function validateResolution(b){
  if(b?.action==='refresh')assertRefreshProvider(b.provider);
+ if(b?.action==='refresh'&&b.type==='temu-pricing'&&b.provider!=='TEMU')throw Error('Les prix doivent être actualisés depuis TEMU');
  if(!actionTypes[b.action]?.includes(b.type))throw Error('Action incompatible avec le problème sélectionné');
  if(typeof b.id!=='string'||!b.id||!/^[a-f0-9-]{36}$/i.test(String(b.requestId)))throw Error('Commande et identifiant de demande requis');
  const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider']}[b.action]||[])];
@@ -163,7 +165,7 @@ async function context(db,directory,id){
  const temuJob=order.channel==='temu'?(await db.query('SELECT status,error,packages,attempt_id FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]:null;
  return projectSharedParcelContext({order,lines,job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
 }
-export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic}={}){
+export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic,refreshTemuPricing=temuBcPricingLoader(db,directory)}={}){
  const diagnoseCarrier=refreshCarrierDiagnostic||carrierDiagnosticReader(db,directory).read;
  const pendingBlDiagnostics=pendingBlDiagnosticReconciler(db,api);
  const importedLabelDiagnostics=importedLabelDiagnosticReconciler(db,api);
@@ -381,6 +383,10 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    }
    if(b.provider==='TEMU'){
     if(o.channel!=='temu')throw Error('Cette commande ne provient pas de TEMU');
+    if(b.type==='temu-pricing'){
+     await stage('Actualisation des prix et frais de livraison depuis TEMU');
+     return refreshTemuOrderPricing(db,o,refreshTemuPricing);
+    }
     if(typeof refreshTemuDiagnostic!=='function')throw Error('Lecture TEMU indisponible : connexion à vérifier');
     await stage('Lecture de la commande et des expéditions dans TEMU');
     return {...await refreshTemuDiagnostic(o.reference),readOnly:true};

@@ -3,7 +3,7 @@ function compactProblem(raw,sku='',provider='Erplain') {
  const result=(type,label,s=sku)=>({type,label,sku:s,detail:text,provider:apiName});
  const apiName=/GOFO/i.test(text)?'GOFO':/GLS/i.test(text)?'GLS':/TEMU/i.test(text)?'TEMU':/Shopify/i.test(text)?'Shopify':provider;
  if(["Échec d’étiquette antérieur, suivi d’une revalidation BC/BL. Aucune relance effectuée.","Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.","Appels d’offres · GLS Pharma obligatoire : actualiser la préparation selon les règles transporteurs"].includes(text))return result('preparation',text,'');
- if(/TEMU/i.test(text)&&/3000032|prix et TVA|Prix et frais de livraison|Données financières|Prix API à récupérer/i.test(text))return result('temu-pricing','TEMU · Prix à renseigner','');
+ if(/TEMU/i.test(text)&&/3000032|prix et TVA|Prix et frais de livraison|Données financières|Prix API à récupérer|Revenu vendeur estimé/i.test(text))return result('temu-pricing','TEMU · Prix à actualiser','');
  if(/^Reprendre le remplacement après correction/.test(text))return result('equivalent-pending','Vérifier le remplacement');
  if(/^Produit équivalent vérifié/.test(text))return result('equivalent-pending','Confirmer le remplacement');
  if(/Commande (modifiée|annulée|déjà expédiée)/i.test(text))return result('platform',/annulée/i.test(text)?'Commande annulée sur la plateforme':/déjà expédiée/i.test(text)?'Commande déjà expédiée sur la plateforme':'Commande modifiée sur la plateforme','');
