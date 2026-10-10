@@ -3,6 +3,7 @@ import {chooseActiveStockVariant} from './active-stock-choice.mjs';
 import {readFile,writeFile,rename} from 'node:fs/promises';
 import path from 'node:path';
 import {erplainFetch} from './erplain-transport.mjs';
+import {businessWeight} from './weight-business-policy.mjs';
 // The connector owns its query. No caller can submit GraphQL or a mutation.
 const QUERY=`query V3ProductWeight($where: QueryVariantsWhereWhereConditions, $first: Int, $page: Int) {
  Variants(where:$where, first:$first, page:$page) {
@@ -16,18 +17,10 @@ export function validateConfig(input){
  const companyId=String(input.companyId||'').trim();if(companyId!=='100174'||url.href!=='https://api.erplain.app/graphql')throw new Error('Seule la société ERPLAIN LIVE 100174 est autorisée');
  return {url:url.href,apiKey:input.apiKey.trim(),companyId};
 }
-// Erplain values without a unit are grams (human rule, 10 October 2026).
+// Shared human business policy: missing weight = 5 g; only explicit kg means kg.
 // Keep source values untouched; all callers receive kilograms exactly once.
 export function erplainWeightKg(weightAmount,weightUnit){
- if(weightAmount==null||(typeof weightAmount==='string'&&!weightAmount.trim()))throw new Error('Poids non renseigné dans Erplain');
- if(!['number','string'].includes(typeof weightAmount))throw new Error('Poids non renseigné dans Erplain');
- const amount=Number(weightAmount);
- if(!Number.isFinite(amount)||amount<=0)throw new Error('Poids non renseigné dans Erplain');
- const unit=weightUnit==null?'g':typeof weightUnit==='string'?(weightUnit.trim().toLowerCase()||'g'):null;
- if(!['g','kg'].includes(unit))throw new Error('Unité de poids Erplain absente ou non prise en charge');
- const kg=unit==='g'?amount/1000:amount;
- if(!Number.isFinite(kg)||kg<=0)throw new Error('Poids non renseigné dans Erplain');
- return kg;
+ return businessWeight(weightAmount,weightUnit).weightKg;
 }
 export function resolveWeight(data,sku,selection={}){
  if(!Array.isArray(data))throw new Error('Réponse catalogue Erplain invalide');

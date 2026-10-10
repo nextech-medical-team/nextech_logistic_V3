@@ -1,3 +1,4 @@
+import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {importedLabelDiagnosticReconciler} from './imported-label-diagnostic.mjs';
 import {carrierPrevalidationReconciler} from './carrier-prevalidation-diagnostic.mjs';
 import {catalogueLookupProof,refreshLookupDiagnostics} from './catalogue-lookup-diagnostics.mjs';
@@ -170,8 +171,17 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
  const carrierPrevalidationDiagnostics=carrierPrevalidationReconciler(db,api);
  const diagnoseShopify=refreshShopifyDiagnostic||shopifyDiagnosticReader(db,directory).read;
  const waiting=waitingResolutionWorker(db);
- let running=false;
- const update=async(id,status,stage,result=null,error=null)=>db.query('UPDATE resolution_jobs SET status=$2,stage=$3,result=coalesce($4::jsonb,result),error=$5,updated_at=now() WHERE id=$1',[id,status,stage,result?JSON.stringify(result):null,error]);
+ let running=false,lastWeightStatusRefresh=0;
+ const update=async(id,status,stage,result=null,error=null)=>{
+  if(status==='complete'){
+   const job=(await db.query('SELECT order_id,result FROM resolution_jobs WHERE id=$1',[id])).rows[0];
+   if(!job)throw Error('Intervention introuvable pendant actualisation');
+   const statusVerification=await refreshCorrectionStatuses(db,job.order_id);
+   result={...(job.result||{}),...(result||{}),statusVerification};
+   if(statusVerification.state==='needs_review')stage='Intervention effectuée · commande à vérifier';
+  }
+  return db.query('UPDATE resolution_jobs SET status=$2,stage=$3,result=coalesce($4::jsonb,result),error=$5,updated_at=now() WHERE id=$1',[id,status,stage,result?JSON.stringify(result):null,error]);
+ };
  const failure=async(j,e)=>{
   // A local completion failure can happen after substitution cleared its hold.
   // Re-establish it before releasing the ERP/stock locks, without replaying the API.
@@ -435,6 +445,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   },
   async run(){await reconcileCompletedBlResumptions(db);if(running)return;running=true;let j;
    try{
+    if(Date.now()-lastWeightStatusRefresh>=60000){await reconcileVerifiedWeights(db);lastWeightStatusRefresh=Date.now();}
     await reconcileCompletedErpReviews(db);
     await reconcileResolvedStockReviews(db);
     await reconcileMonetaryPreviews(db);
