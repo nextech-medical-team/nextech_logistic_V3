@@ -24,7 +24,8 @@ test('Three states can disagree without changing cancellation/product/finance po
 test('TEMU actual delivery events remain authoritative and stale reads become unknown',()=>{
  const t={carrier:'temu',tracking:'T1',checkedAt:'2026-10-10T11:59:00Z',events:[{carrier:'temu',tracking:'T1',code:'DELIVERED',label:'Delivered',at:'2026-10-10T11:00:00Z'}]};
  assert.equal(logisticsObservation([t],{now}).status,'delivered');
- assert.equal(logisticsObservation([{...t,checkedAt:'2026-10-09T00:00:00Z'}],{now}).status,'unknown');
+ const delivered=logisticsObservation([{...t,checkedAt:'2026-10-09T00:00:00Z'}],{now});assert.equal(delivered.status,'delivered');assert.equal(delivered.parcels[0].stale,true);
+ assert.equal(logisticsObservation([{...t,checkedAt:'2026-10-09T00:00:00Z',events:[{...t.events[0],code:'IN_TRANSIT',label:'In transit'}]}],{now}).status,'unknown');
  assert.equal(logisticsObservation([{...t,error:'API unavailable'}],{now}).status,'unknown');
  assert.equal(logisticsObservation([{...t,tracking:'OTHER'}],{now}).status,'unknown');
  assert.equal(logisticsObservation([{...t,checkedAt:'2026-10-11T00:00:00Z'}],{now}).status,'unknown');

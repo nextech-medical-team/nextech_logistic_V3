@@ -3,7 +3,11 @@ export function logisticsObservation(targets,{now=Date.now(),maxAgeMs=8*3600000}
  const parcels=targets.map(t=>{
   const at=Date.parse(t.checkedAt),fresh=Number.isFinite(at)&&at<=now&&now-at<=maxAgeMs;
   const events=Array.isArray(t.events)?t.events.filter(e=>String(e.tracking)===String(t.tracking)&&e.carrier===t.carrier):[];
-  return {tracking:t.tracking,carrier:t.carrier,checkedAt:t.checkedAt||null,status:fresh&&!t.error?aggregateParcels([t.tracking],events).status:'unknown',error:t.error||(!fresh?'Lecture de suivi absente ou périmée':null)};
+  const observed=aggregateParcels([t.tracking],events).status;
+  // Delivered orders no longer enter the periodic carrier reader. Their actual
+  // delivery scan stays valid; retain its date instead of losing it after 8h.
+  const terminalDelivery=observed==='delivered'&&Number.isFinite(at)&&at<=now;
+  return {tracking:t.tracking,carrier:t.carrier,checkedAt:t.checkedAt||null,status:(fresh||terminalDelivery)&&!t.error?observed:'unknown',stale:!fresh,error:t.error||(!fresh&&!terminalDelivery?'Lecture de suivi absente ou périmée':null)};
  });
  const statuses=parcels.map(p=>p.status);
  const status=!parcels.length?'unknown':statuses.every(s=>s==='delivered')?'delivered':statuses.includes('exception')?'exception':statuses.includes('cancelled')?'cancelled':statuses.includes('unknown')?'unknown':statuses.some(s=>s==='shipped'||s==='delivered')?'shipped':'not_shipped';
