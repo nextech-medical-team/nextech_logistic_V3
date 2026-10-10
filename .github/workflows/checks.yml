@@ -20,6 +20,7 @@ jobs:
         run: npm run check
       - name: Tests isolés
         run: npm test
+          npm run test:tracking --if-present
       - name: Déploiement et retour arrière
         run: python3 -m unittest discover -s deploy -p 'test_*.py'
       - name: Interface isolée ordinateur et mobile

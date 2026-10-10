@@ -28,6 +28,7 @@ jobs:
             npm ci --ignore-scripts --no-audit --no-fund
             npm run check
             npm test
+            npm run test:tracking --if-present
             python3 -m unittest discover -s deploy -p 'test_*.py'
           } 2>&1 | tee proofs/checks.log
           npm install --no-save --ignore-scripts --package-lock=false @playwright/test@1.64.0
