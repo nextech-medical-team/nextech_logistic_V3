@@ -8,7 +8,6 @@ import {PDFDocument} from 'pdf-lib';
 import {currentParcelPdf} from './parcel-pdf.mjs';
 import {currentTemuPdf} from './temu-label-pdf.mjs';
 import {managerSql} from './account-manager.mjs';
-const limit=80*1024*1024;
 let store=null;
 export function configureExportStore(directory){store=blobStore(directory);}
 const storage=()=>store||blobStore(process.env.EXPORT_DIR||path.resolve(process.env.DATA_DIR||'data','exports'));
@@ -34,8 +33,8 @@ export function sortLabelOrders(rows,mode){
 function dateKey(o){const s=o.source_date||'';const m=/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/.exec(s);return m?`${m[3].length===2?'20':''}${m[3]}-${m[2]}-${m[1]}`:s||String(o.received_at||'');}
 export async function buildLabelDownload(db,input,job,options={}){
  const {ids=[],deliveryIds=[],temuReferences=[],sort='selection'}=input;
- job.sort=sort;job.items=[];job.percent=0;job.stage='Lecture de la sélection';job.status='running';let bytes=0;const docs=[];
- async function add(pdf,item,transform,source={}){try{const data=transform?await transform():Buffer.from(pdf);await PDFDocument.load(data);bytes+=data.length;if(bytes>limit)throw Error('Lot supérieur à 80 Mo : réduire la sélection');docs.push({data,item,source});item.labels++;}catch(e){if(bytes>limit)throw e;item.problems.push('PDF non exploitable : '+e.message);}}
+ job.sort=sort;job.items=[];job.percent=0;job.stage='Lecture de la sélection';job.status='running';const docs=[];
+ async function add(pdf,item,transform,source={}){try{const data=transform?await transform():Buffer.from(pdf);await PDFDocument.load(data);docs.push({data,item,source});item.labels++;}catch(e){item.problems.push('PDF non exploitable : '+e.message);}}
  const rows=[];for(const id of ids){const o=(await db.query(`SELECT orders.*,${managerSql} AS account_manager,(SELECT tracking FROM carrier_jobs WHERE order_id=orders.id) export_tracking,(SELECT array_agg(DISTINCT coalesce(nullif(l.target_sku,''),nullif(m.target_sku,''),CASE WHEN orders.channel IN ('tender','samples') THEN l.source_sku END)) FROM lines l LEFT JOIN mappings m ON m.channel=orders.channel AND m.source_sku=l.source_sku WHERE l.order_id=orders.id) skus FROM orders WHERE id=$1`,[id])).rows[0];rows.push(o||{id,reference:id,absent:true});}
  const total=ids.length+deliveryIds.length+temuReferences.length;let done=0;
  const item=(reference,extra={})=>{const r={reference,labels:0,problems:[],...extra};job.items.push(r);return r;};
@@ -76,7 +75,7 @@ export async function labelDownloadRoutes(ctx){
  const {p,req,res,db,user,body,json}=ctx;if(!p.startsWith('/api/labels/batches'))return false;
  if(p==='/api/labels/batches'&&req.method==='POST'){
   const input=await body(req);for(const k of ['ids','deliveryIds','temuReferences']){input[k]??=[];if(!Array.isArray(input[k])||input[k].some(x=>typeof x!=='string'||!x||x.length>200))throw Error('Sélection invalide');input[k]=[...new Set(input[k])];}
-  const count=input.ids.length+input.deliveryIds.length+input.temuReferences.length;if(count<1||count>500)throw Error('Sélectionner de 1 à 500 commandes ou livraisons');input.sort??='selection';if(!sortModes.includes(input.sort))throw Error('Tri invalide');
+  const count=input.ids.length+input.deliveryIds.length+input.temuReferences.length;if(count<1)throw Error('Sélectionner au moins une commande ou livraison');input.sort??='selection';if(!sortModes.includes(input.sort))throw Error('Tri invalide');
   if(input.requestId&&!/^[a-f0-9-]{36}$/i.test(input.requestId))throw Error('Identifiant de téléchargement invalide');
   const existing=(await db.query("SELECT id,input FROM label_export_jobs WHERE owner=$1 AND status IN ('pending','running') ORDER BY created_at LIMIT 1",[user.email])).rows[0];if(existing){if(isDeepStrictEqual(existing.input,input)){json(res,202,{id:existing.id});return true;}throw Error('Un téléchargement est déjà en cours pour ce compte');}
   const id=randomUUID();const result=await db.query('INSERT INTO label_export_jobs(id,owner,input) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING id',[id,user.email,JSON.stringify(input)]);if(!result.rows.length){const old=(await db.query("SELECT id,input FROM label_export_jobs WHERE owner=$1 AND input->>'requestId'=$2",[user.email,input.requestId])).rows[0];if(!old||!isDeepStrictEqual(old.input,input))throw Error('Validation déjà utilisée');json(res,202,{id:old.id});return true;}json(res,202,{id});return true;
