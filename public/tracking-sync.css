@@ -1,0 +1,16 @@
+.tracking-sync-dialog{box-sizing:border-box;width:min(1400px,95vw);max-width:95vw;max-height:90vh;border:1px solid #d8e1df;border-radius:12px;padding:24px;color:#193237}
+.tracking-sync-dialog::backdrop{background:rgb(20 40 40 / 35%)}
+.tracking-sync-heading,.tracking-sync-pagination{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.tracking-sync-heading h2{margin:0}
+.tracking-sync-dialog form{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:16px 0}
+.tracking-sync-dialog label{display:grid;gap:6px;flex:1;min-width:220px}
+.tracking-sync-scroll{overflow:auto;max-height:45vh}
+.tracking-sync-dialog table{width:100%;border-collapse:collapse;text-align:left}
+.tracking-sync-dialog th,.tracking-sync-dialog td{padding:12px;border-bottom:1px solid #e1e9e6;vertical-align:top}
+.tracking-sync-dialog small{display:block;margin-top:5px}
+.tracking-sync-dialog [data-error]{color:#9c2626;background:#fff1f1;padding:12px;border-radius:8px}
+.tracking-sync-dialog [data-progress]{font-weight:600}
+.tracking-sync-dialog [data-history]{margin-top:24px;border-top:1px solid #d8e1df;padding-top:12px}
+.tracking-sync-dialog li{margin:10px 0}
+.tracking-sync-pagination{margin-top:16px}
+@media(max-width:600px){.tracking-sync-dialog{padding:12px}.tracking-sync-heading{align-items:start}.tracking-sync-heading h2{font-size:1.15rem}}

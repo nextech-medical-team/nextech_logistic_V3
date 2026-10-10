@@ -8,6 +8,10 @@
   },
   "scripts": {
     "start": "node src/server.mjs",
+    "tracking:preview": "node scripts/sync-tracking.mjs",
+    "tracking:sync": "node scripts/sync-tracking.mjs --apply",
+    "tracking:watch": "node scripts/sync-tracking.mjs --apply --watch",
+    "test:tracking": "node --test test/tracking-sync*.test.mjs",
     "test": "node scripts/run-tests.mjs",
     "check": "node scripts/check-syntax.mjs"
   },

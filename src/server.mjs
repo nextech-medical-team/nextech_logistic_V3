@@ -1,3 +1,6 @@
+import {loadEnvFile} from 'node:process';
+import {initializeTrackingSync} from './tracking-sync-history.mjs';
+import {trackingSyncService,trackingSyncRoutes} from './tracking-sync-service.mjs';
 import {initializeOrderSuspension,orderSuspensionService} from './order-suspension.mjs';
 import {initializeImportCorrections,importCorrections} from './import-corrections.mjs';
 import {restoreCancelledDeliveryStock} from './cancelled-delivery-stock.mjs';
@@ -90,6 +93,8 @@ import {createCatalogSync} from './erplain-readonly.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 
+try{loadEnvFile(path.join(root,'.env'));}catch(e){if(e.code!=='ENOENT')throw e;}
+
 const directory=process.env.DATA_DIR||path.join(root,'data');await mkdir(directory,{recursive:true});
 
 const config=runtimeConfig();
@@ -109,9 +114,13 @@ const importCorrectionService=importCorrections(db,erplainAccount(directory,'sou
 await db.withLocks(['schema'],()=>initializeOrderSuspension(db));
 const suspensionService=orderSuspensionService(db,erplainAccount(directory,'live'));
 configureApiBudget(db);configureShipmentLocks(db);const cachedOrderSummary=orderSummaryCache(db);
+await db.withLocks(['schema'],()=>initializeTrackingSync(db));
+if(config.background)await db.query("UPDATE tracking_sync_runs SET status='interrupted',finished_at=now(),error='Serveur redémarré : les résultats déjà reçus sont conservés. Relancez la synchronisation.' WHERE status='running'");
 const runtime=createRuntime(db,{role:config.role});await runtime.start();
 let taskSequence=0;
 function backgroundInterval(fn,ms,name){return config.background?runtime.schedule(name||'background-'+(++taskSequence),fn,ms):{unref(){}};}
+const statusSync=trackingSyncService(db,process.env.CREDENTIALS_DIR||directory,{shouldStop:()=>runtime.stopping});
+backgroundInterval(()=>statusSync.run(),1000,'tracking-sync');
 const v2Followup=v2Worker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>v2Followup.run(),10000,'v2-followup');
 const temuReading=readingService(db,directory);
 const shopifyObservation=shopifyObservationWorker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>shopifyObservation.run(),10000,'shopify-observation');
@@ -222,7 +231,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/tracking-sync.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -332,6 +341,7 @@ const server=http.createServer(async(req,res)=>{
     if(await shopifyObservationRoutes({p,url,req,res,db,json,user,permitted}))return;
     if(await v2Routes({p,url,req,res,db,json,user,permitted}))return;
     if(await temuRoutes({p,url,req,res,db,service:temuService,local:temuLocal,sync:temuSync,user,json,body,permitted,audit}))return;
+    if(await trackingSyncRoutes({p,url,req,res,service:statusSync,user,body,json,permitted}))return;
     if(p==='/api/tracking/current'&&req.method==='POST'){permitted(user,['admin','manager','operator']);const b=await body(req);const primary=(await db.query('SELECT environment,carrier,tracking FROM carrier_jobs WHERE order_id=$1',[b.id])).rows[0];const additional=(await db.query("SELECT environment,carrier,tracking FROM extra_parcels WHERE order_id=$1 AND status='ready'",[b.id])).rows;const targets=[...(primary?.tracking||[]).map(tracking=>({...primary,tracking})),...additional];const target=targets.find(t=>t.tracking===b.tracking);if(!target)throw Error('Ce numéro ne correspond plus au suivi actuel');if(target.carrier!=='gofo'){json(res,200,{tracking:target.tracking,url:'https://gls-group.com/FR/fr/suivi-colis?match='+encodeURIComponent(target.tracking)});return;}const result=await extras.tracking(target.environment,target.tracking);await audit(user,'tracking.gofo.read',{orderId:b.id,tracking:target.tracking});json(res,200,{tracking:target.tracking,result});return;}
     if(p==='/api/tracking/automatic'&&req.method==='GET'){json(res,200,{rows:await tracking.list(),running:tracking.running});return;}
     if(p==='/api/lifecycle'&&req.method==='GET'){json(res,200,{rows:await lifecycle.list(),running:lifecycle.running});return;}
