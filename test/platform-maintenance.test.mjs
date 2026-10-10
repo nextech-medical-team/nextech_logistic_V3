@@ -91,3 +91,12 @@ test('Database guard accepts the actual Unix socket DSN and rejects another driv
  assert.equal(assertPlatformMaintenanceDatabase('postgresql://nextech@localhost/'+database+'?database=other',database,pg.Client),database);
  assert.throws(()=>assertPlatformMaintenanceDatabase('https://example.invalid/'+database,database,pg.Client));
 });
+
+test('Linux publication lock accepts the inherited locked descriptor and refuses a different open description or inode',{skip:process.platform!=='linux'},async()=>{
+ const directory=await mkdtemp(path.join(os.tmpdir(),'nextech-lock-test-')),lock=path.join(directory,'publication.lock'),other=path.join(directory,'other.lock');
+ const moduleUrl=new URL('../src/platform-hold-maintenance.mjs',import.meta.url).href;
+ const script=`import assert from 'node:assert/strict';import {assertPlatformMaintenanceLock as check} from ${JSON.stringify(moduleUrl)};await check(9,${JSON.stringify(lock)});await assert.rejects(check(10,${JSON.stringify(lock)}),/Verrou exclusif indisponible/);await assert.rejects(check(11,${JSON.stringify(lock)}),/Descripteur du verrou différent/);console.log('LOCK_PASS');`;
+ try{
+  const result=await promisify(execFile)('/bin/bash',['-c','exec 9>"$1"; flock -x 9; exec 10>"$1"; exec 11>"$2"; "$3" --input-type=module -e "$4"','lock-test',lock,other,process.execPath,script]);assert.ok(result.stdout.includes('LOCK_PASS'));
+ }finally{for(const file of [lock,other])await unlink(file);await rmdir(directory);}
+});

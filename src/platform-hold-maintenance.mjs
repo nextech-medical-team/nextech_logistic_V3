@@ -76,12 +76,15 @@ export function assertPlatformMaintenanceDatabase(url,expected,Client){
  if(!expected||database!==expected)throw Error('Base de production attendue non confirmée');
  return database;
 }
+export async function assertPlatformMaintenanceLock(fd,targetPath='/var/lock/nextech-deploy.lock'){
+ if(!Number.isInteger(fd)||fd<3)throw Error('Descripteur du verrou de publication requis');
+ const [held,target]=await Promise.all([stat('/proc/self/fd/'+fd),stat(targetPath)]);if(held.ino!==target.ino||held.dev!==target.dev)throw Error('Descripteur du verrou différent');
+ await new Promise((resolve,reject)=>{const child=spawn('/usr/bin/flock',['-n','-x',String(fd)],{stdio:Array.from({length:fd+1},(_,i)=>i===fd?fd:'ignore')});child.once('error',reject);child.once('exit',code=>code===0?resolve():reject(Error('Verrou exclusif indisponible')));});
+}
 if(await isPlatformMaintenanceEntry(import.meta.url)){
  const args=process.argv.slice(2),value=k=>args[args.indexOf(k)+1];
  if(!args.includes('--section7')||!args.includes('--report')||!args.includes('--writers')||!args.includes('--expected-database'))throw Error('Maintenance réservée à Section7 sous verrou, rapport et inventaire explicites requis');
- const fd=Number(value('--lock-fd'));if(!Number.isInteger(fd)||fd<3)throw Error('Descripteur du verrou de publication requis');
- const [held,target]=await Promise.all([stat('/proc/self/fd/'+fd),stat('/var/lock/nextech-deploy.lock')]);if(held.ino!==target.ino||held.dev!==target.dev)throw Error('Descripteur du verrou différent');
- await new Promise((resolve,reject)=>{const child=spawn('/usr/bin/flock',['-n','-x',String(fd),'true'],{stdio:Array.from({length:fd+1},(_,i)=>i===fd?fd:'ignore')});child.once('error',reject);child.once('exit',code=>code===0?resolve():reject(Error('Verrou exclusif indisponible')));});
+ await assertPlatformMaintenanceLock(Number(value('--lock-fd')));
  try{loadEnvFile('/etc/nextech/application.env');}catch(e){if(!process.env.DATABASE_URL)throw e;}
  const url=process.env.DATABASE_URL;const {Pool,Client}=await import('pg');assertPlatformMaintenanceDatabase(url,value('--expected-database'),Client);
  const pool=new Pool({connectionString:url,max:2});
