@@ -42,9 +42,10 @@ class DispatcherTests(unittest.TestCase):
    # Patch Path for only the fixed backup root; every other path retains real filesystem behavior.
    real_path=d.Path
    def path_override(value):return backup_root if str(value)=='/var/backups/nextech' else real_path(value)
-   with patch.object(d,'validate_manifest',return_value=True),patch.object(d,'BUILD_ROOT',td),patch.object(d,'STATE',state),patch.object(d,'APP',app),patch.object(d,'Path',side_effect=path_override),patch.object(d,'fetch',return_value='b'*40),patch.object(d,'git',side_effect=lambda *args:archive.getvalue() if args[0]=='archive' else b''),patch.object(d,'tree',side_effect=[{'public/x.js':b'old'},{'public/x.js':b'new'}]),patch.object(d,'verify_environment',return_value='hash'),patch.object(d,'run',return_value=b''),patch.object(d,'install_file',side_effect=fake_install),patch.object(d,'health',side_effect=ValueError('bad health')):
+   with patch.object(d,'validate_manifest',return_value=True),patch.object(d,'BUILD_ROOT',td),patch.object(d,'STATE',state),patch.object(d,'APP',app),patch.object(d,'Path',side_effect=path_override),patch.object(d,'fetch',return_value='b'*40),patch.object(d,'git',side_effect=lambda *args:archive.getvalue() if args[0]=='archive' else b''),patch.object(d,'tree',side_effect=[{'public/x.js':b'old'},{'public/x.js':b'new'}]),patch.object(d,'verify_environment',return_value='hash'),patch.object(d,'run',return_value=b''),patch.object(d,'install_file',side_effect=fake_install),patch.object(d,'health',side_effect=[ValueError('bad health'),None]):
     result=d.deploy('b'*40,{'manifest':{},'proofs':{}})
    self.assertEqual(result['status'],'failed');self.assertEqual(result['rollback'],'files-restored')
+   self.assertEqual(result['rollbackHealth'],'PASS')
    self.assertEqual((app/'public/x.js').read_bytes(),b'old');self.assertEqual((app/'public/other.js').read_bytes(),b'colleague')
    self.assertEqual(json.loads((state/'baseline.json').read_text())['commit'],'a'*40)
 if __name__=='__main__':unittest.main()

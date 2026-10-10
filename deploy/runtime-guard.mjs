@@ -4,12 +4,18 @@ import path from 'node:path';
 import pg from '/opt/nextech/current/node_modules/pg/lib/index.js';
 import {backgroundTasks} from '/opt/nextech/current/src/background-controls.mjs';
 const [action,backup]=process.argv.slice(2);
-if(!['pause','check','resume'].includes(action)||!/^cicd-[a-f0-9]{40}-\d+$/.test(path.basename(backup||'')))throw Error('Arguments invalides');
+if(!['pause','check','resume','verify-restored'].includes(action)||!/^cicd-[a-f0-9]{40}-\d+$/.test(path.basename(backup||'')))throw Error('Arguments invalides');
 const file='/var/lib/nextech-live/'+path.basename(backup)+'-controls.json';
 const db=new pg.Client({host:'/var/run/postgresql',user:'nextech',database:'nextech_v3_migration'});
 await db.connect();
 try{
- if(action==='check'){
+ if(action==='verify-restored'){
+  const original=JSON.parse(fs.readFileSync(file+'.restored'));
+  await db.query('BEGIN READ ONLY');
+  const current=(await db.query("SELECT value FROM settings WHERE key='background_tasks'")).rows[0]?.value||{};
+  for(const key of original.keys)if(current[key]!==original.saved[key])throw Error('Contrôle métier différent du snapshot restauré');
+  await db.query('ROLLBACK');
+ }else if(action==='check'){
   const observation='/var/lib/nextech-live/temu-reading-observation.json';
   if(fs.existsSync(observation)&&JSON.parse(fs.readFileSync(observation)).running)throw Error('Lecture TEMU active');
   await db.query('BEGIN READ ONLY');

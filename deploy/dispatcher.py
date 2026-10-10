@@ -105,6 +105,7 @@ def deploy(commit,packet=None):
   atomic_json(proof_dir/'manifest.json',packet['manifest'])
   report['verification']={'status':'PASS','commit':commit,'proofs':{name:digest(data) for name,data in proofs.items()},'serverBaseline':'PASS'}
   env_hash=verify_environment()
+  report['environmentHashBefore']=env_hash;report['baselineCommitBefore']=baseline['commit']
   # Dependency installation and tests are isolated from production secrets/database.
   with tempfile.TemporaryDirectory(prefix='v3-build-',dir=BUILD_ROOT) as workspace:
    candidate=Path(workspace)/'candidate';candidate.mkdir()
@@ -175,7 +176,11 @@ def deploy(commit,packet=None):
   if stopped:
    try:run(['systemctl','start',*SERVICES]);wait_web();health();report['rollbackHealth']='PASS'
    except Exception:report['rollbackHealth']='FAILED';report['manualIntervention']=True
+  elif installed:
+   try:health();report['rollbackHealth']='PASS'
+   except Exception:report['rollbackHealth']='FAILED';report['manualIntervention']=True
  finally:
+  report['installed']=installed;report['paused']=paused
   if paused:
    try:guard('resume',backup);report['taskControlsRestored']=True
    except Exception:report['taskControlsRestored']=False;report['manualIntervention']=True;report['status']='failed'
@@ -194,6 +199,7 @@ if __name__=='__main__':
  STATE.mkdir(mode=0o700,exist_ok=True);request_dir=STATE/'requests';request_dir.mkdir(mode=0o700,exist_ok=True)
  request_path=request_dir/(commit+'.json')
  existing=json.loads(request_path.read_text()) if request_path.exists() else None
+ if existing and existing['status'] in ('failed','resolved'):sys.exit('Ce commit a échoué ; résoudre le blocage et publier un nouveau commit corrigé')
  record=existing or {'id':str(uuid.uuid5(uuid.NAMESPACE_URL,'nextech-cicd:'+commit)),'commit':commit,'section':7,'serverManaged':True,'createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'status':'ready'}
  deadline=time.monotonic()+1200
  while True:
@@ -209,14 +215,14 @@ if __name__=='__main__':
    automatic=[json.loads(p.read_text()) for p in request_dir.glob('*.json')]
    head=fetch()
    for old_record in automatic:
-    if old_record['commit']!=head and old_record['status'] in ('ready','blocked'):
+    if old_record['commit']!=head and old_record['status'] in ('ready','blocked') and not old_record.get('requiresReplacement') and not old_record.get('report',{}).get('manualIntervention'):
      old_record['status']='superseded';atomic_json(request_dir/(old_record['commit']+'.json'),old_record)
    if commit!=head:
     record['status']='superseded';atomic_json(request_path,record);print(json.dumps(record));sys.exit(0)
    deferred=blockers(local,automatic,record['id'],record['createdAt'])
    if not deferred:
     record['status']='deploying';atomic_json(request_path,record)
-    result=deploy(commit,packet);record['status']=result['status'];record['updatedAt']=datetime.datetime.now(datetime.timezone.utc).isoformat();record['report']=result;atomic_json(request_path,record)
+    result=deploy(commit,packet);record['status']=result['status'];record['requiresReplacement']=result['status']=='failed';record['updatedAt']=datetime.datetime.now(datetime.timezone.utc).isoformat();record['report']=result;atomic_json(request_path,record)
     print(json.dumps(result));sys.exit(0 if result['status'] in ('deployed','superseded') else 1)
    record['status']='ready';record['waitingFor']=[r['id'] for r in deferred];atomic_json(request_path,record)
   # Release the global lock so Section7 can publish the older request.
