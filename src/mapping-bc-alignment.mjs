@@ -4,6 +4,7 @@ import {readHistoricalStock,assertNoHistoricalStockRemoval} from './historical-s
 
 import {verifyBcPricing,verifySourceCommercialTotals} from './bc-pricing.mjs';
 
+import {assertFullOrderStock} from './stock-gate.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
 
 
@@ -28,6 +29,20 @@ export function mappedDocumentQuantities(items){
 
 }
 
+export async function assertAdditionalMappingStock(api,bc,items){
+ if(bc.update_stock!==true)return;
+ const existing=new Map(mappedDocumentQuantities(bc.line_items));
+ for(const [key,quantity] of mappedDocumentQuantities(items)){
+  const additional=quantity-(existing.get(key)||0);if(additional<=1e-6)continue;
+  const [id,locationId]=key.split(':');
+  const {Variant:v}=await api.request('query V3MappingAdditionalStock($id:ID!){Variant(id:$id){id sku active track_inventory product{id active} stock_levels(first:100){data{location{id} available on_hand} paginatorInfo{hasMorePages}}}}',{id});
+  if(String(v?.id)!==id||v.active!==true||v.product?.active!==true||typeof v.track_inventory!=='boolean')throw Error('Additional mapping stock identity not confirmed');
+  if(v.track_inventory===false)continue;
+  if(!Array.isArray(v.stock_levels?.data)||v.stock_levels.paginatorInfo?.hasMorePages!==false)throw Error('Additional mapping stock response incomplete');
+  const levels=v.stock_levels.data.filter(l=>String(l.location?.id)===locationId);if(levels.length!==1)throw Error('Additional mapping stock location not confirmed');
+  assertFullOrderStock([{variant:v,location:{id:locationId},quantity:additional,available:levels[0].available,on_hand:levels[0].on_hand,reserved_quantity:0}]);
+ }
+}
 // Uses the normal Erplain BC edit. Erplain owns its stock adjustment; V3 never
 
 // issues a separate stock restitution/debit here. A lost response is read back,
@@ -76,6 +91,7 @@ export async function alignMappedBc(api,o,{save,guard}){
 
  if(bc.update_stock===true){await assertNoHistoricalStockRemoval(api,o);await readHistoricalStock(api,bc);}
 
+ await assertAdditionalMappingStock(api,bc,o.items);
  await guard();
 
  o.erp_live.mappingAlignmentAttempt={status:'uncertain',before:digest(actual),target:digest(desired),previousVariants,requestedAt:new Date().toISOString(),stockPolicy:bc.update_stock};await save(o);

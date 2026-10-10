@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {alignMappedBc} from '../src/mapping-bc-alignment.mjs';
+import {alignMappedBc,assertAdditionalMappingStock} from '../src/mapping-bc-alignment.mjs';
 
 function fixture({lostResponse=false,applyBeforeLoss=true,bcExtras={}}={}){
  const item={id:'3',type:'normal',quantity:3000,price:20/3000,discount:0,discount_rule_amount:0,ecotax:0,tax_amount:0,tax_codes:[],location:{id:'1'},variant:{id:'2',sku:'680483',track_inventory:true}};
@@ -41,4 +41,19 @@ test('existing shipments, paid invoices, partial orders, explicit equivalents an
  }
  for(const field of ['partial_mode','existingBL','equivalent']){const f=fixture();if(field==='partial_mode')f.order.partial_mode=true;else if(field==='existingBL')f.order.erp_live.bl={id:'9'};else f.order.erp_live.equivalentItems=[{}];assert.equal((await alignMappedBc(f.api,f.order,f.options)).skipped,true);assert.equal(f.calls.length,0);}
  const f=fixture();await assert.rejects(alignMappedBc(f.api,f.order,{...f.options,guard:async()=>{throw Error('Commande suspendue');}}),/suspendue/);assert.equal(f.calls.filter(q=>q.startsWith('mutation')).length,0);
+});
+
+test('only additional mapped units require available stock, never the previously debited quantity',async()=>{
+ const item=(id,quantity)=>({type:'normal',variant:{id,sku:id},location:{id:'1'},quantity});const bc={update_stock:true,line_items:[item('2',3000)]};let calls=0;
+ const api={request:async(q,{id})=>{calls++;assert.ok(q.startsWith('query '));return {Variant:{id,sku:id,active:true,track_inventory:true,product:{id:'p',active:true},stock_levels:{data:[{location:{id:'1'},available:20,on_hand:20}],paginatorInfo:{hasMorePages:false}}}};}};
+ await assertAdditionalMappingStock(api,bc,[item('2',20)]);assert.equal(calls,0);
+ await assertAdditionalMappingStock(api,bc,[item('2',3020)]);assert.equal(calls,1);
+ await assertAdditionalMappingStock(api,bc,[item('3',20)]);assert.equal(calls,2);
+ await assert.rejects(assertAdditionalMappingStock(api,bc,[item('2',3021)]),/stock insuffisant/);
+});
+test('additional stock requires complete data for the exact active variant and location',async()=>{
+ const item={type:'normal',variant:{id:'2'},location:{id:'1'},quantity:20},bc={update_stock:true,line_items:[]};
+ for(const extra of [{id:'other'},{active:false},{track_inventory:undefined},{stock_levels:{data:[],paginatorInfo:{hasMorePages:false}}},{stock_levels:{data:[],paginatorInfo:{hasMorePages:true}}}]){
+ const api={request:async()=>({Variant:{id:'2',active:true,track_inventory:true,product:{id:'p',active:true},...extra}})};await assert.rejects(assertAdditionalMappingStock(api,bc,[item]));
+ }
 });
