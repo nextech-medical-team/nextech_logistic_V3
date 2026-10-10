@@ -1,10 +1,13 @@
+import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
+import {assertTemuManualLabel} from './manual-label-policy.mjs';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
 import {randomUUID} from 'node:crypto';import {addressIssue} from './domain.mjs';
 export async function regenerateProductionLabels(db,{batchId=randomUUID(),ids=null,allowReady=false,stockOverride=null}={}){
  if(ids!==null&&(!Array.isArray(ids)||ids.some(id=>typeof id!=='string')))throw Error('Liste de commandes invalide');
  const rows=(await db.query(ids===null?"SELECT * FROM orders ORDER BY received_at,id":"SELECT * FROM orders WHERE id=ANY($1::text[]) ORDER BY received_at,id",ids===null?[]:[ids])).rows;let queued=0;const skipped=[];
  for(const o of rows){
-  let reason=o.reference.startsWith('DEMO-')?'Commande fictive':o.channel==='temu'?'Circuit TEMU achat séparé':o.partial_mode?'Livraisons partielles à traiter séparément':!['gls','gls_pharma','gls_shop','gofo'].includes(o.carrier)?'Transporteur non déterminé':addressIssue(o.address)||(!(Number(o.weight_kg)>0)?'Poids absent':null);
+  let reason=o.reference.startsWith('DEMO-')?'Commande fictive':o.channel==='temu'&&!o.transport_choice?'Circuit TEMU achat séparé':o.partial_mode?'Livraisons partielles à traiter séparément':!['gls','gls_pharma','gls_shop','gofo'].includes(o.carrier)?'Transporteur non déterminé':addressIssue(o.address)||(!(Number(o.weight_kg)>0)?'Poids absent':null);
+  if(!reason)try{assertDirectCarrierAllowed(o,o.carrier);if(o.channel==='temu')assertTemuManualLabel((await db.query('SELECT status FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0]);}catch(e){reason=e.message;}
   if(!reason&&(!Number.isInteger(Number(o.parcel_count))||Number(o.parcel_count)<1))reason='Nombre de colis absent';
   if(!reason)try{await assertLabelStockGate(db,o,stockOverride);}catch(e){reason=e.message;}
   if(reason){skipped.push({id:o.id,reference:o.reference,reason});continue;}
