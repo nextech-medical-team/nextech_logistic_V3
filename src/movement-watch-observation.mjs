@@ -26,8 +26,8 @@ export async function observeMovement(api,order){
  api=observationApi(api);const result={checkedAt:new Date().toISOString(),domain:'physical_parcel_tracking',writeAllowed:false,resumeAllowed:false,proof:null,reasonCode:null,detail:null};
  const known=order.source_payload?.selectedReimport?.preservedPackages||[];
  const d=await readTemuOrderDiagnostic(api,order.reference,{knownPackages:known});
- if(d.status===3||d.cancellationRequested)return {...result,reasonCode:d.status===3?'order_cancelled':'cancellation_requested',detail:d.status===3?'Commande TEMU annulée : rapprochement du suivi nécessaire, reprise conservée à l’arrêt.':'Annulation demandée chez TEMU : reprise conservée à l’arrêt.'};
- if(d.errors.length||!d.packages.length)return {...result,reasonCode:'read_incomplete',detail:'Suivi du colis non vérifiable : '+(d.errors.map(e=>e.message).join(' ; ')||'aucun colis identifié'),proof:{sourceStatus:d.status,complete:false}};
+ if(d.status===3||d.cancellationRequested)return {...result,reasonCode:d.status===3?'order_cancelled':'cancellation_requested',detail:d.status===3?'Commande annulée sur TEMU : rapprochement du suivi nécessaire, reprise conservée à l’arrêt.':'Annulation demandée chez TEMU : reprise conservée à l’arrêt.'};
+ if(d.errors.length||!d.packages.length)return {...result,reasonCode:'read_incomplete',detail:'Suivi du colis non vérifiable (TEMU) : '+(d.errors.map(e=>e.message).join(' · ')||'aucun colis identifié'),proof:{sourceStatus:d.status,complete:false}};
  const parcels=[];
  for(const p of d.packages){const t=await api.read('temu.track.trackinginfo.get',{packageSn:p.packageSn});if(t?.packageSn!==p.packageSn||String(t.trackingNum)!==String(p.trackingNumber)||!Array.isArray(t.trackingInfo)||!t.trackingInfo.length)throw Error('Suivi du colis non vérifiable : identité ou événements manquants');
  const seen=new Set(),events=t.trackingInfo.map(e=>{const raw=String(e.logisticsUpdatedAt||''),at=/^\d{10,13}$/.test(raw)?new Date(Number(raw)*(raw.length===10?1000:1)).toISOString():raw;if(!Number.isFinite(Date.parse(at))||Date.parse(at)>Date.now()+300000)throw Error('Suivi du colis non vérifiable : date invalide');const row={code:String(e.logisticsStatus||''),label:String(e.statusText||'').slice(0,300),at};const key=JSON.stringify(row);if(seen.has(key))throw Error('Suivi du colis non vérifiable : événements dupliqués');seen.add(key);return row;});
@@ -36,7 +36,7 @@ export async function observeMovement(api,order){
  parcels.push({packageSn:p.packageSn,tracking:String(p.trackingNumber),carrier:String(p.shippingCompanyName||''),labelStatus:Number(p.shippingLabelStatus),preparationOnly,states,events});
  }
  const proof={sourceStatus:d.status,complete:true,parcels,originalTrackingGuardPasses:parcels.every(p=>p.preparationOnly),universalNoMovementCertificate:false};
- if(proof.originalTrackingGuardPasses)return {...result,reasonCode:'preparation_only_observed',detail:'Suivi transport relu : seuls des événements de préparation sont observés. Reprise historique et autres contrôles à valider ; suspension conservée.',proof};
+ if(proof.originalTrackingGuardPasses)return {...result,reasonCode:'preparation_only_observed',detail:'Suivi TEMU relu : seuls des événements de préparation sont observés. Reprise historique et autres contrôles à valider. Suspension conservée.',proof};
  const physical=parcels.some(p=>p.states.some(s=>['shipped','delivered'].includes(s)));
- return {...result,reasonCode:physical?'physical_progress':'tracking_review',detail:physical?'Colis pris en charge ou livré : suivi uniquement, aucune nouvelle préparation déduite.':'Suivi du colis non vérifiable : événement inconnu, contradictoire ou incident à rapprocher.',proof};
+ return {...result,reasonCode:physical?'physical_progress':'tracking_review',detail:physical?'Colis TEMU pris en charge ou livré : suivi uniquement, aucune nouvelle préparation déduite.':'Suivi du colis non vérifiable (TEMU) : événement inconnu, contradictoire ou incident à rapprocher.',proof};
 }
