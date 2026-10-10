@@ -113,3 +113,8 @@ test('automatic historical resume preserves an unconfirmed preview and rechecks 
  assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);assert.equal((await db.query("SELECT result->>'replacementSku' sku FROM resolution_jobs WHERE id='preview'")).rows[0].sku,'NEW');
  }finally{await db.close();}
 });
+
+import {persistedRecheckProblemSql} from '../src/order-problem-predicates.mjs';
+test('the problems list retains an independent review after another correction succeeds and removes it after its own completion',async()=>{
+ const db=await fixture();try{await db.query("UPDATE orders SET issue=null WHERE id='a'");await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,error,created_at) VALUES('address','a','address','address','review','Current address mismatch',now()-interval '1 hour'),('weight','a','weight','weight','complete',null,now())");const m=orderRecheckMonitor(db,{});await m.runLocal();assert.equal((await db.query("SELECT state->>'result' result FROM order_recheck_monitor WHERE order_id='a'")).rows[0].result,'Current address mismatch');assert.ok((await db.query(`SELECT id FROM orders WHERE ${persistedRecheckProblemSql}`)).rows.some(r=>r.id==='a'));await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,error,created_at) VALUES('fixed','a','fixed','address','complete',null,now()+interval '1 second')");await m.runLocal();assert.ok(!(await db.query(`SELECT id FROM orders WHERE ${persistedRecheckProblemSql}`)).rows.some(r=>r.id==='a'));}finally{await db.close();}
+});
