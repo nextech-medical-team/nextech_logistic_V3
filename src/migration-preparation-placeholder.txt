@@ -1,0 +1,1 @@
+Migration preparation: all operational actions await the user's GO.

@@ -1,0 +1,1 @@
+(()=>{const b=document.createElement('div');b.textContent='ERPLAIN LIVE · Nouvelle réception TEMU et Shopify depuis le 6 octobre à 10 h 45 min 34 s. Achats TEMU sur confirmation. Reprise historique suspendue.';b.style.cssText='padding:16px;background:#fff3d6;color:#684300;border:1px solid #e5cc87';document.body.prepend(b);})();

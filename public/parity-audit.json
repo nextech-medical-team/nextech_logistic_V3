@@ -1,0 +1,900 @@
+{
+  "source": "Archive locale en lecture seule",
+  "routes": [
+    {
+      "file": "modules/amazon/http/amazonCsvImportRoutes.ts",
+      "line": 19,
+      "method": "GET",
+      "routeExpression": "\"/parametres/csv-amazon\""
+    },
+    {
+      "file": "modules/amazon/http/amazonCsvImportRoutes.ts",
+      "line": 38,
+      "method": "POST",
+      "routeExpression": "\"/parametres/csv-amazon/import\""
+    },
+    {
+      "file": "modules/amazon/http/amazonRoutes.ts",
+      "line": 17,
+      "method": "GET",
+      "routeExpression": "\"/amazon/status\""
+    },
+    {
+      "file": "modules/amazon/http/amazonRoutes.ts",
+      "line": 25,
+      "method": "GET",
+      "routeExpression": "\"/amazon/orders\""
+    },
+    {
+      "file": "modules/amazon/http/amazonRoutes.ts",
+      "line": 40,
+      "method": "GET",
+      "routeExpression": "\"/amazon/orders/:amazonOrderId\""
+    },
+    {
+      "file": "modules/amazon/http/amazonRoutes.ts",
+      "line": 54,
+      "method": "POST",
+      "routeExpression": "\"/amazon/orders/:amazonOrderId/import\""
+    },
+    {
+      "file": "modules/amazon/http/amazonRoutes.ts",
+      "line": 58,
+      "method": "POST",
+      "routeExpression": "\"/amazon/orders/:amazonOrderId/sync\""
+    },
+    {
+      "file": "modules/amazon/http/amazonRoutes.ts",
+      "line": 62,
+      "method": "GET",
+      "routeExpression": "\"/amazon/listings\""
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 42,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 48,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 124,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 163,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 199,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 238,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 293,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 297,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 385,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 521,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 525,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 571,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 625,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierDashboardRoutes.ts",
+      "line": 722,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierRoutingSettingsRoutes.ts",
+      "line": 49,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/carriers/http/carrierRoutingSettingsRoutes.ts",
+      "line": 90,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/customers/http/customerRoutes.ts",
+      "line": 13,
+      "method": "GET",
+      "routeExpression": "\"/customers/:customerId\""
+    },
+    {
+      "file": "modules/health/http/healthRoutes.ts",
+      "line": 5,
+      "method": "GET",
+      "routeExpression": "\"/health\""
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceAccountRoutes.ts",
+      "line": 17,
+      "method": "GET",
+      "routeExpression": "\"/marketplace-accounts\""
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceAccountRoutes.ts",
+      "line": 27,
+      "method": "POST",
+      "routeExpression": "\"/marketplace-accounts\""
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 88,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 122,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 191,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 192,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 196,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 519,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 598,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 633,
+      "method": "POST",
+      "routeExpression": "\"/commandes/multi/erplain-shipping-orders/sync\""
+    },
+    {
+      "file": "modules/marketplaces/http/marketplaceDashboardRoutes.ts",
+      "line": 636,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/orchestration/http/jobRoutes.ts",
+      "line": 14,
+      "method": "GET",
+      "routeExpression": "\"/jobs\""
+    },
+    {
+      "file": "modules/orders/http/integrationSyncRoutes.ts",
+      "line": 15,
+      "method": "GET",
+      "routeExpression": "\"/integration-sync-statuses\""
+    },
+    {
+      "file": "modules/orders/http/integrationSyncRoutes.ts",
+      "line": 30,
+      "method": "GET",
+      "routeExpression": "\"/integration-sync-statuses/errors\""
+    },
+    {
+      "file": "modules/orders/http/orderRoutes.ts",
+      "line": 18,
+      "method": "GET",
+      "routeExpression": "\"/orders\""
+    },
+    {
+      "file": "modules/orders/http/orderRoutes.ts",
+      "line": 28,
+      "method": "GET",
+      "routeExpression": "\"/orders/:orderId\""
+    },
+    {
+      "file": "modules/orders/http/orderRoutes.ts",
+      "line": 48,
+      "method": "POST",
+      "routeExpression": "\"/orders\""
+    },
+    {
+      "file": "modules/orders/http/skuMappingRoutes.ts",
+      "line": 66,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/orders/http/skuMappingRoutes.ts",
+      "line": 86,
+      "method": "GET",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/orders/http/skuMappingRoutes.ts",
+      "line": 152,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/orders/http/skuMappingRoutes.ts",
+      "line": 230,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/orders/http/skuMappingRoutes.ts",
+      "line": 261,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/orders/http/skuMappingRoutes.ts",
+      "line": 293,
+      "method": "POST",
+      "routeExpression": "pathname"
+    },
+    {
+      "file": "modules/orders/http/skuMappingRoutes.ts",
+      "line": 296,
+      "method": "GET",
+      "routeExpression": "\"/sku-mappings\""
+    },
+    {
+      "file": "modules/orders/http/skuMappingRoutes.ts",
+      "line": 307,
+      "method": "POST",
+      "routeExpression": "\"/sku-mappings\""
+    },
+    {
+      "file": "modules/public/http/publicRoutes.ts",
+      "line": 27,
+      "method": "GET",
+      "routeExpression": "\"/\""
+    },
+    {
+      "file": "modules/public/http/publicRoutes.ts",
+      "line": 32,
+      "method": "GET",
+      "routeExpression": "page.path"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 23,
+      "method": "GET",
+      "routeExpression": "root"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 24,
+      "method": "GET",
+      "routeExpression": "root+'/operations/:id'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 29,
+      "method": "GET",
+      "routeExpression": "root+'/catalog'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 30,
+      "method": "POST",
+      "routeExpression": "root+'/excel-blank'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 31,
+      "method": "POST",
+      "routeExpression": "root+'/excel-template'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 32,
+      "method": "POST",
+      "routeExpression": "root+'/excel-preview'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 33,
+      "method": "GET",
+      "routeExpression": "root+'/needs'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 34,
+      "method": "GET",
+      "routeExpression": "root+'/plans/:id'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 35,
+      "method": "GET",
+      "routeExpression": "root+'/history'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 36,
+      "method": "POST",
+      "routeExpression": "root+'/analyse'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 37,
+      "method": "POST",
+      "routeExpression": "root+'/preview'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 38,
+      "method": "POST",
+      "routeExpression": "root+'/plans/:id/groups/:group/create'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 39,
+      "method": "POST",
+      "routeExpression": "root+'/plans/:id/groups/:group/retry-preview'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 40,
+      "method": "POST",
+      "routeExpression": "root+'/plans/:id/groups/:group/diagnose'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 41,
+      "method": "POST",
+      "routeExpression": "root+'/plans/:id/groups/:group/check'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 42,
+      "method": "POST",
+      "routeExpression": "root+'/products'"
+    },
+    {
+      "file": "modules/purchasing/http/purchasingRoutes.ts",
+      "line": 43,
+      "method": "POST",
+      "routeExpression": "root+'/products/check'"
+    },
+    {
+      "file": "modules/samples/http/sampleRoutes.ts",
+      "line": 9,
+      "method": "GET",
+      "routeExpression": "\"/commandes-echantillons\""
+    },
+    {
+      "file": "modules/samples/http/sampleRoutes.ts",
+      "line": 10,
+      "method": "POST",
+      "routeExpression": "\"/commandes-echantillons/import\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 51,
+      "method": "GET",
+      "routeExpression": "\"/shopify/callback\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 64,
+      "method": "GET",
+      "routeExpression": "\"/shopify/connect\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 95,
+      "method": "GET",
+      "routeExpression": "\"/shopify/status\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 119,
+      "method": "GET",
+      "routeExpression": "\"/shopify/connections\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 132,
+      "method": "GET",
+      "routeExpression": "\"/shopify/products\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 146,
+      "method": "GET",
+      "routeExpression": "\"/shopify/orders\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 160,
+      "method": "GET",
+      "routeExpression": "\"/shopify/orders/:orderId\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 174,
+      "method": "GET",
+      "routeExpression": "\"/shopify/orders/:orderId/refund-inspection\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 185,
+      "method": "POST",
+      "routeExpression": "\"/shopify/orders/:orderId/refund-process\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 205,
+      "method": "POST",
+      "routeExpression": "\"/shopify/orders/:orderId/import\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 209,
+      "method": "POST",
+      "routeExpression": "\"/shopify/orders/:orderId/sync\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 213,
+      "method": "GET",
+      "routeExpression": "\"/shopify/webhooks\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 226,
+      "method": "POST",
+      "routeExpression": "\"/shopify/webhooks/register\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 259,
+      "method": "POST",
+      "routeExpression": "\"/shopify/connections\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 281,
+      "method": "POST",
+      "routeExpression": "\"/shopify/connections/:storeDomain/disconnect\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 305,
+      "method": "GET",
+      "routeExpression": "\"/shopify/webhook-events\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 319,
+      "method": "POST",
+      "routeExpression": "\"/shopify/webhook-events\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 342,
+      "method": "POST",
+      "routeExpression": "\"/shopify/webhook-events/:eventId/processed\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyConnectionRoutes.ts",
+      "line": 357,
+      "method": "POST",
+      "routeExpression": "\"/shopify/webhook-events/:eventId/failed\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyMetafieldImportRoutes.ts",
+      "line": 9,
+      "method": "GET",
+      "routeExpression": "\"/parametres/metachamps-shopify\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyMetafieldImportRoutes.ts",
+      "line": 10,
+      "method": "POST",
+      "routeExpression": "\"/parametres/metachamps-shopify/process\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyWebhookRoutes.ts",
+      "line": 19,
+      "method": "POST",
+      "routeExpression": "\"/shopify/webhooks/orders-create\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyWebhookRoutes.ts",
+      "line": 51,
+      "method": "POST",
+      "routeExpression": "\"/shopify/webhooks/orders-updated\""
+    },
+    {
+      "file": "modules/shopify/http/shopifyWebhookRoutes.ts",
+      "line": 83,
+      "method": "POST",
+      "routeExpression": "\"/shopify/webhooks/refunds-create\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 37,
+      "method": "GET",
+      "routeExpression": "\"/tech\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 53,
+      "method": "GET",
+      "routeExpression": "\"/tech/deploiement-environnement\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 69,
+      "method": "GET",
+      "routeExpression": "\"/tech/sante-webhooks\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 85,
+      "method": "GET",
+      "routeExpression": "\"/tech/sauvegardes-reprise\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 103,
+      "method": "POST",
+      "routeExpression": "\"/tech/sauvegardes-reprise/enregistrements\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 134,
+      "method": "GET",
+      "routeExpression": "\"/tech/controles-securite\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 152,
+      "method": "GET",
+      "routeExpression": "\"/tech/controles-securite/audit-trail.csv\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 167,
+      "method": "GET",
+      "routeExpression": "\"/tech/controles-securite/registre/attachments/:fileName\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 189,
+      "method": "POST",
+      "routeExpression": "\"/tech/controles-securite/registre\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 227,
+      "method": "POST",
+      "routeExpression": "\"/tech/controles-securite/pentest\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 255,
+      "method": "GET",
+      "routeExpression": "\"/tech/documentation\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 271,
+      "method": "GET",
+      "routeExpression": "\"/tech/documentation/references/:slug\""
+    },
+    {
+      "file": "modules/tech/http/technicalWorkspaceRoutes.ts",
+      "line": 287,
+      "method": "GET",
+      "routeExpression": "\"/tech/rapports-tests/:reportType/:runId\""
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 25,
+      "method": "GET",
+      "routeExpression": "root"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 26,
+      "method": "GET",
+      "routeExpression": "`${root}/data`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 27,
+      "method": "GET",
+      "routeExpression": "`${root}/warehouses`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 32,
+      "method": "POST",
+      "routeExpression": "`${root}/orders/:id/carriers`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 33,
+      "method": "POST",
+      "routeExpression": "`${root}/rules`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 34,
+      "method": "GET",
+      "routeExpression": "`${root}/orders/:id`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 35,
+      "method": "POST",
+      "routeExpression": "`${root}/orders/:id/services`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 36,
+      "method": "POST",
+      "routeExpression": "`${root}/orders/:id/buy`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 37,
+      "method": "POST",
+      "routeExpression": "`${root}/orders/:id/prepare`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 38,
+      "method": "POST",
+      "routeExpression": "`${root}/orders/:id/switch-carrier`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 43,
+      "method": "POST",
+      "routeExpression": "`${root}/jobs/:id/${action}`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 49,
+      "method": "GET",
+      "routeExpression": "`${root}/jobs/:id/events`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 50,
+      "method": "GET",
+      "routeExpression": "`${root}/documents/:id`"
+    },
+    {
+      "file": "modules/temu/http/temuBuyShippingRoutes.ts",
+      "line": 54,
+      "method": "POST",
+      "routeExpression": "`${root}/print`"
+    },
+    {
+      "file": "modules/temu/http/temuConnectionRoutes.ts",
+      "line": 15,
+      "method": "GET",
+      "routeExpression": "\"/temu/status\""
+    },
+    {
+      "file": "modules/temu/http/temuConnectionRoutes.ts",
+      "line": 28,
+      "method": "GET",
+      "routeExpression": "\"/temu/connections\""
+    },
+    {
+      "file": "modules/temu/http/temuConnectionRoutes.ts",
+      "line": 41,
+      "method": "POST",
+      "routeExpression": "\"/temu/connections\""
+    },
+    {
+      "file": "modules/temu/http/temuConnectionRoutes.ts",
+      "line": 63,
+      "method": "POST",
+      "routeExpression": "\"/temu/connections/:mallId/disconnect\""
+    },
+    {
+      "file": "modules/temu/http/temuRoutes.ts",
+      "line": 25,
+      "method": "GET",
+      "routeExpression": "\"/temu/callback\""
+    },
+    {
+      "file": "modules/temu/http/temuRoutes.ts",
+      "line": 36,
+      "method": "GET",
+      "routeExpression": "\"/temu/malls\""
+    },
+    {
+      "file": "modules/temu/http/temuRoutes.ts",
+      "line": 55,
+      "method": "POST",
+      "routeExpression": "\"/temu/webhooks/register\""
+    },
+    {
+      "file": "modules/temu/http/temuRoutes.ts",
+      "line": 82,
+      "method": "GET",
+      "routeExpression": "\"/temu/orders\""
+    },
+    {
+      "file": "modules/temu/http/temuRoutes.ts",
+      "line": 107,
+      "method": "GET",
+      "routeExpression": "\"/temu/orders/:parentOrderSn\""
+    },
+    {
+      "file": "modules/temu/http/temuRoutes.ts",
+      "line": 134,
+      "method": "POST",
+      "routeExpression": "\"/temu/orders/:parentOrderSn/import\""
+    },
+    {
+      "file": "modules/temu/http/temuWebhookRoutes.ts",
+      "line": 13,
+      "method": "POST",
+      "routeExpression": "\"/temu/webhooks/callback\""
+    },
+    {
+      "file": "modules/tenders/http/tenderRoutes.ts",
+      "line": 15,
+      "method": "GET",
+      "routeExpression": "\"/appels-offres\""
+    },
+    {
+      "file": "modules/tenders/http/tenderRoutes.ts",
+      "line": 27,
+      "method": "POST",
+      "routeExpression": "\"/appels-offres/import\""
+    },
+    {
+      "file": "modules/workspace/http/workspaceShellRoutes.ts",
+      "line": 13,
+      "method": "GET",
+      "routeExpression": "\"/app\""
+    }
+  ],
+  "screens": [
+    {
+      "file": "modules/amazon/http/renderAmazonCsvImportPage.ts",
+      "sha256": "a35960a9e88f5b461fb0e4ae17f38b24f83832b673f36c0bd59930eefb80860a",
+      "conditions": 4
+    },
+    {
+      "file": "modules/carriers/http/renderCarrierDashboardPage.ts",
+      "sha256": "17834b8fcfa9c52c86f5d69b31f77ea4e78d7d45c59425c69087c33e894cc5ea",
+      "conditions": 156
+    },
+    {
+      "file": "modules/carriers/http/renderCarrierRoutingSettingsPage.ts",
+      "sha256": "8aaa17369f200f93a70e8c61ee10d78aa705508d5f32a9b3747779b9f49b09c2",
+      "conditions": 15
+    },
+    {
+      "file": "modules/marketplaces/http/renderMarketplaceDashboardPage.ts",
+      "sha256": "1cd69d3a4376a339c573917e1c72c77692df28431b6526ad8c08abd531a45d39",
+      "conditions": 9
+    },
+    {
+      "file": "modules/marketplaces/http/renderMarketplaceOperationsPage.ts",
+      "sha256": "edf334315d02e399c680f5811b87168fdd6c14daae6523080537881c7c5b4e6c",
+      "conditions": 86
+    },
+    {
+      "file": "modules/marketplaces/http/renderMarketplaceWorkspaceDashboardPage.ts",
+      "sha256": "7f5c951e04affed952013e2c19597b6db7d8b88e1665257f84c3d8669a8bab21",
+      "conditions": 0
+    },
+    {
+      "file": "modules/orders/http/renderSkuMappingPage.ts",
+      "sha256": "b0eb2dc1697d63d10c0eb6c57f89d8193224dd70bc07e21e275c1b019789b334",
+      "conditions": 28
+    },
+    {
+      "file": "modules/purchasing/http/renderPurchasingPage.ts",
+      "sha256": "05e4226bbf296c6055bf8d824805b83cfbf62bda4e7915d6a45aff8ed8cdea3b",
+      "conditions": 42
+    },
+    {
+      "file": "modules/samples/http/renderSampleImportPage.ts",
+      "sha256": "9bb9334f01b4284cbced91aa9afffa003507adf5f1372b1e2c51096580ba8a5c",
+      "conditions": 3
+    },
+    {
+      "file": "modules/shopify/http/renderShopifyMetafieldImportPage.ts",
+      "sha256": "9be396ce89889c3b6c6be435abea127065d5266ff41e690b165a81fa92d1ebc7",
+      "conditions": 8
+    },
+    {
+      "file": "modules/tech/http/renderTechnicalWorkspacePage.ts",
+      "sha256": "0284cce143ebe0bf67330f73d32e4d70a1eb2f3c7d7e64974728ab57506ee28e",
+      "conditions": 18
+    },
+    {
+      "file": "modules/temu/http/renderTemuShippingPage.ts",
+      "sha256": "0f8fe5f1e44b8f69028c2e2b235d0c55219efa7ec18bb142717ac88a0cde948a",
+      "conditions": 63
+    },
+    {
+      "file": "modules/tenders/http/renderTenderImportPage.ts",
+      "sha256": "de6e5e2f8c6902cfdaab79a6697a5eac21902a66dbaa012e8995023342df7fdb",
+      "conditions": 3
+    },
+    {
+      "file": "modules/workspace/http/renderWorkspaceShellPage.ts",
+      "sha256": "9b48b1a23a99f32f800900868eec6d34a266bdb4af58d363e48a2f359847432b",
+      "conditions": 0
+    }
+  ],
+  "note": "Inventaire statique des déclarations. Les chemins dynamiques restent des expressions. Ce relevé ne certifie pas la parité fonctionnelle."
+}

@@ -1,0 +1,23 @@
+{
+  "name": "nextech-logistic-v3",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "check": "node scripts/check-syntax.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "exceljs": "4.4.0",
+    "pdf-lib": "^1.17.1",
+    "pg": "8.23.1"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

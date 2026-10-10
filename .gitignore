@@ -1,0 +1,15 @@
+node_modules/
+data/
+.env
+.env.*
+!.env.example
+.local-acces-v3/
+*.credential.clixml
+*.pem
+*.key
+*.log
+coverage/
+tmp/
+
+src/margin-published-snapshot.json
+src/temu-reading-reports.json
