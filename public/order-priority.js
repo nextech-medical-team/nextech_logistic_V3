@@ -16,7 +16,7 @@
    const r=latest.get(ref.dataset.detail),cell=ref.closest('tr').cells[index];if(!cell)continue;
    let box=cell.querySelector('.order-processing'),button=ref.parentElement.querySelector('.processing-priority');
    if(!r?.stage&&!r?.previewPending&&!r?.priority&&!r?.canPrioritize&&!r?.monitoring?.blocked){box?.remove();button?.remove();continue;}
-   cell.style.minWidth='240px';body.closest('table').querySelectorAll('thead th')[index].style.minWidth='240px';
+   cell.style.setProperty('width','240px','important');body.closest('table').querySelectorAll('thead th')[index].style.setProperty('width','240px','important');
    if(!box){box=document.createElement('div');box.className='order-processing';box.style.minWidth='220px';box.style.fontSize='12px';box.style.lineHeight='1.4';
     for(const cls of ['processing-stage','processing-position','processing-elapsed','processing-reason','processing-preview','processing-signals','processing-other','monitoring-last','monitoring-next','monitoring-result','monitoring-step','monitoring-alert']){const line=document.createElement('div');line.className=cls;line.style.overflowWrap='anywhere';if(cls==='processing-other')line.style.whiteSpace='pre-line';if(cls==='processing-preview'){line.style.fontWeight='bold';line.style.color='#8a4b00';}box.append(line);}
     cell.append(box);
