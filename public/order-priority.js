@@ -15,13 +15,19 @@
   for(const ref of body.querySelectorAll('[data-detail]')){
    const r=latest.get(ref.dataset.detail),cell=ref.closest('tr').cells[index];if(!cell)continue;
    let box=cell.querySelector('.order-processing'),button=ref.parentElement.querySelector('.processing-priority');
-   if(!r?.stage&&!r?.previewPending&&!r?.priority&&!r?.canPrioritize){box?.remove();button?.remove();continue;}
+   if(!r?.stage&&!r?.previewPending&&!r?.priority&&!r?.canPrioritize&&!r?.monitoring?.blocked){box?.remove();button?.remove();continue;}
    if(!box){box=document.createElement('div');box.className='order-processing';
-    for(const cls of ['processing-stage','processing-position','processing-elapsed','processing-reason','processing-preview','processing-signals','processing-other']){const line=document.createElement('div');line.className=cls;line.style.overflowWrap='anywhere';if(cls==='processing-other')line.style.whiteSpace='pre-line';if(cls==='processing-preview'){line.style.fontWeight='bold';line.style.color='#8a4b00';}box.append(line);}
+    for(const cls of ['processing-stage','processing-position','processing-elapsed','processing-reason','processing-preview','processing-signals','processing-other','monitoring-last','monitoring-next','monitoring-result','monitoring-step','monitoring-alert']){const line=document.createElement('div');line.className=cls;line.style.overflowWrap='anywhere';if(cls==='processing-other')line.style.whiteSpace='pre-line';if(cls==='processing-preview'){line.style.fontWeight='bold';line.style.color='#8a4b00';}box.append(line);}
     cell.append(box);
    }
-   box.hidden=!r.stage&&!r.priority&&!r.previewPending;
-   setText(box.querySelector('.processing-stage'),r.stage|| (r.previewPending?'Remplacement à confirmer':'Priorité enregistrée · en attente de préparation'));
+   box.hidden=!r.stage&&!r.priority&&!r.previewPending&&!r.monitoring?.blocked;
+   const monitor=r.monitoring,stamp=value=>value?new Date(value).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'À vérifier';
+   setText(box.querySelector('.monitoring-last'),monitor?.lastCheck?'Dernière vérification : '+stamp(monitor.lastCheck):'');
+   setText(box.querySelector('.monitoring-next'),monitor?.nextCheck?'Prochain contrôle : '+stamp(monitor.nextCheck):'');
+   setText(box.querySelector('.monitoring-result'),monitor?.result?'Résultat : '+monitor.result:'');
+   setText(box.querySelector('.monitoring-step'),monitor?.nextStep?'Étape suivante : '+monitor.nextStep:'');
+   const alert=box.querySelector('.monitoring-alert');setText(alert,monitor?.alert?'Sans progression depuis plus d’une heure · '+monitor.result+' · '+monitor.nextStep:'');alert.setAttribute('role','status');alert.style.fontWeight='bold';alert.style.color='#8a4b00';
+   setText(box.querySelector('.processing-stage'),r.stage|| (r.monitoring?.blocked?'Contr�le des blocages':r.previewPending?'Remplacement à confirmer':'Priorité enregistrée · en attente de préparation'));
    const status=cell.querySelector(':scope > .badge');
    if(status&&r.stage&&(status.dataset.processingStatus||['Traitement en cours','À générer','En attente'].includes(status.textContent.trim()))){
     status.dataset.processingStatus='true';setText(status,r.state==='blocked'?'Bloquée':r.state==='active'?'Traitement en cours':'En attente');

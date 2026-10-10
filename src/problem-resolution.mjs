@@ -47,6 +47,7 @@ import {regenerateProductionLabels} from './label-regeneration.mjs';
 import {correctionCatalog} from './problem-corrections.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 import {assertFullOrderStock} from './stock-gate.mjs';
+import {assertResumeStock} from './resume-stock-policy.mjs';
 import {createProductionCarriers,createTestCarriers} from './carriers-test.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -312,13 +313,12 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    return bcComparisonDiagnostic(o,r.Order,lines);
   }
   if(j.action==='resume-erp'){
-   if(o.archived||o.erp_live?.bc?.status==='cancelled'||o.tracking_status==='cancelled')throw Error('Commande archivée ou annulée : reprise du BL non autorisée');
+   if(o.archived||o.erp_live?.bc?.status==='cancelled')throw Error('Commande archivée ou BC annulé : reprise du BL non autorisée');
    if(o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
    if(o.partial_mode)throw Error('Utiliser la préparation de la livraison partielle');
    if(!o.erp_live?.bc?.id)throw Error('BC Erplain non créé');
-   if(['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande déjà expédiée : contrôler ses documents existants');
    await stage('Relecture du stock dans Erplain LIVE');await api.verify();
-   const r=await api.request(`query V3ResolutionStock($id:ID!){Order(id:$id){${o.source_payload?.erplainImported?manualOrderFields:'id status line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}'}}}`,{id:String(o.erp_live.bc.id)});
+   const r=await api.request(`query V3ResolutionStock($id:ID!){Order(id:$id){${o.source_payload?.erplainImported?manualOrderFields:'id status update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}'}}}`,{id:String(o.erp_live.bc.id)});
    if(!r.Order?.line_items?.length)throw Error('API Erplain · Stock non reçu');
    if(['closed','cancelled','completed'].includes(r.Order.status))throw Error('BC clôturé : reprise du BL non autorisée');
    if(r.Order.status!=='active')throw Error('API Erplain · État actif du BC non confirmé');
@@ -327,9 +327,9 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    {
     const desired=await readComparisonLines(db,o);
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku,quantity=Number(l.quantity);if(typeof sku!=='string'||!sku.trim()||!Number.isFinite(quantity)||quantity<=0)throw Error('Produits ou quantités du BC non vérifiables : reprise non autorisée');sums.set(sku,(sums.get(sku)||0)+quantity);}return JSON.stringify([...sums].sort());};
-    if(total(desired)!==total(resumeStockLines))throw Error(o.source_payload?.erplainImported?'Commande V3 et BL en attente différents : vérifier les quantités avant reprise':'Commande V3 et BC différents : vérifier les produits et quantités avant reprise');
+    if(total(desired)!==total(resumeStockLines)&&(o.source_payload?.erplainImported||o.erp_live?.bl?.id))throw Error('Commande V3 et livraison existante différentes : vérifier les quantités avant reprise');
    }
-   assertFullOrderStock(resumeStockLines);
+   await assertResumeStock(api,o,r.Order,resumeStockLines);
    await db.transaction(async tx=>{const e=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];if(e?.status==='processing')throw Error('Traitement Erplain en cours');
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
     await tx.query("INSERT INTO erp_live_jobs(order_id,status) VALUES($1,'pending') ON CONFLICT(order_id) DO UPDATE SET status='pending',error=null,updated_at=now()",[o.id]);

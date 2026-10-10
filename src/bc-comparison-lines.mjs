@@ -1,11 +1,10 @@
-import {convertedQuantity} from './domain.mjs';
+import {currentMappingLine} from './current-mapping-line.mjs';
 // Resolve the same physical quantities as preparation without writing lines or BCs.
 export function comparisonLines(lines,channel){
  if(!lines.length)throw Error('Comparaison BC impossible : aucune ligne de commande');
  return lines.map(l=>{
-  const sku=l.target_sku||l.mapped_sku||(['tender','samples'].includes(channel)?l.source_sku:null);
+  const {sku,quantity}=currentMappingLine(l,channel);
   if(!sku)throw Error('Mapping manquant : '+l.source_sku);
-  const quantity=Number(l.target_quantity??(l.source_qty?convertedQuantity(l.quantity,l.source_qty,l.target_qty):l.quantity));
   if(!Number.isFinite(quantity)||quantity<=0)throw Error('Quantité invalide : '+sku);
   return {sku,quantity};
  });

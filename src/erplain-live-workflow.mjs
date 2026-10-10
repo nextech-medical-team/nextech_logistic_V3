@@ -11,6 +11,8 @@ import {resumeTransientErplain,recordTransientFailure,closeTransientReviews} fro
 import {cancellationBlock,mutationBlock} from './erp-transient-policy.mjs';
 import {confirmDeliveryReady} from './bl-ready.mjs';
 import {historicalPreparationProof} from './historical-stock-proof.mjs';
+import {currentMappingLine} from './current-mapping-line.mjs';
+import {alignMappedBc} from './mapping-bc-alignment.mjs';
 import {normalizeHistoricalDraft} from './historical-bl-draft.mjs';
 import {resumeTemuFinancialReviews} from './financial-review-recovery.mjs';
 import {resumeAcceptedCommercialReviews} from './commercial-tolerance-recovery.mjs';
@@ -124,7 +126,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    }
    const items=await Promise.all(lines.map(async l=>{
 
-    const sku=l.target_sku||l.mapped_sku||(['tender','samples'].includes(o.channel)?l.source_sku:null);
+    const {sku,quantity}=currentMappingLine(l,o.channel);
 
     if(!sku)throw Error('BC · Mapping manquant : '+l.source_sku);
     const binding=bindings.get(sku);
@@ -147,7 +149,6 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     // reconciliation. A global SKU weight must not silently choose another one.
     o.selectedProducts??={};o.selectedProducts[sku]=product;
 
-    const quantity=Number(l.target_quantity??(l.source_qty?convertedQuantity(l.quantity,l.source_qty,l.target_qty):l.quantity));
 
     return {location:{id:String(references.locationId)},variant:{id:String(target.targetVariantId)},quantity,price:0,description:sku};
 
@@ -179,6 +180,14 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    const missing=working.filter(o=>!o.erp_live.bc);
    for(const o of missing){const found=await recoverOrder(api,o);if(found){o.erp_live.bc={id:found.id,label:found.label};o.erp_live.phase='bc_created';await save(o);}}
    for(const o of working)o.documentMetadata=await documentMetadata(o,directory);
+   for(const o of working.filter(o=>o.erp_live.bc?.id)){
+    try{await withShipmentLock(()=>alignMappedBc(api,o,{save,guard:async()=>{
+     const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh);if(block)throw Error(block);
+     const rows=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
+     if(JSON.stringify(rows.map(l=>currentMappingLine(l,o.channel)))!==JSON.stringify(o.selectedSourceLines.map(l=>currentMappingLine(l,o.channel))))throw Error('Mapping modifié pendant le contrôle : nouvelle vérification requise');
+    }}));}catch(e){o.failed=true;await fail(o,e);}
+   }
+   working=working.filter(o=>!o.failed);
    // Validate existing BC source amounts before any recovery can create stock.
    for(const o of working.filter(o=>o.erp_live.bc?.id)){try{const {Order:commercial}=await api.request('query V3SourceBeforeRecovery($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});if(String(commercial?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');const confirmed=verifySourceCommercialTotals(commercial,o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing);o.erp_live.pricing={...o.erp_live.pricing,confirmed,status:'verified',error:null,verifiedAt:new Date().toISOString()};await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);
