@@ -1,4 +1,5 @@
 import {shopifyCancellationReason} from './shopify-cancellation-policy.mjs';
+import {platformReceiptDisposition} from './platform-receipt-version.mjs';
 import {authorizedFreshTemu} from './temu-authorized-reimport.mjs';
 import {recoverCompleteTemuImport} from './temu-import-recovery.mjs';
 import {initialMarketplaceHold} from './temu-initial-hold.mjs';
@@ -50,8 +51,8 @@ export async function applyMarketplaceReceipt(db,r,options={}){
  return withShipmentLock(()=>db.transaction(async tx=>{
   const link=(await tx.query('SELECT * FROM marketplace_order_links WHERE channel=$1 AND shop=$2 AND reference=$3 FOR UPDATE',[r.channel,r.shop,o.reference])).rows[0];
   if(fresh&&link)throw Error('Ancien lien marketplace encore présent : reprise interrompue');
-  if(link?.version&&o.version&&(Date.parse(link.version)>Date.parse(o.version)||Date.parse(link.version)===Date.parse(o.version)))return {unchanged:true};
   const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,o.reference])).rows[0];
+  if(platformReceiptDisposition({observedVersion:link?.version,incomingVersion:o.version,pending:!!existing?.source_payload?.marketplacePendingCorrection})==='skip')return {unchanged:true};
   if(fresh&&existing)throw Error('Ancienne fiche V3 encore présente : reprise interrompue');
   if(existing){const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
    if(existing.source_payload?.visibilityHold){

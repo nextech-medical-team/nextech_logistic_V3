@@ -20,9 +20,11 @@ export async function attachLogisticsObservations(db,rows){
  FROM targets t LEFT JOIN carrier_tracking c ON c.carrier=CASE WHEN t.carrier LIKE 'gls%' THEN 'gls' ELSE t.carrier END AND c.environment=t.environment AND c.tracking=t.tracking`,[ids])).rows;
  for(const row of rows){
   let own=targets.filter(t=>t.order_id===row.id);
-  if(row.channel==='temu'&&!row.transport_choice&&!row.partial_mode){
+  if(row.channel==='temu'&&!row.transport_choice){
    const r=row.temu_job?.result||{},events=(r.deliveryStatuses||[]).filter(e=>e.source==='temu_tracking').map(e=>({carrier:'temu',tracking:e.trackingKey,code:e.code,label:e.label,at:e.at}));
-   own=(r.packageInfoResultList||[]).filter(p=>p.trackingNumber).map(p=>({tracking:p.trackingNumber,carrier:'temu',checkedAt:r.trackingVerifiedAt,events,error:(r.trackingErrors||[]).find(e=>e.package===p.packageSn)?.error}));
+   const temuParcels=(r.packageInfoResultList||[]).filter(p=>p.trackingNumber).map(p=>({tracking:p.trackingNumber,carrier:'temu',checkedAt:r.trackingVerifiedAt,events,error:(r.trackingErrors||[]).find(e=>e.package===p.packageSn)?.error}));
+   own=own.map(t=>temuParcels.find(p=>p.tracking===t.tracking)||t);
+   if(!row.partial_mode)own.push(...temuParcels.filter(p=>!own.some(t=>t.tracking===p.tracking)));
   }
   row.logistics_observation=logisticsObservation(own);
  }

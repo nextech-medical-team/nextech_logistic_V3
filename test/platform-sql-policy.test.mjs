@@ -2,6 +2,13 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {bcAllowedSql} from '../src/bc-authorization.mjs';
 import {attachLogisticsObservations} from '../src/logistics-observation-view.mjs';
+import {readFile} from 'node:fs/promises';
+test('Recovery SQL never excludes TEMU orders for a declared cancellation request',async()=>{
+ for(const name of ['financial-review-recovery','stock-auto-reconciliation','temu-command-recovery']){
+  const code=await readFile(new URL('../src/'+name+'.mjs',import.meta.url),'utf8');
+  assert.doesNotMatch(code,/AND NOT jsonb_path_exists[^\n]*pending_buyer_cancellation/);
+ }
+});
 test('BC selection ignores platform declarations and preserves human suspension',async()=>{
  const db=new PGlite();try{
  await db.exec('CREATE TABLE orders(id text,reference text,channel text,suspension jsonb,source_payload jsonb,archived boolean,resolution_pending_resume boolean,issue text)');

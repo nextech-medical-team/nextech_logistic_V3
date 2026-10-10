@@ -27,7 +27,6 @@ export async function recoverInitialCommercialReviews(db){
    AND coalesce(o.source_payload->>'visibilityHold','false')<>'true'
 
 
-   AND NOT jsonb_path_exists(coalesce(o.source_payload,'{}'),'$.temuOrderDetail.parentOrderMap.parentOrderLabel[*] ? (@.name == "pending_buyer_cancellation" && (@.value == 1 || @.value == "1"))')
    AND (coalesce(o.issue,'')='' OR o.issue=e.error OR o.issue='Données récupérées · Préparation à vérifier')
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit','delivered_simulated')
    AND coalesce(o.label_status,'')<>'cancelled'

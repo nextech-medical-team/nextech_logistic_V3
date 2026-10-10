@@ -34,7 +34,6 @@ export async function resumeTemuFinancialReviews(db){
  WHERE e.status='review' AND o.channel IN ('temu','amazon') AND (${bcAllowedSql}) AND NOT o.partial_mode AND NOT o.resolution_pending_resume
  AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
 
- AND NOT jsonb_path_exists(coalesce(o.source_payload,'{}'),'$.temuOrderDetail.parentOrderMap.parentOrderLabel[*] ? (@.name == "pending_buyer_cancellation" && (@.value == 1 || @.value == "1"))')
  AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
  AND o.erp_live->'bc'->>'id' IS NULL AND coalesce(o.erp_live->>'phase','')=''
  AND ((o.channel='temu' AND (e.error LIKE 'TEMU · Remises client et TVA à rapprocher%' OR e.error LIKE 'TEMU · Nombre de lignes financières%' OR e.error LIKE 'TEMU · Annulation partielle%'
