@@ -23,7 +23,7 @@ export async function resumeSynchronizedGofo(db){
  return db.transaction(async tx=>{
   const candidates=(await tx.query(`SELECT o.id,r.id sync_id FROM orders o
    JOIN LATERAL(SELECT * FROM resolution_jobs WHERE order_id=o.id ORDER BY created_at DESC,id DESC LIMIT 1) r ON true
-   WHERE (coalesce(o.suspension->>'active','false')<>'true' AND NOT (o.suspension ? 'erplainCancellation') AND NOT (o.suspension ? 'suspendedAt' AND o.resolution_pending_resume) AND NOT o.archived AND o.reference NOT LIKE 'DEMO-%' AND NOT coalesce(o.source_payload ? 'marketplacePendingCorrection',false) AND NOT coalesce((o.source_payload->>'cancelled')='true',false) AND coalesce(o.source_payload->>'cancelled_at','')='' AND NOT coalesce(o.issue,'') ~* 'commande annulée') AND o.carrier='gofo' AND o.channel<>'temu' AND coalesce(o.source_payload->>'erplainImported','false')<>'true'
+   WHERE (coalesce(o.suspension->>'active','false')<>'true' AND NOT (o.suspension ? 'erplainCancellation') AND NOT (o.suspension ? 'suspendedAt' AND o.resolution_pending_resume) AND NOT o.archived AND o.reference NOT LIKE 'DEMO-%' AND NOT coalesce(o.source_payload ? 'marketplacePendingCorrection',false) AND NOT coalesce(o.issue,'') ~* 'commande annulée') AND o.carrier='gofo' AND o.channel<>'temu' AND coalesce(o.source_payload->>'erplainImported','false')<>'true'
    AND o.resolution_pending_resume=true AND o.partial_mode=false AND o.label_status='simulated'
    AND coalesce(o.tracking_status,'') NOT IN ('shipped','in_transit','delivered','delivered_simulated','cancelled')
    AND coalesce(o.erp_live->'bc'->>'status','') NOT IN ('cancelled','closed','completed')

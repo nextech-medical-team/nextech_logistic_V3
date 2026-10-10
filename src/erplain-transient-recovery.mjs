@@ -20,8 +20,7 @@ export async function resumeTransientErplain(db,api){
   const cancelled=(await tx.query(`SELECT o.id,o.source_payload,o.label_status,o.tracking_status,o.issue,o.erp_live,e.error FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE e.status='review' AND e.error NOT LIKE 'Demande d’annulation%' AND e.error NOT LIKE 'Commande annulée%'
    AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL)
-   AND (o.source_payload->>'cancelled' IN ('true','1') OR coalesce(o.source_payload->>'cancelled_at','')<>'' OR o.label_status='cancelled' OR o.tracking_status='cancelled' OR o.issue ~* 'commande annulée' OR o.source_payload->'temuOrderDetail'->'parentOrderMap'->>'parentOrderStatus'='3'
-    OR jsonb_path_exists(coalesce(o.source_payload,'{}'),'$.temuOrderDetail.parentOrderMap.parentOrderLabel[*] ? (@.name == "pending_buyer_cancellation" && (@.value == 1 || @.value == "1"))'))
+   AND (o.label_status='cancelled' OR o.tracking_status='cancelled' OR coalesce(o.suspension->>'active','false')='true' OR o.suspension ? 'erplainCancellation')
    ORDER BY e.updated_at LIMIT 50 FOR UPDATE OF o,e SKIP LOCKED`)).rows;
   for(const o of cancelled){const block=cancellationBlock(o);if(!block)continue;await tx.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{transientRecovery}',$2::jsonb) WHERE id=$1",[o.id,JSON.stringify({...o.erp_live.transientRecovery,lastError:o.erp_live.transientRecovery?.lastError||o.error})]);await tx.query('UPDATE erp_live_jobs SET error=$2 WHERE order_id=$1',[o.id,block]);}
   // Locks and the worker-wide shipment lock prevent two schedulers claiming the same retry.
@@ -30,9 +29,8 @@ export async function resumeTransientErplain(db,api){
    AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
    AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
-   AND coalesce(o.source_payload->>'cancelled','') NOT IN ('true','1') AND coalesce(o.source_payload->>'cancelled_at','')=''
-   AND coalesce(o.source_payload->'temuOrderDetail'->'parentOrderMap'->>'parentOrderStatus','')<>'3'
-   AND NOT jsonb_path_exists(coalesce(o.source_payload,'{}'),'$.temuOrderDetail.parentOrderMap.parentOrderLabel[*] ? (@.name == "pending_buyer_cancellation" && (@.value == 1 || @.value == "1"))')
+
+
    AND NOT coalesce(o.issue,'') ~* 'commande annulée'
    AND coalesce(o.erp_live->'bc'->>'status','') NOT IN ('cancelled','closed') AND coalesce(o.erp_live->'bl'->>'status','') NOT IN ('cancelled','closed')
    AND (coalesce(o.erp_live->'transientRecovery'->>'attempts','0') IN ('0','1','2') OR o.erp_live->'transientRecovery'->>'readRateLimited'='true')
