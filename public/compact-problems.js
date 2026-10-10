@@ -6,6 +6,7 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/TEMU/i.test(text)&&/3000032|prix et TVA|Prix et frais de livraison|Données financières|Prix API à récupérer/i.test(text))return result('temu-pricing','TEMU · Prix à renseigner','');
  if(/^Reprendre le remplacement après correction/.test(text))return result('equivalent-pending','Vérifier le remplacement');
  if(/^Produit équivalent vérifié/.test(text))return result('equivalent-pending','Confirmer le remplacement');
+ if(/^Produit (?:équivalent|restant) \[[^\]]+\] : Poids vérifié, remplacement à confirmer$/.test(text))return result('equivalent-pending','Confirmer le remplacement');
  if(/Commande (modifiée|annulée|déjà expédiée)/i.test(text))return result('platform',/annulée/i.test(text)?'Commande annulée sur la plateforme':/déjà expédiée/i.test(text)?'Commande déjà expédiée sur la plateforme':'Commande modifiée sur la plateforme','');
  if(code==='401'||code==='403')return result('api-access','API '+apiName+' · Accès refusé ('+code+')','');
  if(code==='429')return result('api-limit','API '+apiName+' · Limite atteinte (429)','');
