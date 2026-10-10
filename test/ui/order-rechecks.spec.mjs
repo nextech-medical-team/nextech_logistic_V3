@@ -8,7 +8,7 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  const card=page.locator('#order-rows .order-processing');await expect(card).toHaveCount(1);await expect(card.locator('.processing-stage')).toHaveText('Contr\u00f4le des blocages');
  for(const [cls,text]of [['monitoring-last','Derni\u00e8re v\u00e9rification'],['monitoring-next','Prochain contr\u00f4le'],['monitoring-result','R\u00e9sultat'],['monitoring-step','\u00c9tape suivante']])await expect(card.locator('.'+cls)).toContainText(text);
  await expect(card.locator('.monitoring-alert')).toContainText('Sans progression depuis plus d\u2019une heure');await card.scrollIntoViewIfNeeded();
- const bounds=await card.boundingBox();expect(bounds.width).toBeLessThan(viewport.width);const clipping=await card.evaluate(el=>[...el.children].some(c=>c.scrollWidth>el.clientWidth+2));expect(clipping).toBe(false);
+ const bounds=await card.boundingBox();expect(bounds.width).toBeLessThan(viewport.width);expect(bounds.width).toBeGreaterThanOrEqual(210);expect(bounds.height).toBeLessThan(350);const clipping=await card.evaluate(el=>[...el.children].some(c=>c.scrollWidth>el.clientWidth+2));expect(clipping).toBe(false);
  await page.screenshot({path:'proofs/order-rechecks-'+name+'.png',fullPage:false});expect(writes).toEqual([]);expect(errors).toEqual([]);
  fs.writeFileSync('proofs/order-rechecks-'+name+'.json',JSON.stringify({status:'PASS',viewport,fields:4,persistentAlert:true,writes,errors,bounds,clipping,scope:'Full application with synthetic order and processing responses'}));
 });
