@@ -1,5 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {PGlite} from '@electric-sql/pglite';
 import {reconcileVerifiedWeights} from '../src/verified-weight-diagnostics.mjs';
+import {waitingResolutionWorker} from '../src/resolution-waiting.mjs';
 test('real SQL reconciliation covers replacement, newer failures, variant conflicts, no-audit and repeat',async()=>{
  const db=new PGlite();try{
  await db.exec(`CREATE TABLE orders(id text primary key,archived boolean default false,issue text,erp_live jsonb default '{}');
@@ -26,4 +27,22 @@ test('real SQL reconciliation covers replacement, newer failures, variant confli
  // Another error is never cleared by an old weight proof.
  assert.ok(jobs.every(j=>j.error.includes('Stock insuffisant')));
  }finally{await db.close();}
+});
+for(const fail of [false,true])test('real deferred completion checks current status; read failure stays in review '+fail,async()=>{
+ const j={id:'j',order_id:'o',action:'recover-pdf',status:'waiting',result:{pdfOnly:true}},queries=[];let orderReads=0;
+ const db={query:async(sql,args)=>{
+  queries.push(sql);
+  if(sql.startsWith('SELECT * FROM resolution_jobs WHERE status='))return {rows:[j]};
+  if(sql==='SELECT * FROM orders WHERE id=$1'){orderReads++;if(fail&&orderReads===2)throw Error('Snapshot indisponible');return {rows:[{id:'o',archived:false,label_status:'production_ready'}]};}
+  if(sql.startsWith('SELECT * FROM erplain_product_bindings'))return {rows:[]};
+  if(sql.startsWith('SELECT order_id,result'))return {rows:[j]};
+  if(sql.includes('FROM erp_live_jobs'))return {rows:[{status:'complete',error:null}]};
+  if(sql.includes('FROM carrier_jobs'))return {rows:[{status:'ready',error:null}]};
+  if(sql.startsWith('SELECT action,error'))return {rows:[{action:'equivalent-preview',error:'Remplacement à confirmer'}]};
+  if(sql.startsWith('UPDATE resolution_jobs SET status=')){j.status=args[1];j.stage=args[2];if(args[3])j.result=JSON.parse(args[3]);j.error=args[4];}
+  return {rows:[]};}};
+ await waitingResolutionWorker(db,{regenerate:()=>{throw Error('Étiquette jamais recréée');}}).run();
+ assert.equal(j.status,fail?'review':'complete');
+ if(fail)assert.match(j.error,/Snapshot indisponible/);else{assert.equal(j.result.statusVerification.state,'needs_review');assert.match(j.stage,/commande à vérifier/);assert.equal(j.result.statusVerification.businessCompleted,false);}
+ assert.ok(!queries.some(q=>/UPDATE orders|INSERT INTO carrier_jobs/.test(q)));
 });
