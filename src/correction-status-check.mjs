@@ -1,4 +1,4 @@
-import {completedHistoricalPreparation,reconcileHistoricalPreparation,currentReplacementPreview} from './historical-preparation-completion.mjs';
+import {completedHistoricalPreparation,reconcileHistoricalPreparation,currentReplacementPreview,currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
 import {reconcileVerifiedWeights} from './verified-weight-diagnostics.mjs';
 import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
 
@@ -22,7 +22,6 @@ export async function refreshCorrectionStatuses(db,orderId){
  const erpJob=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[orderId])).rows[0];
  if(completedHistoricalPreparation(order,erpJob)){const result=await reconcileHistoricalPreparation(db,orderId);if(result.updated)order=(await db.query('SELECT * FROM orders WHERE id=$1',[orderId])).rows[0];}
  const carrierJob=(await db.query('SELECT status,error FROM carrier_jobs WHERE order_id=$1',[orderId])).rows[0];
- const latest=(await db.query('SELECT action,status,error,result FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[orderId])).rows[0];
- const otherReviews=latest?.status==='review'?[latest]:[];
- return correctionStatusSnapshot({...order,pendingReplacement:currentReplacementPreview(latest)||otherReviews.some(j=>j.action==='replace-equivalent'&&!j.error)},{erpJob,carrierJob,otherReviews});
+ const actions=(await db.query(resolutionStateSql,[orderId])).rows;const {reviews:otherReviews,pendingReplacement}=currentResolutionState(actions);
+ return correctionStatusSnapshot({...order,pendingReplacement:pendingReplacement||otherReviews.some(j=>j.action==='replace-equivalent'&&!j.error)},{erpJob,carrierJob,otherReviews});
 }

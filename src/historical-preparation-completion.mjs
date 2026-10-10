@@ -2,6 +2,14 @@ import {oldFinanceErrors,projectCurrentDiagnostics} from './current-order-diagno
 import {shipmentFingerprint} from './label-stock-gate.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 export function currentReplacementPreview(j){return j?.action==='equivalent-preview'&&j.status==='complete'&&!j.error&&!!j.result?.replacementSku&&!j.result?.reconcileOnly;}
+export const resolutionStateSql="SELECT action,status,error,result,created_at,id FROM (SELECT DISTINCT ON (action) action,status,error,result,created_at,id FROM resolution_jobs WHERE order_id=$1 ORDER BY action,created_at DESC,id DESC) current_actions ORDER BY created_at DESC,id DESC";
+export function currentResolutionState(actions=[]){
+ actions=Array.isArray(actions)?actions:[];
+ const preparation=new Set(['resume-erp','resume','replace-equivalent','reconcile-bc','compare-bc','manual-temu-pricing','equivalent-preview']);
+ const completed=actions.findIndex(j=>['resume-erp','resume','replace-equivalent'].includes(j.action)&&j.status==='complete'&&!j.error&&!j.result?.partialRemainder);
+ const reviews=actions.filter((j,i)=>j.status==='review'&&(!preparation.has(j.action)||completed<0||i<completed));
+ const preview=actions.findIndex(currentReplacementPreview);return {reviews,pendingReplacement:preview>=0&&(completed<0||preview<completed)};
+}
 const historicalReason='Reprise historique \u00e0 v\u00e9rifier : BL non cr\u00e9\u00e9';
 export function completedHistoricalPreparation(o,e,now=Date.now()){
  const p=o.erp_live,pricing=p?.pricing;
