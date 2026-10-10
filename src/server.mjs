@@ -1,3 +1,4 @@
+import {initializeMovementWatch,movementWatchWorker,movementWatchdog,movementWatchStatus} from './movement-watch.mjs';
 import {loadEnvFile} from 'node:process';
 import {suspensionGuardRequired} from './suspension-route-policy.mjs';
 import {initializeOrderRecheckMonitor,orderRecheckMonitor} from './order-recheck-monitor.mjs';
@@ -120,6 +121,7 @@ const suspensionService=orderSuspensionService(db,erplainAccount(directory,'live
 configureApiBudget(db);configureShipmentLocks(db);const cachedOrderSummary=orderSummaryCache(db);
 await db.withLocks(['schema'],()=>initializeTrackingSync(db));
 if(config.background)await db.query("UPDATE tracking_sync_runs SET status='interrupted',finished_at=now(),error='Serveur redémarré : les résultats déjà reçus sont conservés. Relancez la synchronisation.' WHERE status='running'");
+await db.withLocks(['schema'],()=>initializeMovementWatch(db));
 const runtime=createRuntime(db,{role:config.role});await runtime.start();
 await db.withLocks(['schema'],()=>initializeOrderRecheckMonitor(db,{afterPublication:config.background}));
 let taskSequence=0;
@@ -150,6 +152,9 @@ const stocks=stockSync(db,directory),erpWorker=erplainLiveWorker(db,directory);
 const rechecks=orderRecheckMonitor(db,erplainAccount(directory,'live'),{canResume:()=>runtime.enabled('automatic-preparation')&&runtime.enabled('erplain-preparation'),enabled:()=>!runtime.stopping&&runtime.enabled('resolutions')});
 backgroundInterval(()=>rechecks.runLocal().catch(e=>console.error('Recontrôle local : '+e.message)),5000,'order-rechecks');
 backgroundInterval(()=>rechecks.runExternal().catch(e=>console.error('Recontrôle externe : '+e.message)),60000,'order-rechecks-external');
+const movementWatch=movementWatchWorker(db,directory,{shouldStop:()=>runtime.stopping});
+backgroundInterval(()=>movementWatch.run(),1000,'movement-watch');
+backgroundInterval(()=>movementWatchdog(db),300000,'movement-watchdog');
 const stockResume=stockResumeWorker(db,directory,{enabled:()=>!runtime.stopping&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation')});
 backgroundInterval(()=>stockResume.run(),30000,'stock-resume');
 const interruptedErplain=interruptedErplainRecovery(db,directory,{shouldStop:()=>runtime.stopping});
@@ -239,7 +244,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/tracking-sync.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -321,6 +326,7 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/marketplaces/automatic'&&req.method==='POST'){permitted(user,['admin']);const b=await body(req);if(typeof b.enabled!=='boolean'||!Number.isFinite(Date.parse(b.since)))throw Error('Activation et date de début de réception requises');await db.query("INSERT INTO settings(key,value) VALUES('marketplace_automatic',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify({...((await db.query("SELECT value FROM settings WHERE key='marketplace_automatic'")).rows[0]?.value||{}),enabled:b.enabled,since:new Date(Math.max(Date.parse(b.since),Date.parse('2026-10-06T08:45:34Z'))).toISOString(),lookbackDays:7})]);await audit(user,'marketplace.automatic.configured',{enabled:b.enabled,since:b.since});json(res,200,{ok:true});return;}
     if(p==='/api/events'&&req.method==='GET'){events.connect(req,res);return;}
     if(p==='/api/operations/tasks'&&['GET','POST'].includes(req.method)){permitted(user,['admin']);const input=req.method==='POST'?await body(req):undefined;json(res,200,{tasks:await taskControls(db,input)});return;}
+    if(p==='/api/movement-watch'&&req.method==='GET'){permitted(user,['admin','manager','operator']);json(res,200,await movementWatchStatus(db));return;}
     if(p==='/api/operations/health'&&req.method==='GET'){permitted(user,['admin','manager']);const workers=(await db.query("SELECT role,heartbeat,state FROM worker_health WHERE heartbeat>now()-interval '30 seconds' ORDER BY heartbeat DESC")).rows;json(res,200,{database:db.kind,workers});return;}
 
     if(p==='/api/live-estimates'&&req.method==='GET'){

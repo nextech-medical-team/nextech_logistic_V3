@@ -18,7 +18,7 @@ export function knownImportedFieldError(message){
 const time=v=>v instanceof Date?v.getTime():typeof v==='string'?Date.parse(v):NaN;
 export function importedDiagnosticEligibility(o,c,e,{now=Date.now()}={}){
  if(!o?.id||!isImportedErplain(o)||c?.status!=='failed'||!knownImportedFieldError(c.error)||c.environment!=='production'||c.result!==null||!Array.isArray(c.tracking)||c.tracking.length||c.document_count!==0||c.stock_override!==null)return false;
- if(o.archived||o.partial_mode||o.suspension?.active||o.suspension?.erplainCancellation||o.source_payload?.marketplacePendingCorrection||o.source_payload?.cancelled||o.source_payload?.cancelled_at||!['not_shipped','unknown'].includes(o.tracking_status))return false;
+ if(o.archived||o.partial_mode||o.suspension?.active||o.suspension?.erplainCancellation||o.source_payload?.marketplacePendingCorrection||!['not_shipped','unknown'].includes(o.tracking_status))return false;
  if(o.source_payload?.erplainValidationHold&&o.source_payload.erplainValidation!=='approved')return false;
  if(['ready','production_ready','sandbox_ready','cancelled'].includes(o.label_status))return false;
  const s=o.erp_live||{};

@@ -15,13 +15,13 @@ const names=v=>(v||[]).filter(x=>typeof x==='string'||x?.value===1||x?.value==='
 export function inspectTemu(detail,reference){
  const p=detail.parentOrderMap,items=detail.orderList;if(p?.parentOrderSn!==reference||!Array.isArray(items)||!items.length)throw new Error('Identité ou articles TEMU incomplets');
  const flags=[...names(p.parentOrderLabel),...items.flatMap(i=>names(i.orderLabel))];
- const blockers={pending_buyer_cancellation:'TEMU · Annulation client en cours',pending_buyer_address_change:'TEMU · Adresse en cours de modification par le client',pending_risk_control_alert:'TEMU · Contrôle de risque en cours',EU_to_UK:'TEMU · Expédition UE vers Royaume-Uni à vérifier'};const blocker=flags.find(x=>blockers[x]);if(blocker)throw new Error(blockers[blocker]);
+ // Platform risk/address/cancellation labels remain indicative; actual data and provider responses are checked below.
  if([p,...items].some(x=>String(x.orderPaymentType).toUpperCase()==='COD'))throw new Error('Paiement à la livraison incompatible');
  const packages=[...new Set(items.flatMap(i=>(i.packageSnInfo||[]).map(x=>x.packageSn)))];if(packages.some(x=>!/^PK-\d+$/.test(x)))throw new Error('Colis TEMU invalide');
- const lines=items.filter(i=>Number(i.orderStatus)===2).map(i=>({parentOrderSn:reference,orderSn:String(i.orderSn||''),quantity:Number(i.quantity)}));
+ const lines=items.map(i=>({parentOrderSn:reference,orderSn:String(i.orderSn||''),quantity:Number(i.quantity)}));
  if(lines.some(l=>!l.orderSn||!Number.isInteger(l.quantity)||l.quantity<=0)||new Set(lines.map(l=>l.orderSn)).size!==lines.length)throw new Error('Articles ou quantités TEMU invalides');
- const pres=items.filter(i=>Number(i.orderStatus)===2).map(i=>names(i.orderLabel).includes('Y2_advance_sale'));if(pres.some(Boolean)&&!pres.every(Boolean))throw new Error('Précommandes et commandes ordinaires à séparer');
- return {lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,status:Number(p.parentOrderStatus),fingerprint:hash(detail),deadline:Number(p.expectShipLatestTime)*1000};
+ const pres=items.map(i=>names(i.orderLabel).includes('Y2_advance_sale'));if(pres.some(Boolean)&&!pres.every(Boolean))throw new Error('Précommandes et commandes ordinaires à séparer');
+ return {lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,status:Number(p.parentOrderStatus),fingerprint:hash({reference,lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,payment:[p,...items].map(x=>x.orderPaymentType),deadline:p.expectShipLatestTime}),deadline:Number(p.expectShipLatestTime)*1000};
 }
 export function offerParcel(offer,base,info,now=Date.now()){
  const currency=offer.estimatedCurrencyCode;const symbol=({EUR:'€',GBP:'£',USD:'$'})[currency];let price=String(offer.estimatedAmount??'').trim();if(symbol)price=price.replace(symbol,'');if(/^[A-Z]{3}$/.test(currency||''))price=price.replace(currency,'');price=price.trim();const amount=/^\d+(?:[.,]\d{1,2})?$/.test(price)?Number(price.replace(',','.')):NaN;if(!String(offer.estimatedAmount||'').trim()||!Number.isFinite(amount)||amount<0||! /^[A-Z]{3}$/.test(offer.estimatedCurrencyCode||''))throw new Error('Prix ou devise non vérifiable');
@@ -42,7 +42,7 @@ export function temuShipping(db,api){
   const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),info=inspectTemu(detail,reference);
   const existing=fresh.shipments||await readTemuShipments(api,reference,detail);
   if(info.packages.length||(existing.shipmentInfoDTO||[]).length)throw new Error('Une expédition existe déjà dans TEMU : utiliser Récupérer les étiquettes');
-  if(info.status!==2||!info.lines.length)throw new Error('Commande TEMU non entièrement à expédier');
+  if(!info.lines.length)throw new Error('Commande TEMU non entièrement à expédier');
   if(!warehouseCache||Date.now()-warehouseAt>300000){warehouseCache=(await api.read('bg.logistics.warehouse.list.get',{returnEnableBuyShippingLabelOnly:true})).warehouseList||[];warehouseAt=Date.now();}const warehouses=warehouseCache;
   const usable=warehouses.filter(w=>w.enableBuyShippingLabel!==false),defaults=usable.filter(w=>w.defaultWarehouse);const warehouse=defaults.length===1?defaults[0]:usable.length===1?usable[0]:null;if(!warehouse?.warehouseId)throw new Error('Entrepôt TEMU absent ou ambigu');
   const base={warehouseId:warehouse.warehouseId,weight:'0.25',weightUnit:'kg',length:'10.00',width:'8.00',height:'0.50',dimensionUnit:'cm'};

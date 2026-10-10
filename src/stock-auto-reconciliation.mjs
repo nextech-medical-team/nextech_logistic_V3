@@ -15,10 +15,9 @@ export async function scheduleStockChecks(db){
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
    AND coalesce(o.erp_live->'bc'->>'status','') NOT IN ('cancelled','closed') AND coalesce(o.erp_live->'bl'->>'status','') NOT IN ('cancelled','closed')
    AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
-   AND coalesce(o.source_payload->>'cancelled','') NOT IN ('true','1') AND coalesce(o.source_payload->>'cancelled_at','')=''
-   AND NOT (o.channel='shopify' AND (coalesce(o.source_payload->>'cancelledAt','')<>'' OR lower(coalesce(o.source_payload->>'financial_status',o.source_payload->>'displayFinancialStatus',''))='refunded'))
-   AND coalesce(o.source_payload->'temuOrderDetail'->'parentOrderMap'->>'parentOrderStatus','')<>'3'
-   AND NOT jsonb_path_exists(coalesce(o.source_payload,'{}'),'$.temuOrderDetail.parentOrderMap.parentOrderLabel[*] ? (@.name == "pending_buyer_cancellation" && (@.value == 1 || @.value == "1"))')
+
+
+
    AND NOT coalesce(o.issue,'') ~* 'commande annulée'
    AND coalesce(e.error,'') NOT LIKE 'BC%' AND coalesce(e.error,'') NOT LIKE 'Stock Erplain · Mouvement à vérifier : BC%'
    AND coalesce(o.suspension->>'active','false')<>'true' AND NOT (o.suspension ? 'erplainCancellation')

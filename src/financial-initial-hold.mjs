@@ -18,9 +18,9 @@ export async function resumeFinancialInitialHolds(db){
  const rows=(await tx.query(`SELECT o.*,e.status erp_job_status,e.error erp_job_error FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
  WHERE (${bcAllowedSql}) AND o.channel='temu' AND o.resolution_pending_resume=true AND NOT o.partial_mode AND coalesce(o.issue,'')=''
  AND coalesce(o.tracking_status,'') NOT IN ('shipped','delivered','in_transit','delivered_simulated','cancelled')
- AND coalesce(o.label_status,'')<>'cancelled' AND coalesce(o.source_payload->>'cancelled','') NOT IN ('true','1')
- AND coalesce(o.source_payload->'temuOrderDetail'->'parentOrderMap'->>'parentOrderStatus','')<>'3'
- AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.source_payload->'temuOrderDetail'->'parentOrderMap'->'parentOrderLabel')='array' THEN o.source_payload->'temuOrderDetail'->'parentOrderMap'->'parentOrderLabel' ELSE '[]'::jsonb END) x WHERE x->>'name'='pending_buyer_cancellation' AND x->>'value'='1') AND NOT coalesce(o.source_payload ? 'erplainImported',false)
+ AND coalesce(o.label_status,'')<>'cancelled'
+
+ AND NOT coalesce(o.source_payload ? 'erplainImported',false)
  AND o.source_payload->>'sourceShop' IS NOT NULL
  AND o.erp_live->>'phase' IS NULL AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL
  AND o.erp_live->'stockDocument'->>'id' IS NULL AND o.erp_live->>'stockCreationAttemptedAt' IS NULL

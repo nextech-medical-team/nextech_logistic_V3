@@ -1,0 +1,5 @@
+/* Preserve access to all three observations in the horizontally scrolling table. */
+#view-orders table{min-width:1500px!important}
+#view-orders table th[data-column="erplain-tracking"]{width:12%!important}
+#view-orders table th[data-column="platform-tracking"]{width:14%!important}
+#view-orders td[data-erplain-tracking],#view-orders td[data-platform-status]{overflow-wrap:anywhere;white-space:normal}

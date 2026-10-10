@@ -20,7 +20,7 @@ const fingerprint=(o,lines)=>createHash('sha256').update(JSON.stringify({id:o.id
 // It is never permission to create a shipment, resume an order or debit stock.
 export function carrierPrevalidationProof(o,c,e,lines,bc,{now=Date.now()}={}){
  if(!o?.id||c?.status!=='failed'||c.error!==preparationChangedError||c.environment!=='production'||c.result!==null||!Array.isArray(c.tracking)||c.tracking.length||c.document_count!==0||c.stock_override!==null)return fail('not_definite_preflight_failure');
- if(o.archived||o.partial_mode||o.suspension?.active||o.suspension?.erplainCancellation||o.source_payload?.marketplacePendingCorrection||o.source_payload?.cancelled||o.source_payload?.cancelled_at||!['not_shipped','unknown'].includes(o.tracking_status))return fail('protected_order');
+ if(o.archived||o.partial_mode||o.suspension?.active||o.suspension?.erplainCancellation||o.source_payload?.marketplacePendingCorrection||!['not_shipped','unknown'].includes(o.tracking_status))return fail('protected_order');
  if(o.source_payload?.erplainValidationHold&&o.source_payload.erplainValidation!=='approved')return fail('validation_hold');
  if(['ready','production_ready','sandbox_ready','cancelled'].includes(o.label_status))return fail('label_state_changed');
  const s=o.erp_live||{},verified=time(s.verifiedAt),failedAt=time(c.updated_at),erpAt=time(e?.updated_at),stockAt=time(s.stockCheckedAt);

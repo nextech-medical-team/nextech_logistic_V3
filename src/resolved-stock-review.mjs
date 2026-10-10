@@ -6,7 +6,7 @@ export function resolvedStockReview(x){
  && o.archived===false&&!o.partial_mode&&!o.resolution_pending_resume
  && !String(o.reference||'').startsWith('DEMO-')&&!/commande annulée/i.test(o.issue||'')
  && !Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection')
- && ![true,'true',1,'1'].includes(o.source_payload?.cancelled)&&!o.source_payload?.cancelled_at
+
  && o.label_status!=='cancelled'&&!['cancelled','shipped','delivered','in_transit'].includes(o.tracking_status)
  && s.bc?.id&&s.bc.status==='active'&&s.bl?.id&&!['cancelled','closed'].includes(s.bl.status)
  && s.phase==='bl_created'&&s.stockDocument?.id&&s.stockDocument.status==='completed'&&s.stockDocument.update_stock===true
@@ -20,7 +20,7 @@ export async function reconcileResolvedStockReviews(db){
  (SELECT count(*)::int FROM carrier_documents d WHERE d.order_id=o.id) documents
  FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id JOIN carrier_jobs c ON c.order_id=o.id
  WHERE r.status='review' AND r.stage='Erplain à compléter' AND (r.error LIKE 'Stock Erplain · Mouvement à vérifier :%' OR r.error LIKE 'Stock Erplain : ancien cycle non identifié%' OR r.error LIKE 'BL bloqué%stock insuffisant%')
- AND (${bcAllowedSql}) AND coalesce(o.source_payload->>'cancelled','')<>'1' AND coalesce(o.label_status,'')<>'cancelled' AND NOT o.partial_mode AND NOT o.resolution_pending_resume
+ AND (${bcAllowedSql}) AND coalesce(o.label_status,'')<>'cancelled' AND NOT o.partial_mode AND NOT o.resolution_pending_resume
  AND e.status='complete' AND e.error IS NULL AND c.status='ready' AND c.error IS NULL
  AND o.erp_live->>'phase'='bl_created' AND o.erp_live->'stockDocument'->>'status'='completed'
  AND o.erp_live->'stockDocument'->>'update_stock'='true'

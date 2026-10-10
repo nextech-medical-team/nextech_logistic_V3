@@ -1,11 +1,8 @@
 import {suspensionBlock} from './order-suspension.mjs';
-import {shopifyCancellationReason} from './shopify-cancellation-policy.mjs';
 export function cancellationBlock(o){
  const suspended=suspensionBlock(o);if(suspended)return suspended;
- const p=o.source_payload||{},t=p.temuOrderDetail?.parentOrderMap||{};
- if(o.channel==='shopify'&&(shopifyCancellationReason(p)||shopifyCancellationReason(p.marketplacePendingCorrection)))return 'Commande annulée ou entièrement remboursée : préparation suspendue';
- if([true,'true',1,'1'].includes(p.cancelled)||p.cancelled_at||Number(t.parentOrderStatus)===3||o.label_status==='cancelled'||o.tracking_status==='cancelled'||/commande annulée/i.test(o.issue||''))return 'Commande annulée : préparation suspendue';
- if(Array.isArray(t.parentOrderLabel)&&t.parentOrderLabel.some(x=>x.name==='pending_buyer_cancellation'&&Number(x.value)===1))return 'Demande d’annulation client en attente sur TEMU : préparation suspendue';
+ // Explicit V3 cancellation and carrier evidence remain operational.
+ if(o.label_status==='cancelled'||o.tracking_status==='cancelled')return 'Commande annulée dans V3 : préparation suspendue';
  return null;
 }
 export function transientErpError(message){return /SQLSTATE\[40001\]|\bdeadlock\b|lock wait timeout|Erplain HTTP (429|502|503|504)\b|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError/i.test(message||'')}
