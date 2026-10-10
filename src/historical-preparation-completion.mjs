@@ -1,0 +1,38 @@
+import {oldFinanceErrors,projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
+import {shipmentFingerprint} from './label-stock-gate.mjs';
+import {suspensionBlock} from './order-suspension.mjs';
+export function currentReplacementPreview(j){return j?.action==='equivalent-preview'&&j.status==='complete'&&!j.error&&!!j.result?.replacementSku&&!j.result?.reconcileOnly;}
+const historicalReason='Reprise historique \u00e0 v\u00e9rifier : BL non cr\u00e9\u00e9';
+export function completedHistoricalPreparation(o,e,now=Date.now()){
+ const p=o.erp_live,pricing=p?.pricing;
+ if(o.label_status!=='blocked'||!o.issue||(!oldFinanceErrors.includes(o.issue)&&o.issue!==historicalReason))return false;
+ if(o.archived||o.simulation||o.partial_mode||o.resolution_pending_resume||suspensionBlock(o)||o.source_payload?.marketplacePendingCorrection||o.source_payload?.visibilityHold||o.source_payload?.erplainValidationHold)return false;
+ if(e?.status!=='complete'||e.error!==null||p?.phase!=='bl_ready'||p.bc?.status!=='active'||!p.bc?.id||!p.bl?.id||!['ready_to_ship','shipped','delivered','completed'].includes(p.bl.status))return false;
+ if(pricing?.status!=='verified'||pricing.error||pricing.confirmed?.authority!=='erplain'||!Number.isFinite(pricing.confirmed.total)||!Number.isFinite(pricing.confirmed.sourceTotal)||(!p.historicalStockProof&&!p.stockDocument?.id))return false;
+ if(!p.stockDocument?.id){const stock=p.historicalStockProof;if(stock.stockOnBc!==true||String(stock.bcId)!==String(p.bc.id)||!Array.isArray(stock.quantities)||!Array.isArray(stock.logIds))return false;}
+ if(!/^[a-f0-9]{64}$/.test(p.labelPreparationFingerprint||''))return false;
+ for(const value of [p.verifiedAt,p.stockCheckedAt]){const t=Date.parse(value);if(!Number.isFinite(t)||t>now||now-t>86400000)return false;}
+ if(oldFinanceErrors.includes(o.issue)&&projectCurrentDiagnostics(structuredClone(o)).issue!==null)return false;
+ return true;
+}
+export async function reconcileHistoricalPreparation(db,orderId,{fingerprint=shipmentFingerprint}={}){
+ return db.transaction(async tx=>{
+  const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[orderId])).rows[0];if(!o)return {updated:false};
+  const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[orderId])).rows[0];if(!completedHistoricalPreparation(o,e))return {updated:false};
+  if(await fingerprint(tx,o)!==o.erp_live.labelPreparationFingerprint)return {updated:false};
+  let complete=false;
+  if(o.channel==='temu'){
+   const j=(await tx.query('SELECT status,error,packages FROM temu_label_jobs WHERE reference=$1 FOR SHARE',[o.reference])).rows[0];
+   const docs=(await tx.query('SELECT package,octet_length(pdf) bytes FROM temu_label_documents WHERE reference=$1 FOR SHARE',[o.reference])).rows;
+   complete=j?.status==='ready'&&j.error===null&&Array.isArray(j.packages)&&j.packages.length>0&&j.packages.every(p=>docs.some(d=>d.package===p&&Number(d.bytes)>0));
+  }else{
+   const j=(await tx.query('SELECT status,error,environment,tracking FROM carrier_jobs WHERE order_id=$1 FOR SHARE',[orderId])).rows[0];
+   const docs=(await tx.query('SELECT document_index,octet_length(pdf) bytes FROM carrier_documents WHERE order_id=$1 FOR SHARE',[orderId])).rows;
+   complete=j?.status==='ready'&&j.error===null&&j.environment==='production'&&Array.isArray(j.tracking)&&j.tracking.length>0&&j.tracking.every((t,i)=>!!t&&docs.some(d=>Number(d.document_index)===i&&Number(d.bytes)>0));
+  }
+  if(!complete)return {updated:false};
+  await tx.query("UPDATE orders SET label_status='production_ready',issue=null WHERE id=$1",[orderId]);
+  await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:historical-completion','diagnostic.historical_preparation_completed',$1)",[JSON.stringify({orderId,previousIssue:o.issue,previousLabelStatus:o.label_status,bcId:o.erp_live.bc.id,blId:o.erp_live.bl.id,verifiedAt:o.erp_live.verifiedAt,stockCheckedAt:o.erp_live.stockCheckedAt,labelPreparationFingerprint:o.erp_live.labelPreparationFingerprint,labelsPreserved:true})]);
+  return {updated:true};
+ });
+}

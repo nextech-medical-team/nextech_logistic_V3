@@ -101,3 +101,5 @@ test('old review errors remain history and never reopen a command after its late
  await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,payload,error,created_at) VALUES('current','a','current','resume-erp','review','{}','Current document mismatch',now()+interval '1 second')");await m.runLocal();assert.equal((await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state.result,'Current document mismatch');
  }finally{await db.close();}
 });
+
+test('resolved blockers retain visible dated follow-up and unconfirmed previews never become false completion',()=>{const blocked=monitoringObservation({issue:'Stock insuffisant'},{});const resolved=monitoringObservation({issue:null,label_status:'production_ready'},blocked);assert.equal(resolved.blocked,false);assert.equal(resolved.followUp,true);assert.equal(resolved.alert,false);const preview=monitoringObservation({issue:null,latest_resolution:{action:'equivalent-preview',status:'complete',error:null,result:{replacementSku:'NEW'}}},{});assert.equal(preview.blocked,true);assert.match(preview.nextStep,/Confirmer/);});
