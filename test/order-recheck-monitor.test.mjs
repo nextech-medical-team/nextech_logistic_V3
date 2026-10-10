@@ -79,6 +79,7 @@ test('mapping correction immediately rechecks all matching orders using current 
  assert.ok((await db.query('SELECT state FROM order_recheck_monitor ORDER BY order_id')).rows.every((r,i)=>r.state.progress!==previous[i]));
  const rows=(await db.query("SELECT l.quantity*m.target_qty/m.source_qty quantity FROM lines l JOIN mappings m ON m.source_sku=l.source_sku")).rows;assert.ok(rows.every(r=>Number(r.quantity)===20));
  await db.query("UPDATE mappings SET target_qty=2");await m.runLocal();
+ await db.query("UPDATE lines SET quantity=30");assert.ok((await db.query('SELECT requested,checked FROM order_recheck_monitor')).rows.every(r=>r.requested>r.checked));await m.runLocal();
  }finally{await db.close();}
 });
 
