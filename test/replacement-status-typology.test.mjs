@@ -1,4 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';
+import {selectProblemOrders} from '../src/problem-typology.mjs';
+import {currentProblemClassifier} from '../src/problem-typology-reader.mjs';
 const ctx=vm.createContext({});vm.runInContext(fs.readFileSync(new URL('../public/compact-problems.js',import.meta.url),'utf8'),ctx);
 test('verified remaining or replacement weights belong to replacement confirmation',()=>{
  for(const prefix of ['Produit restant','Produit équivalent']){
@@ -17,4 +19,5 @@ test('order-level projection exposes the correct filter family and preserves ind
  const o={sku_lines:[{sku:'SKU',quantity:1}],resolution_error:message,pending_equivalent:{sku:'OLD',replacementSku:'NEW',error:message},issue:'SKU : Stock insuffisant'};
  const problems=ctx.compactProblems(o);assert.ok(problems.some(x=>x.type==='equivalent-pending'));assert.ok(problems.some(x=>x.type==='stock'));assert.ok(!problems.some(x=>['weight','weight-unit','unknown'].includes(x.type)));
  assert.equal(o.resolution_error,message);
+ const result=selectProblemOrders([{...o,id:'order'}],['Confirmer le remplacement'],currentProblemClassifier());assert.equal(result.total,1);assert.equal(result.problemTypes.find(x=>x.label==='Confirmer le remplacement').count,1);
 });
