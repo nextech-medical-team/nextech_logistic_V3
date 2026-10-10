@@ -2,6 +2,8 @@
 
 Chaque push sur `main` déclenche `.github/workflows/deploy.yml`. Les branches et pull requests passent les contrôles sans accéder à la production. Le job de publication ne démarre qu'après `npm ci`, les vérifications syntaxiques, les tests applicatifs et les tests de déploiement/retour arrière.
 
+La branche principale exige une pull request, une revue et le contrôle `Vérifications V3` avant fusion. Le nom de ce contrôle est distinct des jobs de publication pour éviter les statuts ambigus. La publication automatique intervient après la fusion sur `main` ; les branches de travail des collègues ne sont pas publiées directement.
+
 Le job utilise l'environnement GitHub `production`, limité à `main`. Variables de cet environnement : `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_KNOWN_HOSTS`. Secret : `DEPLOY_SSH_KEY`. Ne jamais mettre cette clé dans Git. La vérification de l'empreinte SSH est obligatoire ; ne pas utiliser `StrictHostKeyChecking=no`.
 
 La clé ne permet qu'une commande `deploy <SHA>` ; aucun shell, transfert de fichiers, tunnel ou agent SSH. L'exécuteur Section 7 installé sur le serveur récupère lui-même le dépôt public en HTTPS et accepte uniquement le SHA courant de `main`, descendant de sa référence publiée. Une ancienne exécution dépassée par un nouveau push est signalée comme telle.

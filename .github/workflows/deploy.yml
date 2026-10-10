@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   verify:
+    name: Préparation publication V3
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -19,13 +20,14 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Installer les dÃ©pendances isolÃ©es
+      - name: Installer les dÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©pendances isolÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©es
         run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
       - run: npm test
-      - name: Tests du dÃ©ploiement et du retour arriÃ¨re
+      - name: Tests du dÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ploiement et du retour arriÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨re
         run: python3 -m unittest discover -s deploy -p 'test_*.py'
   deploy:
+    name: Publication V3 (Section 7)
     if: github.ref == 'refs/heads/main'
     needs: verify
     runs-on: ubuntu-latest
@@ -41,7 +43,7 @@ jobs:
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       TARGET_SHA: ${{ github.sha }}
     steps:
-      - name: PrÃ©parer la connexion limitÃ©e
+      - name: PrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©parer la connexion limitÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©e
         shell: bash
         run: |
           set -euo pipefail
@@ -53,7 +55,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/v3-ssh"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/v3-ssh/key"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/v3-ssh/known_hosts"
-      - name: Publication par lâ€™exÃ©cuteur Section 7
+      - name: Publication par lÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢exÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©cuteur Section 7
         shell: bash
         run: |
           set -euo pipefail
@@ -69,7 +71,7 @@ jobs:
           name: v3-deployment-report
           path: deployment-report.json
           if-no-files-found: ignore
-      - name: Effacer la clÃ© temporaire
+      - name: Effacer la clÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© temporaire
         if: always()
         shell: bash
         run: rm -f "$RUNNER_TEMP/v3-ssh/key"

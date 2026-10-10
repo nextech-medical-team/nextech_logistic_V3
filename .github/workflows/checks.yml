@@ -1,4 +1,4 @@
-name: VÃ©rifications du code V3
+name: VÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rifications du code V3
 on:
   push:
   pull_request:
@@ -6,6 +6,7 @@ permissions:
   contents: read
 jobs:
   verify:
+    name: Vérifications V3
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -13,11 +14,11 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: DÃ©pendances isolÃ©es
+      - name: DÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©pendances isolÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©es
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Syntaxe
         run: npm run check
-      - name: Tests isolÃ©s
+      - name: Tests isolÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©s
         run: npm test
-      - name: DÃ©ploiement et retour arriÃ¨re
+      - name: DÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ploiement et retour arriÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨re
         run: python3 -m unittest discover -s deploy -p 'test_*.py'
