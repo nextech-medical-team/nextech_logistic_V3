@@ -1,5 +1,11 @@
 import {createHash} from 'node:crypto';
 import {platformLifecycleRevisionSql} from './platform-lifecycle-revision.mjs';
+export function platformLifecycleReadinessProblem(order,existing,partials,now){
+ if(!existing.length||existing.some(l=>l.locked||l.requested||l.error||!Number.isFinite(Date.parse(l.checked_at))||Date.parse(l.checked_at)>now||now-Date.parse(l.checked_at)>=21600000))return 'Statut BL Erplain à rapprocher · actualisation demandée, en erreur ou échue';
+ const expectedIds=[order?.erp_live?.bl?.id,...partials.map(p=>p.bl?.id)].filter(x=>x!=null).map(String);
+ if(!expectedIds.length||expectedIds.some(bl=>!existing.some(l=>String(l.bl_id)===bl)))return 'Statut BL Erplain à rapprocher · document absent du contrôle lifecycle';
+ return null;
+}
 // The pause probe must inspect authoritative stopped/idle writer state.
 // This factory does not stop services or invoke any provider.
 export function platformHoldDatabaseAdapter({sourceRead,normalizedIncoming,partialAllocationProof,pauseProbe,now=()=>Date.now()}){
@@ -42,16 +48,15 @@ export function platformHoldDatabaseAdapter({sourceRead,normalizedIncoming,parti
   if(invalidExtras.length)otherErrors.push('Colis supplémentaires non confirmés ou sans PDF');
   if(invalidPartials.length)otherErrors.push('Livraison partielle non confirmée ou documents ambigus');
   if(rows.partial_deliveries.length&&!partialAllocationProof)otherErrors.push('Allocation BC/BL partielle non prouvée');
+  const lifecycleProblem=platformLifecycleReadinessProblem(order,rows.document_lifecycle,rows.partial_deliveries,now());if(lifecycleProblem)otherErrors.push(lifecycleProblem);
   const p=await paused();
   return {order,priorLines:rows.lines,sourceRead,normalizedIncoming,labels,carrierJobs,workflowJobs:rows.jobs,erpJobs:rows.erp_live_jobs,otherErrors,partialAllocationProof,relatedEvidence,runtimeProof:{allBusinessWritersPaused:true,checkedAt:new Date(now()).toISOString(),epoch:p.epoch}};
  },
  async pinLifecycleRevision(tx,id){
   const existing=(await tx.query('SELECT * FROM document_lifecycle WHERE order_id=$1 FOR UPDATE',[id])).rows;
-  if(!existing.length||existing.some(l=>l.locked||l.requested||l.error||!Number.isFinite(Date.parse(l.checked_at))||Date.parse(l.checked_at)>now()||now()-Date.parse(l.checked_at)>=21600000))throw Error('Lifecycle demandé, en erreur ou dû : rapprochement indépendant requis');
   const currentOrder=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];
   const partials=(await tx.query('SELECT * FROM partial_deliveries WHERE order_id=$1 FOR UPDATE',[id])).rows;
-  const expectedIds=[currentOrder?.erp_live?.bl?.id,...partials.map(p=>p.bl?.id)].filter(x=>x!=null).map(String);
-  if(!expectedIds.length||expectedIds.some(bl=>!existing.some(l=>String(l.bl_id)===bl)))throw Error('Un BL référencé manque au lifecycle : ne pas provoquer sa découverte/reprise');
+  const lifecycleProblem=platformLifecycleReadinessProblem(currentOrder,existing,partials,now());if(lifecycleProblem)throw Error(lifecycleProblem);
   const revisions=(await tx.query(platformLifecycleRevisionSql,[id])).rows;
   if(revisions.length!==existing.length||new Set(revisions.map(r=>r.bl_id)).size!==existing.length||revisions.some(r=>!r.revision||!existing.some(l=>l.bl_id===r.bl_id)))throw Error('Révision lifecycle incomplète');
   for(const r of revisions){const changed=await tx.query('UPDATE document_lifecycle SET preparation_revision=$2 WHERE bl_id=$1 RETURNING bl_id',[r.bl_id,r.revision]);if(changed.rows.length!==1)throw Error('Lifecycle disparu');}

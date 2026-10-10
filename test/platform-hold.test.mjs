@@ -2,12 +2,24 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {planPlatformShipmentHold} from '../src/platform-shipment-hold-plan.mjs';
 import {reconcilePlatformShipmentHold,platformHoldEvidenceHash} from '../src/platform-shipment-hold-transaction.mjs';
 import {planPlatformHoldReconciliation} from '../src/platform-hold-reclassification.mjs';
+import {platformLifecycleReadinessProblem} from '../src/platform-shipment-hold-db.mjs';
 const now=Date.parse('2026-10-10T00:00:00Z'),checkedAt='2026-10-09T23:59:59Z';
 function fixture(){
  const payload={id:'1',name:'#TEST',fulfillment_status:'fulfilled',financial_status:'paid',cancelled_at:null,updated_at:checkedAt,line_items:[{id:'2',sku:'SKU',quantity:1}]};
  const address={name:'Test',street:'Street',postal:'10000',city:'City',country:'FR'},line={source_line:'2',source_sku:'SKU',quantity:1};
  return {order:{id:'order1',channel:'shopify',reference:'#TEST',issue:'Commande déjà expédiée dans Shopify · Vérifier les documents',label_status:'blocked',resolution_pending_resume:true,address,tracking_status:'not_shipped',carrier:'gls',erp_live:{bc:{id:'3',status:'active'},bl:{id:'4',status:'ready_to_ship'}},source_payload:{...payload,marketplacePendingCorrection:{...payload}}},priorLines:[line],normalizedIncoming:{reference:'#TEST',source_payload:payload,lines:[line],address},sourceRead:{payload,checkedAt,origin:'provider',channel:'shopify',orderId:'order1',readOnly:true,complete:true},carrierJobs:[{status:'ready',environment:'production',tracking:['TRACK']}],labels:[{orderId:'order1',index:0,tracking:'TRACK',sha256:'a'.repeat(64)}],workflowJobs:[{status:'complete'}],erpJobs:[{status:'complete'}],runtimeProof:{allBusinessWritersPaused:true,checkedAt}};
 }
+test('Independent Erplain lifecycle review replaces platform diagnostic without pinning or resuming',async()=>{
+ for(const mode of ['requested','locked','error','missing timestamp','future','due','missing document','no lifecycle','partial missing']){
+  const f=fixture(),rows=[{bl_id:'4',checked_at:new Date(now-1000).toISOString()}],partials=[];
+  if(mode==='requested')rows[0].requested=true;if(mode==='locked')rows[0].locked=true;if(mode==='error')rows[0].error='Read failed';if(mode==='missing timestamp')rows[0].checked_at=null;if(mode==='future')rows[0].checked_at=new Date(now+1).toISOString();if(mode==='due')rows[0].checked_at=new Date(now-21600000).toISOString();if(mode==='missing document')rows[0].bl_id='5';if(mode==='no lifecycle')rows.length=0;if(mode==='partial missing')partials.push({bl:{id:'5'}});
+  const reason=platformLifecycleReadinessProblem(f.order,rows,partials,now);assert.ok(reason);f.otherErrors=[reason];const before=structuredClone(f);
+  const p=planPlatformHoldReconciliation(f,{now});assert.equal(p.eligible,true);assert.equal(p.lifecycleRevisionChanged,false);assert.match(p.technicalPatch.issue,/Statut BL Erplain à rapprocher/);assert.equal(p.technicalPatch.label_status,f.order.label_status);assert.equal(p.technicalPatch.resolution_pending_resume,true);assert.deepEqual(p.technicalPatch.source_payload.marketplacePendingCorrection,f.order.source_payload.marketplacePendingCorrection);
+  const adapter={assertWritersPaused:async()=>({paused:true,epoch:'lease'}),readLockedEvidence:async()=>f,pinLifecycleRevision:async()=>{throw Error('Must not request or pin lifecycle');}};
+  await reconcilePlatformShipmentHold({transaction:async fn=>fn({query:async()=>({rows:[{id:'order1'}]})})},{orderId:'order1',expectedEvidenceHash:platformHoldEvidenceHash(f)},adapter,{now});assert.deepEqual(f,before);
+ }
+ assert.equal(platformLifecycleReadinessProblem(fixture().order,[{bl_id:'4',checked_at:checkedAt}],[],now),null);
+});
 test('Historical hold removal is independent of cancellation/refund/unknown declarations and immutable',()=>{
  for(const status of ['fulfilled','partial','unfulfilled',undefined,'UNKNOWN'])for(const cancelled of [null,checkedAt])for(const financial of ['paid','refunded',undefined]){
   const f=fixture();Object.assign(f.sourceRead.payload,{fulfillment_status:status,cancelled_at:cancelled,financial_status:financial});
