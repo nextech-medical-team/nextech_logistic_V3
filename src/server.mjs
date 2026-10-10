@@ -3,6 +3,8 @@ import {initializeImportCorrections,importCorrections} from './import-correction
 import {restoreCancelledDeliveryStock} from './cancelled-delivery-stock.mjs';
 import {refreshErplainDocuments} from './erplain-documents-sync.mjs';
 import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
+import {selectProblemOrders,paginateProblemOrders} from './problem-typology.mjs';
+import {currentProblemClassifier} from './problem-typology-reader.mjs';
 import {initializeStockResumeWatch,stockResumeWorker} from './stock-resume-watch.mjs';
 import {initializeShopifyObservation,shopifyObservationWorker,shopifyObservationRoutes} from './shopify-observation.mjs';
 import {readingService} from './temu-reading.mjs';
@@ -413,7 +415,12 @@ const server=http.createServer(async(req,res)=>{
 
     }
 
-    if(p==='/api/orders'&&req.method==='GET'){
+    if((p==='/api/orders'||p==='/api/order-problem-types')&&req.method==='GET'){
+      const catalogOnly=p==='/api/order-problem-types';
+      const problemLabels=url.searchParams.getAll('problem-label').filter(Boolean);
+      if(problemLabels.length>100||problemLabels.some(label=>label.length>2000))throw Error('Sélection de problèmes invalide');
+      const scanAll=catalogOnly||problemLabels.length>0;
+      const scopeParams=new URLSearchParams(url.searchParams);scopeParams.delete('problem-label');
       const diagnosticStart=Date.now();
 
       const search=(url.searchParams.get('search')||'').slice(0,120),channel=url.searchParams.get('channel')||'',status=url.searchParams.get('status')||'';
@@ -421,14 +428,14 @@ const server=http.createServer(async(req,res)=>{
       const page=Math.max(1,Math.min(10000,parseInt(url.searchParams.get('page')||'1')||1));
 
       const pageSize=[50,100,200].includes(Number(url.searchParams.get('pageSize')))?Number(url.searchParams.get('pageSize')):50;
-      const {where,args,order}=orderQuery(url.searchParams);
+      const {where,args,order}=orderQuery(scopeParams);
 
-      const {rows}=await db.query(`WITH paged AS MATERIALIZED (SELECT id,(SELECT sum(target_quantity) FROM lines WHERE order_id=orders.id) AS item_quantity FROM orders ${where} ORDER BY ${order} LIMIT ${pageSize} OFFSET $${args.length+1}) SELECT ${managerSql} AS account_manager,(SELECT CASE WHEN r.status='review' THEN r.error ELSE null END FROM resolution_jobs r WHERE r.order_id=orders.id ORDER BY r.created_at DESC LIMIT 1) AS resolution_error,resolution_pending_resume,(SELECT json_build_object('id',r.id,'stage',r.stage) FROM resolution_jobs r WHERE r.order_id=orders.id AND r.status IN ('queued','running','waiting') LIMIT 1) AS resolution_active,suspension,CASE WHEN partial_mode THEN ${partialAllocationSql} ELSE '[]'::jsonb END AS partial_allocation,partial_mode,erp_live,id,channel,reference,recipient,address,source_payload,source_date,received_at,label_status,erp_status,tracking_status,invoice_status,weight_kg,parcel_count,carrier,issue,simulation,(SELECT json_agg(source_payload) FROM lines WHERE order_id=orders.id) AS price_sources,(SELECT json_agg(json_build_object('sku',coalesce(l.target_sku,m.target_sku,CASE WHEN orders.channel IN ('tender','samples') THEN l.source_sku END),'quantity',coalesce(l.target_quantity,CASE WHEN orders.channel IN ('tender','samples') THEN l.quantity WHEN m.source_qty>0 THEN round(l.quantity*m.target_qty/m.source_qty,6) END),'source_sku',l.source_sku,'source_quantity',l.quantity,'mapping_exists',m.source_sku IS NOT NULL,'catalog_issue',CASE WHEN l.source_payload->>'erplainCorrectedWeightKg' IS NOT NULL THEN null ELSE c.message END) ORDER BY l.source_line) FROM lines l LEFT JOIN mappings m ON m.channel=orders.channel AND m.source_sku=l.source_sku LEFT JOIN catalog_results c ON c.sku=coalesce(l.target_sku,m.target_sku,CASE WHEN orders.channel IN ('tender','samples') THEN l.source_sku END) WHERE l.order_id=orders.id) AS sku_lines,(SELECT sum(target_quantity) FROM lines WHERE order_id=orders.id) AS item_quantity,(SELECT count(*) FROM lines WHERE order_id=orders.id) AS line_count,(SELECT json_build_object('status',status,'error',error,'environment',environment,'tracking',tracking,'stock_override',stock_override) FROM carrier_jobs WHERE order_id=orders.id) AS carrier_job,(SELECT json_build_object('status',status,'error',error) FROM erp_live_jobs e WHERE e.order_id=orders.id) AS erp_live_job,(SELECT count(*)::int FROM carrier_documents d JOIN carrier_jobs c ON c.order_id=d.order_id WHERE d.order_id=orders.id AND c.status='ready') AS document_count FROM orders WHERE id IN (SELECT id FROM paged) ORDER BY ${order}`,[...args,(page-1)*pageSize]);
+      let {rows}=await db.query(`WITH paged AS MATERIALIZED (SELECT id,(SELECT sum(target_quantity) FROM lines WHERE order_id=orders.id) AS item_quantity FROM orders ${where} ORDER BY ${order} ${scanAll?'':`LIMIT ${pageSize} OFFSET $${args.length+1}`} ) SELECT ${managerSql} AS account_manager,(SELECT CASE WHEN r.status='review' THEN r.error ELSE null END FROM resolution_jobs r WHERE r.order_id=orders.id ORDER BY r.created_at DESC LIMIT 1) AS resolution_error,resolution_pending_resume,(SELECT json_build_object('id',r.id,'stage',r.stage) FROM resolution_jobs r WHERE r.order_id=orders.id AND r.status IN ('queued','running','waiting') LIMIT 1) AS resolution_active,suspension,CASE WHEN partial_mode THEN ${partialAllocationSql} ELSE '[]'::jsonb END AS partial_allocation,partial_mode,erp_live,id,channel,reference,recipient,address,source_payload,source_date,received_at,label_status,erp_status,tracking_status,invoice_status,weight_kg,parcel_count,carrier,issue,simulation,(SELECT json_agg(source_payload) FROM lines WHERE order_id=orders.id) AS price_sources,(SELECT json_agg(json_build_object('sku',coalesce(l.target_sku,m.target_sku,CASE WHEN orders.channel IN ('tender','samples') THEN l.source_sku END),'quantity',coalesce(l.target_quantity,CASE WHEN orders.channel IN ('tender','samples') THEN l.quantity WHEN m.source_qty>0 THEN round(l.quantity*m.target_qty/m.source_qty,6) END),'source_sku',l.source_sku,'source_quantity',l.quantity,'mapping_exists',m.source_sku IS NOT NULL,'catalog_issue',CASE WHEN l.source_payload->>'erplainCorrectedWeightKg' IS NOT NULL THEN null ELSE c.message END) ORDER BY l.source_line) FROM lines l LEFT JOIN mappings m ON m.channel=orders.channel AND m.source_sku=l.source_sku LEFT JOIN catalog_results c ON c.sku=coalesce(l.target_sku,m.target_sku,CASE WHEN orders.channel IN ('tender','samples') THEN l.source_sku END) WHERE l.order_id=orders.id) AS sku_lines,(SELECT sum(target_quantity) FROM lines WHERE order_id=orders.id) AS item_quantity,(SELECT count(*) FROM lines WHERE order_id=orders.id) AS line_count,(SELECT json_build_object('status',status,'error',error,'environment',environment,'tracking',tracking,'stock_override',stock_override) FROM carrier_jobs WHERE order_id=orders.id) AS carrier_job,(SELECT json_build_object('status',status,'error',error) FROM erp_live_jobs e WHERE e.order_id=orders.id) AS erp_live_job,(SELECT count(*)::int FROM carrier_documents d JOIN carrier_jobs c ON c.order_id=d.order_id WHERE d.order_id=orders.id AND c.status='ready') AS document_count FROM orders WHERE id IN (SELECT id FROM paged) ORDER BY ${order}`,scanAll?args:[...args,(page-1)*pageSize]);
 
-      const diagnosticPage=Date.now();await orderPageDetails(db,rows);const diagnosticDetails=Date.now();
+      const diagnosticPage=Date.now();for(let offset=0;offset<rows.length;offset+=200)await orderPageDetails(db,rows.slice(offset,offset+200));const diagnosticDetails=Date.now();
       for(const row of rows)projectCurrentDiagnostics(row);
       
-      const diagnosticCount=Date.now();const {transportStats,summary}=await cachedOrderSummary(url.searchParams);const total=summary.total;if(process.env.DIAGNOSTIC_TIMING==='1')console.error(JSON.stringify({pageMs:diagnosticPage-diagnosticStart,detailsMs:diagnosticDetails-diagnosticPage,countMs:diagnosticCount-diagnosticDetails,statisticsMs:Date.now()-diagnosticCount}));
+
 
       for(const row of rows){
 
@@ -448,6 +455,17 @@ const server=http.createServer(async(req,res)=>{
       for(const row of rows)if(row.label_status==='waiting_catalog'&&connection.configured&&!connection.running&&!connection.nextRetryAt){row.label_status='weight_pending';row.issue='Poids Erplain non disponible dans V3 ; consulter Connexions pour le dernier résultat. Aucun téléchargement en cours.';}
       if(!connection.configured)for(const row of rows)if(row.label_status==='waiting_catalog'){row.issue='Connexion Erplain à configurer : aucun téléchargement de poids en cours.';row.label_status='connection_missing';}
 
+      let matched=null;
+      if(scanAll){
+        const problemParams=new URLSearchParams(scopeParams);problemParams.append('status','__problems');
+        const problemScope=orderQuery(problemParams);
+        const problemIds=(await db.query('SELECT id FROM orders '+problemScope.where,problemScope.args)).rows.map(row=>row.id);
+        matched=selectProblemOrders(rows,catalogOnly?[]:problemLabels,currentProblemClassifier(),problemIds);
+        if(catalogOnly){json(res,200,{problemTypes:matched.problemTypes,at:new Date().toISOString()});return;}
+      }
+      const {transportStats,summary}=matched?await orderStatistics(db,scopeParams,matched.rows.map(row=>row.id)):await cachedOrderSummary(scopeParams);
+      const total=summary.total;
+      if(matched)rows=paginateProblemOrders(matched,page,pageSize).rows;
       json(res,200,{rows,transportStats,summary,total,page,pages:Math.max(1,Math.ceil(total/pageSize))});return;
 
     }
