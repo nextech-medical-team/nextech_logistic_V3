@@ -49,7 +49,7 @@ export async function assertAdditionalMappingStock(api,bc,items){
 
 // and an uncertain recorded mutation is never submitted a second time.
 
-export async function alignMappedBc(api,o,{save,guard}){
+export async function alignMappedBc(api,o,{save,guard,preserveLabels}){
 
  if(!o.erp_live?.bc?.id||o.erp_live.bl?.id||o.partial_mode||o.erp_live.equivalentItems||o.source_payload?.erplainImported)return {skipped:true};
 
@@ -93,6 +93,8 @@ export async function alignMappedBc(api,o,{save,guard}){
 
  await assertAdditionalMappingStock(api,bc,o.items);
  await guard();
+ if(typeof preserveLabels!=='function')throw Error('Conservation des etiquettes existantes non verifiable avant alignement BC');
+ await preserveLabels();await guard();
 
  o.erp_live.mappingAlignmentAttempt={status:'uncertain',before:digest(actual),target:digest(desired),previousVariants,requestedAt:new Date().toISOString(),stockPolicy:bc.update_stock};await save(o);
 

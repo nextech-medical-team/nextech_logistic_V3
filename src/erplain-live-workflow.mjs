@@ -1,3 +1,4 @@
+import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
 import {ensureMissingProduct,reconcileCreationAttempt,sourceProductName,readCreationSku,createBlockedMissingProducts,productCreationBlock} from './missing-product-creation.mjs';
 import {bindProduct} from './product-bindings.mjs';
 import {selectedProductWeights,cacheSelectedProductWeights} from './selected-product-weights.mjs';
@@ -181,7 +182,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of missing){const found=await recoverOrder(api,o);if(found){o.erp_live.bc={id:found.id,label:found.label};o.erp_live.phase='bc_created';await save(o);}}
    for(const o of working)o.documentMetadata=await documentMetadata(o,directory);
    for(const o of working.filter(o=>o.erp_live.bc?.id)){
-    try{await withShipmentLock(()=>alignMappedBc(api,o,{save,guard:async()=>{
+    try{await withShipmentLock(()=>alignMappedBc(api,o,{save,preserveLabels:()=>preserveSubstitutionLabels(db,o.id),guard:async()=>{
      const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh);if(block)throw Error(block);
      const rows=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
      if(JSON.stringify(rows.map(l=>currentMappingLine(l,o.channel)))!==JSON.stringify(o.selectedSourceLines.map(l=>currentMappingLine(l,o.channel))))throw Error('Mapping modifié pendant le contrôle : nouvelle vérification requise');
@@ -277,6 +278,8 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     if(o.erp_live.bl&&o.erp_live.bl.status!=='unpublished')continue;
     await withShipmentLock(async()=>{try{
      const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const blocked=!fresh||fresh.archived?'Commande indisponible':fresh.resolution_pending_resume?'Préparation suspendue : validation requise':cancellationBlock(fresh);if(blocked)throw Error(blocked);
+     // Retain the exact served PDF and SKU copy before the BL changes its context.
+     await preserveSubstitutionLabels(db,o.id);
      await assertStockResolved(db,o.items.map(l=>l.variant.id),{orderId:o.id});
      const snapshot=await api.request('query V3CheckFullStock($id:ID!){Order(id:$id){id update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}}}',{id:String(o.erp_live.bc.id)});
      if(!snapshot.Order?.line_items?.length)throw new Error('Stock non vérifiable : BC sans lignes');

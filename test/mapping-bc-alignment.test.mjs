@@ -18,7 +18,7 @@ function fixture({lostResponse=false,applyBeforeLoss=true,bcExtras={}}={}){
   }
   assert.fail('unexpected provider operation');
  }};
- return {order,api,calls,options:{save:async()=>{},guard:async()=>{}},get bc(){return bc;}};
+ return {order,api,calls,options:{save:async()=>{},guard:async()=>{},preserveLabels:async()=>{}},get bc(){return bc;}};
 }
 test('current mapping 20 aligns BC 3000 through normal Erplain edit and verifies net debit 20',async()=>{
  const f=fixture(),result=await alignMappedBc(f.api,f.order,f.options);
@@ -56,4 +56,10 @@ test('additional stock requires complete data for the exact active variant and l
  for(const extra of [{id:'other'},{active:false},{track_inventory:undefined},{stock_levels:{data:[],paginatorInfo:{hasMorePages:false}}},{stock_levels:{data:[],paginatorInfo:{hasMorePages:true}}}]){
  const api={request:async()=>({Variant:{id:'2',active:true,track_inventory:true,product:{id:'p',active:true},...extra}})};await assert.rejects(assertAdditionalMappingStock(api,bc,[item]));
  }
+});
+
+test('existing label preservation completes before BC mutation; failure blocks every external write',async()=>{
+ const f=fixture();let preserved=false;f.options.preserveLabels=async()=>{assert.equal(f.calls.some(q=>q.startsWith('mutation')),false);preserved=true;};await alignMappedBc(f.api,f.order,f.options);assert.equal(preserved,true);
+ const blocked=fixture();blocked.options.preserveLabels=async()=>{throw Error('PDF preservation mismatch');};await assert.rejects(alignMappedBc(blocked.api,blocked.order,blocked.options),/PDF preservation mismatch/);assert.equal(blocked.calls.filter(q=>q.startsWith('mutation')).length,0);assert.equal(blocked.order.erp_live.mappingAlignmentAttempt,undefined);
+ const missing=fixture();delete missing.options.preserveLabels;await assert.rejects(alignMappedBc(missing.api,missing.order,missing.options),/Conservation des etiquettes/);assert.equal(missing.calls.filter(q=>q.startsWith('mutation')).length,0);
 });
