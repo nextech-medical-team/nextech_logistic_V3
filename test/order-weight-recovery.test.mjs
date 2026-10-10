@@ -57,3 +57,10 @@ test('mapped alias and previously cached zero reconcile immediately through actu
  const second=await refreshWeightUnitDiagnostics(db,{id:'o'},'A',binding().product);assert.equal(second.diagnosticOnly,true);
  }finally{await db.close();}
 });
+
+test('shared filter and distinct counts keep parcel/catalog failures outside missing product weights',async()=>{
+ const {selectProblemOrders}=await import('../src/problem-typology.mjs');const {currentProblemClassifier}=await import('../src/problem-typology-reader.mjs');
+ const rows=[{id:'parcel',issue:'Poids ou nombre de colis absent',sku_lines:[]},{id:'catalog',issue:'En attente de synchronisation Erplain : A',sku_lines:[]},{id:'weight',issue:'A : Poids non renseigné dans Erplain',sku_lines:[{sku:'A',quantity:1,catalog_issue:'Poids non renseigné dans Erplain'}]}];
+ const selected=selectProblemOrders(rows,['Poids manquant'],currentProblemClassifier());assert.deepEqual(selected.rows.map(o=>o.id),['weight']);assert.equal(selected.problemTypes.find(p=>p.label==='Poids manquant').count,1);
+ assert.equal(selectProblemOrders(rows,['Catalogue Erplain à synchroniser'],currentProblemClassifier()).total,1);assert.equal(selectProblemOrders(rows,['Poids du colis / nombre de colis à vérifier'],currentProblemClassifier()).total,1);
+});
