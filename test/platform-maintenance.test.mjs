@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {runPlatformHoldMaintenance,rollbackPlatformHoldMaintenance,savePlatformMaintenanceReport} from '../src/platform-hold-maintenance.mjs';
+import {runPlatformHoldMaintenance,rollbackPlatformHoldMaintenance,savePlatformMaintenanceReport,isPlatformMaintenanceEntry,assertPlatformMaintenanceDatabase} from '../src/platform-hold-maintenance.mjs';import pg from 'pg';
 import {authorizedTemuScope,authorizedFreshTemu} from '../src/temu-authorized-reimport.mjs';
-import {mkdtemp,writeFile,readFile,readdir,stat,unlink,rmdir} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
+import {mkdtemp,writeFile,readFile,readdir,stat,lstat,symlink,unlink,rmdir} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {fileURLToPath} from 'node:url';import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 test('Private TEMU authorization is kept outside Git and independent of declared status',async()=>{
  assert.throws(()=>authorizedTemuScope([['PO-1-2','123'],['PO-1-2','123']]));assert.throws(()=>authorizedTemuScope([['BAD','123']]));assert.throws(()=>authorizedTemuScope([['PO-1-2','invalid']]));
  const directory=await mkdtemp(path.join(os.tmpdir(),'nextech-scope-test-')),file=path.join(directory,'temu-authorized-reimport-scope.json'),old=process.env.DATA_DIR;
@@ -71,4 +71,23 @@ test('Atomic report replacement preserves the existing private journal when seri
   await assert.rejects(savePlatformMaintenanceReport(file,{invalid:1n}));assert.equal(await readFile(file,'utf8'),before);assert.deepEqual(await readdir(directory),['journal.json']);
   if(process.platform!=='win32')assert.equal((await stat(file)).mode&0o777,0o600);
  }finally{await unlink(file);await rmdir(directory);}
+});
+
+test('The real maintenance CLI executes through a current directory symlink, while imports stay inactive',async()=>{
+ const directory=await mkdtemp(path.join(os.tmpdir(),'nextech-entry-test-')),current=path.join(directory,'current'),source=fileURLToPath(new URL('../src',import.meta.url));
+ try{
+  await symlink(source,current,'junction');const entry=path.join(current,'platform-hold-maintenance.mjs'),url=new URL('../src/platform-hold-maintenance.mjs',import.meta.url).href;
+  assert.equal(await isPlatformMaintenanceEntry(url,entry),true);assert.equal(await isPlatformMaintenanceEntry(import.meta.url,entry),false);assert.equal(await isPlatformMaintenanceEntry('data:text/javascript,',entry),false);
+  // Missing Section7 arguments must reach the actual CLI guard and fail before
+  // credentials, production database, publication lock or services are accessed.
+  await assert.rejects(promisify(execFile)(process.execPath,[entry]),e=>e.code===1&&e.stderr.includes('Maintenance réservée à Section7'));
+ }finally{assert.ok((await lstat(current)).isSymbolicLink());await unlink(current);await rmdir(directory);}
+});
+
+test('Database guard accepts the actual Unix socket DSN and rejects another driver-selected database without connecting',()=>{
+ const database='nextech_v3_migration';
+ for(const url of ['postgresql://nextech@/'+database+'?host=/var/run/postgresql','postgres://nextech@localhost/'+database])assert.equal(assertPlatformMaintenanceDatabase(url,database,pg.Client),database);
+ assert.throws(()=>assertPlatformMaintenanceDatabase('postgresql://nextech@/other?host=/var/run/postgresql',database,pg.Client));
+ assert.equal(assertPlatformMaintenanceDatabase('postgresql://nextech@localhost/'+database+'?database=other',database,pg.Client),database);
+ assert.throws(()=>assertPlatformMaintenanceDatabase('https://example.invalid/'+database,database,pg.Client));
 });

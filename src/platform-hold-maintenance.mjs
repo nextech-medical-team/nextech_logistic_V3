@@ -1,4 +1,4 @@
-import {createHash,randomUUID} from 'node:crypto';import {open,rename,unlink,readFile,stat} from 'node:fs/promises';import {dirname} from 'node:path';import {loadEnvFile} from 'node:process';import {fileURLToPath} from 'node:url';import {spawn} from 'node:child_process';
+import {createHash,randomUUID} from 'node:crypto';import {open,rename,unlink,readFile,stat,realpath} from 'node:fs/promises';import {dirname} from 'node:path';import {loadEnvFile} from 'node:process';import {fileURLToPath} from 'node:url';import {spawn} from 'node:child_process';
 import {shopifyCollector,loadShopifyConfig} from './marketplace-collection.mjs';import {normalizeShopifyOrders} from './marketplace-local-import.mjs';
 import {platformHoldDatabaseAdapter} from './platform-shipment-hold-db.mjs';import {platformHoldEvidenceHash,reconcilePlatformShipmentHold,platformHoldWriteLockSql} from './platform-shipment-hold-transaction.mjs';import {systemdWriterPauseProbe} from './platform-writer-pause.mjs';
 const diagnostic=/^Commande (?:déjà expédiée dans (?:Shopify|Amazon)(?: · Vérifier les documents)?|(?:entièrement remboursée|annulée) dans Shopify(?: · BC et BL Erplain annulés)?)$/i;
@@ -64,15 +64,27 @@ export async function rollbackPlatformHoldMaintenance({db,pauseProbe,report}){
   return {status:'PASS',restored,uncommitted,externalWrites:0,newJobs:0,labelsTouched:0};
  });
 }
-if(process.argv[1]&&fileURLToPath(import.meta.url)===process.argv[1]){
+export async function isPlatformMaintenanceEntry(url,argument=process.argv[1]){
+ if(!argument||!url.startsWith('file:'))return false;
+ try{return await realpath(fileURLToPath(url))===await realpath(argument);}catch(e){if(e.code==='ENOENT')return false;throw e;}
+}
+export function assertPlatformMaintenanceDatabase(url,expected,Client){
+ if(!url||!/^postgres(?:ql)?:/.test(url)||typeof Client!=='function')throw Error('Base de production attendue non confirmée');
+ // Use the driver's parser: a valid Unix-socket DSN has an empty hostname and
+ // is rejected by WHATWG URL even though PostgreSQL accepts it.
+ const database=new Client({connectionString:url}).connectionParameters.database;
+ if(!expected||database!==expected)throw Error('Base de production attendue non confirmée');
+ return database;
+}
+if(await isPlatformMaintenanceEntry(import.meta.url)){
  const args=process.argv.slice(2),value=k=>args[args.indexOf(k)+1];
  if(!args.includes('--section7')||!args.includes('--report')||!args.includes('--writers')||!args.includes('--expected-database'))throw Error('Maintenance réservée à Section7 sous verrou, rapport et inventaire explicites requis');
  const fd=Number(value('--lock-fd'));if(!Number.isInteger(fd)||fd<3)throw Error('Descripteur du verrou de publication requis');
  const [held,target]=await Promise.all([stat('/proc/self/fd/'+fd),stat('/var/lock/nextech-deploy.lock')]);if(held.ino!==target.ino||held.dev!==target.dev)throw Error('Descripteur du verrou différent');
  await new Promise((resolve,reject)=>{const child=spawn('/usr/bin/flock',['-n','-x',String(fd),'true'],{stdio:Array.from({length:fd+1},(_,i)=>i===fd?fd:'ignore')});child.once('error',reject);child.once('exit',code=>code===0?resolve():reject(Error('Verrou exclusif indisponible')));});
  try{loadEnvFile('/etc/nextech/application.env');}catch(e){if(!process.env.DATABASE_URL)throw e;}
- const url=process.env.DATABASE_URL;if(!url||!/^postgres(?:ql)?:/.test(url)||new URL(url).pathname.slice(1)!==value('--expected-database'))throw Error('Base de production attendue non confirmée');
- const {Pool}=await import('pg');const pool=new Pool({connectionString:url,max:2});
+ const url=process.env.DATABASE_URL;const {Pool,Client}=await import('pg');assertPlatformMaintenanceDatabase(url,value('--expected-database'),Client);
+ const pool=new Pool({connectionString:url,max:2});
  const db={query:(...a)=>pool.query(...a),transaction:async fn=>{const c=await pool.connect();try{await c.query('BEGIN');const r=await fn(c);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}}};
  const pauseProbe=systemdWriterPauseProbe({requiredUnits:value('--writers').split(',')});
  const save=report=>savePlatformMaintenanceReport(value('--report'),report);
