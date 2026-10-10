@@ -1,0 +1,35 @@
+{
+  "synthetic": true,
+  "cases": [
+    {
+      "orderId": "fixture-order-1"
+    },
+    {
+      "orderId": "fixture-order-2"
+    },
+    {
+      "orderId": "fixture-order-3"
+    },
+    {
+      "orderId": "fixture-order-4"
+    },
+    {
+      "orderId": "fixture-order-5"
+    },
+    {
+      "orderId": "fixture-order-6"
+    },
+    {
+      "orderId": "fixture-order-7"
+    },
+    {
+      "orderId": "fixture-order-8"
+    },
+    {
+      "orderId": "fixture-order-9"
+    },
+    {
+      "orderId": "fixture-order-10"
+    }
+  ]
+}

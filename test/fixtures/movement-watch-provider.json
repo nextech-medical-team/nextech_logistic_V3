@@ -1,0 +1,2454 @@
+{
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "fixture-order-1",
+      "reference": "TEST-MOVEMENT-1",
+      "bc": [
+        {
+          "id": 1001,
+          "label": "DOC-1002",
+          "status": "cancelled",
+          "created_at": "2026-09-28 20:06:01",
+          "external_reference": "TEST-MOVEMENT-1",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1025,
+              "type": "normal",
+              "quantity": 20,
+              "variant": {
+                "id": 1026,
+                "sku": "SKU-1027",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1029,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": []
+    },
+    {
+      "id": "fixture-order-2",
+      "reference": "TEST-MOVEMENT-2",
+      "bc": [
+        {
+          "id": 1003,
+          "label": "DOC-1004",
+          "status": "active",
+          "created_at": "2026-10-03 10:40:37",
+          "external_reference": "TEST-MOVEMENT-2",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1030,
+              "type": "normal",
+              "quantity": 10,
+              "variant": {
+                "id": 1031,
+                "sku": "SKU-1032",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1033,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": []
+    },
+    {
+      "id": "fixture-order-3",
+      "reference": "TEST-MOVEMENT-3",
+      "bc": [
+        {
+          "id": 1005,
+          "label": "DOC-1006",
+          "status": "active",
+          "created_at": "2026-10-02 18:12:20",
+          "external_reference": "TEST-MOVEMENT-3",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1034,
+              "type": "normal",
+              "quantity": 30,
+              "variant": {
+                "id": 1035,
+                "sku": "SKU-1036",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1037,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": []
+    },
+    {
+      "id": "fixture-order-4",
+      "reference": "TEST-MOVEMENT-4",
+      "bc": [
+        {
+          "id": 1007,
+          "label": "DOC-1008",
+          "status": "active",
+          "created_at": "2026-10-02 11:01:45",
+          "external_reference": "TEST-MOVEMENT-4",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1038,
+              "type": "normal",
+              "quantity": 10,
+              "variant": {
+                "id": 1039,
+                "sku": "SKU-1040",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1041,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": []
+    },
+    {
+      "id": "fixture-order-5",
+      "reference": "TEST-MOVEMENT-5",
+      "bc": [
+        {
+          "id": 1009,
+          "label": "DOC-1010",
+          "status": "active",
+          "created_at": "2026-10-01 15:50:49",
+          "external_reference": "TEST-MOVEMENT-5",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1042,
+              "type": "normal",
+              "quantity": 50,
+              "variant": {
+                "id": 1043,
+                "sku": "SKU-1044",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1045,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": []
+    },
+    {
+      "id": "fixture-order-6",
+      "reference": "TEST-MOVEMENT-6",
+      "bc": [
+        {
+          "id": 1011,
+          "label": "DOC-1012",
+          "status": "active",
+          "created_at": "2026-10-01 15:50:34",
+          "external_reference": "TEST-MOVEMENT-6",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1046,
+              "type": "normal",
+              "quantity": 30,
+              "variant": {
+                "id": 1035,
+                "sku": "SKU-1036",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1047,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": []
+    },
+    {
+      "id": "fixture-order-7",
+      "reference": "TEST-MOVEMENT-7",
+      "bc": [
+        {
+          "id": 1013,
+          "label": "DOC-1014",
+          "status": "active",
+          "created_at": "2026-09-30 10:07:22",
+          "external_reference": "TEST-MOVEMENT-7",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1048,
+              "type": "normal",
+              "quantity": 30,
+              "variant": {
+                "id": 1049,
+                "sku": "SKU-1050",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1051,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": []
+    },
+    {
+      "id": "fixture-order-8",
+      "reference": "TEST-MOVEMENT-8",
+      "bc": [
+        {
+          "id": 1015,
+          "label": "DOC-1016",
+          "status": "active",
+          "created_at": "2026-09-30 17:09:09",
+          "external_reference": "TEST-MOVEMENT-8",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1052,
+              "type": "normal",
+              "quantity": 4,
+              "variant": {
+                "id": 1053,
+                "sku": "SKU-1054",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": []
+    },
+    {
+      "id": "fixture-order-9",
+      "reference": "TEST-MOVEMENT-9",
+      "bc": [
+        {
+          "id": 1019,
+          "label": "DOC-1020",
+          "status": "active",
+          "created_at": "2026-10-09 11:15:22",
+          "external_reference": "TEST-MOVEMENT-9",
+          "update_stock": false,
+          "line_items": [
+            {
+              "id": 1055,
+              "type": "normal",
+              "quantity": 1,
+              "variant": {
+                "id": 1056,
+                "sku": "SKU-1057",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1058,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [
+              {
+                "id": 1021,
+                "label": "DOC-1022",
+                "status": "ready_to_ship",
+                "update_stock": false,
+                "line_items": [
+                  {
+                    "parent_id": 1055,
+                    "type": "normal",
+                    "quantity": 1,
+                    "variant": {
+                      "id": 1056,
+                      "sku": "SKU-1057"
+                    },
+                    "location": {
+                      "id": 1028
+                    }
+                  }
+                ]
+              }
+            ],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1017,
+          "label": "DOC-1018",
+          "status": "cancelled",
+          "created_at": "2026-09-30 17:22:05",
+          "external_reference": "TEST-MOVEMENT-9",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1059,
+              "type": "normal",
+              "quantity": 1,
+              "variant": {
+                "id": 1056,
+                "sku": "SKU-1057",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1060,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "shipping": [
+        {
+          "id": 1021,
+          "label": "DOC-1022",
+          "status": "ready_to_ship",
+          "created_at": "2026-10-09 11:16:13",
+          "update_stock": false,
+          "orders": {
+            "data": [
+              {
+                "id": 1019
+              }
+            ],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          },
+          "line_items": [
+            {
+              "type": "normal",
+              "quantity": 1,
+              "variant": {
+                "id": 1056,
+                "sku": "SKU-1057"
+              },
+              "location": {
+                "id": 1028
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixture-order-10",
+      "reference": "TEST-MOVEMENT-10",
+      "bc": [],
+      "shipping": []
+    }
+  ],
+  "referenceSearch": {
+    "Orders": {
+      "data": [
+        {
+          "id": 1001,
+          "label": "DOC-1002",
+          "status": "cancelled",
+          "external_reference": "TEST-MOVEMENT-1",
+          "created_at": "2026-09-28 20:06:01",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1025,
+              "type": "normal",
+              "quantity": 20,
+              "variant": {
+                "id": 1026,
+                "sku": "SKU-1027",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1029,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1015,
+          "label": "DOC-1016",
+          "status": "active",
+          "external_reference": "TEST-MOVEMENT-8",
+          "created_at": "2026-09-30 17:09:09",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1052,
+              "type": "normal",
+              "quantity": 4,
+              "variant": {
+                "id": 1053,
+                "sku": "SKU-1054",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1017,
+          "label": "DOC-1018",
+          "status": "cancelled",
+          "external_reference": "TEST-MOVEMENT-9",
+          "created_at": "2026-09-30 17:22:05",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1059,
+              "type": "normal",
+              "quantity": 1,
+              "variant": {
+                "id": 1056,
+                "sku": "SKU-1057",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1060,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1019,
+          "label": "DOC-1020",
+          "status": "active",
+          "external_reference": "TEST-MOVEMENT-9",
+          "created_at": "2026-10-09 11:15:22",
+          "update_stock": false,
+          "line_items": [
+            {
+              "id": 1055,
+              "type": "normal",
+              "quantity": 1,
+              "variant": {
+                "id": 1056,
+                "sku": "SKU-1057",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1058,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [
+              {
+                "id": 1021,
+                "status": "ready_to_ship",
+                "update_stock": false
+              }
+            ],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1013,
+          "label": "DOC-1014",
+          "status": "active",
+          "external_reference": "TEST-MOVEMENT-7",
+          "created_at": "2026-09-30 10:07:22",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1048,
+              "type": "normal",
+              "quantity": 30,
+              "variant": {
+                "id": 1049,
+                "sku": "SKU-1050",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1051,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1011,
+          "label": "DOC-1012",
+          "status": "active",
+          "external_reference": "TEST-MOVEMENT-6",
+          "created_at": "2026-10-01 15:50:34",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1046,
+              "type": "normal",
+              "quantity": 30,
+              "variant": {
+                "id": 1035,
+                "sku": "SKU-1036",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1047,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1009,
+          "label": "DOC-1010",
+          "status": "active",
+          "external_reference": "TEST-MOVEMENT-5",
+          "created_at": "2026-10-01 15:50:49",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1042,
+              "type": "normal",
+              "quantity": 50,
+              "variant": {
+                "id": 1043,
+                "sku": "SKU-1044",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1045,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1007,
+          "label": "DOC-1008",
+          "status": "active",
+          "external_reference": "TEST-MOVEMENT-4",
+          "created_at": "2026-10-02 11:01:45",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1038,
+              "type": "normal",
+              "quantity": 10,
+              "variant": {
+                "id": 1039,
+                "sku": "SKU-1040",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1041,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1005,
+          "label": "DOC-1006",
+          "status": "active",
+          "external_reference": "TEST-MOVEMENT-3",
+          "created_at": "2026-10-02 18:12:20",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1034,
+              "type": "normal",
+              "quantity": 30,
+              "variant": {
+                "id": 1035,
+                "sku": "SKU-1036",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1037,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        {
+          "id": 1003,
+          "label": "DOC-1004",
+          "status": "active",
+          "external_reference": "TEST-MOVEMENT-2",
+          "created_at": "2026-10-03 10:40:37",
+          "update_stock": true,
+          "line_items": [
+            {
+              "id": 1030,
+              "type": "normal",
+              "quantity": 10,
+              "variant": {
+                "id": 1031,
+                "sku": "SKU-1032",
+                "track_inventory": true
+              },
+              "location": {
+                "id": 1028
+              }
+            },
+            {
+              "id": 1033,
+              "type": "shipping_cost",
+              "quantity": 1,
+              "variant": null,
+              "location": {
+                "id": 1028
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      ],
+      "paginatorInfo": {
+        "hasMorePages": false
+      }
+    }
+  },
+  "stockSearch": {
+    "StockRemovals": {
+      "data": [
+        {
+          "id": 1023,
+          "label": "V3FS-fixture-order-9",
+          "status": "completed",
+          "dated_at": "2026-09-29",
+          "update_stock": true,
+          "line_items": [
+            {
+              "quantity": 1,
+              "variant": {
+                "id": 1056,
+                "sku": "SKU-1057"
+              },
+              "location": {
+                "id": 1028
+              }
+            }
+          ]
+        }
+      ],
+      "paginatorInfo": {
+        "hasMorePages": false
+      }
+    }
+  },
+  "ledgers": [
+    {
+      "variant": "1026",
+      "since": "2026-09-26 00:00:00",
+      "complete": true,
+      "rows": [
+        {
+          "id": 1061,
+          "document_id": 1001,
+          "order_type": "Order",
+          "created_at": "2026-09-28 20:06:02",
+          "on_hand_diff": -20,
+          "available_diff": -20,
+          "variant": {
+            "id": 1026,
+            "sku": "SKU-1027"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1062,
+          "document_id": 1063,
+          "order_type": "Purchase",
+          "created_at": "2026-10-02 10:38:25",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1026,
+            "sku": "SKU-1027"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1064,
+          "document_id": 1065,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-06 10:55:32",
+          "on_hand_diff": 80,
+          "available_diff": 80,
+          "variant": {
+            "id": 1026,
+            "sku": "SKU-1027"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1066,
+          "document_id": 1001,
+          "order_type": "Order",
+          "created_at": "2026-10-08 11:47:16",
+          "on_hand_diff": 20,
+          "available_diff": 20,
+          "variant": {
+            "id": 1026,
+            "sku": "SKU-1027"
+          },
+          "location": {
+            "id": 1028
+          }
+        }
+      ]
+    },
+    {
+      "variant": "1031",
+      "since": "2026-10-01 00:00:00",
+      "complete": true,
+      "rows": [
+        {
+          "id": 1067,
+          "document_id": 1003,
+          "order_type": "Order",
+          "created_at": "2026-10-03 10:40:37",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1031,
+            "sku": "SKU-1032"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1068,
+          "document_id": 1069,
+          "order_type": "Purchase",
+          "created_at": "2026-10-05 11:37:23",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1031,
+            "sku": "SKU-1032"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1070,
+          "document_id": 1069,
+          "order_type": "Purchase",
+          "created_at": "2026-10-07 14:31:55",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1031,
+            "sku": "SKU-1032"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1071,
+          "document_id": 1072,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-07 14:42:42",
+          "on_hand_diff": 160,
+          "available_diff": 160,
+          "variant": {
+            "id": 1031,
+            "sku": "SKU-1032"
+          },
+          "location": {
+            "id": 1028
+          }
+        }
+      ]
+    },
+    {
+      "variant": "1035",
+      "since": "2026-09-29 00:00:00",
+      "complete": true,
+      "rows": [
+        {
+          "id": 1073,
+          "document_id": 1074,
+          "order_type": "Order",
+          "created_at": "2026-10-01 15:48:58",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1075,
+          "document_id": 1011,
+          "order_type": "Order",
+          "created_at": "2026-10-01 15:50:35",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1076,
+          "document_id": 1005,
+          "order_type": "Order",
+          "created_at": "2026-10-02 18:12:20",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1077,
+          "document_id": 1078,
+          "order_type": "Order",
+          "created_at": "2026-10-05 04:36:43",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1079,
+          "document_id": 1069,
+          "order_type": "Purchase",
+          "created_at": "2026-10-05 11:37:23",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1080,
+          "document_id": 1069,
+          "order_type": "Purchase",
+          "created_at": "2026-10-07 14:31:55",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1081,
+          "document_id": 1072,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-07 14:42:42",
+          "on_hand_diff": 360,
+          "available_diff": 360,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1082,
+          "document_id": 1078,
+          "order_type": "Order",
+          "created_at": "2026-10-07 16:10:21",
+          "on_hand_diff": 30,
+          "available_diff": 30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1083,
+          "document_id": 1084,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 16:11:51",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1085,
+          "document_id": 1074,
+          "order_type": "Order",
+          "created_at": "2026-10-07 16:55:13",
+          "on_hand_diff": 30,
+          "available_diff": 30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1086,
+          "document_id": 1087,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-08 13:23:19",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1088,
+          "document_id": 1089,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-09 05:18:13",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1090,
+          "document_id": 1091,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-10 14:22:41",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1035,
+            "sku": "SKU-1036"
+          },
+          "location": {
+            "id": 1028
+          }
+        }
+      ]
+    },
+    {
+      "variant": "1039",
+      "since": "2026-09-30 00:00:00",
+      "complete": true,
+      "rows": [
+        {
+          "id": 1092,
+          "document_id": 1093,
+          "order_type": "Purchase",
+          "created_at": "2026-09-30 07:59:36",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1094,
+          "document_id": 1095,
+          "order_type": "Order",
+          "created_at": "2026-09-30 12:29:36",
+          "on_hand_diff": 10,
+          "available_diff": 10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1096,
+          "document_id": 1097,
+          "order_type": "Order",
+          "created_at": "2026-09-30 19:07:15",
+          "on_hand_diff": -20,
+          "available_diff": -20,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1098,
+          "document_id": 1099,
+          "order_type": "Order",
+          "created_at": "2026-10-01 07:51:52",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1100,
+          "document_id": 1101,
+          "order_type": "Order",
+          "created_at": "2026-10-01 08:40:26",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1102,
+          "document_id": 1103,
+          "order_type": "Order",
+          "created_at": "2026-10-01 11:03:14",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1104,
+          "document_id": 1105,
+          "order_type": "Order",
+          "created_at": "2026-10-01 11:05:34",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1106,
+          "document_id": 1107,
+          "order_type": "Order",
+          "created_at": "2026-10-01 14:36:46",
+          "on_hand_diff": -40,
+          "available_diff": -40,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1108,
+          "document_id": 1109,
+          "order_type": "Order",
+          "created_at": "2026-10-01 18:29:46",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1110,
+          "document_id": 1111,
+          "order_type": "Order",
+          "created_at": "2026-10-01 18:30:01",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1112,
+          "document_id": 1113,
+          "order_type": "Order",
+          "created_at": "2026-10-01 18:30:44",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1114,
+          "document_id": 1115,
+          "order_type": "Order",
+          "created_at": "2026-10-01 19:00:16",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1116,
+          "document_id": 1117,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-02 07:59:00",
+          "on_hand_diff": 200,
+          "available_diff": 200,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1118,
+          "document_id": 1119,
+          "order_type": "Order",
+          "created_at": "2026-10-02 09:51:54",
+          "on_hand_diff": -20,
+          "available_diff": -20,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1120,
+          "document_id": 1063,
+          "order_type": "Purchase",
+          "created_at": "2026-10-02 10:38:25",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1121,
+          "document_id": 1063,
+          "order_type": "Purchase",
+          "created_at": "2026-10-02 10:39:49",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1122,
+          "document_id": 1007,
+          "order_type": "Order",
+          "created_at": "2026-10-02 11:01:46",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1123,
+          "document_id": 1124,
+          "order_type": "Order",
+          "created_at": "2026-10-02 11:11:34",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1125,
+          "document_id": 1126,
+          "order_type": "Order",
+          "created_at": "2026-10-02 13:33:10",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1127,
+          "document_id": 1128,
+          "order_type": "Order",
+          "created_at": "2026-10-02 21:59:13",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1129,
+          "document_id": 1130,
+          "order_type": "Order",
+          "created_at": "2026-10-03 21:54:52",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1131,
+          "document_id": 1132,
+          "order_type": "Order",
+          "created_at": "2026-10-04 11:56:08",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1133,
+          "document_id": 1134,
+          "order_type": "Order",
+          "created_at": "2026-10-05 06:39:39",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1135,
+          "document_id": 1136,
+          "order_type": "Purchase",
+          "created_at": "2026-10-05 11:22:57",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1137,
+          "document_id": 1138,
+          "order_type": "Order",
+          "created_at": "2026-10-05 15:33:34",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1139,
+          "document_id": 1140,
+          "order_type": "Order",
+          "created_at": "2026-10-05 16:37:23",
+          "on_hand_diff": -40,
+          "available_diff": -40,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1141,
+          "document_id": 1065,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-06 10:55:32",
+          "on_hand_diff": 200,
+          "available_diff": 200,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1142,
+          "document_id": 1143,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-06 11:10:57",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1144,
+          "document_id": 1145,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-06 12:23:28",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1146,
+          "document_id": 1147,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-06 16:08:56",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1148,
+          "document_id": 1149,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-06 21:51:52",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1150,
+          "document_id": 1151,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 08:34:51",
+          "on_hand_diff": -16,
+          "available_diff": -16,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1152,
+          "document_id": 1132,
+          "order_type": "Order",
+          "created_at": "2026-10-07 15:33:44",
+          "on_hand_diff": 10,
+          "available_diff": 10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1153,
+          "document_id": 1154,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 15:37:17",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1155,
+          "document_id": 1138,
+          "order_type": "Order",
+          "created_at": "2026-10-07 15:56:17",
+          "on_hand_diff": 10,
+          "available_diff": 10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1156,
+          "document_id": 1157,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 16:00:41",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1158,
+          "document_id": 1134,
+          "order_type": "Order",
+          "created_at": "2026-10-07 16:02:32",
+          "on_hand_diff": 10,
+          "available_diff": 10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1159,
+          "document_id": 1160,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 16:04:51",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1161,
+          "document_id": 1126,
+          "order_type": "Order",
+          "created_at": "2026-10-07 16:23:35",
+          "on_hand_diff": 10,
+          "available_diff": 10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1162,
+          "document_id": 1128,
+          "order_type": "Order",
+          "created_at": "2026-10-07 16:25:03",
+          "on_hand_diff": 10,
+          "available_diff": 10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1163,
+          "document_id": 1164,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 16:26:49",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1165,
+          "document_id": 1166,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 17:03:07",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1167,
+          "document_id": 1168,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-08 11:28:27",
+          "on_hand_diff": 400,
+          "available_diff": 400,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1169,
+          "document_id": 1170,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-08 12:33:48",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1171,
+          "document_id": 1172,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-08 13:19:45",
+          "on_hand_diff": -60,
+          "available_diff": -60,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1173,
+          "document_id": 1174,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-08 13:40:30",
+          "on_hand_diff": -20,
+          "available_diff": -20,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1175,
+          "document_id": 1176,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-09 07:51:24",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1177,
+          "document_id": 1178,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-09 10:37:28",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1179,
+          "document_id": 1180,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-10 10:15:08",
+          "on_hand_diff": -10,
+          "available_diff": -10,
+          "variant": {
+            "id": 1039,
+            "sku": "SKU-1040"
+          },
+          "location": {
+            "id": 1028
+          }
+        }
+      ]
+    },
+    {
+      "variant": "1043",
+      "since": "2026-09-29 00:00:00",
+      "complete": true,
+      "rows": [
+        {
+          "id": 1181,
+          "document_id": 1182,
+          "order_type": "Order",
+          "created_at": "2026-10-01 09:11:38",
+          "on_hand_diff": -50,
+          "available_diff": -50,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1183,
+          "document_id": 1009,
+          "order_type": "Order",
+          "created_at": "2026-10-01 15:50:50",
+          "on_hand_diff": -50,
+          "available_diff": -50,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1184,
+          "document_id": 1185,
+          "order_type": "Order",
+          "created_at": "2026-10-03 10:42:02",
+          "on_hand_diff": -100,
+          "available_diff": -100,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1186,
+          "document_id": 1069,
+          "order_type": "Purchase",
+          "created_at": "2026-10-05 11:37:23",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1187,
+          "document_id": 1069,
+          "order_type": "Purchase",
+          "created_at": "2026-10-07 14:31:55",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1188,
+          "document_id": 1072,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-07 14:42:42",
+          "on_hand_diff": 1200,
+          "available_diff": 1200,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1189,
+          "document_id": 1185,
+          "order_type": "Order",
+          "created_at": "2026-10-07 15:52:43",
+          "on_hand_diff": 100,
+          "available_diff": 100,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1190,
+          "document_id": 1191,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 15:53:55",
+          "on_hand_diff": -100,
+          "available_diff": -100,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1192,
+          "document_id": 1182,
+          "order_type": "Order",
+          "created_at": "2026-10-07 16:48:22",
+          "on_hand_diff": 50,
+          "available_diff": 50,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1193,
+          "document_id": 1194,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-07 16:49:39",
+          "on_hand_diff": -50,
+          "available_diff": -50,
+          "variant": {
+            "id": 1043,
+            "sku": "SKU-1044"
+          },
+          "location": {
+            "id": 1028
+          }
+        }
+      ]
+    },
+    {
+      "variant": "1049",
+      "since": "2026-09-28 00:00:00",
+      "complete": true,
+      "rows": [
+        {
+          "id": 1195,
+          "document_id": 1013,
+          "order_type": "Order",
+          "created_at": "2026-09-30 10:07:23",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1049,
+            "sku": "SKU-1050"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1196,
+          "document_id": 1063,
+          "order_type": "Purchase",
+          "created_at": "2026-10-02 10:38:25",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1049,
+            "sku": "SKU-1050"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1197,
+          "document_id": 1198,
+          "order_type": "Order",
+          "created_at": "2026-10-05 16:31:23",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1049,
+            "sku": "SKU-1050"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1199,
+          "document_id": 1065,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-06 10:55:32",
+          "on_hand_diff": 120,
+          "available_diff": 120,
+          "variant": {
+            "id": 1049,
+            "sku": "SKU-1050"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1200,
+          "document_id": 1198,
+          "order_type": "Order",
+          "created_at": "2026-10-07 16:06:29",
+          "on_hand_diff": 30,
+          "available_diff": 30,
+          "variant": {
+            "id": 1049,
+            "sku": "SKU-1050"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1201,
+          "document_id": 1202,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-08 13:35:20",
+          "on_hand_diff": -30,
+          "available_diff": -30,
+          "variant": {
+            "id": 1049,
+            "sku": "SKU-1050"
+          },
+          "location": {
+            "id": 1028
+          }
+        }
+      ]
+    },
+    {
+      "variant": "1053",
+      "since": "2026-09-28 00:00:00",
+      "complete": true,
+      "rows": [
+        {
+          "id": 1203,
+          "document_id": 1015,
+          "order_type": "Order",
+          "created_at": "2026-09-30 17:09:09",
+          "on_hand_diff": -4,
+          "available_diff": -4,
+          "variant": {
+            "id": 1053,
+            "sku": "SKU-1054"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1204,
+          "document_id": 1063,
+          "order_type": "Purchase",
+          "created_at": "2026-10-02 10:38:25",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1053,
+            "sku": "SKU-1054"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1205,
+          "document_id": 1065,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-06 10:55:32",
+          "on_hand_diff": 12,
+          "available_diff": 12,
+          "variant": {
+            "id": 1053,
+            "sku": "SKU-1054"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1206,
+          "document_id": 1207,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-08 12:04:48",
+          "on_hand_diff": -1,
+          "available_diff": -1,
+          "variant": {
+            "id": 1053,
+            "sku": "SKU-1054"
+          },
+          "location": {
+            "id": 1028
+          }
+        }
+      ]
+    },
+    {
+      "variant": "1056",
+      "since": "2026-09-28 00:00:00",
+      "complete": true,
+      "rows": [
+        {
+          "id": 1208,
+          "document_id": 1017,
+          "order_type": "Order",
+          "created_at": "2026-09-30 17:22:06",
+          "on_hand_diff": -1,
+          "available_diff": -1,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1209,
+          "document_id": 1210,
+          "order_type": "Purchase",
+          "created_at": "2026-10-02 12:12:19",
+          "on_hand_diff": 0,
+          "available_diff": 0,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1211,
+          "document_id": 1017,
+          "order_type": "Order",
+          "created_at": "2026-10-02 15:41:52",
+          "on_hand_diff": 1,
+          "available_diff": 1,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1212,
+          "document_id": 1213,
+          "order_type": "Order",
+          "created_at": "2026-10-05 18:02:41",
+          "on_hand_diff": -1,
+          "available_diff": -1,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1214,
+          "document_id": 1213,
+          "order_type": "Order",
+          "created_at": "2026-10-07 16:58:21",
+          "on_hand_diff": 1,
+          "available_diff": 1,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1215,
+          "document_id": 1216,
+          "order_type": "PurchaseReceipt",
+          "created_at": "2026-10-09 09:17:40",
+          "on_hand_diff": 50,
+          "available_diff": 50,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1217,
+          "document_id": 1218,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-09 10:32:25",
+          "on_hand_diff": -1,
+          "available_diff": -1,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1219,
+          "document_id": 1023,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-09 11:16:27",
+          "on_hand_diff": -1,
+          "available_diff": -1,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        },
+        {
+          "id": 1220,
+          "document_id": 1221,
+          "order_type": "StockRemoval",
+          "created_at": "2026-10-09 18:53:08",
+          "on_hand_diff": -1,
+          "available_diff": -1,
+          "variant": {
+            "id": 1056,
+            "sku": "SKU-1057"
+          },
+          "location": {
+            "id": 1028
+          }
+        }
+      ]
+    }
+  ]
+}
