@@ -3,7 +3,7 @@ import {reconcileVerifiedWeights} from '../src/verified-weight-diagnostics.mjs';
 import {waitingResolutionWorker} from '../src/resolution-waiting.mjs';
 test('real SQL reconciliation covers replacement, newer failures, variant conflicts, no-audit and repeat',async()=>{
  const db=new PGlite();try{
- await db.exec(`CREATE TABLE orders(id text primary key,channel text default 'amazon',archived boolean default false,issue text,erp_live jsonb default '{}',updated_at timestamptz default now()-interval '1 hour');
+ await db.exec(`CREATE TABLE orders(id text primary key,channel text default 'amazon',archived boolean default false,issue text,erp_live jsonb default '{}',received_at timestamptz default now()-interval '1 hour');
  CREATE TABLE mappings(channel text,source_sku text,target_sku text);CREATE TABLE lines(order_id text,target_sku text,source_sku text,source_payload jsonb);
  CREATE TABLE erplain_product_bindings(sku text,live_variant_id text,product jsonb,verified_at timestamptz);
  CREATE TABLE resolution_jobs(id text,order_id text,status text,action text,stage text,payload jsonb,error text,created_at timestamptz,updated_at timestamptz);
