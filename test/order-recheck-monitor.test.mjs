@@ -39,8 +39,8 @@ test('real PostgreSQL triggers enqueue immediate checks; periodic checks persist
   const monitor=orderRecheckMonitor(db,{}, {readProduct:async()=>{reads++;active++;max=Math.max(max,active);await Promise.resolve();active--;return {usable:false,status:'missing'};},readDocuments:async()=>{docs++;return {};},cacheProduct:()=>assert.fail('no active product')});
   await monitor.runLocal();const first=(await db.query('SELECT * FROM order_recheck_monitor ORDER BY order_id')).rows;
   assert.equal(first.length,2);assert.ok(first.every(r=>r.state.lastCheck&&r.state.nextCheck&&r.checked===r.requested));
-  await monitor.runExternal();assert.equal(reads,1);assert.equal(docs,2);assert.ok(max<=2);
-  await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second'");await monitor.runExternal();assert.equal(reads,1);assert.equal(docs,4);
+  await monitor.runExternal();assert.equal(reads,1);assert.equal(docs,0);assert.ok(max<=2);
+  await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second'");await monitor.runExternal();assert.equal(reads,1);assert.equal(docs,0);
   await db.query("UPDATE correction_jobs SET status='complete' WHERE order_id='a'");
   await db.query("INSERT INTO correction_jobs VALUES('a','complete','{}',null)");const queued=(await db.query("SELECT requested,checked FROM order_recheck_monitor WHERE order_id='a'")).rows[0];assert.ok(queued.requested>queued.checked);
   await monitor.runLocal();assert.equal((await db.query("SELECT requested=checked ok FROM order_recheck_monitor WHERE order_id='a'")).rows[0].ok,true);
@@ -79,5 +79,24 @@ test('mapping correction immediately rechecks all matching orders using current 
  assert.ok((await db.query('SELECT state FROM order_recheck_monitor ORDER BY order_id')).rows.every((r,i)=>r.state.progress!==previous[i]));
  const rows=(await db.query("SELECT l.quantity*m.target_qty/m.source_qty quantity FROM lines l JOIN mappings m ON m.source_sku=l.source_sku")).rows;assert.ok(rows.every(r=>Number(r.quantity)===20));
  await db.query("UPDATE mappings SET target_qty=2");await m.runLocal();
+ }finally{await db.close();}
+});
+
+test('bounded resource batches keep unread SKUs due and eventually cover every order without repeated provider reads',async()=>{
+ const db=await fixture();try{
+ await db.query("UPDATE lines SET source_sku='Y' WHERE order_id='b'");await db.query("INSERT INTO orders(id,reference,issue) VALUES('c','C','SKU Erplain introuvable')");await db.query("INSERT INTO lines(id,order_id,source_sku,quantity) VALUES('3','c','Z',1)");
+ const reads=[];const m=orderRecheckMonitor(db,{}, {maxSkuReads:2,readProduct:async(api,sku)=>{reads.push(sku);return {usable:false,status:'missing'};},readDocuments:()=>assert.fail('SKU-only problem must not search unrelated documents')});
+ await m.runLocal();await m.runExternal();assert.equal(reads.length,2);
+ const pending=(await db.query("SELECT order_id,state FROM order_recheck_monitor WHERE state->>'externalResult' LIKE '%partiels%'")).rows;assert.equal(pending.length,1);
+ await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second' WHERE order_id=$1",[pending[0].order_id]);await m.runExternal();assert.deepEqual(reads.sort(),['X','Y','Z']);
+ }finally{await db.close();}
+});
+
+test('old review errors remain history and never reopen a command after its latest correction completes',async()=>{
+ const db=await fixture();try{
+ await db.query("UPDATE orders SET issue=null WHERE id='a'");
+ await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,payload,error,created_at) VALUES('old','a','old','resume-erp','review','{}','Obsolete stock error',now()-interval '1 hour'),('new','a','new','resume-erp','complete','{}',null,now())");
+ const m=orderRecheckMonitor(db,{});await m.runLocal();assert.equal((await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state.blocked,false);
+ await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,payload,error,created_at) VALUES('current','a','current','resume-erp','review','{}','Current document mismatch',now()+interval '1 second')");await m.runLocal();assert.equal((await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state.result,'Current document mismatch');
  }finally{await db.close();}
 });
