@@ -23,8 +23,8 @@ test('commercial platform states do not create a diagnostic or next-step suspens
 });
 
 async function fixture(){
- const db=new PGlite();db.withLocks=async(keys,fn)=>fn();
- await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
+ const db=new PGlite();db.withLocks=async(keys,fn)=>fn();db.transaction=fn=>fn(db);
+ await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
  CREATE TABLE erp_live_jobs(order_id text,status text,error text,state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text);
  CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,created_at timestamptz DEFAULT now());
  CREATE TABLE correction_jobs(order_id text,status text,result jsonb,error text);
@@ -53,5 +53,31 @@ test('suspended orders remain visible locally and never trigger external resume 
  const monitor=orderRecheckMonitor(db,{}, {readProduct:()=>assert.fail('suspended SKU read'),readDocuments:()=>assert.fail('suspended document read')});await monitor.run();
  assert.equal((await db.query('SELECT count(*)::int n FROM resolution_jobs')).rows[0].n,0);
  assert.ok((await db.query('SELECT state FROM order_recheck_monitor')).rows.every(r=>r.state.result.includes('suspendue')));
+ }finally{await db.close();}
+});
+
+test('a slow external read never delays local checks; automatic resume respects runtime controls and deduplicates jobs',async()=>{
+ const db=await fixture();try{
+ await db.query(`UPDATE orders SET issue='Reprise historique : BL non cree',erp_live='{"phase":"historical_review","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
+ let release,started;const begin=new Promise(r=>started=r),pause=new Promise(r=>release=r);let allow=false;
+ const m=orderRecheckMonitor(db,{}, {canResume:()=>allow,readProduct:async()=>{started();await pause;return {usable:false,status:'missing'};},readDocuments:async()=>({})});
+ await m.runLocal();const reading=m.runExternal();await begin;
+ await db.query("INSERT INTO correction_jobs VALUES('a','complete','{}',null)");await m.runLocal();
+ assert.equal((await db.query("SELECT requested=checked ok FROM order_recheck_monitor WHERE order_id='a'")).rows[0].ok,true);
+ release();await reading;assert.equal((await db.query('SELECT count(*)::int n FROM resolution_jobs')).rows[0].n,0);
+ allow=true;await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second'");await m.runExternal();
+ assert.equal((await db.query('SELECT count(*)::int n FROM resolution_jobs')).rows[0].n,2);
+ await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second'");await m.runExternal();
+ assert.equal((await db.query('SELECT count(*)::int n FROM resolution_jobs')).rows[0].n,2);
+ }finally{await db.close();}
+});
+test('mapping correction immediately rechecks all matching orders using current quantities instead of cached quantities',async()=>{
+ const db=await fixture();try{
+ await db.query("UPDATE lines SET quantity=20,target_sku='OLD',target_quantity=3000");const m=orderRecheckMonitor(db,{});await m.runLocal();const previous=(await db.query('SELECT state FROM order_recheck_monitor ORDER BY order_id')).rows.map(r=>r.state.progress);
+ await db.query("INSERT INTO mappings VALUES('temu','X','CURRENT',1,1)");
+ assert.ok((await db.query('SELECT requested,checked FROM order_recheck_monitor')).rows.every(r=>r.requested>r.checked));await m.runLocal();
+ assert.ok((await db.query('SELECT state FROM order_recheck_monitor ORDER BY order_id')).rows.every((r,i)=>r.state.progress!==previous[i]));
+ const rows=(await db.query("SELECT l.quantity*m.target_qty/m.source_qty quantity FROM lines l JOIN mappings m ON m.source_sku=l.source_sku")).rows;assert.ok(rows.every(r=>Number(r.quantity)===20));
+ await db.query("UPDATE mappings SET target_qty=2");await m.runLocal();
  }finally{await db.close();}
 });
