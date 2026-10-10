@@ -103,3 +103,13 @@ test('old review errors remain history and never reopen a command after its late
 });
 
 test('resolved blockers retain visible dated follow-up and unconfirmed previews never become false completion',()=>{const blocked=monitoringObservation({issue:'Stock insuffisant'},{});const resolved=monitoringObservation({issue:null,label_status:'production_ready'},blocked);assert.equal(resolved.blocked,false);assert.equal(resolved.followUp,true);assert.equal(resolved.alert,false);const preview=monitoringObservation({issue:null,latest_resolution:{action:'equivalent-preview',status:'complete',error:null,result:{replacementSku:'NEW'}}},{});assert.equal(preview.blocked,true);assert.match(preview.nextStep,/Confirmer/);});
+
+test('automatic historical resume preserves an unconfirmed preview and rechecks suspension inside the transaction',async()=>{
+ const db=await fixture();try{
+ await db.query(`UPDATE orders SET issue='Reprise historique : BL non cree',erp_live='{"phase":"historical_review","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
+ await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result) VALUES('preview','a','preview','equivalent-preview','complete','{\"replacementSku\":\"NEW\"}')");
+ const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:false,status:'missing'}),readDocuments:async()=>({})});await m.runLocal();
+ const transaction=db.transaction;db.transaction=async fn=>{await db.query("UPDATE orders SET suspension='{\"active\":true}' WHERE id='b'");return transaction(fn);};await m.runExternal();
+ assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);assert.equal((await db.query("SELECT result->>'replacementSku' sku FROM resolution_jobs WHERE id='preview'")).rows[0].sku,'NEW');
+ }finally{await db.close();}
+});
