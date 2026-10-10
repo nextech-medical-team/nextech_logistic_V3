@@ -21,7 +21,7 @@ export async function reconcileVerifiedWeights(db,onlySku=null,onlyOrder=null){
  const bindings=(await db.query('SELECT * FROM erplain_product_bindings'+(onlySku?' WHERE sku=$1':` b WHERE b.verified_at>now()-interval '24 hours' AND (
   EXISTS(SELECT 1 FROM resolution_jobs j WHERE j.status='review' AND j.error LIKE '%'||b.sku||'%' AND (j.error LIKE '%Poids non renseigné%' OR j.error LIKE '%Poids manquant%' OR j.error LIKE '%Unité de poids%'))
   OR EXISTS(SELECT 1 FROM orders o JOIN lines l ON l.order_id=o.id WHERE coalesce(l.target_sku,(SELECT m.target_sku FROM mappings m WHERE m.channel=o.channel AND m.source_sku=l.source_sku),l.source_sku)=b.sku AND (o.issue LIKE '%Poids%' OR o.issue LIKE '%Unité de poids%' OR (o.erp_live->'lastAudit'->'issues')::text LIKE '%Poids%'))
-  OR EXISTS(SELECT 1 FROM erp_live_jobs e JOIN lines l ON l.order_id=e.order_id WHERE coalesce(l.target_sku,(SELECT m.target_sku FROM mappings m WHERE m.channel=o.channel AND m.source_sku=l.source_sku),l.source_sku)=b.sku AND (e.error LIKE '%Poids%' OR e.error LIKE '%Unité de poids%'))
+  OR EXISTS(SELECT 1 FROM erp_live_jobs e JOIN orders o ON o.id=e.order_id JOIN lines l ON l.order_id=e.order_id WHERE coalesce(l.target_sku,(SELECT m.target_sku FROM mappings m WHERE m.channel=o.channel AND m.source_sku=l.source_sku),l.source_sku)=b.sku AND (e.error LIKE '%Poids%' OR e.error LIKE '%Unité de poids%'))
  )`),onlySku?[onlySku]:[])).rows;
  for(const b of bindings){
   if(!verifiedWeightBinding(b))continue;

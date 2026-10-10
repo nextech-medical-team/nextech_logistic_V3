@@ -38,6 +38,7 @@ for(const fail of [false,true])test('real deferred completion checks current sta
  const j={id:'j',order_id:'o',action:'recover-pdf',status:'waiting',result:{pdfOnly:true}},queries=[];let orderReads=0;
  const db={query:async(sql,args)=>{
   queries.push(sql);
+  if(sql.startsWith('SELECT o.id,o.issue'))return {rows:[]};
   if(sql.startsWith('SELECT * FROM resolution_jobs WHERE status='))return {rows:[j]};
   if(sql==='SELECT * FROM orders WHERE id=$1'){orderReads++;if(fail&&orderReads===2)throw Error('Snapshot indisponible');return {rows:[{id:'o',archived:false,label_status:'production_ready'}]};}
   if(sql.startsWith('SELECT * FROM erplain_product_bindings'))return {rows:[]};
