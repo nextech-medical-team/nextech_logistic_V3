@@ -89,7 +89,7 @@ async function orders(){
 
  if((document.querySelector('[data-inline-editing]')||(window.getSelection()?.toString()&&$('order-rows').contains(window.getSelection()?.anchorNode))))return;const requestVersion=++orderRequestVersion;
 
- const params=new URLSearchParams({page,pageSize:$('orders-page-size')?.value||50,search:$('search').value,sort:orderSort,direction:orderDirection});for(const key of ['channel','status','carrier','country','tracking-filter'])for(const v of [...$(key).selectedOptions].map(o=>o.value).filter(Boolean))params.append(key==='tracking-filter'?'tracking':key,v);for(const key of ['from','to'])if($(key).value)params.set(key,$(key).value);for(const option of [...($('problem-type')?.selectedOptions||[])])params.append('problem',option.value);const packet=preparedOrderResponse?.query===params.toString()?preparedOrderResponse:null;preparedOrderResponse=null;
+ const params=new URLSearchParams({page,pageSize:$('orders-page-size')?.value||50,search:$('search').value,sort:orderSort,direction:orderDirection});for(const key of ['channel','status','carrier','country','tracking-filter'])for(const v of [...$(key).selectedOptions].map(o=>o.value).filter(Boolean))params.append(key==='tracking-filter'?'tracking':key,v);for(const key of ['from','to'])if($(key).value)params.set(key,$(key).value);for(const option of [...($('problem-type')?.selectedOptions||[])])params.append('problem-label',option.value);const packet=preparedOrderResponse?.query===params.toString()?preparedOrderResponse:null;preparedOrderResponse=null;
 
  const r=packet?.r||await api('/api/orders?'+params);
 

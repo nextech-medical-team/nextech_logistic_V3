@@ -6,7 +6,7 @@ Le dossier `src/` contient le backend et les connecteurs ; `public/` contient l'
 
 Les bases de données, documents, étiquettes, journaux et identifiants de production sont volontairement exclus. Ne jamais connecter un environnement de développement aux services métier réels sans autorisation spécifique.
 
-Le serveur publié ne contient pas les dossiers `scripts/` et `test/`. Les commandes `npm test` et `npm run check` du package d'origine référencent des scripts absents de cet export. Les vérifications syntaxiques ont été exécutées séparément ; cet export ne constitue pas une validation fonctionnelle complète.
+L'export initial du serveur ne contenait pas les dossiers `scripts/` et `test/`. Ils ont depuis été ajoutés : `npm run check` vérifie la syntaxe JavaScript, `npm test` vérifie les filtres de problèmes et les contrôles de publication, et `npm run test:tracking` vérifie la synchronisation et l'export Excel après installation des dépendances. Ces tests isolés ne valident pas les connexions de production.
 
 La publication GitHub ne déclenche pas de déploiement serveur. Les publications et redémarrages V3 restent exclusivement centralisés par la Section 7 via la file commune du projet.
 
