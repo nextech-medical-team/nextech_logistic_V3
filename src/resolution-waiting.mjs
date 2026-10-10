@@ -1,3 +1,4 @@
+import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {advanceEquivalentLabel} from './equivalent-auto-label.mjs';
 import {regenerateProductionLabels} from './label-regeneration.mjs';
 
@@ -7,7 +8,16 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
  let running=false;
 
- const update=async(id,status,stage,result=null,error=null)=>db.query("UPDATE resolution_jobs SET status=$2,stage=$3,result=coalesce($4::jsonb,result),error=$5,updated_at=now() WHERE id=$1 AND status='waiting'",[id,status,stage,result?JSON.stringify(result):null,error]);
+ const update=async(id,status,stage,result=null,error=null)=>{
+  if(status==='complete'){
+   const current=(await db.query('SELECT order_id,result FROM resolution_jobs WHERE id=$1',[id])).rows[0];
+   if(!current)throw Error('Intervention introuvable pendant actualisation');
+   const statusVerification=await refreshCorrectionStatuses(db,current.order_id);
+   result={...(current.result||{}),...(result||{}),statusVerification};
+   if(statusVerification.state==='needs_review')stage='Intervention effectuée · commande à vérifier';
+  }
+  return db.query("UPDATE resolution_jobs SET status=$2,stage=$3,result=coalesce($4::jsonb,result),error=$5,updated_at=now() WHERE id=$1 AND status='waiting'",[id,status,stage,result?JSON.stringify(result):null,error]);
+ };
 
  async function advance(j){
 
@@ -22,7 +32,18 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
      if(erp?.status==='review'){await update(j.id,'review','Erplain à compléter',j.result,erp.error);return;}
 
      const automatic=await advanceEquivalentLabel(db,j);
-     if(automatic.handled)return;
+     if(automatic.handled){
+      const current=(await db.query('SELECT status,result FROM resolution_jobs WHERE id=$1',[j.id])).rows[0];
+      if(current?.status==='complete'){
+       try{
+        const statusVerification=await refreshCorrectionStatuses(db,j.order_id);
+        await db.query("UPDATE resolution_jobs SET result=result||$2::jsonb,stage=$3 WHERE id=$1 AND status='complete'",[j.id,JSON.stringify({statusVerification}),statusVerification.state==='needs_review'?'Intervention effectuée · commande à vérifier':'Terminé']);
+       }catch(e){
+        await db.query("UPDATE resolution_jobs SET status='review',stage='Intervention effectuée · actualisation à vérifier',error=$2 WHERE id=$1 AND status='complete'",[j.id,'Actualisation des statuts échouée : '+e.message]);
+       }
+      }
+      return;
+     }
 
      // Other document-only corrections retain their separate label decision.
 
