@@ -1,43 +1,42 @@
-import {readHistoricalStock} from './historical-stock-proof.mjs';
-import {reconcileFullStock} from './stock-cycle.mjs';
 import {createHash} from 'node:crypto';
-const fields='id label status created_at update_stock line_items{id type quantity variant{id sku track_inventory} location{id}} shipping_orders(first:100){data{id label status update_stock line_items{parent_id type quantity variant{id} location{id}}} paginatorInfo{hasMorePages}}';
-export function observationFingerprint(o){const s=o.erp_live||{},p=o.source_payload||{};return createHash('sha256').update(JSON.stringify({id:o.id,reference:o.reference,erp:{phase:s.phase,bc:s.bc,bl:s.bl,stockDocument:s.stockDocument,previousCancelledCycle:s.previousCancelledCycle,equivalentItems:s.equivalentItems,stockCreationAttemptedAt:s.stockCreationAttemptedAt,stockCreationOutcome:s.stockCreationOutcome,stockPendingVariants:s.stockPendingVariants},hold:p.selectedReimport,cancelled:p.cancelled,cancelledAt:p.cancelledAt,temuStatus:p.temuOrderDetail?.parentOrderMap?.parentOrderStatus,correction:p.marketplacePendingCorrection,suspension:o.suspension,archived:o.archived,partial:o.partial_mode,tracking:o.tracking_status,label:o.label_status,held:o.resolution_pending_resume,issue:o.issue})).digest('hex');}
-export function observationApi(api,{timeoutMs=600000}={}){const ledgers=new Map(),deadline=Date.now()+timeoutMs;let expired=false;return Object.freeze({async request(query,variables){const q=String(query).replace(/#[^\n]*/g,'').trim();if(!/^query\s+[A-Za-z][A-Za-z0-9_]*\s*(?:\(|\{)/.test(q)||/\b(mutation|subscription)\b/.test(q))throw Error('Lecture Erplain requise');const remaining=deadline-Date.now();if(expired||remaining<=0)throw Error('Délai de lecture dépassé : nouvelle vérification programmée');let timer,result;try{result=await Promise.race([api.request(query,variables),new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;reject(Error('Délai de lecture dépassé : nouvelle vérification programmée'));},remaining);})]);}finally{clearTimeout(timer);}
- if(result?.InventoryLogs){const key=JSON.stringify([q,variables?.where]);if(variables?.page===1)ledgers.set(key,new Set());const seen=ledgers.get(key)||new Set();for(const row of result.InventoryLogs.data||[]){if(!row.id||seen.has(String(row.id)))throw Error('Journal incohérent : pagination répétée');seen.add(String(row.id));}ledgers.set(key,seen);}return result;
-}});}
+import {readFile} from 'node:fs/promises';
+import path from 'node:path';
+import {temuApi} from './temu-api.mjs';
+import {loadShopVault} from './temu-shop-vault.mjs';
+import {readTemuOrderDiagnostic} from './temu-order-diagnostic.mjs';
+import {carrierState} from './status-policy.mjs';
+const pre=new Set(['LAST-MILE MANIFEST','LABEL CREATED','SHIPMENT INFORMATION RECEIVED']);
+const allowed=new Set(['bg.open.accesstoken.info.get','bg.order.detail.v2.get','bg.logistics.shipment.v2.get','bg.logistics.shipment.result.get','temu.track.trackinginfo.get']);
+export function observationFingerprint(o){const p=o.source_payload||{};return createHash('sha256').update(JSON.stringify({id:o.id,reference:o.reference,mall:p.mallId,packages:p.selectedReimport?.preservedPackages,hold:p.selectedReimport,labels:o.label_status,tracking:o.tracking_status,suspension:o.suspension,archived:o.archived,pending:o.resolution_pending_resume,issue:o.issue})).digest('hex');}
+export function observationApi(api,{timeoutMs=600000,shouldStop=()=>false}={}){const deadline=Date.now()+timeoutMs;let expired=false;const stopped=()=>Object.assign(Error('Lecture interrompue pour arrêt propre'),{code:'STOPPED'});return Object.freeze({async read(type,data){if(!allowed.has(type))throw Error('Lecture du suivi uniquement : opération interdite');if(shouldStop())throw stopped();const remaining=deadline-Date.now();if(expired||remaining<=0)throw Error('Délai de lecture dépassé');let timer,poll;try{return await Promise.race([api.read(type,data),new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;reject(Error('Délai de lecture dépassé'));},remaining);poll=setInterval(()=>{if(shouldStop())reject(stopped());},1000);})]);}finally{clearTimeout(timer);clearInterval(poll);}}});}
+export function transportClients(directory,{factory=temuApi,shops=loadShopVault,shouldStop=()=>false,loadConfig=async()=>JSON.parse((await readFile(path.join(directory,'temu-production.json'),'utf8')).replace(/^\uFEFF/,''))}={}){
+ const cache=new Map();
+ const client=c=>{const raw=factory(c),secrets=[c.TEMU_APP_KEY,c.TEMU_APP_SECRET,c.TEMU_ACCESS_TOKEN].filter(Boolean);return {async read(type,data){try{return await raw.read(type,data);}catch(e){let message=String(e.message||'Lecture TEMU interrompue');for(const secret of secrets)message=message.replaceAll(secret,'[secret]');throw Object.assign(Error(message.slice(0,500)),{retryAfter:e.retryAfter});}}};};
+ return {async forOrder(o){const deadline=Date.now()+600000,mall=String(o.source_payload?.mallId||'');if(!/^\d+$/.test(mall))throw Error('Boutique TEMU non identifiée');const cached=cache.get(mall);if(cached&&Date.now()-cached.at<300000)return cached.api;
+ const config=await loadConfig(),country=String(o.address?.country||'').toUpperCase();let configs=[config],vaultLoaded=false;
+ for(let i=0;i<configs.length;i++){if(shouldStop()||i>=20||Date.now()>=deadline)throw Error('Connexion aux boutiques interrompue : nouvelle lecture nécessaire');const c=configs[i];let identity;const api=observationApi(client(c),{timeoutMs:deadline-Date.now(),shouldStop});try{identity=await api.read('bg.open.accesstoken.info.get',{});}catch{/* Keep the error generic: never retain credential content. */}
+ if(String(identity?.mallId)===mall){cache.set(mall,{api,at:Date.now()});return api;}
+ const associated=identity?.associatedMallTokenList?.filter(m=>String(m.mallId)===mall&&m.accessToken)||[];
+ if(associated.length===1){const candidate=observationApi(client({...c,TEMU_ACCESS_TOKEN:associated[0].accessToken}),{timeoutMs:Math.max(1,deadline-Date.now()),shouldStop}),verified=await candidate.read('bg.open.accesstoken.info.get',{});if(String(verified?.mallId)!==mall)throw Error('Identité de boutique associée incohérente');cache.set(mall,{api:candidate,at:Date.now()});return candidate;}
+ if(!vaultLoaded){vaultLoaded=true;const entries=await shops(directory);configs.push(...entries.filter(m=>!country||String(m.country).toUpperCase()===country).map(m=>({...config,TEMU_APP_KEY:m.appKey,TEMU_APP_SECRET:m.appSecret,TEMU_ACCESS_TOKEN:m.accessToken})));}
+ }
+ throw Error('Accès TEMU non vérifié pour la boutique de cette commande');}};
+}
 export async function observeMovement(api,order){
- api=observationApi(api);const state=order.erp_live||{};
- const result={checkedAt:new Date().toISOString(),sourceFingerprint:observationFingerprint(order),writeAllowed:false,resumeAllowed:false,proof:null,documents:[],reasonCode:null,detail:null};
- const references=[String(order.reference||''),'V3:'+order.id];
- const candidates=(await api.request('query MovementWatchCandidates($where:QueryOrdersWhereWhereConditions){Orders(first:100,where:$where){data{id label status external_reference} paginatorInfo{hasMorePages}}}',{where:{column:'EXTERNAL_REFERENCE',operator:'IN',value:references}})).Orders;
- if(!Array.isArray(candidates?.data)||candidates.paginatorInfo?.hasMorePages!==false)throw Error('Recherche BC incomplète');
- const known=[state.bc,...(order.source_payload?.selectedReimport?.previousBC||[]),state.previousCancelledCycle?.bc].filter(b=>b?.id);
- const ids=[...new Set([...known.map(b=>String(b.id)),...candidates.data.map(b=>String(b.id))])];
- if(ids.length>10)throw Error('Historique BC trop volumineux : contrôle requis');
- if(!ids.length)return {...result,reasonCode:'bc_not_identified',detail:'Aucun BC identifié : absence de sortie non démontrée. Rapprochement historique nécessaire.'};
- const labels=[...new Set(['V3FS-'+order.id,...ids.map(id=>'V3FS-'+order.id+'-BC'+id)])];
- const stocks=(await api.request('query MovementWatchStockDocuments($where:QueryStockRemovalsWhereWhereConditions!){StockRemovals(first:100,where:$where){data{id label status update_stock notes line_items{quantity variant{id} location{id}}} paginatorInfo{hasMorePages}}}',{where:{column:'LABEL',operator:'IN',value:labels}})).StockRemovals;
- if(!Array.isArray(stocks?.data)||stocks.paginatorInfo?.hasMorePages!==false)throw Error('Recherche mouvements incomplète');
- for(const id of ids){if(!/^\d+$/.test(id))throw Error('Identité BC invalide');const bc=(await api.request(`query MovementWatchReadBC($id:ID!){Order(id:$id){${fields}}}`,{id})).Order;if(String(bc?.id)!==id)throw Error('BC demandé non reçu');result.documents.push(bc);}
- const active=result.documents.filter(b=>b.status==='active');
- if(active.length>1)return {...result,reasonCode:'multiple_active_bc',detail:'Plusieurs BC actifs : rapprochement individuel requis.'};
- const current=state.bc?.id?result.documents.find(b=>String(b.id)===String(state.bc.id)):active[0];
- if(!current||current.status==='cancelled')return {...result,reasonCode:'cancelled_bc',detail:'BC historique annulé : conserver l’arrêt métier et vérifier les compensations de stock.'};
- if(current.update_stock===true){
-  if(stocks.data.length||state.stockCreationAttemptedAt)return {...result,reasonCode:'additional_stock_history',detail:'BC gérant le stock et sortie séparée ou tentative connue : risque de double déduction à rapprocher.'};
-  if(state.bl?.id)return {...result,reasonCode:'historical_bl_to_reconcile',detail:'BL historique identifié : contrôler son journal et sa relation au BC avant continuation.'};
-  const extra=[...(state.historicalStockProof?.quantities||[]).map(l=>l.key.split(':')[0]),...(state.stockPendingVariants||[])];
-  const proof=(await readHistoricalStock(api,current,{additionalVariants:extra})).proof;
-  return {...result,reasonCode:'historical_deduction_verified',detail:'Déduction de stock de l’ancien BC confirmée. Aucune nouvelle sortie ; reprise historique et autres motifs à vérifier.',proof};
+ api=observationApi(api);const result={checkedAt:new Date().toISOString(),domain:'physical_parcel_tracking',writeAllowed:false,resumeAllowed:false,proof:null,reasonCode:null,detail:null};
+ const known=order.source_payload?.selectedReimport?.preservedPackages||[];
+ const d=await readTemuOrderDiagnostic(api,order.reference,{knownPackages:known});
+ if(d.status===3||d.cancellationRequested)return {...result,reasonCode:d.status===3?'order_cancelled':'cancellation_requested',detail:d.status===3?'Commande TEMU annulée : rapprochement du suivi nécessaire, reprise conservée à l’arrêt.':'Annulation demandée chez TEMU : reprise conservée à l’arrêt.'};
+ if(d.errors.length||!d.packages.length)return {...result,reasonCode:'read_incomplete',detail:'Suivi du colis non vérifiable : '+(d.errors.map(e=>e.message).join(' ; ')||'aucun colis identifié'),proof:{sourceStatus:d.status,complete:false}};
+ const parcels=[];
+ for(const p of d.packages){const t=await api.read('temu.track.trackinginfo.get',{packageSn:p.packageSn});if(t?.packageSn!==p.packageSn||String(t.trackingNum)!==String(p.trackingNumber)||!Array.isArray(t.trackingInfo)||!t.trackingInfo.length)throw Error('Suivi du colis non vérifiable : identité ou événements manquants');
+ const seen=new Set(),events=t.trackingInfo.map(e=>{const raw=String(e.logisticsUpdatedAt||''),at=/^\d{10,13}$/.test(raw)?new Date(Number(raw)*(raw.length===10?1000:1)).toISOString():raw;if(!Number.isFinite(Date.parse(at))||Date.parse(at)>Date.now()+300000)throw Error('Suivi du colis non vérifiable : date invalide');const row={code:String(e.logisticsStatus||''),label:String(e.statusText||'').slice(0,300),at};const key=JSON.stringify(row);if(seen.has(key))throw Error('Suivi du colis non vérifiable : événements dupliqués');seen.add(key);return row;});
+ const states=events.map(e=>carrierState('temu',e)),contradiction=events.some(e=>pre.has(e.code.toUpperCase())&&['shipped','delivered','cancelled','exception'].includes(carrierState('temu',{label:e.label})));
+ const preparationOnly=!contradiction&&events.every((e,i)=>pre.has(e.code.toUpperCase())&&states[i]==='not_shipped');
+ parcels.push({packageSn:p.packageSn,tracking:String(p.trackingNumber),carrier:String(p.shippingCompanyName||''),labelStatus:Number(p.shippingLabelStatus),preparationOnly,states,events});
  }
- if(stocks.data.length&&state.bc?.id&&state.bl?.id&&state.phase==='creating_stock'){
-  const bl=(await api.request('query MovementWatchCycleBL($id:ID!){ShippingOrder(id:$id){id status update_stock line_items{type quantity variant{id} location{id}}}}',{id:String(state.bl.id)})).ShippingOrder;
-  if(String(bl?.id)!==String(state.bl.id))throw Error('BL demandé non reçu');
-  const items=state.equivalentItems||current.line_items.filter(l=>l.type==='normal');
-  const stock=await reconcileFullStock(api,{...order,items},{allowCreate:false,allowRecoverMissing:false});
-  if(stock)return {...result,reasonCode:'cycle_movement_verified',detail:'Mouvement du cycle actuel vérifié : reprise possible uniquement si les gardes métier existantes l’autorisent.',proof:{stock,bcId:String(state.bc.id),blId:String(state.bl.id)}};
- }
- if(stocks.data.length)return {...result,reasonCode:'stock_document_found',detail:'Mouvement de stock retrouvé : contrôler les quantités, le BL et les anciens cycles avant toute reprise.',stockDocuments:stocks.data};
- return {...result,reasonCode:'absence_not_proven',detail:'Aucun mouvement retrouvé par ces références ; cela ne prouve pas l’absence de sortie. Vérification historique maintenue.'};
+ const proof={sourceStatus:d.status,complete:true,parcels,originalTrackingGuardPasses:parcels.every(p=>p.preparationOnly),universalNoMovementCertificate:false};
+ if(proof.originalTrackingGuardPasses)return {...result,reasonCode:'preparation_only_observed',detail:'Suivi transport relu : seuls des événements de préparation sont observés. Reprise historique et autres contrôles à valider ; suspension conservée.',proof};
+ const physical=parcels.some(p=>p.states.some(s=>['shipped','delivered'].includes(s)));
+ return {...result,reasonCode:physical?'physical_progress':'tracking_review',detail:physical?'Colis pris en charge ou livré : suivi uniquement, aucune nouvelle préparation déduite.':'Suivi du colis non vérifiable : événement inconnu, contradictoire ou incident à rapprocher.',proof};
 }

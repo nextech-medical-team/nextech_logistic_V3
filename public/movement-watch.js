@@ -2,10 +2,10 @@
   'use strict';
   const app=document.getElementById('app'),main=app?.querySelector('main');
   if(!app||!main)return;
-  const panel=document.createElement('section');panel.id='movement-watch-panel';panel.className='panel padded';panel.hidden=true;panel.setAttribute('aria-label','Vérification des mouvements de stock');
-  const title=document.createElement('h2');title.textContent='Vérification des mouvements de stock';
+  const panel=document.createElement('section');panel.id='movement-watch-panel';panel.className='panel padded';panel.hidden=true;panel.setAttribute('aria-label','Vérification du suivi des colis TEMU');
+  const title=document.createElement('h2');title.textContent='Vérification du suivi des colis TEMU';
   const summary=document.createElement('p');summary.setAttribute('role','status');
-  const cadence=document.createElement('p');cadence.textContent='Lecture des preuves toutes les 15 minutes · contrôle de la surveillance toutes les 5 minutes · alerte après une heure. Les suspensions et les étiquettes sont préservées.';
+  const cadence=document.createElement('p');cadence.textContent='Suivi du déplacement des colis relu toutes les 15 minutes · contrôle de la surveillance toutes les 5 minutes · alerte après une heure. Les suspensions et les étiquettes sont préservées. Un statut de préparation ne certifie pas une absence physique de mouvement.';
   const details=document.createElement('details'),toggle=document.createElement('summary'),list=document.createElement('div');toggle.textContent='Commandes suivies et prochaines vérifications';details.append(toggle,list);panel.append(title,summary,cadence,details);
   const style=document.createElement('style');style.textContent='#movement-watch-panel{margin-bottom:18px}#movement-watch-panel details{margin-top:12px}#movement-watch-panel article{padding:12px 0;border-top:1px solid #dbe5e5;overflow-wrap:anywhere}#movement-watch-panel p{line-height:1.5}#movement-watch-panel .movement-watch-alert{color:#8a4500;font-weight:700}#movement-watch-panel button{margin-top:8px;max-width:100%}';document.head.append(style);main.querySelector('header')?.after(panel);
   let busy=false,lastKey='';
