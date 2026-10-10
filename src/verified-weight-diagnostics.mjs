@@ -20,6 +20,7 @@ export async function reconcileVerifiedWeights(db,onlySku=null,onlyOrder=null){
  const bindings=(await db.query('SELECT * FROM erplain_product_bindings'+(onlySku?' WHERE sku=$1':` b WHERE b.verified_at>now()-interval '24 hours' AND (
   EXISTS(SELECT 1 FROM resolution_jobs j WHERE j.status='review' AND j.error LIKE '%'||b.sku||'%' AND (j.error LIKE '%Poids non renseigné%' OR j.error LIKE '%Poids manquant%' OR j.error LIKE '%Unité de poids%'))
   OR EXISTS(SELECT 1 FROM orders o JOIN lines l ON l.order_id=o.id WHERE coalesce(l.target_sku,l.source_sku)=b.sku AND (o.issue LIKE '%Poids%' OR o.issue LIKE '%Unité de poids%' OR (o.erp_live->'lastAudit'->'issues')::text LIKE '%Poids%'))
+  OR EXISTS(SELECT 1 FROM erp_live_jobs e JOIN lines l ON l.order_id=e.order_id WHERE coalesce(l.target_sku,l.source_sku)=b.sku AND (e.error LIKE '%Poids%' OR e.error LIKE '%Unité de poids%'))
  )`),onlySku?[onlySku]:[])).rows;
  for(const b of bindings){
   if(!verifiedWeightBinding(b))continue;
@@ -32,15 +33,16 @@ export async function reconcileVerifiedWeights(db,onlySku=null,onlyOrder=null){
    AND NOT EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status='processing')
    AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id AND c.status IN ('creating','awaiting_pdf'))`,[b.sku,String(b.live_variant_id),onlyOrder])).rows;
   for(const row of rows)await db.transaction(async tx=>{
-   const o=(await tx.query('SELECT id,issue,erp_live FROM orders WHERE id=$1 FOR UPDATE',[row.id])).rows[0];if(!o)return;
+   const o=(await tx.query('SELECT id,issue,erp_live,updated_at FROM orders WHERE id=$1 FOR UPDATE',[row.id])).rows[0];if(!o)return;
    const proof=(await tx.query('SELECT * FROM erplain_product_bindings WHERE sku=$1 FOR SHARE',[b.sku])).rows[0];
    if(!verifiedWeightBinding(proof)||String(proof.live_variant_id)!==String(b.live_variant_id))return;
-   const lines=(await tx.query('SELECT target_sku,source_sku,source_payload FROM lines WHERE order_id=$1',[o.id])).rows;
+   const lines=(await tx.query('SELECT target_sku,source_sku,source_payload FROM lines WHERE order_id=$1 FOR SHARE',[o.id])).rows;
    if(lines.some(l=>(l.target_sku||l.source_sku)===b.sku&&l.source_payload?.erplainSourceVariantId!=null&&String(l.source_payload.erplainSourceVariantId)!==String(b.live_variant_id)))return;
    const audit=o.erp_live?.lastAudit;
-   if(audit&&Date.parse(proof.verified_at)>Date.parse(audit.at)){
-    const issue=withoutVerifiedWeight(o.issue,b.sku),issues=(audit.issues||[]).map(x=>withoutVerifiedWeight(x,b.sku)).filter(Boolean);
-    if(issue!==o.issue||JSON.stringify(issues)!==JSON.stringify(audit.issues||[]))await tx.query('UPDATE orders SET issue=$2,erp_live=$3 WHERE id=$1',[o.id,issue,JSON.stringify({...o.erp_live,lastAudit:{...audit,issues,weightReconciledAt:new Date().toISOString()}})]);
+   if(Date.parse(proof.verified_at)>Date.parse(audit?.at||o.updated_at)){
+    const issue=withoutVerifiedWeight(o.issue,b.sku),issues=Array.isArray(audit?.issues)?audit.issues.map(x=>withoutVerifiedWeight(x,b.sku)).filter(Boolean):audit?.issues;
+    const live=audit?{...o.erp_live,lastAudit:{...audit,issues,weightReconciledAt:new Date().toISOString()}}:o.erp_live;
+    if(issue!==o.issue||audit&&JSON.stringify(issues)!==JSON.stringify(audit.issues))await tx.query('UPDATE orders SET issue=$2,erp_live=$3 WHERE id=$1',[o.id,issue,JSON.stringify(live)]);
    }
    const jobs=(await tx.query("SELECT id,action,error,payload,created_at,updated_at FROM resolution_jobs WHERE order_id=$1 AND status='review' FOR UPDATE",[o.id])).rows;
    let changed=0;

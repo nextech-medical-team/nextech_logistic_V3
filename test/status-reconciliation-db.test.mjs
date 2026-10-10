@@ -3,7 +3,7 @@ import {reconcileVerifiedWeights} from '../src/verified-weight-diagnostics.mjs';
 import {waitingResolutionWorker} from '../src/resolution-waiting.mjs';
 test('real SQL reconciliation covers replacement, newer failures, variant conflicts, no-audit and repeat',async()=>{
  const db=new PGlite();try{
- await db.exec(`CREATE TABLE orders(id text primary key,archived boolean default false,issue text,erp_live jsonb default '{}');
+ await db.exec(`CREATE TABLE orders(id text primary key,archived boolean default false,issue text,erp_live jsonb default '{}',updated_at timestamptz default now()-interval '1 hour');
  CREATE TABLE lines(order_id text,target_sku text,source_sku text,source_payload jsonb);
  CREATE TABLE erplain_product_bindings(sku text,live_variant_id text,product jsonb,verified_at timestamptz);
  CREATE TABLE resolution_jobs(id text,order_id text,status text,action text,stage text,payload jsonb,error text,created_at timestamptz,updated_at timestamptz);
@@ -26,6 +26,12 @@ test('real SQL reconciliation covers replacement, newer failures, variant confli
  const audits=(await db.query('SELECT * FROM audit')).rows.length;await reconcileVerifiedWeights(db);assert.equal((await db.query('SELECT * FROM audit')).rows.length,audits);
  // Another error is never cleared by an old weight proof.
  assert.ok(jobs.every(j=>j.error.includes('Stock insuffisant')));
+ // A weight error present only in ERP is also eligible; no audit is required.
+ await db.query('INSERT INTO orders(id,issue) VALUES($1,$2)',['erp-only','SKU : Poids manquant']);
+ await db.query('INSERT INTO lines VALUES($1,$2,$2,$3)',['erp-only','SKU',JSON.stringify({erplainSourceVariantId:'12'})]);
+ await db.query('INSERT INTO erp_live_jobs VALUES($1,$2,$3,$4)',['erp-only','review','SKU : Poids non renseigné dans Erplain',old]);
+ await reconcileVerifiedWeights(db);assert.equal((await db.query("SELECT issue FROM orders WHERE id='erp-only'")).rows[0].issue,null);
+ const erp=(await db.query("SELECT status,error FROM erp_live_jobs WHERE order_id='erp-only'")).rows[0];assert.equal(erp.error,null);assert.equal(erp.status,'review');
  }finally{await db.close();}
 });
 for(const fail of [false,true])test('real deferred completion checks current status; read failure stays in review '+fail,async()=>{
