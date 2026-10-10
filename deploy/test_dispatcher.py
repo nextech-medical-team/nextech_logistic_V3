@@ -4,6 +4,12 @@ from unittest.mock import patch
 import dispatcher as d
 
 class DispatcherTests(unittest.TestCase):
+ def test_runuser_uses_absolute_path_with_restricted_environment(self):
+  with patch.object(d.subprocess,'run') as invoke:
+   invoke.return_value.stdout=b''
+   d.guard('check',Path('/tmp/backup'))
+   self.assertEqual(invoke.call_args.args[0][0],'/usr/sbin/runuser')
+  self.assertEqual(d.RUNUSER,'/usr/sbin/runuser')
  def test_health_checks_served_version(self):
   with tempfile.TemporaryDirectory() as td:
    app=Path(td);(app/'public').mkdir();(app/'public/index.html').write_bytes(b'new')

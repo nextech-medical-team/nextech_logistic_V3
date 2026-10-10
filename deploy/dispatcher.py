@@ -14,6 +14,7 @@ APP=Path('/opt/nextech/current')
 REPO=STATE/'repository'
 REMOTE='https://github.com/nextech-medical-team/nextech_logistic_V3.git'
 GUARD='/usr/local/lib/nextech-cicd/runtime-guard.mjs'
+RUNUSER='/usr/sbin/runuser'
 BUILD_ROOT='/var/tmp'
 SERVICES=['nextech-web','nextech-worker']
 
@@ -51,7 +52,7 @@ def fetch():
  git('fetch','--prune','origin','+refs/heads/main:refs/heads/main')
  return git('rev-parse','refs/heads/main').decode().strip()
 def guard(action,backup):
- return run(['runuser','-u','nextech','--','node',GUARD,action,str(backup)])
+ return run([RUNUSER,'-u','nextech','--','node',GUARD,action,str(backup)])
 def health():
  run(['systemctl','is-active',*SERVICES])
  # TLS validation is enabled; no authentication or business request.
@@ -115,7 +116,7 @@ def deploy(commit,packet=None):
    run(['chown','-R','nextech-build:nextech-build',workspace]);os.chmod(workspace,0o750)
    isolated={'PATH':'/usr/bin:/bin','HOME':'/var/lib/nextech-build','NODE_ENV':'test','CI':'true'}
    for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],120),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
-    run(['runuser','-u','nextech-build','--',*command],cwd=candidate,env=isolated,timeout=timeout)
+    run([RUNUSER,'-u','nextech-build','--',*command],cwd=candidate,env=isolated,timeout=timeout)
    report['checks']='PASS'
    if not changed:
     health();baseline['commit']=commit;atomic_json(STATE/'baseline.json',baseline);report['status']='deployed';report['restart']=False;return report
