@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {runPlatformHoldMaintenance,rollbackPlatformHoldMaintenance} from '../src/platform-hold-maintenance.mjs';
+import {runPlatformHoldMaintenance,rollbackPlatformHoldMaintenance,savePlatformMaintenanceReport} from '../src/platform-hold-maintenance.mjs';
 import {authorizedTemuScope,authorizedFreshTemu} from '../src/temu-authorized-reimport.mjs';
-import {mkdtemp,writeFile,unlink,rmdir} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
+import {mkdtemp,writeFile,readFile,readdir,stat,unlink,rmdir} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 test('Private TEMU authorization is kept outside Git and independent of declared status',async()=>{
  assert.throws(()=>authorizedTemuScope([['PO-1-2','123'],['PO-1-2','123']]));assert.throws(()=>authorizedTemuScope([['BAD','123']]));assert.throws(()=>authorizedTemuScope([['PO-1-2','invalid']]));
  const directory=await mkdtemp(path.join(os.tmpdir(),'nextech-scope-test-')),file=path.join(directory,'temu-authorized-reimport-scope.json'),old=process.env.DATA_DIR;
@@ -22,4 +22,53 @@ test('Maintenance replaces historical platform cancellation reason, preserves ca
  const report=await runPlatformHoldMaintenance({db,apply:true,pauseProbe:async()=>({paused:true,epoch:'test-pause'}),collect:async()=>({payload,checkedAt:new Date().toISOString(),origin:'provider',channel:'shopify',orderId:order.id,readOnly:true,complete:true})});
  assert.equal(report.status,'PASS');assert.equal(updates,1);assert.match(order.issue,/BC annulé dans Erplain/);assert.doesNotMatch(order.issue,/Shopify/);assert.deepEqual(order.erp_live,original.erp_live);assert.equal(order.tracking_status,original.tracking_status);assert.equal(order.label_status,'cancelled');assert.equal(order.resolution_pending_resume,false);assert.equal(report.newJobs,0);assert.equal(report.externalWrites,0);
  const restored=await rollbackPlatformHoldMaintenance({db,pauseProbe:async()=>({paused:true,epoch:'test-pause'}),report});assert.equal(restored.restored,1);assert.deepEqual(order,original);
+});
+
+function faultFixture(fault){
+ const at=new Date().toISOString(),payload={id:'1',name:'#TEST',created_at:at,updated_at:at,fulfillment_status:'fulfilled',financial_status:'refunded',cancelled_at:at,line_items:[{id:'2',sku:'SKU',quantity:1}],shipping_address:{name:'TEST',address1:'Street',zip:'10000',city:'City',country_code:'FR'}};
+ const order={id:'order1',channel:'shopify',reference:'#TEST',source_payload:{...payload},issue:'Commande entièrement remboursée dans Shopify · BC et BL Erplain annulés',label_status:'cancelled',tracking_status:'cancelled',resolution_pending_resume:false,archived:false,erp_live:{bc:{id:'3',status:'cancelled'},bl:{id:'4',status:'cancelled'}}};
+ const original=structuredClone(order),tables=Object.fromEntries(['orders','lines','jobs','erp_live_jobs','carrier_jobs','carrier_documents','document_lifecycle','extra_parcels','partial_deliveries','partial_documents','resolution_jobs','correction_jobs','temu_label_jobs'].map(n=>[n,n==='orders'?[order]:[]]));let written=false;
+ const db={query:async(sql,args)=>{
+  if(sql.startsWith('LOCK TABLE'))return {rows:[]};
+  if(sql.startsWith('UPDATE orders SET')){Object.assign(order,{source_payload:JSON.parse(args[1]),issue:args[2],resolution_pending_resume:args[3],label_status:args[4]});written=true;if(fault==='preservation'){order.tracking_status='tampered';fault=undefined;}return {rows:[{id:order.id}]};}
+  if(written&&fault==='evidence-read'&&sql.startsWith('SELECT * FROM orders')){fault=undefined;throw Error('Injected evidence read failure after write');}
+  const table=sql.match(/SELECT \* FROM ([a-z_]+)/)?.[1];assert.ok(table,sql);return {rows:structuredClone(tables[table])};
+ },transaction:async fn=>{
+  const before=structuredClone(order);let committed=false;
+  try{const result=await fn(db);if(fault==='before-commit'){fault=undefined;throw Error('Injected failure before COMMIT');}committed=true;if(fault==='commit-ack'){fault=undefined;throw Error('Injected lost COMMIT acknowledgment');}return result;}
+  catch(e){if(!committed){for(const k of Object.keys(order))delete order[k];Object.assign(order,before);written=false;}throw e;}
+ }};
+ const pauseProbe=async()=>({paused:true,epoch:'test-pause'}),collect=async()=>({payload,checkedAt:new Date().toISOString(),origin:'provider',channel:'shopify',orderId:order.id,readOnly:true,complete:true});
+ return {db,order,original,pauseProbe,collect};
+}
+
+for(const fault of ['evidence-read','preservation'])test('Maintenance '+fault+' failure after writing rolls back before commit with zero residual changes',async()=>{
+ const f=faultFixture(fault),report=await runPlatformHoldMaintenance({...f,apply:true});assert.equal(report.status,'BLOCKED');assert.deepEqual(f.order,f.original);assert.equal(report.rows[0].commitState,undefined);
+ const rollback=await rollbackPlatformHoldMaintenance({...f,report});assert.equal(rollback.restored,0);assert.deepEqual(f.order,f.original);
+});
+
+test('A lost commit acknowledgment remains journaled and rollback restores a BLOCKED committed row',async()=>{
+ const f=faultFixture('commit-ack'),report=await runPlatformHoldMaintenance({...f,apply:true});assert.equal(report.status,'BLOCKED');assert.equal(report.rows[0].commitState,'prepared');assert.notDeepEqual(f.order,f.original);
+ const rollback=await rollbackPlatformHoldMaintenance({...f,report});assert.equal(rollback.restored,1);assert.deepEqual(f.order,f.original);
+});
+
+test('A failure saving the final report recovers from the durable precommit journal',async()=>{
+ const f=faultFixture();let durable;
+ await assert.rejects(runPlatformHoldMaintenance({...f,apply:true,save:async report=>{if(report.rows[0]?.commitState==='committed')throw Error('Injected report write failure after COMMIT');durable=structuredClone(report);}}),/after COMMIT/);
+ assert.equal(durable.rows[0].commitState,'prepared');assert.equal(durable.rows[0].status,'COMMIT_PENDING');assert.notDeepEqual(f.order,f.original);
+ const rollback=await rollbackPlatformHoldMaintenance({...f,report:durable});assert.equal(rollback.restored,1);assert.deepEqual(f.order,f.original);
+});
+
+test('A prepared journal whose transaction did not commit is recognized without rewriting original data',async()=>{
+ const f=faultFixture('before-commit'),report=await runPlatformHoldMaintenance({...f,apply:true});assert.equal(report.status,'BLOCKED');assert.equal(report.rows[0].commitState,'prepared');assert.deepEqual(f.order,f.original);
+ const rollback=await rollbackPlatformHoldMaintenance({...f,report});assert.equal(rollback.restored,0);assert.equal(rollback.uncommitted,1);assert.deepEqual(f.order,f.original);
+});
+
+test('Atomic report replacement preserves the existing private journal when serialization fails',async()=>{
+ const directory=await mkdtemp(path.join(os.tmpdir(),'nextech-journal-test-')),file=path.join(directory,'journal.json');
+ try{
+  await savePlatformMaintenanceReport(file,{rows:[{commitState:'prepared'}]});const before=await readFile(file,'utf8');
+  await assert.rejects(savePlatformMaintenanceReport(file,{invalid:1n}));assert.equal(await readFile(file,'utf8'),before);assert.deepEqual(await readdir(directory),['journal.json']);
+  if(process.platform!=='win32')assert.equal((await stat(file)).mode&0o777,0o600);
+ }finally{await unlink(file);await rmdir(directory);}
 });
