@@ -1,3 +1,4 @@
+import {currentMappingFingerprint} from './current-mapping-line.mjs';
 import {oldFinanceErrors,projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
 import {shipmentFingerprint} from './label-stock-gate.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
@@ -18,16 +19,17 @@ export function completedHistoricalPreparation(o,e,now=Date.now()){
  if(e?.status!=='complete'||e.error!==null||p?.phase!=='bl_ready'||p.bc?.status!=='active'||!p.bc?.id||!p.bl?.id||!['ready_to_ship','shipped','delivered','completed'].includes(p.bl.status))return false;
  if(pricing?.status!=='verified'||pricing.error||pricing.confirmed?.authority!=='erplain'||!Number.isFinite(pricing.confirmed.total)||!Number.isFinite(pricing.confirmed.sourceTotal)||(!p.historicalStockProof&&!p.stockDocument?.id))return false;
  if(!p.stockDocument?.id){const stock=p.historicalStockProof;if(stock.stockOnBc!==true||String(stock.bcId)!==String(p.bc.id)||!Array.isArray(stock.quantities)||!Array.isArray(stock.logIds))return false;}
- if(!/^[a-f0-9]{64}$/.test(p.labelPreparationFingerprint||''))return false;
+ if(!/^[a-f0-9]{64}$/.test(p.mappingPreparationFingerprint||'')||!/^[a-f0-9]{64}$/.test(p.labelPreparationFingerprint||''))return false;
  for(const value of [p.verifiedAt,p.stockCheckedAt]){const t=Date.parse(value);if(!Number.isFinite(t)||t>now||now-t>86400000)return false;}
  if(oldFinanceErrors.includes(o.issue)&&projectCurrentDiagnostics(structuredClone(o)).issue!==null)return false;
  return true;
 }
-export async function reconcileHistoricalPreparation(db,orderId,{fingerprint=shipmentFingerprint}={}){
+export async function reconcileHistoricalPreparation(db,orderId,{fingerprint=shipmentFingerprint,mappingFingerprint=currentMappingFingerprint}={}){
  return db.transaction(async tx=>{
   const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[orderId])).rows[0];if(!o)return {updated:false};
   const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[orderId])).rows[0];if(!completedHistoricalPreparation(o,e))return {updated:false};
   if(await fingerprint(tx,o)!==o.erp_live.labelPreparationFingerprint)return {updated:false};
+  if(await mappingFingerprint(tx,o)!==o.erp_live.mappingPreparationFingerprint)return {updated:false};
   let complete=false;
   if(o.channel==='temu'){
    const j=(await tx.query('SELECT status,error,packages FROM temu_label_jobs WHERE reference=$1 FOR SHARE',[o.reference])).rows[0];

@@ -12,7 +12,7 @@ import {resumeTransientErplain,recordTransientFailure,closeTransientReviews} fro
 import {cancellationBlock,mutationBlock} from './erp-transient-policy.mjs';
 import {confirmDeliveryReady} from './bl-ready.mjs';
 import {historicalPreparationProof} from './historical-stock-proof.mjs';
-import {currentMappingLine} from './current-mapping-line.mjs';
+import {currentMappingLine,currentMappingFingerprint,mappingSelectionFingerprint} from './current-mapping-line.mjs';
 import {alignMappedBc} from './mapping-bc-alignment.mjs';
 import {normalizeHistoricalDraft} from './historical-bl-draft.mjs';
 import {resumeTemuFinancialReviews} from './financial-review-recovery.mjs';
@@ -316,6 +316,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     const totals=rows=>{const m=new Map();for(const l of shippingProductLines(rows))m.set(String(l.variant?.id),(m.get(String(l.variant?.id))||0)+Number(l.quantity));return JSON.stringify([...m].sort());};
     if(!actual||!bl||(!o.erp_live.pendingBlIds?.length&&totals(o.items)!==totals(actual.line_items))||totals(o.items)!==totals(bl.line_items)){await fail(o,new Error('Écart BC/BL : références ou quantités à contrôler'));continue;}
     try{const stockOnBc=actual.update_stock===true;if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}const stock=stockOnBc?null:await reconcileFullStock(api,o,{allowCreate:false});o.erp_live.bl=await confirmDeliveryReady(api,{bcId:o.erp_live.bc.id,blId:o.erp_live.bl.id,lines:o.items,stockOnBc,pendingBlScope:Boolean(o.source_payload?.erplainImported&&o.source_payload?.account==='live'&&o.erp_live.pendingBlIds?.length),stockDocument:stock,stockLabel:stock?.label,stockNotes:'LIVE : sortie de stock liée au BL '+bl.label});o.erp_live.stockPendingVariants=[];o.erp_live.phase='bl_ready';await save(o);}catch(e){await fail(o,e);continue;}
+    const mappingProof=mappingSelectionFingerprint(o.selectedSourceLines,o.channel);if(await currentMappingFingerprint(db,o)!==mappingProof){await fail(o,new Error('Mapping modifié pendant la préparation : BC et BL à recontrôler'));continue;}o.erp_live.mappingPreparationFingerprint=mappingProof;
     assertHistoricalBlNumber(bl);o.erp_live.bl={...o.erp_live.bl,label:bl.label};o.erp_live.verifiedAt=new Date().toISOString();o.erp_live.labelPreparationFingerprint=await shipmentFingerprint(db,(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0]);await save(o);await db.query("UPDATE orders SET erp_status='live_created' WHERE id=$1",[o.id]);await db.query("UPDATE erp_live_jobs SET status='complete',error=null,updated_at=now() WHERE order_id=$1",[o.id]);
    }
   }catch(e){for(const o of working)await fail(o,e);}finally{running=false;activeBcOnlyOrderId=null;}
