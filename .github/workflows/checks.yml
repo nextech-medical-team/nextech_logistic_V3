@@ -1,4 +1,4 @@
-name: VÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©rifications du code V3
+name: Vérifications du code V3
 on:
   push:
   pull_request:
@@ -14,11 +14,17 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: DÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©pendances isolÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©es
+      - name: Dépendances isolées
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Syntaxe
         run: npm run check
-      - name: Tests isolÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©s
+      - name: Tests isolés
         run: npm test
-      - name: DÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ploiement et retour arriÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨re
+      - name: Déploiement et retour arrière
         run: python3 -m unittest discover -s deploy -p 'test_*.py'
+      - name: Interface isolée ordinateur et mobile
+        run: |
+          mkdir -p proofs
+          npm install --no-save --ignore-scripts --package-lock=false @playwright/test@1.64.0
+          npx playwright install --with-deps chromium
+          npx playwright test

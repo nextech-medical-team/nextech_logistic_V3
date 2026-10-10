@@ -20,12 +20,24 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - name: Installer les dÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©pendances isolÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©es
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm run check
-      - run: npm test
-      - name: Tests du dÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©ploiement et du retour arriÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨re
-        run: python3 -m unittest discover -s deploy -p 'test_*.py'
+      - name: Vérifications isolées et preuves
+        run: |
+          set -euo pipefail
+          mkdir -p proofs
+          {
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run check
+            npm test
+            python3 -m unittest discover -s deploy -p 'test_*.py'
+          } 2>&1 | tee proofs/checks.log
+          npm install --no-save --ignore-scripts --package-lock=false @playwright/test@1.64.0
+          npx playwright install --with-deps chromium
+          npx playwright test
+          python3 scripts/package-ci-proof.py "$GITHUB_SHA"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: publication-packet
+          path: publication-packet.json
   deploy:
     name: Publication V3 (Section 7)
     if: github.ref == 'refs/heads/main'
@@ -43,7 +55,10 @@ jobs:
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       TARGET_SHA: ${{ github.sha }}
     steps:
-      - name: PrÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©parer la connexion limitÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©e
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: publication-packet
+      - name: Préparer la connexion limitée
         shell: bash
         run: |
           set -euo pipefail
@@ -55,7 +70,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/v3-ssh"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/v3-ssh/key"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/v3-ssh/known_hosts"
-      - name: Publication par lÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢exÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â©cuteur Section 7
+      - name: Publication par l’exécuteur Section 7
         shell: bash
         run: |
           set -euo pipefail
@@ -63,7 +78,7 @@ jobs:
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/v3-ssh/known_hosts" \
             -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-            "$DEPLOY_USER@$DEPLOY_HOST" "deploy $TARGET_SHA" | tee deployment-report.json
+            "$DEPLOY_USER@$DEPLOY_HOST" "deploy $TARGET_SHA" < publication-packet.json | tee deployment-report.json
       - name: Conserver le rapport
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -71,7 +86,7 @@ jobs:
           name: v3-deployment-report
           path: deployment-report.json
           if-no-files-found: ignore
-      - name: Effacer la clÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â© temporaire
+      - name: Effacer la clé temporaire
         if: always()
         shell: bash
         run: rm -f "$RUNNER_TEMP/v3-ssh/key"

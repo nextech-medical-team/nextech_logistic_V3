@@ -1,12 +1,13 @@
 #!/usr/bin/python3
 """Section 7 publisher, installed once by Section 7; never run candidate code as root."""
-import os,sys,json,time,shutil,subprocess,tempfile,re,urllib.request,signal
+import os,sys,json,time,shutil,subprocess,tempfile,re,urllib.request,signal,base64,uuid,datetime
 try:import grp
 except ImportError:
  import types
  grp=types.SimpleNamespace(getgrnam=lambda _:None) # Windows unit tests only; publisher requires Linux/root.
 from pathlib import Path
 from plan import plan,digest,safe_path
+from queue_policy import blockers,validate_manifest
 
 STATE=Path('/var/lib/nextech-cicd')
 APP=Path('/opt/nextech/current')
@@ -78,7 +79,7 @@ def verify_environment():
   if str(env) not in run(['systemctl','show',service,'-p','EnvironmentFiles','--value']).decode():raise ValueError('EnvironmentFile absent : '+service)
  return digest(env.read_bytes())
 
-def deploy(commit):
+def deploy(commit,packet=None):
  if not re.fullmatch('[a-f0-9]{40}',commit):raise ValueError('Commit invalide')
  STATE.mkdir(mode=0o700,exist_ok=True)
  report={'commit':commit,'startedAt':time.time(),'status':'running','businessWritesForTesting':0}
@@ -94,6 +95,15 @@ def deploy(commit):
   old,new=tree(baseline['commit']),tree(commit)
   names=set(old)|set(new);current=read_current(names)
   changed=plan(old,new,current,baseline['serverHashes']);report['files']=changed
+  if packet is None:raise ValueError('Manifeste CI absent')
+  proofs={name:base64.b64decode(value,validate=True) for name,value in packet['proofs'].items()}
+  validate_manifest(packet['manifest'],proofs,commit,changed)
+  proof_dir=STATE/'proofs'/commit;proof_dir.mkdir(parents=True,mode=0o700,exist_ok=True)
+  for name,data in proofs.items():
+   if name not in ('checks.log','desktop.png','mobile.png','performance.json'):raise ValueError('Nom de preuve refusé')
+   target=proof_dir/name;target.write_bytes(data);target.chmod(0o600)
+  atomic_json(proof_dir/'manifest.json',packet['manifest'])
+  report['verification']={'status':'PASS','commit':commit,'proofs':{name:digest(data) for name,data in proofs.items()},'serverBaseline':'PASS'}
   env_hash=verify_environment()
   # Dependency installation and tests are isolated from production secrets/database.
   with tempfile.TemporaryDirectory(prefix='v3-build-',dir=BUILD_ROOT) as workspace:
@@ -177,11 +187,39 @@ if __name__=='__main__':
  if os.geteuid()!=0 or len(sys.argv)!=3 or sys.argv[1]!='deploy':sys.exit('Usage: dispatcher.py deploy COMMIT')
  def interrupted(signum,frame):raise RuntimeError('Publication interrompue par signal '+str(signum))
  for sig in (signal.SIGHUP,signal.SIGTERM,signal.SIGINT):signal.signal(sig,interrupted)
- with open('/var/lock/nextech-deploy.lock','a') as lock:
-  deadline=time.monotonic()+600
-  while True:
-   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+ packet_raw=sys.stdin.buffer.read(2*1024*1024+1)
+ if len(packet_raw)>2*1024*1024:sys.exit('Preuves CI trop volumineuses')
+ packet=json.loads(packet_raw);commit=sys.argv[2]
+ if not re.fullmatch('[a-f0-9]{40}',commit):sys.exit('Commit invalide')
+ STATE.mkdir(mode=0o700,exist_ok=True);request_dir=STATE/'requests';request_dir.mkdir(mode=0o700,exist_ok=True)
+ request_path=request_dir/(commit+'.json')
+ existing=json.loads(request_path.read_text()) if request_path.exists() else None
+ record=existing or {'id':str(uuid.uuid5(uuid.NAMESPACE_URL,'nextech-cicd:'+commit)),'commit':commit,'section':7,'serverManaged':True,'createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'status':'ready'}
+ deadline=time.monotonic()+1200
+ while True:
+  deferred=[]
+  with open('/var/lock/nextech-deploy.lock','a') as lock:
+   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
    except BlockingIOError:
-    if time.monotonic()>deadline:sys.exit('Publication Section 7 en cours : verrou non disponible après dix minutes')
-    time.sleep(2)
-  result=deploy(sys.argv[2]);print(json.dumps(result));sys.exit(0 if result['status'] in ('deployed','superseded') else 1)
+    if time.monotonic()>deadline:sys.exit('Verrou Section7 encore occupé')
+    time.sleep(2);continue
+   mirror=STATE/'local-queue.json'
+   if not mirror.exists():sys.exit('File commune non initialisée ; publication refusée')
+   local=json.loads(mirror.read_text())['requests']
+   automatic=[json.loads(p.read_text()) for p in request_dir.glob('*.json')]
+   head=fetch()
+   for old_record in automatic:
+    if old_record['commit']!=head and old_record['status'] in ('ready','blocked'):
+     old_record['status']='superseded';atomic_json(request_dir/(old_record['commit']+'.json'),old_record)
+   if commit!=head:
+    record['status']='superseded';atomic_json(request_path,record);print(json.dumps(record));sys.exit(0)
+   deferred=blockers(local,automatic,record['id'],record['createdAt'])
+   if not deferred:
+    record['status']='deploying';atomic_json(request_path,record)
+    result=deploy(commit,packet);record['status']=result['status'];record['updatedAt']=datetime.datetime.now(datetime.timezone.utc).isoformat();record['report']=result;atomic_json(request_path,record)
+    print(json.dumps(result));sys.exit(0 if result['status'] in ('deployed','superseded') else 1)
+   record['status']='ready';record['waitingFor']=[r['id'] for r in deferred];atomic_json(request_path,record)
+  # Release the global lock so Section7 can publish the older request.
+  if time.monotonic()>deadline:
+   record['status']='blocked';atomic_json(request_path,record);print(json.dumps({'status':'blocked','request':record,'reason':'Demande antérieure encore ouverte'}));sys.exit(1)
+  time.sleep(10)

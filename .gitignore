@@ -12,6 +12,9 @@ coverage/
 tmp/
 __pycache__/
 *.pyc
+proofs/
+publication-packet.json
+test-results/
 
 src/margin-published-snapshot.json
 src/temu-reading-reports.json
