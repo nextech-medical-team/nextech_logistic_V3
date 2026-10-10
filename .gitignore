@@ -10,6 +10,8 @@ data/
 *.log
 coverage/
 tmp/
+__pycache__/
+*.pyc
 
 src/margin-published-snapshot.json
 src/temu-reading-reports.json
