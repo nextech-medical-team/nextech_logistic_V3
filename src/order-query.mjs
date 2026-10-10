@@ -10,8 +10,9 @@ export const orderDateSql=`CASE
  WHEN btrim(source_date) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN split_part(btrim(source_date),'/',3)||lpad(split_part(btrim(source_date),'/',2),2,'0')||lpad(split_part(btrim(source_date),'/',1),2,'0')
  WHEN btrim(source_date) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{2}$' THEN '20'||split_part(btrim(source_date),'/',3)||lpad(split_part(btrim(source_date),'/',2),2,'0')||lpad(split_part(btrim(source_date),'/',1),2,'0')
  ELSE to_char(received_at AT TIME ZONE 'Europe/Paris','YYYYMMDD') END`;
-export function orderQuery(params){
+export function orderQuery(params,orderIds=null){
  const args=[],parts=["archived=false"];if(params.getAll('problem').some(Boolean))parts.push("coalesce(suspension->>'active','false')<>'true'");const add=(sql,value)=>{args.push(value);parts.push(sql.replaceAll('?', '$'+args.length));};
+ if(orderIds!==null)add('orders.id=ANY(?::text[])',orderIds);
  const terms=searchTerms(params.get('search'));
  if(terms.length){
   // One bound pattern array keeps large pasted lists from repeating correlated joins.
