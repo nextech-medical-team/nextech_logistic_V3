@@ -23,6 +23,7 @@ function fixture({catalog=null,missing=true,linked,mutationFailure,change,protec
   if(sql.startsWith("SELECT CASE WHEN l.source_payload->>'mappingScope'"))return {rows:[{sku:'R'}]};
   if(sql.startsWith('SELECT status,error,updated_at'))return {rows:[job]};
   if(sql.startsWith('SELECT status FROM carrier_jobs'))return {rows:[]};
+  if(sql.startsWith('SELECT id,action,status,error,updated_at FROM resolution_jobs'))return {rows:[]};
   if(sql.startsWith('SELECT 1 FROM resolution_jobs'))return {rows:[]};
   if(sql.startsWith('UPDATE erp_live_jobs SET error=$2 WHERE')){assert.equal(args[2],job.error);job.error=args[1];return {rows:[],rowCount:1};}
   if(sql.startsWith('INSERT INTO audit'))return {rows:[],rowCount:1};
