@@ -1,3 +1,4 @@
+import {initializeEquivalenceImports,equivalenceImportService} from './equivalence-import.mjs';
 import {initializeMovementWatch,movementWatchWorker,movementWatchdog,movementWatchStatus} from './movement-watch.mjs';
 import {loadEnvFile} from 'node:process';
 import {suspensionGuardRequired} from './suspension-route-policy.mjs';
@@ -109,6 +110,7 @@ const releaseLeader=config.background?await db.acquireLeader():async()=>{};
 await initializeAppSchema(db,[initializeCarrierJobs,initializeComments2005,initializeTemuShipping,initializeStocks,initializeErplainLive,initializePartialDeliveries,initializeCorrections,initializeResolutions,initializeProcurement,initializeLifecycle,initializeErplainRefresh,initializeMarketplaceInbox,initializeLabelDownloads,initializeReadServiceJobs,initializeProcessingClock],{background:config.background});
 await db.withLocks(['schema'],()=>initializeSkuCopies(db));
 await db.withLocks(['schema'],()=>initializeEquivalences(db));
+await db.withLocks(['schema'],()=>initializeEquivalenceImports(db));
 await db.withLocks(['schema'],()=>initializeStockResumeWatch(db));
 await db.withLocks(['schema'],()=>initializeV2Followup(db));
 await db.withLocks(['schema'],()=>initializeShopifyObservation(db));
@@ -142,6 +144,8 @@ const corrections=correctionWorker(db,directory);const correctionTimer=backgroun
 
 const resolutions=resolutionService(db,directory,{refreshTemuDiagnostic:reference=>temuLocal.diagnose(reference)});const resolutionTimer=backgroundInterval(()=>resolutions.run(),900,'resolutions');resolutionTimer.unref();
 backgroundInterval(()=>runtime.enabled('resolutions')?resolutions.followWaiting():undefined,1000,'resolutions-followup').unref();
+const equivalenceImports=equivalenceImportService(db,directory);
+backgroundInterval(()=>runtime.enabled('resolutions')?equivalenceImports.run():undefined,1200,'equivalence-imports');
 const procurement=procurementService(db,directory);const purchaseTimer=backgroundInterval(()=>procurement.run(),2500,'procurement');purchaseTimer.unref();
 const fbmConfirmationPath=path.join(directory,'margin-amazon-fbm-confirmation.json');
 let fbmConfirmation;try{fbmConfirmation=JSON.parse(await readFile(fbmConfirmationPath,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;fbmConfirmation={confirmedAt:new Date().toISOString(),reason:'Utilisateur : commandes Amazon présentes expédiées par notre entrepôt (FBM)',orderIds:(await db.query("SELECT id FROM orders WHERE channel='amazon' AND archived=false")).rows.map(r=>r.id)};await writeFile(fbmConfirmationPath,JSON.stringify(fbmConfirmation,null,2),{flag:'wx'});}
@@ -244,7 +248,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -362,6 +366,7 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/lifecycle/resume'&&req.method==='POST'){permitted(user,['admin','manager','operator']);await tracking.request();const r=await lifecycle.request();await audit(user,'erplain.live.lifecycle.request',{});json(res,202,r);return;}
     if(p==='/api/erplain/status/refresh'&&req.method==='POST'){permitted(user,['admin','manager','operator']);const r=await documentStatuses.refresh();await audit(user,'erplain.live.status.read',{});json(res,200,r);return;}
     if(await comments2005Api({p,url,req,res,db,user,body,json,permitted,audit}))return;
+    if(await equivalenceImports.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await resolutions.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await correctionsApi({p,url,req,res,db,user,body,json,permitted,directory}))return;
     if(await equivalenceApi({p,url,req,res,db,user,body,json,permitted,api:erplainAccount(directory,'source'),directory}))return;
@@ -584,7 +589,7 @@ async function shutdown(){if(shuttingDown)return;shuttingDown=true;try{
  const httpClosed=config.http?new Promise(resolve=>{server.close(resolve);server.closeIdleConnections();}):Promise.resolve();
  runtime.beginStop();catalog.stop();await runtime.stop();
  await Promise.all([catalog.wait(),allWeights.wait(),stocks.wait()]);
- while(stockResume.running||v2Followup.running||erplainRefresh.running||resolutions.running||corrections.running||partialWorker.running||erpWorker.running||carrierWorkers?.active.size||tracking.running||lifecycle.running||temuLocal.running)await new Promise(r=>setTimeout(r,100));
+ while(equivalenceImports.running||stockResume.running||v2Followup.running||erplainRefresh.running||resolutions.running||corrections.running||partialWorker.running||erpWorker.running||carrierWorkers?.active.size||tracking.running||lifecycle.running||temuLocal.running)await new Promise(r=>setTimeout(r,100));
  while(activeRequests)await new Promise(r=>setTimeout(r,100));server.closeAllConnections();
  await httpClosed;await releaseLeader();await db.close();process.exit(0);
  }catch{console.error('Arrêt incomplet : contrôle des traitements nécessaire');process.exit(1);}}

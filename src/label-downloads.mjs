@@ -35,6 +35,7 @@ export async function buildLabelDownload(db,input,job,options={}){
  const {ids=[],deliveryIds=[],temuReferences=[],sort='selection'}=input;
  job.sort=sort;job.items=[];job.percent=0;job.stage='Lecture de la sélection';job.status='running';const docs=[];
  async function add(pdf,item,transform,source={}){try{const data=transform?await transform():Buffer.from(pdf);await PDFDocument.load(data);docs.push({data,item,source});item.labels++;}catch(e){item.problems.push('PDF non exploitable : '+e.message);}}
+ async function external(o,r){if(o?.channel!=='temu'||!o.source_payload?.externalLabel?.active)return false;const label=o.source_payload.externalLabel;if(label.hasPdf){for(const p of (await db.query('SELECT pdf FROM temu_external_label_documents WHERE order_id=$1',[o.id])).rows)await add(p.pdf,r,null,{order:o,bl:o.erp_live?.bl,carrier:label.carrier,tracking:label.tracking});}if(!r.labels)r.problems.push('Étiquette externe enregistrée : aucun PDF joint');return true;}
  const rows=[];for(const id of ids){const o=(await db.query(`SELECT orders.*,${managerSql} AS account_manager,(SELECT tracking FROM carrier_jobs WHERE order_id=orders.id) export_tracking,(SELECT array_agg(DISTINCT coalesce(nullif(l.target_sku,''),nullif(m.target_sku,''),CASE WHEN orders.channel IN ('tender','samples') THEN l.source_sku END)) FROM lines l LEFT JOIN mappings m ON m.channel=orders.channel AND m.source_sku=l.source_sku WHERE l.order_id=orders.id) skus FROM orders WHERE id=$1`,[id])).rows[0];rows.push(o||{id,reference:id,absent:true});}
  const total=ids.length+deliveryIds.length+temuReferences.length;let done=0;
  const item=(reference,extra={})=>{const r={reference,labels:0,problems:[],...extra};job.items.push(r);return r;};
@@ -42,6 +43,7 @@ export async function buildLabelDownload(db,input,job,options={}){
  for(const o of sortLabelOrders(rows,sort)){
   const r=item(o.reference,{id:o.id,manager:o.account_manager,skus:o.skus||[],supplier:o.source_payload?.supplier||null});
   if(o.absent){r.problems.push('Commande introuvable');progress();continue;}
+  if(await external(o,r)){progress();continue;}
   if(o.channel==='temu'&&!o.transport_choice)for(const p of (await db.query('SELECT pdf,package FROM temu_label_documents WHERE reference=$1 ORDER BY package',[o.reference])).rows)await add(p.pdf,r,()=>currentTemuPdf(db,p.pdf,o.reference,p.package),{order:o,bl:o.erp_live?.bl,carrier:'TEMU',tracking:[]});
   const q=o.partial_mode?"SELECT d.pdf,d.document_index,d.delivery_id,p.bl,p.carrier,p.tracking FROM partial_documents d JOIN partial_deliveries p ON p.id=d.delivery_id WHERE p.order_id=$1 AND p.status='ready' ORDER BY p.created_at,p.id,d.document_index":"SELECT d.pdf,d.document_index FROM carrier_documents d JOIN carrier_jobs c ON c.order_id=d.order_id WHERE d.order_id=$1 AND c.status='ready' ORDER BY d.document_index";
   for(const d of (await db.query(q,[o.id])).rows)await add(d.pdf,r,o.partial_mode?()=>currentPartialSkuPdf(db,d.pdf,d.delivery_id,d.document_index):()=>currentParcelPdf(db,d.pdf,o.id,d.document_index),{order:o,bl:o.partial_mode?d.bl:o.erp_live?.bl,carrier:d.carrier||o.carrier,tracking:d.tracking||o.export_tracking||[]});
@@ -53,6 +55,7 @@ export async function buildLabelDownload(db,input,job,options={}){
   const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[ref])).rows[0];
   if(o&&ids.includes(o.id)){progress();continue;}
   const r=item(ref+' · TEMU');
+  if(await external(o,r)){progress();continue;}
   if(o?.transport_choice){
    for(const p of (await db.query("SELECT d.pdf,d.document_index FROM carrier_documents d JOIN carrier_jobs c ON c.order_id=d.order_id WHERE d.order_id=$1 AND c.status='ready' ORDER BY d.document_index",[o.id])).rows)await add(p.pdf,r,()=>currentParcelPdf(db,p.pdf,o.id,p.document_index),{order:o,bl:o.erp_live?.bl,carrier:o.carrier,tracking:[]});
   }else for(const p of (await db.query('SELECT pdf,package FROM temu_label_documents WHERE reference=$1 ORDER BY package',[ref])).rows)await add(p.pdf,r,()=>currentTemuPdf(db,p.pdf,ref,p.package),{order:o,bl:o?.erp_live?.bl,carrier:'TEMU',tracking:[]});

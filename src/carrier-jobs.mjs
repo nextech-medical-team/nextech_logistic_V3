@@ -70,7 +70,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
       const shop=await selectedClient.resolveParcelShop(o);
       o.source_payload={...o.source_payload,glsParcelShopId:shop.parcelShopId,glsParcelShop:shop};
       await db.transaction(async tx=>{
-       await tx.query("UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1",[o.id,JSON.stringify({glsParcelShopId:shop.parcelShopId,glsParcelShop:shop})]);
+       await tx.query("UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1",[o.id,JSON.stringify({glsParcelShopId:shop.parcelShopId,glsParcelShop:shop,...(o.source_payload.shopifyRelay?{shopifyRelay:o.source_payload.shopifyRelay}:{})})]);
        await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','gls.parcelshop_resolved',$1)",[JSON.stringify({orderId:o.id,parcelShopId:shop.parcelShopId,selection:shop.selection,environment:job.environment})]);
       });
      }
