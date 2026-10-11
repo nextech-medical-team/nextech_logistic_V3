@@ -66,7 +66,7 @@ export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,histor
  return {commercialBefore:bc,bcId:String(bc.id),originalSku:original.variant.sku,replacementSku:variant.sku,replaceQuantity:replace,replacementQuantity:quantity,remaining,available:variant.track_inventory===false?null:Math.min(Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).available),Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).on_hand)),weightKg:weight,items,expected,previewFingerprint:fingerprint({bc,variant:{id:variant.id,sku:variant.sku,weight_amount:variant.weight_amount,weight_unit:variant.weight_unit},replace,quantity}),message:'Produit et stock vérifiés dans Erplain LIVE. Remplacement limité à cette commande.'};
 }
 function totals(lines){const sums=new Map();for(const l of lines)sums.set(l.sku,(sums.get(l.sku)||0)+Number(l.quantity));return JSON.stringify([...sums].sort());}
-export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},directory,shopifyReader}={}){
+export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},directory,shopifyReader,deferResume=false}={}){
  validateSubstitution(b,apply);
  if(o.archived||o.erp_live?.bl?.id||o.erp_live?.stockDocument||/^(creating|publishing)/.test(o.erp_live?.phase||'')||(o.source_payload?.marketplacePendingCorrection&&!(o.channel==='shopify'&&o.partial_mode===true))||['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande livrée, fractionnée ou modifiée : rapprochement requis avant remplacement');
  if(!o.erp_live?.bc?.id)throw Error('Créer ou retrouver le BC LIVE avant de remplacer ses produits');
@@ -132,11 +132,12 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  if(plan.previewFingerprint!==b.previewFingerprint)throw Error('BC ou produit modifié depuis la vérification : contrôler de nouveau');
  if(plan.localCommitted){
   const attempt=await startSubstitutionAttempt(db,o,b,plan,permanent,mappingLines);
+  const recoveredResult={...plan.completionResult,importDeferred:deferResume};
   await db.transaction(async tx=>{
-   await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
-   await finishSubstitutionAttempt(tx,o.id,b.requestId,attempt,plan.completionResult);
+   await tx.query('UPDATE orders SET resolution_pending_resume=$2 WHERE id=$1',[o.id,deferResume]);
+   await finishSubstitutionAttempt(tx,o.id,b.requestId,attempt,recoveredResult);
   });
-  return plan.completionResult;
+  return recoveredResult;
  }
  const originals=(await db.query('SELECT * FROM lines WHERE order_id=$1',[o.id])).rows;
  await stage('Préservation des étiquettes existantes');
@@ -160,7 +161,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
 
  if(updated.update_stock===true)historicalAfter=await readHistoricalStock(api,updated,{additionalVariants:plan.commercialBefore.line_items.filter(l=>l.type==='normal').map(l=>l.variant.id)});
  let weight=0;for(const l of shippingProductLines(updated.line_items))weight+=resolveWeight([l.variant],l.variant.sku).weightKg*Number(l.quantity);
- const completionResult={temuLabelPreserved:!!temu,regenerateExisting:false,erpOnly:true,preservedLabels,labelNotice,message:(plan.reconcileOnly?'BC déjà modifié : V3 synchronisé sans nouvelle écriture dans Erplain. ':'')+labelNotice+' Équivalent enregistré dans le BC Erplain LIVE et dans cette commande. Poids recalculé ; préparation remise en file pour contrôle du stock et du BL. '+(permanent?'Le mapping permanent est mis à jour pour les prochaines commandes de ce gestionnaire.':'Le mapping partagé est conservé.')};
+ const completionResult={importDeferred:deferResume,temuLabelPreserved:!!temu,regenerateExisting:false,erpOnly:true,preservedLabels,labelNotice,message:deferResume?'Remplacement enregistré. Préparation suspendue jusqu’aux autres lignes sélectionnées de cet import.':(plan.reconcileOnly?'BC déjà modifié : V3 synchronisé sans nouvelle écriture dans Erplain. ':'')+labelNotice+' Équivalent enregistré dans le BC Erplain LIVE et dans cette commande. Poids recalculé ; préparation remise en file pour contrôle du stock et du BL. '+(permanent?'Le mapping permanent est mis à jour pour les prochaines commandes de ce gestionnaire.':'Le mapping partagé est conservé.')};
  await db.transaction(async tx=>{
   if(plan.shopifyStatusProof){
    const pending=o.source_payload.marketplacePendingCorrection;
@@ -168,7 +169,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
    if(reconciled.rows.length!==1)throw Error('La commande Shopify a changé pendant le remplacement : rapprocher le résultat');
   }
   if(permanent)await tx.query('INSERT INTO mappings(channel,source_sku,target_sku,source_qty,target_qty,notes,updated_at) VALUES($1,$2,$3,$4,$5,$6,now()) ON CONFLICT(channel,source_sku) DO UPDATE SET target_sku=excluded.target_sku,source_qty=excluded.source_qty,target_qty=excluded.target_qty,notes=excluded.notes,updated_at=now()',[permanent.channel,permanent.source_sku,permanent.target_sku,permanent.source_qty,permanent.target_qty,'Équivalence permanente confirmée']);
-  await rememberEquivalence(tx,plan.originalSku,plan.replacementSku);
+  if(Number(plan.replaceQuantity)===Number(plan.replacementQuantity))await rememberEquivalence(tx,plan.originalSku,plan.replacementSku);
   const state={...o.erp_live,equivalentOriginalLines:o.erp_live.equivalentOriginalLines||originals,equivalentItems:shippingProductLines(updated.line_items).map(l=>({variant:{id:String(l.variant.id)},location:{id:String(l.location.id)},quantity:Number(l.quantity),price:Number(l.price),description:l.variant.sku})),equivalentRefreshedAt:new Date().toISOString(),labelReprintNotice:labelNotice||null,equivalentReconciledFrom:plan.recoveredFrom||null,phase:'bc_created',verifiedAt:null,stockCheckedAt:null,labelPreparationFingerprint:null};
   if(attempt)state.equivalentAttemptId=b.requestId;
   if(historicalAfter)state.historicalStockProof=historicalAfter.proof;
@@ -187,6 +188,11 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   await tx.query("INSERT INTO erp_live_jobs(order_id,status) VALUES($1,$2) ON CONFLICT(order_id) DO UPDATE SET status=excluded.status,error=null,updated_at=now()",[o.id,plan.partialProof?'partial':'pending']);
   await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','order.product_substituted',$1)",[JSON.stringify({orderId:o.id,originalSku:plan.originalSku,replacementSku:plan.replacementSku,replaceQuantity:plan.replaceQuantity,replacementQuantity:plan.replacementQuantity})]);
   if(attempt)await finishSubstitutionAttempt(tx,o.id,b.requestId,attempt,completionResult);
+  if(deferResume){
+   await tx.query("UPDATE orders SET resolution_pending_resume=true,issue='Import des équivalences : autres lignes sélectionnées en attente' WHERE id=$1",[o.id]);
+   await tx.query("UPDATE erp_live_jobs SET status='review',error='Import des équivalences : autres lignes sélectionnées en attente' WHERE order_id=$1",[o.id]);
+  }
+
  });
  if(plan.partialProof)return {partialRemainder:true,erpOnly:true,preservedLabels,labelNotice,message:'Remplacement du reliquat enregistré dans le BC. Les livraisons, étiquettes et suivis existants sont inchangés. Le reliquat peut être préparé séparément ; aucun achat automatique.'};
  return completionResult;
