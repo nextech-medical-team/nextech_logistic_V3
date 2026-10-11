@@ -20,6 +20,7 @@ export async function refreshCorrectionStatuses(db,orderId){
  let order=(await db.query('SELECT * FROM orders WHERE id=$1',[orderId])).rows[0];
  if(!order)throw Error('Commande introuvable pendant actualisation des statuts');
  const erpJob=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[orderId])).rows[0];
+ order.resolution_actions=(await db.query(resolutionStateSql,[orderId])).rows;
  if(completedHistoricalPreparation(order,erpJob)){const result=await reconcileHistoricalPreparation(db,orderId);if(result.updated)order=(await db.query('SELECT * FROM orders WHERE id=$1',[orderId])).rows[0];}
  const carrierJob=(await db.query('SELECT status,error FROM carrier_jobs WHERE order_id=$1',[orderId])).rows[0];
  const actions=(await db.query(resolutionStateSql,[orderId])).rows;const {reviews:otherReviews,pendingReplacement}=currentResolutionState(actions);

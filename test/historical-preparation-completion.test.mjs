@@ -14,3 +14,32 @@ test('an unconfirmed successful replacement preview remains an explicit decision
 test('current decisions retain independent reviews and previews across unrelated successful corrections',()=>{
  const preview={action:'equivalent-preview',status:'complete',result:{replacementSku:'NEW'}},address={action:'address',status:'review',error:'Current address mismatch'},weight={action:'weight',status:'complete'};assert.equal(currentResolutionState([weight,preview,address]).pendingReplacement,true);assert.deepEqual(currentResolutionState([weight,preview,address]).reviews,[address]);const resumed={action:'resume-erp',status:'complete'};assert.equal(currentResolutionState([resumed,weight,preview,address]).pendingReplacement,false);assert.deepEqual(currentResolutionState([resumed,weight,preview,address]).reviews,[address]);assert.deepEqual(currentResolutionState([resumed,{action:'resume',status:'review',error:'Obsolete stock error'}]).reviews,[]);
 });
+
+test('successful TEMU resume closes a remaining local flag only after fresh proofs and complete preserved PDFs',async()=>{
+ const db=await fixture();try{
+  await db.query("UPDATE orders SET issue=null,resolution_pending_resume=true WHERE id='o'");
+  await db.query("INSERT INTO resolution_jobs(id,order_id,action,status,error,created_at,result) VALUES('success','o','resume-erp','complete',null,now()-interval '1 minute','{\"erpOnly\":true}')");
+  const before=(await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live,pdf=(await db.query('SELECT pdf FROM temu_label_documents')).rows[0].pdf;
+  assert.equal((await reconcileHistoricalPreparation(db,'o',{fingerprint:async()=>fp,mappingFingerprint:async()=>fp})).updated,true);
+  const actual=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];assert.equal(actual.resolution_pending_resume,false);assert.equal(actual.label_status,'production_ready');assert.deepEqual(actual.erp_live,before);
+  assert.ok(Buffer.from((await db.query('SELECT pdf FROM temu_label_documents')).rows[0].pdf).equals(Buffer.from(pdf)));
+  assert.equal((await refreshCorrectionStatuses(db,'o')).state,'observed');
+ }finally{await db.close();}
+});
+
+test('successful resume cannot retire an unfinished intervention or an older proof',()=>{
+ const resume={id:'success',action:'resume-erp',status:'complete',error:null,created_at:new Date(Date.now()-60000).toISOString(),result:{erpOnly:true}};
+ const ready={...order(),issue:null,resolution_pending_resume:true,resolution_actions:[resume]};assert.equal(completedHistoricalPreparation(ready,erp),true);
+ for(const actions of [[],[{...resume,result:{partialRemainder:true}}],[{...resume,created_at:new Date(Date.now()+1000).toISOString()}],[{action:'address',status:'review',error:'Current address mismatch'},resume],[{action:'equivalent-preview',status:'complete',result:{replacementSku:'NEW'}},resume],[{action:'weight',status:'pending'},resume]])assert.equal(completedHistoricalPreparation({...ready,resolution_actions:actions},erp),false);
+ assert.equal(completedHistoricalPreparation({...ready,erp_live:{...ready.erp_live,stockCheckedAt:new Date(Date.now()-120000).toISOString()}},erp),false);
+});
+
+test('TEMU closure keeps the remaining flag for missing PDF coverage and any active older action',async()=>{
+ const db=await fixture();try{
+  await db.query("UPDATE orders SET issue=null,resolution_pending_resume=true WHERE id='o'");
+  await db.query("INSERT INTO resolution_jobs(id,order_id,action,status,error,created_at) VALUES('success','o','resume-erp','complete',null,now()-interval '1 minute'),('older','o','resume-erp','waiting',null,now()-interval '2 minutes')");
+  const options={fingerprint:async()=>fp,mappingFingerprint:async()=>fp};assert.equal((await reconcileHistoricalPreparation(db,'o',options)).updated,false);
+  await db.query("UPDATE resolution_jobs SET status='complete' WHERE id='older'");await db.query("UPDATE temu_label_jobs SET packages='[\"PK\",\"MISSING\"]'");assert.equal((await reconcileHistoricalPreparation(db,'o',options)).updated,false);
+  assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,true);
+ }finally{await db.close();}
+});
