@@ -1,4 +1,4 @@
-import {continuePreparationFromFreshRead,freshContinuationProof} from './preparation-local-continuation.mjs';
+import {continuePreparationFromFreshRead,freshContinuationProof,completedContinuationForPurchase,releaseCompletedContinuationForPurchase} from './preparation-local-continuation.mjs';
 import {initializeTemuAutomaticPurchase} from './temu-automatic-purchase.mjs';
 import {reconcileStockIncident,stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {reconcilePreparationFromReads} from './preparation-read-reconciliation.mjs';
@@ -72,7 +72,7 @@ export function orderRecheckMonitor(db,api,{enabled=()=>true,canResume=()=>true,
    for(const o of due)if(completedHistoricalPreparation(o,{status:o.erp_job_status,error:o.erp_job_error},now())){const result=await reconcileHistoricalPreparation(db,o.id);if(result.updated){o.label_status='production_ready';o.issue=null;o.resolution_pending_resume=false;}}
    const observations=due.map(o=>{o.erp_live_job={status:o.erp_job_status,error:o.erp_job_error,updated_at:o.erp_job_updated_at};const state=monitoringObservation(o,o.monitoring_previous,now());return {id:o.id,state:localObservationPatch(state),next_check:state.nextCheck,version:o.monitor_version};});
    if(observations.length)await db.query('UPDATE order_recheck_monitor m SET state=m.state||x.state,next_check=x.next_check,checked=x.version FROM jsonb_to_recordset($1::jsonb) AS x(id text,state jsonb,next_check timestamptz,version bigint) WHERE m.order_id=x.id',[JSON.stringify(observations)]);
-   for(const o of due)if(freshContinuationProof(o,now()))await continuePreparationFromFreshRead(db,o.id,{enabled,canResume,now});
+   for(const o of due){if(freshContinuationProof(o,now()))await continuePreparationFromFreshRead(db,o.id,{enabled,canResume,now});else if(completedContinuationForPurchase(o,now()))await releaseCompletedContinuationForPurchase(db,o.id,{enabled,canResume,now});}
   });}finally{localRunning=false;}
  }
  async function runExternal(){
