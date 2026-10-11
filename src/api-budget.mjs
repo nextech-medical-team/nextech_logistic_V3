@@ -1,3 +1,4 @@
+import {fairApiBudget} from './api-budget-fair.mjs';
 let database=null;
 const tails=new Map();
 const available=new Map();
@@ -5,13 +6,15 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 export function configureApiBudget(db){database=db;}
 // Claim only when due: queued callers must recheck a newly imposed cooldown.
 // Do not reserve future slots, which would bypass a later 429 response.
-export async function apiAcquireSlot(key,intervalMs=1600,{maxWaitMs=Infinity,shouldStop=()=>false}={}){
+export async function apiAcquireSlot(key,intervalMs=1600,{maxWaitMs=Infinity,shouldStop=()=>false,onProgress,fair=false}={}){
  if(!Number.isInteger(intervalMs)||intervalMs<1||intervalMs>2147483647)throw Error('Intervalle API invalide');
  if(maxWaitMs!==Infinity&&(!Number.isFinite(maxWaitMs)||maxWaitMs<0))throw Error('Attente API invalide');
+ if(fair)return fairApiBudget(key,{database,maxWaitMs,shouldStop,onProgress},options=>apiAcquireSlot(key,intervalMs,{...options,fair:false}));
  const started=Date.now();
  const wait=async delay=>{if(delay>maxWaitMs-(Date.now()-started))throw Object.assign(Error('Quota partagé : lecture différée'),{code:'source_budget_deferred',retryAfter:String(Math.ceil(delay/1000))});await sleep(Math.min(1000,delay));};
  for(;;){
   if(shouldStop())throw Object.assign(Error('Arrêt demandé'),{code:'TEMU_STOPPING'});
+  await onProgress?.();
   if(database){
    const claimed=await database.query(`INSERT INTO api_budget(key,next_at) VALUES($1,clock_timestamp()+($2::int*interval '1 millisecond')) ON CONFLICT(key) DO UPDATE SET next_at=clock_timestamp()+($2::int*interval '1 millisecond') WHERE api_budget.next_at<=clock_timestamp() RETURNING key`,[key,intervalMs]);
    if(claimed.rows.length)return;
