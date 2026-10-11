@@ -57,7 +57,7 @@ async function fixture(){
  await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,transport_choice text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,label_status text,erp_status text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
  CREATE TABLE erp_live_jobs(order_id text,status text,error text,updated_at timestamptz DEFAULT now(),state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text); CREATE TABLE partial_deliveries(order_id text,status text);
  CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,updated_at timestamptz DEFAULT now(),created_at timestamptz DEFAULT now());
- CREATE TABLE temu_label_jobs(reference text,status text,error text,packages jsonb);
+ CREATE TABLE temu_label_jobs(reference text,status text,error text,packages jsonb,result jsonb);
  CREATE TABLE correction_jobs(order_id text,status text,result jsonb,error text);
  CREATE TABLE lines(id text,order_id text,source_sku text,target_sku text,quantity numeric,target_quantity numeric,source_payload jsonb DEFAULT '{}');CREATE TABLE mappings(channel text,source_sku text,target_sku text,source_qty numeric,target_qty numeric);
  INSERT INTO orders(id,reference,issue) VALUES('a','A','SKU Erplain introuvable'),('b','B','Stock insuffisant');
@@ -215,7 +215,7 @@ for(const scenario of ['valid','stale','future','changed-mapping','stock-review'
   const proof={bcId:'1',readOnly:true,preparationNotStarted:true,checkedAt:new Date(at+(scenario==='stale'?-16*60000:scenario==='future'?60000:0)).toISOString(),comparison:{scope:'full',different:false},errors:[],mappingFingerprint:await currentMappingFingerprint(db,o)};
   await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bcComparisonRefresh}',$1::jsonb) WHERE id='a'",[JSON.stringify(proof)]);
   await db.query("INSERT INTO erp_live_jobs(order_id,status,error) VALUES('a','review',$1)",[scenario==='provider-error'?'Stock insuffisant':null]);
-  await db.query("INSERT INTO temu_label_jobs VALUES('A','complete',null,'[\"existing-package\"]')");
+  await db.query("INSERT INTO temu_label_jobs(reference,status,error,packages) VALUES('A','complete',null,'[\"existing-package\"]')");
   if(scenario==='changed-mapping')await db.query("UPDATE lines SET quantity=2 WHERE order_id='a'");
   if(scenario==='suspended')await db.query("UPDATE orders SET suspension='{\"active\":true}' WHERE id='a'");
   if(scenario==='source-hold')await db.query("UPDATE orders SET source_payload='{\"erplainValidationHold\":true}' WHERE id='a'");

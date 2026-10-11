@@ -40,10 +40,17 @@ export async function requestRecoverySweeps(db){
  });
 }
 
-export function currentHoldDiagnostic(o,{erpJob=o.erp_live_job,carrierJob=o.carrier_job,temuJob=o.temu_job}={}){
+export function currentHoldDiagnostic(o,{erpJob=o.erp_live_job,carrierJob=o.carrier_job,temuJob=o.temu_job,now=Date.now()}={}){
  const state=o.erp_live||{},p=o.source_payload||{};
  if(p.marketplacePendingCorrection)return {code:'source_change',label:'Commande source modifiée : rapprochement des données en attente',nextStep:'Comparer la version source aux documents existants avant toute reprise',decisionRequired:true};
  if(p.temuReadDeferred?.deferred===true&&(!temuJob?.error||temuJob.error==='Quota partagé : lecture différée'))return {code:'temu_read_deferred',label:'Lecture TEMU en attente',nextStep:'Reprise automatique selon la disponibilité du quota ; étiquettes et résultats existants conservés',decisionRequired:false};
+ if(temuJob?.status==='pending'&&temuJob.error==='TEMU · PDF en attente chez TEMU'){
+  const observed=Date.parse(temuJob.result?.observedAt),age=now-observed;
+  const parcels=Array.isArray(temuJob.result?.packageInfoResultList)?temuJob.result.packageInfoResultList:[],packages=Array.isArray(temuJob.packages)?temuJob.packages:[];
+  const verified=temuJob.result?.source==='temu_direct'&&packages.length>0&&packages.every(pkg=>parcels.some(p=>p.packageSn===pkg&&[0,1,'0','1'].includes(p.shippingLabelStatus)))&&parcels.every(p=>packages.includes(p.packageSn)&&[0,1,'0','1'].includes(p.shippingLabelStatus));
+  if(verified&&Number.isFinite(age)&&age>=0&&age<=2*recoveryCadence.local)return {code:'temu_pdf_processing',label:'PDF TEMU : récupération automatique en cours',nextStep:'Relire le résultat et récupérer le PDF existant ; aucun nouvel achat',decisionRequired:false,observedAt:temuJob.result.observedAt};
+  return {code:'temu_pdf_recheck',label:'PDF TEMU : disponibilité à revérifier',nextStep:'Actualiser le résultat TEMU et récupérer le document existant, sans nouvel achat',decisionRequired:false};
+ }
  if(temuJob?.error)return {code:'temu_error',label:temuJob.status==='shipment_error'?'Étiquette refusée par TEMU : '+temuJob.error:temuJob.error,nextStep:'Recontrôler le résultat TEMU ; conserver toute création existante ou incertaine',decisionRequired:false};
  if(['pending','processing'].includes(erpJob?.status))return {code:o.resolution_pending_resume&&state.bc?.id?'erp_admission_hold':'erp_processing',label:o.resolution_pending_resume&&state.bc?.id?'BC existant : admission à la préparation Erplain suspendue':'Préparation Erplain en attente ou en cours',nextStep:o.resolution_pending_resume&&state.bc?.id?'Vérifier l’origine du verrou et les prérequis avant admission au worker':'Suivre le traitement Erplain jusqu’à son résultat',decisionRequired:false};
  if(['pending','creating','awaiting_pdf'].includes(carrierJob?.status))return {code:'carrier_processing',label:'Traitement transport existant en cours',nextStep:'Suivre ou récupérer le document existant, sans nouvelle création',decisionRequired:false};
