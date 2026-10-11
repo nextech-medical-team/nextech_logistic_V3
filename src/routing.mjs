@@ -30,7 +30,7 @@ export function configuredRoute(channel,weight,config=defaultRouting,country='FR
 export async function loadRouting(db){return (await db.query("SELECT value FROM settings WHERE key='routing'")).rows[0]?.value||defaultRouting;}
 
 export function chosenRoute(order,weight,config=defaultRouting){
- if(order.channel==='temu')return configuredRoute('temu',weight,config,order.address?.country);
+ if(order.channel==='temu'&&!order.transport_choice)return configuredRoute('temu',weight,config,order.address?.country);
  const channel=erplainTransportChannel(order);
  if(isImportedErplain(order)&&channel==='tender'){
   const r=config.rules.find(r=>r.channel==='tender');

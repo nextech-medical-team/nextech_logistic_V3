@@ -53,7 +53,7 @@ function createCarriers(c,{fetchImpl,erplainApi,gls:GLS,gofo:GOFO,production}){
     },
     async authenticate(carrier){if(!['gls','gofo'].includes(carrier))throw new Error('Transporteur inconnu');await token(carrier);return {carrier,authenticated:true,environment:production?'production':'test'};},
     async gls(o,{onParcel}={}){
-      assertDirectCarrierAllowed(o);
+      assertDirectCarrierAllowed(o,'gls');
       if(isImportedErplain(o))o=await resolveImportedLabelOrder(o,erplainApi);
       else if(o.channel==='tender')o=await resolveTenderLabelOrder(o,erplainApi);
       const tenderAddress=o.channel==='tender'||isImportedErplain(o)?tenderGlsAddress(o):null;
@@ -72,7 +72,7 @@ function createCarriers(c,{fetchImpl,erplainApi,gls:GLS,gofo:GOFO,production}){
       return {reference:ref,tracking:(s.ParcelData||[]).map(p=>p.TrackID||p.ParcelNumber).filter(Boolean),documents:(s.PrintData||[]).filter(p=>p.Data).map(p=>p.Data)};
     },
     async gofoCreate(o){
-      assertDirectCarrierAllowed(o);
+      assertDirectCarrierAllowed(o,'gofo');
       if(isImportedErplain(o)){
        o=await resolveImportedLabelOrder(o,erplainApi);
        const client=String(o.erplain_label_customer.label),recipient=String(o.address.name),reference=String(o.external_reference),bl=String(o.label_bl);

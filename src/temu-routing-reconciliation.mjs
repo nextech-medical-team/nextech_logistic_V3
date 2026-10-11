@@ -1,6 +1,6 @@
 // Local routing only. No provider call, label operation, stock or ERP change.
 export const temuRoutingCandidates=`SELECT o.* FROM orders o
- WHERE o.channel='temu' AND (coalesce(o.carrier,'')<>'temu' OR o.transport_choice IS NOT NULL)
+ WHERE o.channel='temu' AND coalesce(o.carrier,'')<>'temu' AND o.transport_choice IS NULL
  AND NOT o.archived AND NOT o.partial_mode
  AND coalesce(o.label_status,'')<>'cancelled'
  AND coalesce(o.erp_live->'bc'->>'status','')<>'cancelled' AND coalesce(o.erp_live->>'phase','') !~ '^(creating|publishing)'
