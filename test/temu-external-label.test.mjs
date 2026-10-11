@@ -5,12 +5,20 @@ import {externalLabelInput,registerExternalLabel,hasExternalLabel,readExternalTe
 import {assertDirectCarrierAllowed} from '../src/temu-label-policy.mjs';
 import {prepareLabel} from '../src/workflow.mjs';
 import {temuShipping} from '../src/temu-shipping.mjs';
+import {buildLabelDownload} from '../src/label-downloads.mjs';
+import {PDFDocument} from 'pdf-lib';
 
 test('external declaration validates identity, explicit coverage and optional PDF',()=>{
  const b={carrier:'FedEx',tracking:'123456789\n987654321',confirmed:true};
  assert.equal(externalLabelInput(b).tracking.length,2);
  for(const change of [{confirmed:false},{tracking:''},{tracking:'123\n123'},{carrier:'<bad>'},{pdf:Buffer.from('not PDF').toString('base64')}])assert.throws(()=>externalLabelInput({...b,...change}));
  assert.ok(externalLabelInput({...b,pdf:Buffer.from('%PDF-1.4 test').toString('base64')}).pdf);
+});
+test('export uses only the external PDF, preserving old labels without printing them',async()=>{
+ const pdf=await PDFDocument.create();pdf.addPage();const bytes=await pdf.save();
+ const o={id:'export-external',channel:'temu',reference:'PO-EXTERNAL',source_payload:{externalLabel:{active:true,hasPdf:true,carrier:'FedEx',tracking:['123']}}};const read=[];
+ const db={async query(sql){read.push(sql);if(sql.includes('FROM orders'))return {rows:[o]};if(sql.includes('temu_external_label_documents'))return {rows:[{pdf:bytes}]};throw Error('Unexpected old label read');}};
+ const job={};await buildLabelDownload(db,{ids:[o.id]},job);assert.equal(job.pages,1);assert.equal(job.exportSources[0].source.carrier,'FedEx');assert.ok(!read.some(s=>s.includes('FROM temu_label_documents')||s.includes('FROM carrier_documents')));
 });
 test('declaration is local, idempotent, archives refusal and preserves old documents and independent blocks',async()=>{
  const db=await openDatabase();try{
@@ -45,4 +53,3 @@ test('stale quote, direct buy and old recovery cannot recreate an external order
  await assert.rejects(()=>service.buy('PO-053-19027229409911181','stale',1),/externe/);
  assert.equal((await service.recover('PO-053-19027229409911181')).status,'external');assert.equal(calls,0);
 });
-
