@@ -27,6 +27,6 @@ export function planMaskedTemuHold(e,{now=Date.now()}={}){
  const life=platformLifecycleReadinessProblem(o,lifecycle,[],now);const independent=lifecycle.find(l=>l.error)?.error;const issue=[independent?'Facturation Erplain à vérifier · '+independent:life?'Préparation V3 à vérifier · '+life:null,labelReadDeferred?'TEMU · '+j.error:null].filter(Boolean).join(' ; ')||null;
  if(e.runtimeProof?.allBusinessWritersPaused!==true)return stop('writers','Arrêt des écrivains requis');
  const source_payload={...o.source_payload};delete source_payload.marketplacePendingCorrection;
- source_payload.platformChangeReconciliation={kind:'temu_address_masking',verified:true,at:s.checkedAt,addressFrozen:true,labelsPreserved:true,commercialHash:currentMoney,sourceEvidenceHash:evidenceHash(s.payload),previousPendingHash:evidenceHash(pending)};
+ source_payload.platformChangeReconciliation={kind:'temu_address_masking',deferredReason:issue,deferredBilling:!!(independent||life),deferredLabelRead:labelReadDeferred,verified:true,at:s.checkedAt,addressFrozen:true,labelsPreserved:true,commercialHash:currentMoney,sourceEvidenceHash:evidenceHash(s.payload),previousPendingHash:evidenceHash(pending)};
  return {eligible:true,classification:issue?'masked_address_reclassified_independent_problem':'masked_address_false_hold_removed',technicalPatch:{source_payload,issue,resolution_pending_resume:issue?o.resolution_pending_resume:false,label_status:issue?o.label_status:'production_ready'},externalWrites:0,newJobs:0,labelsTouched:0,lifecycleRevisionChanged:true};
 }
