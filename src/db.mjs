@@ -1,3 +1,4 @@
+import {installTemuParcelRule} from './temu-parcel-count.mjs';
 import { mkdir } from 'node:fs/promises';
 
 import { PGlite } from '@electric-sql/pglite';
@@ -118,6 +119,7 @@ CREATE TABLE IF NOT EXISTS erplain_product_bindings(sku TEXT PRIMARY KEY,live_va
 
   `);await db.query("INSERT INTO schema_migrations(version) VALUES('core-20261005-1')");});
 
+  await installTemuParcelRule(db);
   return db;
 
 }

@@ -15,6 +15,7 @@ import {historicalPreparationProof} from './historical-stock-proof.mjs';
 import {currentMappingLine,currentMappingFingerprint,mappingSelectionFingerprint} from './current-mapping-line.mjs';
 import {alignMappedBc} from './mapping-bc-alignment.mjs';
 import {readPreservedHistoricalBc} from './historical-bc-pricing.mjs';
+import {alignHistoricalSourceVat,queueSourceVatReviews} from './historical-source-vat.mjs';
 import {normalizeHistoricalDraft} from './historical-bl-draft.mjs';
 import {resumeTemuFinancialReviews} from './financial-review-recovery.mjs';
 import {resumeAcceptedCommercialReviews} from './commercial-tolerance-recovery.mjs';
@@ -84,7 +85,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    }
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.
    if(!bcOnlyOrderId){await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
-   if(!bcOnlyOrderId)await scheduleStockChecks(db);
+   if(!bcOnlyOrderId){await queueSourceVatReviews(db);await scheduleStockChecks(db);}
    const ids=await db.transaction(async tx=>{
     if(bcOnlyOrderId){
      const prior=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[bcOnlyOrderId])).rows[0];
@@ -187,6 +188,17 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
      const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh);if(block)throw Error(block);
      const rows=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
      if(JSON.stringify(rows.map(l=>currentMappingLine(l,o.channel)))!==JSON.stringify(o.selectedSourceLines.map(l=>currentMappingLine(l,o.channel))))throw Error('Mapping modifié pendant le contrôle : nouvelle vérification requise');
+    }}));}catch(e){o.failed=true;await fail(o,e);}
+   }
+   working=working.filter(o=>!o.failed);
+   // Correct historical tax-code differences from the current source before
+   // validating commercial totals or creating any missing delivery document.
+   for(const o of working.filter(o=>o.erp_live.bc?.id)){
+    try{await withShipmentLock(()=>alignHistoricalSourceVat(api,o,{save,preserveLabels:()=>preserveSubstitutionLabels(db,o.id),guard:async()=>{
+     const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh);if(block)throw Error(block);
+     if(JSON.stringify(fresh.source_payload?.temuAmounts?.data)!==JSON.stringify(o.source_payload?.temuAmounts?.data))throw Error('TVA source · Source financière modifiée pendant le contrôle');
+     const rows=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
+     if(JSON.stringify(rows.map(l=>currentMappingLine(l,o.channel)))!==JSON.stringify(o.selectedSourceLines.map(l=>currentMappingLine(l,o.channel))))throw Error('TVA source · Mapping modifié pendant le contrôle');
     }}));}catch(e){o.failed=true;await fail(o,e);}
    }
    working=working.filter(o=>!o.failed);
