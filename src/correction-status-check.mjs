@@ -1,3 +1,4 @@
+import {reconcileTemuParcelDiagnostics} from './temu-parcel-count.mjs';
 import {completedHistoricalPreparation,reconcileHistoricalPreparation,currentReplacementPreview,currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
 import {reconcileVerifiedWeights} from './verified-weight-diagnostics.mjs';
 import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
@@ -17,6 +18,7 @@ export function correctionStatusSnapshot(order,{erpJob,carrierJob,otherReviews=[
 export async function refreshCorrectionStatuses(db,orderId){
  if(!orderId)throw Error('Commande requise pour actualiser les statuts');
  await reconcileVerifiedWeights(db,null,orderId);
+ await reconcileTemuParcelDiagnostics(db,orderId);
  let order=(await db.query('SELECT * FROM orders WHERE id=$1',[orderId])).rows[0];
  if(!order)throw Error('Commande introuvable pendant actualisation des statuts');
  const erpJob=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[orderId])).rows[0];

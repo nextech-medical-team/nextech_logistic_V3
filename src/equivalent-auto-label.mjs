@@ -12,7 +12,9 @@ export function assertPreparedLabelOrder(o,e){
  if(e?.status!=='complete'||e.error)throw Error('Contrôle Erplain non terminé');
  if(o.erp_live?.phase!=='bl_ready'||o.erp_live?.bc?.status!=='active'||o.erp_live?.bl?.status!=='ready_to_ship')throw Error('BL non prêt à livrer');
  if(addressIssue(o.address))throw Error(addressIssue(o.address));
- if(!(Number(o.weight_kg)>0)||!Number.isInteger(Number(o.parcel_count))||Number(o.parcel_count)<1)throw Error('Poids ou nombre de colis absent');
+ if(!(Number(o.weight_kg)>0))throw Error('Poids du colis absent');
+ const count=o.channel==='temu'?1:Number(o.parcel_count);
+ if(!Number.isInteger(count)||count<1)throw Error('Nombre de colis absent');
 }
 
 // One order lock covers proof, duplicate protection, queue insertion and hold release.
