@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {selectProblemOrders,paginateProblemOrders,WITHOUT_DIAGNOSTIC} from '../src/problem-typology.mjs';
 import {currentProblemClassifier} from '../src/problem-typology-reader.mjs';
+import {currentPreparationObservation} from '../src/preparation-observation-view.mjs';
+import {preparationNeedsCheck} from '../src/preparation-observation.mjs';
 import {orderQuery} from '../src/order-query.mjs';
 
 test('exact labels, distinct order counts, OR and filtering before pagination',()=>{
@@ -40,12 +42,12 @@ const server=readFileSync(new URL('../src/server.mjs',import.meta.url),'utf8');
 const start=server.indexOf("    if((p==='/api/orders'||p==='/api/order-problem-types')");
 const end=server.indexOf("    if(p==='/api/products'",start);
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-const execute=new AsyncFunction('p','req','url','db','orderQuery','managerSql','partialAllocationSql','orderPageDetails','projectCurrentDiagnostics','readerJobs','catalog','selectProblemOrders','paginateProblemOrders','currentProblemClassifier','orderStatistics','cachedOrderSummary','json','res',server.slice(start,end));
+const execute=new AsyncFunction('p','req','url','db','orderQuery','managerSql','partialAllocationSql','orderPageDetails','projectCurrentDiagnostics','readerJobs','catalog','selectProblemOrders','paginateProblemOrders','currentProblemClassifier','orderStatistics','cachedOrderSummary','json','res','currentPreparationObservation','preparationNeedsCheck',server.slice(start,end));
 async function route(path,query){
  const rows=Array.from({length:120},(_,i)=>({id:String(i),issue:i>=100?'Commande déjà expédiée sur la plateforme':'',label_status:'pending',source_payload:{},sku_lines:[]}));
  let out,sql,statsIds;
- const db={query:async(q,args)=>{if(q.startsWith('SELECT id FROM orders'))return {rows:rows.filter(o=>o.issue).map(o=>({id:o.id}))};sql={q,args};return {rows:structuredClone(rows)};}};
- await execute(path,{method:'GET'},new URL('https://example.test'+path+'?'+query),db,orderQuery,'NULL','NULL',async()=>{},o=>o,{snapshot:async()=>({configured:true})},{status:()=>({})},selectProblemOrders,paginateProblemOrders,currentProblemClassifier,async(_db,_params,ids)=>{statsIds=ids;return {transportStats:[],summary:{total:ids.length}};},async()=>({transportStats:[],summary:{total:120}}),(_res,status,data)=>{assert.equal(status,200);out=data;},{});
+ const db={query:async(q,args)=>{if(q.startsWith('SELECT order_id,state,requested FROM order_recheck_monitor'))return {rows:[]};if(q.startsWith('SELECT id FROM orders'))return {rows:rows.filter(o=>o.issue).map(o=>({id:o.id}))};sql={q,args};return {rows:structuredClone(rows)};}};
+ await execute(path,{method:'GET'},new URL('https://example.test'+path+'?'+query),db,orderQuery,'NULL','NULL',async()=>{},o=>o,{snapshot:async()=>({configured:true})},{status:()=>({})},selectProblemOrders,paginateProblemOrders,currentProblemClassifier,async(_db,_params,ids)=>{statsIds=ids;return {transportStats:[],summary:{total:ids.length}};},async()=>({transportStats:[],summary:{total:120}}),(_res,status,data)=>{assert.equal(status,200);out=data;},{},currentPreparationObservation,preparationNeedsCheck);
  return {out,sql,statsIds};
 }
 test('integrated GET filters all pages and restricts statistics to same orders',async()=>{
