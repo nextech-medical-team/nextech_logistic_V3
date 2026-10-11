@@ -42,7 +42,7 @@ export function planRelaySourceReconciliation(e,{now=Date.now()}={}){
  if(hasLabel&&!relay.selectedId&&(!validNearest||labelIds.some(id=>id!==nearest.parcelShopId)))independent='GLS · Relais par défaut : proximité et destination de l’étiquette à confirmer';
  const patch={source_payload,issue:o.issue,resolution_pending_resume:o.resolution_pending_resume,label_status:o.label_status};
  const obsolete=reason.test(o.issue||'');
- if(independent){patch.issue=independent;return {eligible:true,classification:'relay_label_intervention',technicalPatch:patch,lifecycleRevisionChanged:false};}
+ if(independent){patch.issue=independent;patch.label_status='blocked';return {eligible:true,classification:'relay_label_intervention',technicalPatch:patch,lifecycleRevisionChanged:o.label_status!=='blocked'};}
  if(obsolete){
   const errors=(e.otherErrors||[]).filter(x=>!reason.test(String(x)));
   if(!hasLabel||errors.length){patch.issue=errors.length?'Préparation V3 à vérifier · '+errors.map(String).join(' · ').slice(0,450):'Étiquette relais à créer · préparation source vérifiée';return {eligible:true,classification:'relay_source_verified_preparation_pending',technicalPatch:patch,lifecycleRevisionChanged:false};}
