@@ -42,8 +42,8 @@ async function confirmedRead(db,id,concordant=true){
 async function fixture(){
  const db=new PGlite();db.withLocks=async(keys,fn)=>fn();db.transaction=fn=>fn(db);
  await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
- CREATE TABLE erp_live_jobs(order_id text,status text,error text,state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text); CREATE TABLE partial_deliveries(order_id text,status text);
- CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,created_at timestamptz DEFAULT now());
+ CREATE TABLE erp_live_jobs(order_id text,status text,error text,updated_at timestamptz DEFAULT now(),state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text); CREATE TABLE partial_deliveries(order_id text,status text);
+ CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,updated_at timestamptz DEFAULT now(),created_at timestamptz DEFAULT now());
  CREATE TABLE correction_jobs(order_id text,status text,result jsonb,error text);
  CREATE TABLE lines(id text,order_id text,source_sku text,target_sku text,quantity numeric,target_quantity numeric,source_payload jsonb DEFAULT '{}');CREATE TABLE mappings(channel text,source_sku text,target_sku text,source_qty numeric,target_qty numeric);
  INSERT INTO orders(id,reference,issue) VALUES('a','A','SKU Erplain introuvable'),('b','B','Stock insuffisant');
