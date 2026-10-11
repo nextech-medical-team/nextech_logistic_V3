@@ -214,7 +214,18 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    const busy=(await db.query("SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status IN ('pending','creating','awaiting_pdf')",[o.id])).rows.length;
    if(busy)throw Error('Traitement déjà en cours : attendre sa fin avant de modifier les données de la commande');
   }
-  if(['equivalent-preview','replace-equivalent'].includes(j.action)){const result=await substitution(db,api,o,b,{apply:j.action==='replace-equivalent',stage,directory});if(j.action==='equivalent-preview'||result.partialRemainder)return result;await update(j.id,'waiting','Équivalent enregistré · contrôle stock et BL',{...result,equivalent:true});return null;}
+  if(['equivalent-preview','replace-equivalent'].includes(j.action)){
+   let deferResume=false;
+   if(b.importRow){
+    const imported=(await db.query("SELECT r.* FROM equivalence_import_rows r JOIN equivalence_imports i ON i.id=r.batch_id WHERE r.batch_id=$1 AND r.line=$2 AND r.request_id=$3 AND r.job_id=$4 AND r.order_id=$5 AND r.status='processing' AND i.status='applying'",[b.importRow.batchId,b.importRow.line,b.requestId,j.id,o.id])).rows[0];
+    if(!imported)throw Error('Ligne d’import non confirmée : aucune modification effectuée');
+    deferResume=(await db.query("SELECT 1 FROM equivalence_import_rows WHERE batch_id=$1 AND order_id=$2 AND status='queued'",[imported.batch_id,o.id])).rows.length>0;
+    if(deferResume&&(o.partial_mode||o.erp_live?.bc?.update_stock===true))throw Error('Plusieurs remplacements sur une livraison partielle ou un BC historique : rapprochement requis avant reprise');
+   }
+   const result=await substitution(db,api,o,b,{apply:j.action==='replace-equivalent',stage,directory,deferResume});
+   if(j.action==='equivalent-preview'||result.partialRemainder||result.importDeferred)return result;
+   await update(j.id,'waiting','Équivalent enregistré · contrôle stock et BL',{...result,equivalent:true});return null;
+  }
   if(j.action==='manual-temu-pricing'){await stage('Enregistrement des prix et quantités');const result=await saveManualPricing(db,o.id,b,j.id);return {...result,manualPricing:true,erpOnly:true,checks:await recheckOrders(db,[o.id])};}
   if(j.action==='choose-carrier'){
    assertManualLabelOrder(o,b.carrier,{manualChoice:true});
@@ -443,7 +454,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    if(p!=='/api/resolutions'||req.method!=='POST')return false;
    permitted(user,['admin','manager']);const b=validateResolution(await body(req));const previous=(await db.query('SELECT * FROM resolution_jobs WHERE request_id=$1',[b.requestId])).rows[0];
    if(previous){if(JSON.stringify(previous.payload)!==JSON.stringify(b)){const keys=x=>JSON.stringify(Object.entries(x).sort());if(keys(previous.payload)!==keys(b))throw Error('Identifiant déjà utilisé pour une autre intervention');}json(res,202,{id:previous.id});return true;}
-   let id=randomUUID();await db.transaction(async tx=>{if(!(await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows.length)throw Error('Commande introuvable');const active=(await tx.query("SELECT id FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting')",[b.id])).rows[0];if(active){id=active.id;return;}await tx.query('INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$3,$4,$5)',[id,b.id,b.requestId,b.action,JSON.stringify(b)]);await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'resolution.requested',$2)",[user.email,JSON.stringify({id,orderId:b.id,action:b.action,type:b.type,sku:b.sku,account:'Erplain LIVE'})]);});json(res,202,{id});return true;
+   let id=randomUUID();await db.transaction(async tx=>{if(!(await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows.length)throw Error('Commande introuvable');if((await tx.query("SELECT 1 FROM equivalence_import_rows r JOIN equivalence_imports i ON i.id=r.batch_id WHERE r.order_id=$1 AND i.status='applying'",[b.id])).rows.length)throw Error('Import d’équivalences en cours sur cette commande : attendre son résultat');const active=(await tx.query("SELECT id FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting')",[b.id])).rows[0];if(active){id=active.id;return;}await tx.query('INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$3,$4,$5)',[id,b.id,b.requestId,b.action,JSON.stringify(b)]);await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'resolution.requested',$2)",[user.email,JSON.stringify({id,orderId:b.id,action:b.action,type:b.type,sku:b.sku,account:'Erplain LIVE'})]);});json(res,202,{id});return true;
   },
   async run(){await reconcileCompletedBlResumptions(db);if(running)return;running=true;let j;
    try{
