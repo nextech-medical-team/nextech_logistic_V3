@@ -1,4 +1,5 @@
 export function existingParcelShop(source={}) {
+ if(source.shopifyRelay?.selectedId)return source.shopifyRelay.selectedId;
  const values=[source,source.shopifyOrder||{}];
  for(const v of values)for(const k of ['glsParcelShopId','parcelShopId','parcel_shop_id','parcelshopid'])if(String(v[k]||'').trim())return String(v[k]).trim();
  for(const a of source.note_attributes||[])if(/^(glsParcelShopId|parcelShopId|parcel_shop_id|parcelshopid)$/i.test(a.name||'')&&String(a.value||'').trim())return String(a.value).trim();

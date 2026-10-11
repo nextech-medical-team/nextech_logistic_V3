@@ -1,3 +1,4 @@
+import {currentMappingFingerprint} from '../src/current-mapping-line.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
@@ -30,10 +31,18 @@ test('commercial platform states do not create a diagnostic or next-step suspens
  assert.match(monitoringObservation({suspension:{active:true,note:'Décision humaine'}}).nextStep,/réactivation/);
 });
 
+
+async function confirmedRead(db,id,concordant=true){
+ const order=(await db.query('SELECT * FROM orders WHERE id=$1',[id])).rows[0];
+ const comparison={concordant,checkedAt:new Date().toISOString(),mappingFingerprint:await currentMappingFingerprint(db,order)};
+ await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bcComparisonRefresh}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(comparison)]);
+ return {comparison};
+}
+
 async function fixture(){
  const db=new PGlite();db.withLocks=async(keys,fn)=>fn();db.transaction=fn=>fn(db);
  await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
- CREATE TABLE erp_live_jobs(order_id text,status text,error text,state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text);
+ CREATE TABLE erp_live_jobs(order_id text,status text,error text,state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text); CREATE TABLE partial_deliveries(order_id text,status text);
  CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,created_at timestamptz DEFAULT now());
  CREATE TABLE correction_jobs(order_id text,status text,result jsonb,error text);
  CREATE TABLE lines(id text,order_id text,source_sku text,target_sku text,quantity numeric,target_quantity numeric,source_payload jsonb DEFAULT '{}');CREATE TABLE mappings(channel text,source_sku text,target_sku text,source_qty numeric,target_qty numeric);
@@ -68,7 +77,7 @@ test('a slow external read never delays local checks; automatic resume respects 
  const db=await fixture();try{
  await db.query(`UPDATE orders SET issue='Reprise historique : BL non cree',erp_live='{"phase":"historical_review","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
  let release,started;const begin=new Promise(r=>started=r),pause=new Promise(r=>release=r);let allow=false;
- const m=orderRecheckMonitor(db,{}, {canResume:()=>allow,readProduct:async()=>{started();await pause;return {usable:false,status:'missing'};},readDocuments:async()=>({})});
+ const m=orderRecheckMonitor(db,{}, {canResume:()=>allow,readProduct:async()=>{started();await pause;return {usable:false,status:'missing'};},readDocuments:async(_db,_api,id)=>confirmedRead(db,id)});
  await m.runLocal();const reading=m.runExternal();await begin;
  await db.query("INSERT INTO correction_jobs VALUES('a','complete','{}',null)");await m.runLocal();
  assert.equal((await db.query("SELECT requested=checked ok FROM order_recheck_monitor WHERE order_id='a'")).rows[0].ok,true);
@@ -116,7 +125,7 @@ test('automatic historical resume preserves an unconfirmed preview and rechecks 
  const db=await fixture();try{
  await db.query(`UPDATE orders SET issue='Reprise historique : BL non cree',erp_live='{"phase":"historical_review","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
  await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result) VALUES('preview','a','preview','equivalent-preview','complete','{\"replacementSku\":\"NEW\"}')");
- const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:false,status:'missing'}),readDocuments:async()=>({})});await m.runLocal();
+ const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:false,status:'missing'}),readDocuments:async(_db,_api,id)=>confirmedRead(db,id)});await m.runLocal();
  const transaction=db.transaction;db.transaction=async fn=>{await db.query("UPDATE orders SET suspension='{\"active\":true}' WHERE id='b'");return transaction(fn);};await m.runExternal();
  assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);assert.equal((await db.query("SELECT result->>'replacementSku' sku FROM resolution_jobs WHERE id='preview'")).rows[0].sku,'NEW');
  }finally{await db.close();}
@@ -125,4 +134,26 @@ test('automatic historical resume preserves an unconfirmed preview and rechecks 
 import {persistedRecheckProblemSql} from '../src/order-problem-predicates.mjs';
 test('the problems list retains an independent review after another correction succeeds and removes it after its own completion',async()=>{
  const db=await fixture();try{await db.query("UPDATE orders SET issue=null WHERE id='a'");await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,error,created_at) VALUES('address','a','address','address','review','Current address mismatch',now()-interval '1 hour'),('weight','a','weight','weight','complete',null,now())");const m=orderRecheckMonitor(db,{});await m.runLocal();assert.equal((await db.query("SELECT state->>'result' result FROM order_recheck_monitor WHERE order_id='a'")).rows[0].result,'Current address mismatch');assert.ok((await db.query(`SELECT id FROM orders WHERE ${persistedRecheckProblemSql}`)).rows.some(r=>r.id==='a'));await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,error,created_at) VALUES('fixed','a','fixed','address','complete',null,now()+interval '1 second')");await m.runLocal();assert.ok(!(await db.query(`SELECT id FROM orders WHERE ${persistedRecheckProblemSql}`)).rows.some(r=>r.id==='a'));}finally{await db.close();}
+});
+
+for(const scenario of ['pending-existing','pending-no-bc','pending-no-resume','processing','partial','different','unconfirmed'])test('BC recurrence '+scenario+': real SQL eligibility and protected resume',async()=>{
+ const db=await fixture();try{
+  await db.exec("DELETE FROM order_recheck_monitor WHERE order_id='b'; DELETE FROM orders WHERE id='b'");await db.query("DELETE FROM lines WHERE order_id='b'");
+  const bc=scenario==='pending-no-bc'?{}:{id:'1'};
+  await db.query("UPDATE orders SET resolution_pending_resume=$1,partial_mode=$2,erp_live=$3 WHERE id='a'",[scenario!=='pending-no-resume',scenario==='partial',JSON.stringify({phase:'bc_created',bc,pricing:{status:'verified'}})]);
+  await db.query("INSERT INTO erp_live_jobs(order_id,status) VALUES('a',$1)",[scenario==='processing'?'processing':'pending']);
+  let reads=0;const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:false,status:'missing'}),readDocuments:async(_db,_api,id)=>{reads++;return scenario==='unconfirmed'?{}:confirmedRead(db,id,scenario!=='different');}});
+  await m.runLocal();await m.runExternal();
+  assert.equal(reads,['pending-no-bc','pending-no-resume','processing'].includes(scenario)?0:1);
+  assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,scenario==='pending-existing'?1:0);
+  assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='a'")).rows[0].status,scenario==='processing'?'processing':'pending');
+ }finally{await db.close();}
+});
+
+test('mapping changed after document refresh cannot enqueue an automatic resume',async()=>{
+ const db=await fixture();try{
+ await db.query(`UPDATE orders SET issue='Reprise de preparation',resolution_pending_resume=true,erp_live='{"phase":"bc_created","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
+ const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:false,status:'missing'}),readDocuments:async(_db,_api,id)=>{const proof=await confirmedRead(db,id);await db.query('UPDATE lines SET quantity=quantity+1 WHERE order_id=$1',[id]);return proof;}});
+ await m.runLocal();await m.runExternal();assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);
+ }finally{await db.close();}
 });
