@@ -5,4 +5,4 @@
 #view-orders td[data-erplain-tracking],#view-orders td[data-platform-status]{overflow-wrap:anywhere;white-space:normal}
 
 /* Keep the TEMU message beneath its code even when badges use flex. */
-[data-platform-status] .badge:has(> [data-temu-status-label]){display:inline-block;}
+#view-orders .orders-with-margins td[data-platform-status] .badge:has(> [data-temu-status-label]){display:block!important;}
