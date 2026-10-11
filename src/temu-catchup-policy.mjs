@@ -22,7 +22,7 @@ export function obsoleteTemuVisibilityError(message){
 }
 
 export function pureTemuSourceReadError(message){
- return typeof message==='string'&&message.split(/\s;\s/).every(part=>obsoleteTemuVisibilityError(part)||/^TEMU refuse l.opération\s*:\s*3000032 access_token don't have this api access, please ask for seller to authorize this api in seller center first\.and share the new access_token with you\.\s*$/i.test(part));
+ return obsoleteTemuVisibilityError(message)||typeof message==='string'&&message.split(/\s;\s/).every(part=>obsoleteTemuVisibilityError(part)||/^TEMU refuse l.opération\s*:\s*3000032 access_token don't have this api access, please ask for seller to authorize this api in seller center first\.and share the new access_token with you\.\s*$/i.test(part));
 }
 export function partialTemuReadProof(order,observation){
  if(observation.reference!==(order.source_reference||order.reference)||!observation.coverage?.detail||!observation.coverage?.version||!observation.coverage?.consistency||!Number.isSafeInteger(observation.sourceVersion)||observation.sourceVersion<=0||observation.payload?.detail?.parentOrderMap?.parentOrderSn!==observation.reference||!observation.errors?.length||observation.errors.some(e=>!['shipping','amounts','shipments','packages'].includes(e.field)))return null;

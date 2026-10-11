@@ -255,7 +255,7 @@ test('stable stage supersedes a refusal combined only with obsolete list absence
  assert.equal(obsoleteTemuVisibilityError(refusal+' ; Stock insuffisant'),false);
  assert.equal(obsoleteTemuVisibilityError(refusal+' ; TEMU · Commande absente de la liste source ; Stock insuffisant'),false);
  assert.equal(obsoleteTemuVisibilityError('TEMU · Commande absente de la liste source'),false);
- assert.equal(pureTemuSourceReadError(refusal+' ; TEMU · Commande absente de la liste source'),false);
+ assert.equal(pureTemuSourceReadError(refusal+' ; TEMU · Commande absente de la liste source'),true);
 });
 
 
@@ -275,6 +275,37 @@ test('pending detail retires compound list refusal and preserves hold and docume
    for(const key of ['address','erp_live','label_status','tracking_status','recipient'])assert.deepEqual(after[key],before[key]);assert.equal(after.source_payload.visibilityHold,true);
    const projected=projectCurrentDiagnostics({...before,source_payload:after.source_payload});assert.equal(projected.issue,after.issue);
    const newer=projectCurrentDiagnostics({...before,source_payload:{...after.source_payload,temuDirect:{attemptedAt:new Date(Date.parse(observation.checkedAt)+1000).toISOString()}}});assert.equal(newer.issue,issue);
+  }finally{await db.close();}
+ }
+});
+
+
+test('complete source reconnects stranded initial review without replaying protected work',async()=>{
+ const compound='TEMU refuse l’opération : 180020006 The current order status cannot be viewed. ; TEMU · Commande absente de la liste source';
+ const initial='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU';
+ for(const scenario of ['allowed','paused','before-start','stock','uncertain','history','other-job']){
+  const db=await fixture();try{
+   const p=payload();p.detail.parentOrderMap.parentOrderTime=Math.floor(Date.now()/1000)-60;p.detail.parentOrderMap.updateTime=p.detail.parentOrderMap.parentOrderTime+1;
+   await db.query("UPDATE orders SET issue='Earlier unclassified initial-source warning',source_payload=$1::jsonb WHERE id='A'",[JSON.stringify({mallId:'M',sourceShop:'M',visibilityHold:true})]);
+   await db.query("INSERT INTO erp_live_jobs(order_id,status,error) VALUES('A','review',$1)",[scenario==='other-job'?'Stock insuffisant':initial]);
+   const observation=await readTemuSource(apiFor(p),reference),before=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];
+   const first=await db.transaction(tx=>reconcileTemuCatchup(tx,before,observation));assert.equal(first.initialRecovered,false);
+   let order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.equal(order.source_payload.visibilityHold,false);assert.equal(order.source_payload.temuCatchup.coreComplete,true);assert.equal(order.source_payload.temuInitialPreparationPending,undefined);
+   if(scenario==='uncertain')order.source_payload.temuDirect.attemptedAt=new Date().toISOString();
+   await db.query("UPDATE orders SET issue=$1,source_payload=$2::jsonb WHERE id='A'",[scenario==='stock'?'Stock insuffisant':compound,JSON.stringify(order.source_payload)]);
+   await db.query("INSERT INTO settings VALUES('automatic_live',$1::jsonb)",[JSON.stringify({enabled:scenario!=='paused'})]);
+   await db.query("UPDATE settings SET value=$1::jsonb WHERE key='marketplace_automatic'",[JSON.stringify({enabled:true,channels:{temu:true},since:new Date(Date.now()+(scenario==='before-start'?0:-86400000)).toISOString()})]);
+   if(scenario==='history')await db.exec("INSERT INTO correction_jobs VALUES('A','complete')");
+   order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];const lines=(await db.query("SELECT * FROM lines WHERE order_id='A' ORDER BY source_line")).rows;
+   const result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.equal(result.initialRecovered,scenario==='allowed',scenario);
+   const after=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0],job=(await db.query("SELECT * FROM erp_live_jobs WHERE order_id='A'")).rows[0];
+   assert.equal(job.status,scenario==='allowed'?'pending':'review');assert.equal(job.error,scenario==='allowed'?null:scenario==='other-job'?'Stock insuffisant':initial);
+   assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,1);assert.equal((await db.query('SELECT * FROM temu_label_jobs')).rows.length,0);assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);
+   assert.deepEqual((await db.query("SELECT * FROM lines WHERE order_id='A' ORDER BY source_line")).rows,lines);
+   for(const key of ['address','erp_live','label_status','tracking_status','recipient'])assert.deepEqual(after[key],order[key]);
+   assert.equal(after.source_payload.visibilityHold,false);if(scenario==='stock')assert.equal(after.issue,'Stock insuffisant');else assert(!String(after.issue).includes('180020006'));
+   if(scenario==='uncertain')assert.equal(after.source_payload.temuDirect.attemptedAt,order.source_payload.temuDirect.attemptedAt);
+   if(scenario==='paused'){assert.equal(after.source_payload.temuInitialPreparationPending,true);await db.exec("UPDATE settings SET value='{\"enabled\":true}' WHERE key='automatic_live'");const resumed=await db.transaction(tx=>reconcileTemuCatchup(tx,after,observation));assert.equal(resumed.initialRecovered,true);}
   }finally{await db.close();}
  }
 });
