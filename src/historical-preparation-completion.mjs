@@ -7,7 +7,7 @@ export function currentReplacementPreview(j){return j?.action==='equivalent-prev
 export const resolutionStateSql="SELECT action,status,error,result,created_at,id FROM (SELECT DISTINCT ON (action) action,status,error,result,created_at,id FROM resolution_jobs WHERE order_id=$1 ORDER BY action,created_at DESC,id DESC) current_actions ORDER BY created_at DESC,id DESC";
 export function currentResolutionState(actions=[]){
  actions=Array.isArray(actions)?actions:[];
- const preparation=new Set(['resume-erp','resume','replace-equivalent','reconcile-bc','compare-bc','manual-temu-pricing','equivalent-preview']);
+ const preparation=new Set(['resume-erp','resume','replace-equivalent','reconcile-bc','compare-bc','manual-temu-pricing','equivalent-preview','refresh','create-product']);
  const completed=actions.findIndex(j=>['resume-erp','resume','replace-equivalent'].includes(j.action)&&j.status==='complete'&&!j.error&&!j.result?.partialRemainder);
  const reviews=actions.filter((j,i)=>j.status==='review'&&!closedStockReview(j)&&(!preparation.has(j.action)||completed<0||i<completed));
  const preview=actions.findIndex(currentReplacementPreview);return {reviews,pendingReplacement:preview>=0&&(completed<0||preview<completed)};
