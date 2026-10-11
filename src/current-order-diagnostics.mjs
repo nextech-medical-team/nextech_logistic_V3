@@ -30,7 +30,13 @@ export function projectCurrentDiagnostics(o){
   if(job&&Number.isFinite(Date.parse(job.updated_at))&&Date.parse(job.updated_at)<=Date.parse(partial.checkedAt)&&(pureTemuSourceReadError(job.error)||job.error==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'))job.error=partial.currentReason;
  }
  const deferred=o.source_payload?.platformChangeReconciliation;
- if(deferred?.kind==='temu_address_masking'&&deferred.verified===true&&deferred.deferredBilling===true&&!o.source_payload?.marketplacePendingCorrection&&o.invoice_status==='paid'&&o.issue===deferred.deferredReason&&(!deferred.deferredLabelRead||o.temu_job)){o.issue=o.temu_job?.error?'TEMU · '+o.temu_job.error:null;}
+ // A successful quota read may have retired only the known quota suffix from
+ // the card. Match that exact historical suffix without retiring other errors.
+ const deferredBillingMatches=typeof o.issue==='string'&&(o.issue===deferred?.deferredReason||typeof deferred?.deferredReason==='string'&&o.issue===deferred.deferredReason.replace(/ ; TEMU · Quota partagé : lecture différée$/,''));
+ if(deferred?.kind==='temu_address_masking'&&deferred.verified===true&&deferred.deferredBilling===true&&o.invoice_status==='paid'&&deferredBillingMatches&&(!deferred.deferredLabelRead||o.temu_job)){
+  const sourceReason=o.source_payload?.marketplacePendingCorrection?currentPlatformModificationReason(o,'Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise'):null;
+  o.issue=[sourceReason,o.temu_job?.error?'TEMU · '+o.temu_job.error:null].filter(Boolean).join(' ; ')||null;
+ }
  const stock=o.erp_live?.stockIncidentRecheck,stamp=Date.parse(stock?.checkedAt),stockFresh=Number.isFinite(stamp)&&stamp<=Date.now()&&Date.now()-stamp<=15*60000;
  if(stock&&((stock.preparationRequired&&o.issue===stock.currentIssue)||(stock.status!=='resolved'&&o.issue===stock.currentError))){for(const [target,key] of [[o.erp_live_job,'error'],[o,'resolution_error']])if(target&&stockIncidentOnly(target[key])&&(target===o.erp_live_job?target[key]===stock.erpError:(stock.status==='resolved'?stock.retiredErrors:stock.observedErrors)?.includes(target[key])))target[key]=stock.status==='resolved'?(stockFresh?null:'Stock : vérification à reprendre — dernier contrôle expiré'):stock.currentError;}
 
