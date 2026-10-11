@@ -19,6 +19,7 @@ export async function registerExternalLabel(db,b,user){
  const input=externalLabelInput(b);
  const reference=(await db.query('SELECT reference FROM orders WHERE id=$1',[b.id])).rows[0]?.reference;
  if(!reference)throw Error('Commande absente');
+ await db.withLocks(['temu-external-label-schema'],()=>db.exec('CREATE TABLE IF NOT EXISTS temu_external_label_documents(order_id text PRIMARY KEY REFERENCES orders(id),pdf bytea NOT NULL)'));
  return withShipmentLock(()=>db.transaction(async tx=>{
   const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows[0];
   if(o.channel!=='temu'||o.archived||o.partial_mode)throw Error('Enregistrement réservé à une commande TEMU active complète');
@@ -28,7 +29,6 @@ export async function registerExternalLabel(db,b,user){
   const busy=(await tx.query("SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status IN ('creating','awaiting_pdf','review') UNION ALL SELECT 1 FROM extra_parcels WHERE order_id=$1 AND status IN ('pending','creating','review')",[o.id])).rows.length;
   if(busy)throw Error('Création transporteur en cours : attendre sa fin avant cet enregistrement');
   const declaration={active:true,carrier:input.carrier,tracking:input.tracking,fingerprint:input.fingerprint,hasPdf:!!input.pdf,registeredAt:new Date().toISOString(),registeredBy:user.email};
-  await tx.exec('CREATE TABLE IF NOT EXISTS temu_external_label_documents(order_id text PRIMARY KEY REFERENCES orders(id),pdf bytea NOT NULL)');
   if(input.pdf)await tx.query('INSERT INTO temu_external_label_documents(order_id,pdf) VALUES($1,$2)',[o.id,input.pdf]);
   await tx.query("UPDATE orders SET source_payload=source_payload||$2::jsonb,transport_choice=null,carrier='temu',label_status=CASE WHEN $3 AND label_status<>'cancelled' AND tracking_status<>'cancelled' THEN 'ready' ELSE label_status END,issue=CASE WHEN $4 THEN null ELSE issue END WHERE id=$1",[o.id,JSON.stringify({externalLabel:declaration}),!o.issue||isTemuLabelIssue(o.issue),isTemuLabelIssue(o.issue)]);
   await tx.query("INSERT INTO temu_label_jobs(reference,status,result) VALUES($1,'external',$2) ON CONFLICT(reference) DO UPDATE SET status='external',error=null,plan=null,result=coalesce(temu_label_jobs.result,'{}'::jsonb)||excluded.result,updated_at=now()",[reference,JSON.stringify({externalLabelResolution:{at:declaration.registeredAt,previousStatus:j?.status,previousError:j?.error,carrier:input.carrier}})]);
