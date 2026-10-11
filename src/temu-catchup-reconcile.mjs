@@ -28,6 +28,7 @@ export async function reconcileTemuCatchup(tx,order,observation){
  source.temuCatchup={checkedAt:observation.checkedAt,coverage:observation.coverage,complete:observation.complete,coreComplete:true,conflicts,errors:observation.errors,shipments:fresh.shipments||[],packages:fresh.packages||[],externalWrites:0};
  let nextAddress=order.address,recipient=order.recipient,issue=order.issue;
  const initialIncomplete=source.visibilityHold===true&&!lines.length&&!protectedData;
+ const initialSourceOnly=initialIncomplete&&(!issue||obsoleteTemuVisibilityError(issue)||issue==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'||issue==='TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée');
  if(!conflicts.length){
   if(!protectedData){nextAddress={...order.address,...address};recipient=address.name;
    if(!sameLines){const keep=new Set(active.map(l=>l.orderSn));for(const l of lines)if(!keep.has(l.source_line))await tx.query('DELETE FROM lines WHERE id=$1 AND order_id=$2',[l.id,order.id]);
@@ -43,7 +44,7 @@ export async function reconcileTemuCatchup(tx,order,observation){
   source.temuSourceRead={state:'verified',status:Number(fresh.detail.parentOrderMap.parentOrderStatus),verifiedAt:observation.checkedAt,sourceVersion:observation.sourceVersion};
   if(!source.temuDirect)source.temuDirect={source:'temu_direct',state:'verified',status:Number(fresh.detail.parentOrderMap.parentOrderStatus),verifiedAt:observation.checkedAt};
   source.sourceCoverage={complete:observation.complete,coreComplete:true,sourceStage:observation.sourceStage,fields:observation.coverage,errors:observation.errors};
-  if(source.visibilityHold===true&&observation.complete){source.visibilityHold=false;source.visibilityRecoveredAt=observation.checkedAt;delete source.visibilityReason;delete source.visibilityReadError;if(initialIncomplete)issue='Données TEMU récupérées · Préparation à vérifier';}
+  if(source.visibilityHold===true&&observation.complete){source.visibilityHold=false;source.visibilityRecoveredAt=observation.checkedAt;delete source.visibilityReason;delete source.visibilityReadError;if(initialSourceOnly)issue='Données TEMU récupérées · Préparation à vérifier';}
   if(obsoleteTemuVisibilityError(issue))issue=null;
   if(source.marketplacePendingCorrection?.visibilityError&&obsoleteTemuVisibilityError(source.marketplacePendingCorrection.visibilityError)&&sameLines&&sameAddress)delete source.marketplacePendingCorrection;
  }else{
@@ -52,10 +53,21 @@ export async function reconcileTemuCatchup(tx,order,observation){
   if(!issue||obsoleteTemuVisibilityError(issue))issue='TEMU · Données source différentes : '+conflicts.join(', ')+' · Rapprochement à vérifier';
  }
  await tx.query('UPDATE orders SET address=$2::jsonb,recipient=$3,source_payload=$4::jsonb,issue=$5 WHERE id=$1',[order.id,JSON.stringify(nextAddress),recipient,JSON.stringify(source),issue]);
+ // Reuse the established initial-import recovery only within its existing
+ // reception/live authorization. This queues preparation, never a TEMU purchase.
+ let initialRecovered=false;
+ if(initialSourceOnly&&observation.complete&&!conflicts.length&&!source.temuDirect?.attemptedAt&&!source.externalLabel){
+  const controls=Object.fromEntries((await tx.query("SELECT key,value FROM settings WHERE key IN ('automatic_live','marketplace_automatic')")).rows.map(r=>[r.key,r.value]));
+  const {withinReceptionStart}=await import('./order-visibility.mjs');
+  if(controls.automatic_live?.enabled===true&&controls.marketplace_automatic?.enabled===true&&controls.marketplace_automatic.channels?.temu!==false&&withinReceptionStart('temu',{detail:fresh.detail},controls.marketplace_automatic)){
+   const {recoverCompleteTemuImport}=await import('./temu-import-recovery.mjs');
+   initialRecovered=await recoverCompleteTemuImport(tx,order,{reference:order.reference,version:new Date(Number(observation.sourceVersion)*1000).toISOString(),lines:active},{channel:'temu',shop:String(source.sourceShop||source.mallId||'')});
+  }
+ }
  // Trigger and explicit wakeup use the existing local diagnostic/resumption circuit.
  await tx.query('UPDATE order_recheck_monitor SET next_check=now(),requested=requested+1 WHERE order_id=$1',[order.id]);
  await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:temu-catchup','temu.source.reconciled',$1::jsonb)",[JSON.stringify({orderId:order.id,conflicts,initialIncomplete,externalWrites:0,documentsPreserved:true})]);
- return {conflicts,initialIncomplete};
+ return {conflicts,initialIncomplete,initialRecovered};
 }
 
 export async function observeTemuSourceStage(tx,order,observation){

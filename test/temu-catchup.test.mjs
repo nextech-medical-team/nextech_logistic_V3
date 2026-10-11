@@ -32,7 +32,7 @@ async function fixture(){
  CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,source_reference text,received_at timestamptz DEFAULT now(),recipient text DEFAULT 'TEST',address jsonb DEFAULT '{}',source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',suspension jsonb DEFAULT '{}',issue text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,duplicate_of text,resolution_pending_resume boolean DEFAULT false,label_status text DEFAULT 'pending',erp_status text DEFAULT 'pending',tracking_status text DEFAULT 'not_shipped');
  CREATE TABLE lines(id text PRIMARY KEY,order_id text,source_line text,source_sku text,quantity numeric,target_sku text,target_quantity numeric,source_payload jsonb DEFAULT '{}');
  CREATE TABLE carrier_documents(order_id text,pdf bytea);CREATE TABLE carrier_jobs(order_id text,status text,error text);CREATE TABLE temu_label_jobs(reference text,packages jsonb DEFAULT '[]',attempt_id text,error text,status text);
- CREATE TABLE erp_live_jobs(order_id text,status text,error text);CREATE TABLE resolution_jobs(order_id text,status text,error text);CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE extra_parcels(order_id text);
+ CREATE TABLE erp_live_jobs(order_id text PRIMARY KEY,status text,error text,updated_at timestamptz DEFAULT now());CREATE TABLE marketplace_order_links(channel text,shop text,reference text,order_id text,version text,UNIQUE(channel,shop,reference));CREATE TABLE resolution_jobs(order_id text,status text,error text);CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE extra_parcels(order_id text);
  CREATE TABLE order_recheck_monitor(order_id text PRIMARY KEY,state jsonb DEFAULT '{}',next_check timestamptz DEFAULT now(),requested bigint DEFAULT 1);CREATE TABLE audit(user_email text,action text,detail jsonb);
  INSERT INTO orders(id,reference,issue,source_payload) VALUES('A','${reference}','Stock insuffisant','{"mallId":"M"}');INSERT INTO order_recheck_monitor(order_id) VALUES('A');`);return db;
 }
@@ -182,4 +182,26 @@ test('known partial receipt schedules safe catch-up without replacing current bu
   const after=(await db.query('SELECT * FROM orders')).rows[0];for(const key of ['issue','address','label_status','erp_status','resolution_pending_resume'])assert.deepEqual(after[key],before[key]);
   assert.ok(after.source_payload.temuReceiptObservation);assert.equal((await db.query('SELECT count(*)::int n FROM temu_source_catchup')).rows[0].n,1);assert.equal((await db.query('SELECT count(*)::int n FROM erp_live_jobs')).rows[0].n,0);
  }finally{await db.close();}
+});
+
+
+test('complete initial recovery queues existing preparation only within authorized reception window',async()=>{
+ for(const scenario of ['allowed','paused','before-start','independent-issue','uncertain-purchase','correction-history']){
+  const db=await fixture();try{
+   const p=payload();p.detail.parentOrderMap.parentOrderTime=Math.floor(Date.now()/1000)-60;p.detail.parentOrderMap.updateTime=p.detail.parentOrderMap.parentOrderTime+1;
+   const source={mallId:'M',sourceShop:'M',visibilityHold:true};if(scenario==='uncertain-purchase')source.temuDirect={attemptedAt:new Date().toISOString()};
+   await db.query("UPDATE orders SET issue=$1,source_payload=$2::jsonb,resolution_pending_resume=true WHERE id='A'",[scenario==='independent-issue'?'Stock insuffisant':'TEMU refuse l’opération : 180020006 The current order status cannot be viewed.',JSON.stringify(source)]);
+   await db.query("INSERT INTO settings VALUES('automatic_live',$1::jsonb)",[JSON.stringify({enabled:scenario!=='paused'})]);
+   await db.query("UPDATE settings SET value=$1::jsonb WHERE key='marketplace_automatic'",[JSON.stringify({enabled:true,channels:{temu:true},since:new Date(Date.now()+(scenario==='before-start'?0:-86400000)).toISOString()})]);
+   if(scenario==='correction-history')await db.exec("INSERT INTO correction_jobs VALUES('A','complete')");
+   const observation=await readTemuSource(apiFor(p),reference),order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];
+   const result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.equal(result.initialRecovered,scenario==='allowed',scenario);
+   assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,scenario==='allowed'?1:0,scenario);
+   assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);assert.equal((await db.query('SELECT * FROM temu_label_jobs')).rows.length,0);
+   const after=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.equal(after.source_payload.visibilityHold,false);
+   if(scenario==='independent-issue')assert.equal(after.issue,'Stock insuffisant');
+   if(scenario==='uncertain-purchase')assert.deepEqual(after.source_payload.temuDirect,source.temuDirect);
+   if(scenario==='allowed'){assert.equal(after.resolution_pending_resume,false);assert.equal(after.source_payload.temuLabelPurchaseConfirmationRequired,true);await db.transaction(tx=>reconcileTemuCatchup(tx,after,observation));assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,1);}
+  }finally{await db.close();}
+ }
 });
