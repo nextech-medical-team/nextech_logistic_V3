@@ -137,7 +137,6 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     if(!lookup.Variants?.data||lookup.Variants.paginatorInfo?.hasMorePages)throw Error('BC · Vérification produit Erplain LIVE incomplète : '+sku);
     if(!lookup.Variants.data.some(v=>v.sku===sku)){
      if(binding||choiceDocument)throw Error('BC · Référence liée absente : vérifier le produit existant '+sku);
-     if(l.source_qty&&Number(l.source_qty)!==Number(l.target_qty))throw Error('Création produit · Nom de la référence convertie à confirmer : '+sku);
      const created=await ensureMissingProduct(db,api,{sku,label:sourceProductName(l),guard:async()=>{
       const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];
       const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id});
