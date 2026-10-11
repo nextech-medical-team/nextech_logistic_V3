@@ -60,12 +60,14 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
   if(current.some(j=>!jobs.some(old=>old.id===j.id&&old.error===j.error&&String(old.updated_at)===String(j.updated_at))))return {deferred:true};
   const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[id])).rows[0];
   if(e?.status!==erp?.status||e?.error!==erp?.error)return {deferred:true};
+  proof.erpError=e?.error||null;proof.observedErrors=current.filter(j=>stockIncidentOnly(j.error)).map(j=>j.error);
   if(proof.status==='resolved'){
    const retired=current.filter(j=>stockIncidentOnly(j.error)&&(proof.preparationRequired?['refresh','sync','resume','resume-erp'].includes(j.action):completed&&Number.isFinite(Date.parse(j.created_at))&&Date.parse(j.created_at)<Date.parse(completed.created_at)));
+   proof.retiredErrors=retired.map(j=>j.error);
    const retained=current.filter(j=>j.error&&!retired.some(r=>r.id===j.id));
    if(!proof.preparationRequired&&!completed)return {deferred:true,reason:'Reprise complète réussie non identifiée'};
    for(const j of retired)await tx.query("UPDATE resolution_jobs SET error=null,result=(CASE WHEN jsonb_typeof(result)='object' THEN result ELSE jsonb_build_object('previousResult',result) END)||$2::jsonb,updated_at=now() WHERE id=$1 AND error=$3",[j.id,JSON.stringify({stockIncidentRecheck:{...proof,previousError:j.error}}),j.error]);
-   if(stockIncidentOnly(e?.error))await tx.query('UPDATE erp_live_jobs SET error=null,updated_at=now() WHERE order_id=$1 AND error=$2',[id,e.error]);
+   if(!proof.preparationRequired&&stockIncidentOnly(e?.error))await tx.query('UPDATE erp_live_jobs SET error=null,updated_at=now() WHERE order_id=$1 AND error=$2',[id,e.error]);
    const previousError=o.erp_live?.stockIncidentRecheck?.previousError||o.issue;
    const others=retained.length>0||laterDecision||current.some(j=>j.action==='replace-equivalent'&&!j.error&&Date.parse(j.created_at)>Date.parse(completed?.created_at||0))||(e?.error&&!stockIncidentOnly(e.error));
    let ready=false;
@@ -75,7 +77,7 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
    }
    const trackedIssue=stockIncidentOnly(o.erp_live?.stockIncidentRecheck?.previousError)&&o.issue===o.erp_live.stockIncidentRecheck.currentError;
    const issue=(stockIncidentOnly(o.issue)||trackedIssue)&&!retained.some(j=>stockIncidentOnly(j.error))?(proof.preparationRequired?'Préparation à reprendre : stock disponible':null):o.issue;
-   await tx.query("UPDATE orders SET issue=$2,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$3::jsonb,true),label_status=CASE WHEN $4 AND issue IS NOT DISTINCT FROM $5 THEN 'production_ready' ELSE label_status END,resolution_pending_resume=CASE WHEN $4 AND issue IS NOT DISTINCT FROM $5 THEN false ELSE resolution_pending_resume END WHERE id=$1",[id,issue,JSON.stringify({...proof,previousError}),ready&&!others&&(!o.issue||stockIncidentOnly(o.issue)||trackedIssue),o.issue]);
+   await tx.query("UPDATE orders SET issue=$2,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$3::jsonb,true),label_status=CASE WHEN $4 AND issue IS NOT DISTINCT FROM $5 THEN 'production_ready' ELSE label_status END,resolution_pending_resume=CASE WHEN $4 AND issue IS NOT DISTINCT FROM $5 THEN false ELSE resolution_pending_resume END WHERE id=$1",[id,issue,JSON.stringify({...proof,previousError,currentIssue:issue}),ready&&!others&&(!o.issue||stockIncidentOnly(o.issue)||trackedIssue),o.issue]);
    await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:stock-incident-recheck','diagnostic.stock_incident_resolved',$1)",[JSON.stringify({orderId:id,proof,previousError,retiredJobs:retired.map(j=>({id:j.id,error:j.error})),labelsPreserved:true,businessCompleted:false})]);
   }else {const old=o.erp_live?.stockIncidentRecheck,tracked=stockIncidentOnly(o.issue)||(stockIncidentOnly(old?.previousError)&&o.issue===old.currentError);proof.previousError=old?.previousError||o.issue;await tx.query("UPDATE orders SET issue=CASE WHEN $3 THEN $4 ELSE issue END,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(proof),tracked,proof.currentError]);}
   return proof;
