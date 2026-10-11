@@ -25,3 +25,9 @@ test('processing timeline exposes waiting Erplain, missing BL, TEMU confirmation
  assert.equal(processingView({temu_status:'ready'}).step,'Achat d’étiquette TEMU à confirmer');
  assert.equal(processingView({temu_status:'shipment_error',temu_error:'wrong address'}).step,'Étiquette refusée par TEMU');
 });
+
+test('an obsolete generic issue never hides a current stock or provider failure',()=>{
+ const o={channel:'temu',issue:'Préparation bloquée : vérification à reprendre',label_status:'blocked',erp_live:{phase:'bl_ready',bc:{id:'1'},bl:{id:'2'}},erp_live_job:{status:'review',error:'Stock insuffisant : SKU TEST'},temu_job:{status:'ready'}};
+ assert.equal(monitoringObservation(o).result,'Stock insuffisant : SKU TEST');
+ assert.equal(monitoringObservation({...o,erp_live_job:{status:'review',error:null},temu_job:{status:'shipment_error',error:'TEMU · Étiquette refusée : adresse invalide'}}).result,'Étiquette refusée par TEMU : TEMU · Étiquette refusée : adresse invalide');
+});

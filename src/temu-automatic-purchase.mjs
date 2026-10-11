@@ -7,6 +7,7 @@ export async function initializeTemuAutomaticPurchase(db){
  await db.exec(`CREATE TABLE IF NOT EXISTS temu_automatic_purchase_checks(
  reference text PRIMARY KEY,checked_at timestamptz,next_at timestamptz NOT NULL DEFAULT now(),
  result jsonb NOT NULL DEFAULT '{}');
+ CREATE TABLE IF NOT EXISTS temu_automatic_purchase_audit(attempt_id text PRIMARY KEY,reference text NOT NULL,plan_id text NOT NULL,decision jsonb NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
  CREATE OR REPLACE FUNCTION v3_wake_temu_automatic_purchase() RETURNS trigger AS $$
  DECLARE oid text; BEGIN
  IF TG_TABLE_NAME='orders' THEN oid=NEW.id; ELSE oid=NEW.order_id; END IF;
@@ -19,7 +20,16 @@ export async function initializeTemuAutomaticPurchase(db){
  DROP TRIGGER IF EXISTS v3_wake_temu_purchase_lines ON lines;
  CREATE TRIGGER v3_wake_temu_purchase_lines AFTER INSERT OR UPDATE ON lines FOR EACH ROW EXECUTE FUNCTION v3_wake_temu_automatic_purchase();
  DROP TRIGGER IF EXISTS v3_wake_temu_purchase_corrections ON correction_jobs;
- CREATE TRIGGER v3_wake_temu_purchase_corrections AFTER INSERT OR UPDATE ON correction_jobs FOR EACH ROW EXECUTE FUNCTION v3_wake_temu_automatic_purchase();`);
+ CREATE TRIGGER v3_wake_temu_purchase_corrections AFTER INSERT OR UPDATE ON correction_jobs FOR EACH ROW EXECUTE FUNCTION v3_wake_temu_automatic_purchase();
+ CREATE OR REPLACE FUNCTION v3_temu_purchase_result_diagnostic() RETURNS trigger AS $$
+ BEGIN
+ IF to_regclass('order_recheck_monitor') IS NOT NULL THEN
+ UPDATE order_recheck_monitor m SET next_check=now(),requested=requested+1
+ FROM orders o WHERE o.id=m.order_id AND o.reference=NEW.reference;
+ END IF;
+ RETURN NEW; END; $$ LANGUAGE plpgsql;
+ DROP TRIGGER IF EXISTS v3_temu_purchase_result ON temu_automatic_purchase_checks;
+ CREATE TRIGGER v3_temu_purchase_result AFTER UPDATE OF result ON temu_automatic_purchase_checks FOR EACH ROW EXECUTE FUNCTION v3_temu_purchase_result_diagnostic();`);
 }
 export function automaticPreparationHold(o,now=Date.now()){
  const blocked=suspensionBlock(o);if(blocked)return blocked;

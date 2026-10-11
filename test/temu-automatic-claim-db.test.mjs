@@ -11,6 +11,9 @@ test('real PostgreSQL claim validates the unchanged order and rejects a concurre
  await db.query("UPDATE temu_automatic_purchase_checks SET next_at=now()+interval '1 day'");
  await db.query("INSERT INTO correction_jobs VALUES('o','complete')");
  assert.equal((await db.query('SELECT next_at<=now() due FROM temu_automatic_purchase_checks')).rows[0].due,true);
+ await db.exec("CREATE TABLE order_recheck_monitor(order_id text,next_check timestamptz,requested bigint);INSERT INTO order_recheck_monitor VALUES('o',now()+interval '1 day',1)");
+ await db.query("UPDATE temu_automatic_purchase_checks SET result='{\"status\":\"held\",\"message\":\"Marge négative\"}'::jsonb");
+ const monitor=(await db.query('SELECT next_check<=now() due,requested FROM order_recheck_monitor')).rows[0];assert.equal(monitor.due,true);assert.equal(Number(monitor.requested),2);
  const deadline=Math.floor(Date.now()/1000)+86400;let calls=0;const api={canBuy:true,async buy(){calls++;throw Error('unknown response');},async read(method){
  if(method==='bg.order.detail.v2.get')return {parentOrderMap:{parentOrderSn:reference,parentOrderStatus:2,expectShipLatestTime:deadline},orderList:[{orderSn:'line',quantity:1}]};
  if(method==='bg.logistics.shipment.v2.get')return {shipmentInfoDTO:[]};
@@ -21,15 +24,16 @@ test('real PostgreSQL claim validates the unchanged order and rejects a concurre
  const service=temuShipping(db,api),plan=await service.prepare(reference);
  const proof={id:'o',erpLive:{},sourcePayload:{},address:{},suspension:{},weight:null,lines:(await db.query("SELECT jsonb_agg(to_jsonb(l) ORDER BY source_line,id) lines FROM lines l WHERE order_id='o'")).rows[0].lines};
  await assert.rejects(service.buy(reference,plan.id,plan.amount,{beforeClaim:async()=>{
- await db.query("UPDATE orders SET issue='Stock insuffisant' WHERE id='o'");return {orderProof:proof};
+ await db.query("UPDATE orders SET issue='Stock insuffisant' WHERE id='o'");return {orderProof:proof,allowed:true,audit:{profit:1,planId:plan.id}};
  }}),/modifiés/);assert.equal(calls,0);assert.equal((await db.query('SELECT attempt_id FROM temu_label_jobs')).rows[0].attempt_id,null);
  await db.query("UPDATE orders SET issue=null WHERE id='o'");
  await assert.rejects(service.buy(reference,plan.id,plan.amount,{beforeClaim:async()=>{
- await db.query("UPDATE lines SET quantity=2 WHERE id='l'");return {orderProof:proof};
+ await db.query("UPDATE lines SET quantity=2 WHERE id='l'");return {orderProof:proof,allowed:true,audit:{profit:1,planId:plan.id}};
  }}),/modifiés/);assert.equal(calls,0);
  proof.lines=(await db.query("SELECT jsonb_agg(to_jsonb(l) ORDER BY source_line,id) lines FROM lines l WHERE order_id='o'")).rows[0].lines;
- await assert.rejects(service.buy(reference,plan.id,plan.amount,{beforeClaim:async()=>({orderProof:proof})}),/incertain/);
+ await assert.rejects(service.buy(reference,plan.id,plan.amount,{beforeClaim:async()=>({orderProof:proof,allowed:true,audit:{profit:1,planId:plan.id}})}),/incertain/);
  assert.equal(calls,1);assert.equal((await db.query('SELECT status FROM temu_label_jobs')).rows[0].status,'uncertain');
+ const audit=(await db.query('SELECT decision FROM temu_automatic_purchase_audit')).rows;assert.equal(audit.length,1);assert.equal(audit[0].decision.profit,1);
  await assert.rejects(service.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(calls,1);
  }finally{await db.close();}
 });

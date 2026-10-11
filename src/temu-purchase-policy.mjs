@@ -13,5 +13,5 @@ export function automaticTemuMarginDecision(snapshot,reference,plan,now=Date.now
  if(!row||row.status==='incomplete'||row.issues?.length)return denied(row?.issues?.join(' ; ')||'Marge inconnue');
  if(row.status!=='positive'||!Number.isFinite(row.profit)||row.profit<=0)return denied('Marge nulle ou négative');
  if(!Number.isFinite(row.shipping)||Math.abs(row.shipping-plan.amount/1.2)>0.00001||!row.shippingSource?.startsWith('Devis TEMU'))return denied('Marge non rapprochée du devis TEMU retenu');
- return {allowed:true,profit:row.profit,planId:plan.id};
+ return {allowed:true,profit:row.profit,planId:plan.id,audit:{policy:'positive-margin-no-cainiao-v1',allowed:true,profit:row.profit,planId:plan.id,currency:'EUR',shippingHT:row.shipping,quoteTTC:plan.amount,selectedChannel:plan.selected,calculatedAt:snapshot.calculatedAt,calculatorSource:snapshot.source||null,revenue:row.revenue??null,totalCosts:row.totalCosts??null}};
 }

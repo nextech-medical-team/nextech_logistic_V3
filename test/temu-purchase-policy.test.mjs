@@ -58,7 +58,7 @@ test('atomic order guard refuses a changed command without provider purchase',as
  const h=harness([offer(1,'GLS',2)]),s=temuShipping(h.db,h.api),p=await s.prepare(reference);
  const original=h.db.query;let guarded=false;
  h.db.query=async(sql,args)=>{if(sql.includes("SET status='purchasing'")){guarded=sql.includes('o.erp_live=$5::jsonb')&&sql.includes('correction_jobs');return {rows:[]};}return original(sql,args);};
- await assert.rejects(s.buy(reference,p.id,p.amount,{beforeClaim:async()=>({orderProof:{id:'o',erpLive:{},sourcePayload:{},address:{},suspension:{},weight:null}})}),/modifiés/);
+ await assert.rejects(s.buy(reference,p.id,p.amount,{beforeClaim:async()=>({orderProof:{id:'o',erpLive:{},sourcePayload:{},address:{},suspension:{},weight:null},allowed:true,audit:{profit:1,planId:p.id}})}),/modifiés/);
  assert.equal(guarded,true);assert.equal(h.bought,0);
 });
 
