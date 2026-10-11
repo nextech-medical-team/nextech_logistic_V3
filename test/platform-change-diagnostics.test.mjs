@@ -1,6 +1,21 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {PGlite} from '@electric-sql/pglite';import {currentPlatformModificationReason,currentPlatformModificationSql} from '../src/platform-change-diagnostics.mjs';import {projectCurrentDiagnostics,currentReasonSql,currentReasonEmptySql} from '../src/current-order-diagnostics.mjs';
 const raw='Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise';const at='2026-10-11T14:00:00Z',address={name:'Client',street:'Rue',postal:'75001',city:'Paris',country:'FR'};
 const relay=()=>({channel:'shopify',address,issue:null,source_payload:{marketplacePendingCorrection:{updated_at:at},shopifyRelay:{frozenOrderAddress:address},relaySourceReconciliation:{sourceVersion:at,customerAddressPreserved:true,labelsPreserved:true},platformStatusObservation:{version:at}}});
+test('recorded BC finance proof retires source totals without requiring marketplace agreement; SQL and API preserve independent errors',async()=>{
+ const db=new PGlite();try{
+  await db.exec('CREATE TABLE orders(id int,channel text,address jsonb,source_payload jsonb,issue text,erp_live jsonb,resolution_pending_resume boolean)');
+  let id=0;
+  for(const authority of ['erplain','recorded_erplain_bc'])for(const source of [{},{temuAmounts:{data:{parentOrderMap:{estimatedRevenue:{amount:999999,currency:'USD'}}}}}])for(const valid of [true,false])for(const issue of ['TEMU · Prix client et TVA source incohérents','Stock insuffisant']){
+   const o={channel:'temu',issue,source_payload:source,erp_live:{bc:valid?{id:'42'}:{},phase:'bl_ready',pricing:{status:'verified',error:null,confirmed:{total:12,authority}}}};
+   const expected=valid&&issue.startsWith('TEMU · Prix')?null:issue;
+   const projected=projectCurrentDiagnostics({...structuredClone(o),resolution_error:issue,erp_live_job:{status:'review',error:issue}});
+   assert.equal(projected.issue,expected);assert.equal(projected.resolution_error,expected);assert.equal(projected.erp_live_job.error,expected);assert.equal(projected.erp_live_job.status,'review');
+   await db.query('INSERT INTO orders VALUES($1,$2,$3,$4,$5,$6,false)',[id,o.channel,'{}',JSON.stringify(source),issue,JSON.stringify(o.erp_live)]);
+   const row=(await db.query('SELECT '+currentReasonSql('$1')+' AS reason,'+currentReasonEmptySql('$1')+' AS empty FROM orders WHERE id=$2',[issue,id++])).rows[0];
+   assert.equal(row.reason,expected);assert.equal(row.empty,expected===null);
+  }
+ }finally{await db.close();}
+});
 test('old generic job reason follows verified current relay diagnosis without changing archived job records',()=>{const o=relay(),job={error:raw,status:'review'};o.issue='GLS · Relais de l’étiquette différent';const clone=projectCurrentDiagnostics({...o,resolution_error:job.error,resolution_actions:[structuredClone(job)]});assert.equal(clone.resolution_error,o.issue);assert.equal(clone.resolution_actions[0].error,o.issue);assert.equal(job.error,raw);assert.equal(clone.source_payload.marketplacePendingCorrection.updated_at,at);});
 test('newer observations or a team address edit invalidate old source reconciliation proof',()=>{for(const change of [o=>o.source_payload.marketplacePendingCorrection.updated_at='2026-10-11T14:00:00.900Z',o=>o.source_payload.platformStatusObservation.version='2026-10-11T14:00:01Z',o=>o.address={...address,street:'Équipe'}]){const o=relay();change(o);assert.equal(currentPlatformModificationReason(o,raw),raw);}});
 test('masked TEMU reconciliation retracts obsolete error only while no new correction is pending',()=>{const o={channel:'temu',issue:'Facturation Erplain à vérifier',source_payload:{platformChangeReconciliation:{kind:'temu_address_masking',verified:true,addressFrozen:true,labelsPreserved:true}}};assert.equal(currentPlatformModificationReason(o,raw),o.issue);o.source_payload.marketplacePendingCorrection={};assert.equal(currentPlatformModificationReason(o,raw),raw);assert.equal(currentPlatformModificationReason(o,'Stock insuffisant'),'Stock insuffisant');});

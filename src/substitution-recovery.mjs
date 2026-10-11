@@ -72,7 +72,7 @@ export function recordedSubstitutionPlan(bc,b,failed,preview,order={},historical
   // A routine refresh can replace pricing.verifiedAt after the failed attempt.
   // Retain a dated prior Erplain proof only when tied to the same source totals.
   if(review?.status==='accepted'&&review.confirmed?.sourceTotal!=null&&review.confirmed?.sourceTax!=null&&pricing?.total!=null&&pricing?.tax!=null&&cents(review.confirmed.sourceTotal)===cents(pricing.total)&&cents(review.confirmed.sourceTax)===cents(pricing.tax))proofs.push({confirmed:review.confirmed,checkedAt:review.checkedAt});
-  const proof=proofs.find(p=>{const c=p.confirmed,checked=Date.parse(p.checkedAt);return c&&c.total!=null&&c.tax!=null&&c.authority==='erplain'&&Number.isFinite(checked)&&Number.isFinite(attempted)&&checked<=attempted&&Number.isFinite(Number(c.total))&&Number.isFinite(Number(c.tax))&&cents(c.total)===cents(bc.total)&&cents(c.tax)===cents(taxTotal);});
+  const proof=proofs.find(p=>{const c=p.confirmed,checked=Date.parse(p.checkedAt);return c&&c.total!=null&&c.tax!=null&&['erplain','recorded_erplain_bc'].includes(c.authority)&&Number.isFinite(checked)&&Number.isFinite(attempted)&&checked<=attempted&&Number.isFinite(Number(c.total))&&Number.isFinite(Number(c.tax))&&cents(c.total)===cents(bc.total)&&cents(c.tax)===cents(taxTotal);});
   const c=proof?.confirmed;
   if(!c||pricing?.currency!==bc.currency.label||shipping.length!==1||!Number.isFinite(taxTotal))return blocked();
   if(plan.items.filter(i=>i.id).some(i=>String(i.id)!==String(shipping[0].id)))return blocked();
