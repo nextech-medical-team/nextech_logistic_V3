@@ -70,6 +70,13 @@ function compactProblemParts(raw){
 function compactProblems(order){
  const lines=order.sku_lines||[],out=[],family=order.carrier?.startsWith('gls')?'GLS':order.carrier==='gofo'?'GOFO':order.carrier==='temu'?'TEMU':'Erplain';
  const add=p=>{if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
+ const observation=order.preparation_observation;
+ const currentObservation=observation?.schemaVersion===1&&Date.parse(observation.observedAt)<=Date.now()&&Date.parse(observation.expiresAt)>Date.now()&&Date.now()-Date.parse(observation.observedAt)<900000?observation:null;
+ if(currentObservation){
+  for(const diagnostic of currentObservation.business||[])add({...compactProblem(diagnostic.message),kind:'business',code:diagnostic.code});
+  for(const diagnostic of currentObservation.technical||[])add({...compactProblem(diagnostic.message),kind:'technical',code:diagnostic.code});
+  if(!(currentObservation.business?.length||currentObservation.technical?.length)&&currentObservation.processing?.continuationRequired)add({type:'preparation',kind:'processing',label:'Erplain · Préparation à poursuivre',sku:'',detail:currentObservation.nextStep,provider:'Erplain'});
+ }
  const pending=order.pending_equivalent;const pendingLine=pending&&lines.find(l=>[l.sku,l.mapped_sku,l.source_sku].includes(pending.sku));
  if(pendingLine&&pending.error){const p=compactProblem(pending.error,pending.replacementSku);p.detail='Remplacement prévu : '+pending.sku+' → '+pending.replacementSku+' · '+p.detail;add(p);}
  for(const l of lines){const sku=l.sku||l.mapped_sku||l.source_sku;if(l.catalog_issue)add(compactProblem(l.catalog_issue,sku));if(!['tender','samples','temu'].includes(order.channel)&&l.mapping_exists===false&&!l.sku)add(compactProblem('Mapping manquant',l.source_sku));}
