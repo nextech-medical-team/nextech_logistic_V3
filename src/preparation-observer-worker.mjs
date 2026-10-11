@@ -3,7 +3,7 @@ import {observePreparation,preparationFingerprint,preparationNeedsCheck,preparat
 export const preparationLinesSql=`SELECT l.source_sku source,
  CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_sku ELSE coalesce(p.target_sku,l.target_sku,l.source_sku) END sku,
  CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_quantity WHEN p.source_qty>0 THEN round(l.quantity*p.target_qty/p.source_qty,6) ELSE coalesce(l.target_quantity,l.quantity) END quantity,
- (CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_sku IS NOT NULL AND l.target_quantity>0 ELSE p.target_sku IS NOT NULL AND p.source_qty>0 AND p.target_qty>0 END) AS "mappingPresent"
+ (CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_sku IS NOT NULL AND l.target_quantity>0 WHEN p.source_sku IS NULL AND o.channel IN ('tender','samples') THEN coalesce(l.target_sku,l.source_sku) IS NOT NULL AND coalesce(l.target_quantity,l.quantity)>0 ELSE p.target_sku IS NOT NULL AND p.source_qty>0 AND p.target_qty>0 END) AS "mappingPresent"
  FROM lines l JOIN orders o ON o.id=l.order_id LEFT JOIN mappings p ON p.channel=o.channel AND p.source_sku=l.source_sku WHERE l.order_id=$1 ORDER BY l.id`;
 
 // Readers use the installed shared API budget and must return fully paginated,

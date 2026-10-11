@@ -2,6 +2,9 @@ function compactProblem(raw,sku='',provider='Erplain') {
  const text=String(raw||'');const explicitSku=text.match(/^(?:Produit équivalent|Produit restant|Produit de remplacement) \[([^\]]+)\] : /)?.[1];if(explicitSku)sku=explicitSku;const code=text.match(/(?:HTTP\s*|\()(\d{3})(?:\)|\b)/i)?.[1];
  const result=(type,label,s=sku)=>({type,label,sku:s,detail:text,provider:apiName});
  const apiName=/GOFO/i.test(text)?'GOFO':/GLS/i.test(text)?'GLS':/TEMU/i.test(text)?'TEMU':/Shopify/i.test(text)?'Shopify':provider;
+ if(/Étiquette refusée par TEMU|TEMU.*Étiquette refusée/i.test(text))return result('temu-label-refused','Étiquette refusée par TEMU','');
+ if(/achat d[’']étiquette TEMU à confirmer/i.test(text))return result('temu-purchase-confirmation','Achat d’étiquette TEMU à confirmer','');
+ if(/^Préparation Erplain en attente ou en cours$/.test(text))return result('preparation-pending',text,'');
  if(["Échec d’étiquette antérieur, suivi d’une revalidation BC/BL. Aucune relance effectuée.","Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.","Appels d’offres · GLS Pharma obligatoire : actualiser la préparation selon les règles transporteurs"].includes(text))return result('preparation',text,'');
  if(/TEMU/i.test(text)&&/3000032|prix et TVA|Prix et frais de livraison|Données financières|Prix API à récupérer/i.test(text))return result('temu-pricing','TEMU · Prix à renseigner','');
  if(/^Reprendre le remplacement après correction/.test(text))return result('equivalent-pending','Vérifier le remplacement');
@@ -68,6 +71,7 @@ function compactProblemParts(raw){
  return parts;
 }
 function compactProblems(order){
+ if(order.archived||order.label_status==='cancelled'||order.tracking_status==='cancelled')return [];
  const lines=order.sku_lines||[],out=[],family=order.carrier?.startsWith('gls')?'GLS':order.carrier==='gofo'?'GOFO':order.carrier==='temu'?'TEMU':'Erplain';
  const add=p=>{if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
  const observation=order.preparation_observation;
@@ -93,7 +97,7 @@ function compactProblems(order){
   const affected=relevant.length?relevant:lines;
   return !affected.length||affected.some(l=>!l.mapping_exists&&!l.mapping_resolved);
  });
- if(!visible.length&&order.erp_status==='live_review'&&order.erp_live_job?.status!=='complete')visible.push({type:'erp-review',label:'Erplain · Préparation à vérifier',sku:'',detail:'Préparation Erplain à vérifier. Aucun motif détaillé applicable à la commande actuelle n’est disponible. Consultez le BC, les BL et l’historique du traitement avant toute reprise ; cet état ne confirme pas que les blocages sont résolus.',provider:'Erplain'});
+ if(!visible.length&&order.erp_status==='live_review'&&!['pending','processing','complete'].includes(order.erp_live_job?.status))visible.push({type:'erp-review',label:'Erplain · Préparation à vérifier',sku:'',detail:'Préparation Erplain à vérifier. Aucun motif détaillé applicable à la commande actuelle n’est disponible. Consultez le BC, les BL et l’historique du traitement avant toute reprise ; cet état ne confirme pas que les blocages sont résolus.',provider:'Erplain'});
  return visible;
 }
 function compactProblemButtons(order){const list=compactProblems(order),id=esc(order.id);return list.slice(0,2).map(p=>'<button class="badge warn compact-problem" data-exact-problem="'+id+'" data-problem-type="'+esc(p.type)+'" data-problem-sku="'+esc(p.sku)+'" data-problem-detail="'+esc(p.detail)+'" title="'+esc((p.sku?p.sku+' · ':'')+(p.detail||p.label))+'">'+(p.sku?'<span>'+esc(p.sku)+'</span>':'')+'<span>'+esc(p.label)+'</span></button>').join('')+(list.length>2?'<button class="link-button" data-exact-problem="'+id+'">+'+(list.length-2)+' problèmes</button>':'');}

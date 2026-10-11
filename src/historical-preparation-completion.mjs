@@ -1,3 +1,4 @@
+import {closedStockReview,reopenedStockReview} from './stock-incident-recheck.mjs';
 import {currentMappingFingerprint} from './current-mapping-line.mjs';
 import {oldFinanceErrors,projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
 import {shipmentFingerprint} from './label-stock-gate.mjs';
@@ -6,9 +7,9 @@ export function currentReplacementPreview(j){return j?.action==='equivalent-prev
 export const resolutionStateSql="SELECT action,status,error,result,created_at,id FROM (SELECT DISTINCT ON (action) action,status,error,result,created_at,id FROM resolution_jobs WHERE order_id=$1 ORDER BY action,created_at DESC,id DESC) current_actions ORDER BY created_at DESC,id DESC";
 export function currentResolutionState(actions=[]){
  actions=Array.isArray(actions)?actions:[];
- const preparation=new Set(['resume-erp','resume','replace-equivalent','reconcile-bc','compare-bc','manual-temu-pricing','equivalent-preview']);
+ const preparation=new Set(['resume-erp','resume','replace-equivalent','reconcile-bc','compare-bc','manual-temu-pricing','equivalent-preview','refresh','create-product']);
  const completed=actions.findIndex(j=>['resume-erp','resume','replace-equivalent'].includes(j.action)&&j.status==='complete'&&!j.error&&!j.result?.partialRemainder);
- const reviews=actions.filter((j,i)=>j.status==='review'&&(!preparation.has(j.action)||completed<0||i<completed));
+ const reviews=actions.filter((j,i)=>j.status==='review'&&!closedStockReview(j)&&(reopenedStockReview(j)||!preparation.has(j.action)||completed<0||i<completed));
  const preview=actions.findIndex(currentReplacementPreview);return {reviews,pendingReplacement:preview>=0&&(completed<0||preview<completed)};
 }
 const historicalReason='Reprise historique \u00e0 v\u00e9rifier : BL non cr\u00e9\u00e9';

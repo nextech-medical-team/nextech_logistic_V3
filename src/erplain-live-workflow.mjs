@@ -1,3 +1,4 @@
+import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
 import {ensureMissingProduct,reconcileCreationAttempt,sourceProductName,readCreationSku,createBlockedMissingProducts,productCreationBlock} from './missing-product-creation.mjs';
 import {bindProduct} from './product-bindings.mjs';
@@ -81,6 +82,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
   try{
    if(!bcOnlyOrderId&&process.env.ERPLAIN_LIVE_WRITES==='1'&&process.env.MIGRATION_PREPARATION!=='1'){
     const {recheckOrders}=await import('./problem-resolution.mjs');
+    await prepareIncompleteTemuCatalogue(db,api,{bind:v=>bindProduct(db,v)});
     await createBlockedMissingProducts(db,api,{blocked:mutationBlock,bind:v=>bindProduct(db,v),recheck:ids=>recheckOrders(db,ids)});
    }
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.
@@ -137,7 +139,6 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     if(!lookup.Variants?.data||lookup.Variants.paginatorInfo?.hasMorePages)throw Error('BC · Vérification produit Erplain LIVE incomplète : '+sku);
     if(!lookup.Variants.data.some(v=>v.sku===sku)){
      if(binding||choiceDocument)throw Error('BC · Référence liée absente : vérifier le produit existant '+sku);
-     if(l.source_qty&&Number(l.source_qty)!==Number(l.target_qty))throw Error('Création produit · Nom de la référence convertie à confirmer : '+sku);
      const created=await ensureMissingProduct(db,api,{sku,label:sourceProductName(l),guard:async()=>{
       const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];
       const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id});

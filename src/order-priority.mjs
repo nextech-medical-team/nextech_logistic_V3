@@ -1,4 +1,5 @@
 import {bcAllowedSql} from './bc-authorization.mjs';
+import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
 // Shared by the claim queries and the queue-position display.
 export const erplainEligible = `status='pending' AND EXISTS(SELECT 1 FROM orders o WHERE o.id=erp_live_jobs.order_id AND (${bcAllowedSql}) AND (o.erp_live->'bc'->>'id' IS NULL OR NOT o.resolution_pending_resume)) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=erp_live_jobs.order_id AND r.status IN ('queued','running'))`;
 export const carrierEligible = `NOT EXISTS(SELECT 1 FROM orders suspended_order WHERE suspended_order.id=carrier_jobs.order_id AND (coalesce(suspended_order.suspension->>'active','false')='true' OR suspended_order.suspension ? 'erplainCancellation')) AND ((status='pending' AND (stock_override IS NOT NULL OR NOT EXISTS(SELECT 1 FROM orders o WHERE o.id=carrier_jobs.order_id AND o.resolution_pending_resume=true))) OR (status='awaiting_pdf' AND attempts<5 AND updated_at<now()-interval '10 seconds'))`;
@@ -44,7 +45,7 @@ export async function processingRows(db,ids){
  SELECT order_id,row_number() OVER(PARTITION BY carrier ORDER BY ${priorityOrder('carrier_jobs')})::int position FROM carrier_jobs WHERE ${carrierEligible}
  ),rq AS (
  SELECT order_id,row_number() OVER(ORDER BY ${priorityOrder('resolution_jobs')})::int position FROM resolution_jobs WHERE status='queued'
- ) SELECT o.id,o.source_payload->'externalLabel' external_label,o.transport_choice,o.processing_priority_at,o.tracking_status,o.label_status,o.suspension,o.erp_live->>'phase' phase,
+ ) SELECT o.id,to_jsonb(o) diagnostic_order,o.source_payload->'externalLabel' external_label,o.transport_choice,o.processing_priority_at,o.tracking_status,o.label_status,o.suspension,o.erp_live->>'phase' phase,
  e.status erp_status,e.error erp_error,e.state_since erp_since,e.updated_at erp_updated,eq.position erp_position,coalesce(eq.total,(SELECT max(total) FROM eq),0) erp_total,(SELECT total FROM ea) erp_active,
  c.status carrier_status,c.carrier,c.error carrier_error,c.state_since carrier_since,c.updated_at carrier_updated,cq.position carrier_position,
  r.status resolution_status,r.action resolution_action,r.result resolution_result,r.stage,r.error resolution_error,r.state_since resolution_since,r.updated_at resolution_updated,rq.position resolution_position,
@@ -57,7 +58,15 @@ export async function processingRows(db,ids){
  LEFT JOIN LATERAL(SELECT * FROM resolution_jobs WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) r ON true
  LEFT JOIN eq ON eq.order_id=o.id LEFT JOIN cq ON cq.order_id=o.id LEFT JOIN rq ON rq.order_id=o.id
  WHERE o.id=ANY($1::text[]) AND o.archived=false`,[ids]);
- return rows.map(processingView);
+ return rows.map(row=>{
+  const current=projectCurrentDiagnostics({...row.diagnostic_order,
+   erp_live_job:{error:row.erp_error,updated_at:row.erp_updated},
+   carrier_job:{error:row.carrier_error,updated_at:row.carrier_updated},
+   temu_job:row.temu_status?{error:row.temu_error,updated_at:row.temu_updated}:null,
+   resolution_error:row.resolution_error,resolution_error_updated_at:row.resolution_updated});
+  return processingView({...row,erp_error:current.erp_live_job.error,
+   resolution_error:current.resolution_error});
+ });
 }
 
 const serviceName = value => ({gls:'GLS home',gls_pharma:'GLS PHARMA',gls_shop:'GLS Shop',gofo:'GOFO',temu:'TEMU'})[value]||String(value||'Transporteur').toUpperCase();
@@ -67,10 +76,11 @@ export function processingView(r){
  const add=(service,state,step,since,lastSignal,reason,extra={})=>activities.push({service,state,step,since:since||null,lastSignal:lastSignal||null,reason:reason||null,...extra});
  const carrier=serviceName(r.carrier);
  if(['queued','running'].includes(r.resolution_status))add(['equivalent-preview','replace-equivalent','check-sku','compare-bc','weight','reconcile-bc'].includes(r.resolution_action)?'V3 → Erplain':'V3',r.resolution_status==='queued'?'queued':'active',r.stage||'Correction',r.resolution_since,r.resolution_updated,null,{queue:'Corrections',position:r.resolution_position});
- if(['pending','processing','review'].includes(r.erp_status))add('Erplain',r.erp_status==='processing'?'active':r.erp_status==='review'?'blocked':'queued',r.erp_status==='processing'?({creating_bc:'Création du BC',bc_created:'Contrôle du stock / préparation du BL',creating_bl:'Création du BL',ready:'Vérification finale BC / BL'})[r.phase]||'Traitement BC / BL':r.erp_status==='review'?'Préparation bloquée':r.erp_position?'En attente de traitement':'En attente de validation',r.erp_since,r.erp_updated,r.erp_error,{queue:'Erplain',position:r.erp_position,queueTotal:r.erp_total||0,activeCount:r.erp_active||0,inActiveBatch:r.erp_status==='processing'});
+ if(['pending','processing','review'].includes(r.erp_status))add('Erplain',r.erp_status==='processing'?'active':r.erp_status==='review'?'blocked':'queued',r.erp_status==='processing'?({creating_bc:'Création du BC',bc_created:'Contrôle du stock / préparation du BL',creating_bl:'Création du BL',ready:'Vérification finale BC / BL'})[r.phase]||'Traitement BC / BL':r.erp_status==='review'?(r.erp_error?'Préparation Erplain à corriger':r.phase==='bc_created'?'BL Erplain restant à préparer':'Préparation Erplain à recontrôler'):r.erp_position?'Préparation Erplain en attente de traitement':'Préparation Erplain en attente de validation',r.erp_since,r.erp_updated,r.erp_error,{queue:'Erplain',position:r.erp_position,queueTotal:r.erp_total||0,activeCount:r.erp_active||0,inActiveBatch:r.erp_status==='processing'});
  if(['pending','creating','awaiting_pdf','failed','review'].includes(r.carrier_status))add(carrier,r.carrier_status==='creating'?'active':['failed','review'].includes(r.carrier_status)?'blocked':'queued',r.carrier_status==='creating'?'Création de l’étiquette':r.carrier_status==='awaiting_pdf'?'PDF attendu · récupération programmée':r.carrier_status==='pending'?'Étiquette en attente':'Étiquette bloquée',r.carrier_since,r.carrier_updated,r.carrier_error,{queue:carrier,position:r.carrier_position});
+ if(r.temu_status==='ready'&&!r.external_label?.active&&!r.transport_choice)add('TEMU','queued','Achat d’étiquette TEMU à confirmer',r.temu_since,r.temu_updated);
  if(r.temu_status==='purchasing')add('TEMU','active','Achat de l’étiquette',r.temu_since,r.temu_updated);
- if(!r.external_label?.active&&(!r.transport_choice||['uncertain','cancellation_requested'].includes(r.temu_status))&&['uncertain','shipment_error','api_error','document_unavailable','cancellation_requested'].includes(r.temu_status))add('TEMU','blocked',r.temu_status==='uncertain'?'Résultat d’achat à rapprocher':'Préparation / document à vérifier',r.temu_since,r.temu_updated,r.temu_error||'Vérification nécessaire dans TEMU');
+ if(!r.external_label?.active&&(!r.transport_choice||['uncertain','cancellation_requested'].includes(r.temu_status))&&['uncertain','shipment_error','api_error','document_unavailable','cancellation_requested'].includes(r.temu_status))add('TEMU','blocked',({uncertain:'Résultat d’achat à rapprocher',shipment_error:'Étiquette refusée par TEMU',api_error:'Lecture TEMU en échec',document_unavailable:'PDF TEMU indisponible',cancellation_requested:'Annulation TEMU à rapprocher'})[r.temu_status],r.temu_since,r.temu_updated,r.temu_error||'Vérification nécessaire dans TEMU');
  if(r.temu_sync_status==='running')add('TEMU','active','Lecture des expéditions et documents',r.temu_sync_since,r.temu_sync_updated);
  if(['review','failed','cancelled'].includes(r.resolution_status)&&r.resolution_error)add('V3','blocked',r.stage||'Correction à vérifier',r.resolution_since,r.resolution_updated,r.resolution_error);
  if(r.resolution_status==='waiting'&&!activities.some(a=>a.service==='Erplain'||a.service===carrier))add('V3','queued',r.stage||'Suite du traitement en attente',r.resolution_since,r.resolution_updated);

@@ -65,3 +65,12 @@ test('ordinary list retains SQL pagination and existing statistics',async()=>{
  const {out,sql,statsIds}=await route('/api/orders','page=2');
  assert.ok(sql.q.includes('LIMIT 50'));assert.equal(sql.args.at(-1),50);assert.equal(out.total,120);assert.equal(statsIds,undefined);
 });
+test('cancelled and archived orders never contribute stale errors or fallback labels to problem counts',()=>{
+ const classify=currentProblemClassifier(),reason='Commande modifiée sur la plateforme';
+ const inactive=[{id:'cancelled',label_status:'cancelled'},{id:'tracking',tracking_status:'cancelled'},{id:'archive',archived:true}].map(o=>({...o,issue:reason,resolution_error:reason,erp_error:'Ancien échec',lines:[]}));
+ for(const o of inactive)assert.equal(classify(o).length,0);
+ const result=selectProblemOrders([...inactive,{id:'active',issue:reason}],['Commande modifiée sur la plateforme'],classify,inactive.map(o=>o.id));
+ assert.equal(result.total,1);assert.equal(result.problemTypes.length,1);assert.equal(result.problemTypes[0].count,1);
+ assert.equal(selectProblemOrders(inactive,[WITHOUT_DIAGNOSTIC],classify,inactive.map(o=>o.id)).total,0);
+ const query=orderQuery(new URLSearchParams({status:'__problems'}));assert.match(query.where,/label_status IS DISTINCT FROM 'cancelled'/);assert.match(query.where,/tracking_status IS DISTINCT FROM 'cancelled'/);
+});

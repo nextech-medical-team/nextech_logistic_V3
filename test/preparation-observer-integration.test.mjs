@@ -15,6 +15,20 @@ async function fixture(){const engine=new PGlite();await engine.exec(`
  INSERT INTO order_recheck_monitor(order_id,requested) VALUES('a',1),('b',1);
  `);const held=[];return {engine,db:{query:(...args)=>engine.query(...args),withLocks:async(keys,fn)=>{held.push(...keys);try{return await fn();}finally{held.splice(held.length-keys.length);}},transaction:fn=>engine.transaction(tx=>fn({query:(...args)=>{if(args[0].startsWith('UPDATE order_recheck_monitor'))assert.ok(held.includes('order-recheck-local'),'proof persistence shares local monitor lock');return tx.query(...args);}}))}};}
 const product={status:'active',lookupProof:{responseComplete:true},variant:{id:1,sku:'X',active:true,product:{active:true},track_inventory:true,stock_levels:{data:[{location:{id:100934},available:0,on_hand:0}],paginatorInfo:{hasMorePages:false}}}};
+test('native tender and sample lines reach stock checks without inventing an external mapping',async()=>{
+ const {engine,db}=await fixture();try{
+  await engine.exec(`DELETE FROM mappings; UPDATE orders SET channel=CASE id WHEN 'a' THEN 'tender' ELSE 'samples' END;
+   INSERT INTO orders(id,channel,reference,erp_status) VALUES('c','shopify','C','live_review'),('d','tender','D','live_review');
+   INSERT INTO erp_live_jobs VALUES('c','review',NULL),('d','review',NULL);
+   INSERT INTO lines(id,order_id,source_sku,target_sku,quantity,target_quantity,source_payload) VALUES('3','c','X','X',1,1,'{}'),('4','d','X',NULL,1,NULL,'{"mappingScope":"order"}');
+   INSERT INTO order_recheck_monitor(order_id,requested) VALUES('c',1),('d',1);`);
+  const service=preparationObserverService(db,'unused',{api:{verify:async()=>({id:100174}),request:()=>assert.fail('supplier mutation')},readReferences:async()=>({companyId:100174,locationId:100934}),findDocument:async()=>null,readProduct:async()=>product});
+  assert.equal((await service.run()).persisted,4);
+  const states=new Map((await engine.query('SELECT order_id,state FROM order_recheck_monitor')).rows.map(r=>[r.order_id,r.state.preparationObservation]));
+  for(const id of ['a','b']){assert.equal(states.get(id).mappingVerified,true);assert.equal(states.get(id).business[0].code,'stock-insufficient');}
+  for(const id of ['c','d']){assert.equal(states.get(id).mappingVerified,false);assert.equal(states.get(id).business[0].code,'mapping');}
+ }finally{await engine.close();}
+});
 test('real PostgreSQL observation is periodic, shared, version guarded and never changes business/jobs',async()=>{
  const {engine,db}=await fixture();try{let reads=0,verifications=0;
  const make=extra=>preparationObserverService(db,'unused',{api:{verify:async()=>{verifications++;return {id:100174};},request:()=>assert.fail('unexpected source query')},readReferences:async()=>({companyId:100174,locationId:100934}),findDocument:async()=>null,readProduct:async()=>{reads++;return product;},...extra});

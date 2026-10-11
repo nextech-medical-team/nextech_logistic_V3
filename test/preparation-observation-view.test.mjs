@@ -26,6 +26,16 @@ test('proof requires current source version, valid TTL and nonfuture read',()=>{
 });
 const ctx=vm.createContext({Date,transportPendingText:null});vm.runInContext(fs.readFileSync(new URL('../public/compact-problems.js',import.meta.url),'utf8'),ctx);
 const render=o=>ctx.compactProblems(o);
+test('queued and running jobs do not create a review hold and independent failures remain visible',()=>{
+ for(const status of ['pending','processing','complete']){
+  const order={erp_status:'live_review',erp_live_job:{status},sku_lines:[]};
+  assert.equal(render(order).some(p=>p.type==='erp-review'),false);
+  const diagnostics=render({...order,issue:'Adresse incomplète'});
+  assert.equal(diagnostics.some(p=>p.type==='erp-review'),false);
+  assert.ok(diagnostics.some(p=>p.detail==='Adresse incomplète'));
+ }
+ assert.ok(render({erp_status:'live_review',erp_live_job:{status:'review'},sku_lines:[]}).some(p=>p.type==='erp-review'));
+});
 test('processing projection replaces only an obsolete confirmed mapping or missing reason, without touching history',()=>{
  const row={service:'Erplain',state:'blocked',reason:'BC · Mapping manquant : SKU-X',monitoring:{result:'Stock insuffisant',preparationObservationCurrent:true,preparationObservation:{mappingVerified:true}},activities:[{service:'Erplain',state:'blocked',reason:'BC · Mapping manquant : SKU-X'},{service:'V3',state:'blocked',reason:'Adresse incomplète'}]};
  const before=JSON.stringify(row),out=projectPreparationActivity(row);assert.equal(out.reason,'Stock insuffisant');assert.equal(out.activities[0].reason,'Stock insuffisant');assert.equal(out.activities[1].reason,'Adresse incomplète');assert.equal(JSON.stringify(row),before);
