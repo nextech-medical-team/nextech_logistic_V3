@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';import path from 'node:path';
 const dir=process.env.TEST_SKU_DIR?pathToFileURL(path.resolve(process.env.TEST_SKU_DIR)+path.sep):new URL('../src/',import.meta.url);
-const {createBlockedMissingProducts,readCreationSku}=await import(new URL('missing-product-creation.mjs',dir));
+const {createBlockedMissingProducts,readCreationSku,targetSku,backfillSelection}=await import(new URL('missing-product-creation.mjs',dir));
 function fixture({catalog=null,missing=true,linked,mutationFailure,change,protectedOrder=false,ratio=1}={}){
  const initial={id:'o',channel:'temu',archived:false,resolution_pending_resume:false,source_payload:{},erp_live:{},issue:null,creation_job_error:'BC · SKU Erplain LIVE introuvable : R',labels:{pdf:'unchanged',tracking:'same'}};
  const line={id:'l',source_sku:'MEEME06_R',target_sku:'R',mapped_sku:'R',source_qty:1,target_qty:ratio,quantity:1,source_payload:{goodsName:'Produit source'}};
@@ -19,7 +19,7 @@ function fixture({catalog=null,missing=true,linked,mutationFailure,change,protec
   if(sql.startsWith('UPDATE erplain_product_creation_attempts')){const j=journal.get(args[0]);if(sql.includes("status='review'"))j.status='review';if(sql.includes("status='verified'"))j.status='verified';if(sql.includes('product_id=$2'))j.product_id=args[1];return {rows:[],rowCount:1};}
   if(sql.startsWith('INSERT INTO erplain_product_creation_reviews')){reviews.push(args);return {rows:[],rowCount:1};}
   if(sql.startsWith('SELECT id,archived,issue,erp_live'))return {rows:[initial]};
-  if(sql.startsWith('SELECT coalesce(l.target_sku'))return {rows:[{sku:'R'}]};
+  if(sql.startsWith("SELECT CASE WHEN l.source_payload->>'mappingScope'"))return {rows:[{sku:'R'}]};
   if(sql.startsWith('SELECT status,error,updated_at'))return {rows:[job]};
   if(sql.startsWith('SELECT status FROM carrier_jobs'))return {rows:[]};
   if(sql.startsWith('SELECT 1 FROM resolution_jobs'))return {rows:[]};
@@ -38,8 +38,17 @@ test('existing matching binding does not cause a false missing-reference block',
 for(const missing of [true,false])test('divergent binding refuses duplicate/identity replacement '+missing,async()=>{const f=fixture({missing,linked:'99'});await f.run();assert.equal(f.mutations,0);assert.equal(f.bound.length,0);assert.match(f.reviews[0][4],/liée à rapprocher/);});
 for(const change of [{target_sku:'OTHER'},{mapped_sku:'OTHER'},{source_qty:2},{quantity:2},{source_payload:{goodsName:'Changed'}}])test('mapping/line mutation race prevents product write '+JSON.stringify(change),async()=>{const f=fixture({change});await f.run();assert.equal(f.mutations,0);assert.equal(f.bound.length,0);assert.match(f.reviews[0][4],/modifiée/);});
 test('fresh protected order prevents mutation and cache write',async()=>{const f=fixture({protectedOrder:true});await f.run();assert.equal(f.mutations,0);assert.equal(f.bound.length,0);assert.match(f.reviews[0][4],/protégée/);});
-test('converted product name remains explicit business blocker',async()=>{const f=fixture({ratio:2});await f.run();assert.equal(f.mutations,0);assert.match(f.reviews[0][4],/convertie à confirmer/);});
+for(const ratio of [2,3,5,10,30,50])test('converted quantity does not prohibit target product creation '+ratio,async()=>{const f=fixture({ratio});await f.run();assert.equal(f.mutations,1);assert.equal(f.bound[0].sku,'R');assert.equal(f.calls.find(c=>c.q?.startsWith('mutation')).args.input.label,'Produit source');});
 test('uncertain creation is journaled and never replayed in historical path',async()=>{const f=fixture({mutationFailure:'TimeoutError'});await f.run();await f.run();assert.equal(f.mutations,1);assert.equal(f.bound.length,0);assert.match(f.reviews[1][4],/Tentative précédente/);assert.equal(f.job.error,'BC · SKU Erplain LIVE introuvable : R');});
 test('unrelated historical SKU is not guessed from a substring',async()=>{const f=fixture();f.initial.creation_job_error='BC · SKU Erplain LIVE introuvable : R2';await f.run();assert.equal(f.mutations,0);assert.equal(f.reviews.length,0);});
 test('catalogue-only missing target still uses shared product creation',async()=>{const f=fixture({catalog:'SKU Erplain introuvable'});f.initial.creation_job_error=null;f.job.error=null;await f.run();assert.equal(f.mutations,1);});
 test('foreign SKU reply cannot become proof of absence',async()=>{await assert.rejects(readCreationSku({request:async()=>({Variants:{data:[{sku:'OTHER'}],paginatorInfo:{hasMorePages:false}}})},'R'),/incohérente/);});
+
+test('cancelled order with existing SKU reconciles diagnostics only',async()=>{const f=fixture({missing:false});f.initial.tracking_status='cancelled';await f.run();assert.equal(f.mutations,0);assert.equal(f.bound.length,0);assert.equal(f.job.error,null);assert.equal(f.initial.tracking_status,'cancelled');assert.equal(f.job.status,'review');});
+test('cancelled order with absent SKU preserves protection and diagnostic',async()=>{const f=fixture();f.initial.tracking_status='cancelled';await f.run();assert.equal(f.mutations,0);assert.equal(f.bound.length,0);assert.equal(f.job.error,'BC · SKU Erplain LIVE introuvable : R');});
+test('resume hold with existing SKU allows only diagnostic reconciliation',async()=>{const f=fixture({missing:false});f.initial.resolution_pending_resume=true;await f.run();assert.equal(f.mutations,0);assert.equal(f.bound.length,0);assert.equal(f.job.error,null);assert.equal(f.initial.resolution_pending_resume,true);});
+test('resume hold with absent SKU is not lifted',async()=>{const f=fixture();f.initial.resolution_pending_resume=true;await f.run();assert.equal(f.mutations,0);assert.equal(f.initial.resolution_pending_resume,true);});
+test('historical converted-name blocker is selected and retired only after creation proof',async()=>{const f=fixture({ratio:30});f.initial.creation_job_error='Création produit · Nom de la référence convertie à confirmer : R';f.job.error=f.initial.creation_job_error;await f.run();assert.equal(f.mutations,1);assert.equal(f.job.error,null);});
+test('legacy catalogue Product not found is processed',async()=>{const f=fixture({catalog:'Produit introuvable dans Erplain'});f.initial.creation_job_error=null;f.job.error=null;await f.run();assert.equal(f.mutations,1);});
+
+test('backfill selects the current permanent mapping rather than an old cached target',()=>{const o={channel:'temu'},l={target_sku:'OLD',mapped_sku:'CURRENT',source_payload:{}};assert.equal(targetSku(o,l),'CURRENT');assert.equal(targetSku(o,{...l,source_payload:{mappingScope:'order'}}),'OLD');assert.match(backfillSelection,/mappingScope/);assert.match(backfillSelection,/coalesce\(m.target_sku,l.target_sku/);});

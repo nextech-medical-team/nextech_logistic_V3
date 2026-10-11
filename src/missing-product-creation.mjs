@@ -83,21 +83,20 @@ export function productCreationBlock(o,{resolution=false}={}){
 export const backfillTable=`CREATE TABLE IF NOT EXISTS erplain_product_creation_reviews(order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,line_id TEXT NOT NULL,sku TEXT NOT NULL,status TEXT NOT NULL,error TEXT,updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(order_id,line_id,sku))`;
 export const backfillSelection=`SELECT DISTINCT o.*,e.error AS creation_job_error,r.last_checked FROM orders o
  JOIN lines l ON l.order_id=o.id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku
- LEFT JOIN catalog_results c ON c.sku=coalesce(l.target_sku,m.target_sku,CASE WHEN o.channel IN ('tender','samples') THEN l.source_sku END)
+ LEFT JOIN catalog_results c ON c.sku=CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_sku ELSE coalesce(m.target_sku,l.target_sku,CASE WHEN o.channel IN ('tender','samples') THEN l.source_sku END) END
  LEFT JOIN erp_live_jobs e ON e.order_id=o.id
  LEFT JOIN LATERAL(SELECT max(updated_at) last_checked FROM erplain_product_creation_reviews WHERE order_id=o.id) r ON true
- WHERE (c.message LIKE '%SKU Erplain introuvable%' OR position('SKU Erplain LIVE introuvable :' IN coalesce(e.error,''))>0 OR position('SKU Erplain LIVE introuvable :' IN coalesce(o.issue,''))>0)
- AND o.archived=false AND o.resolution_pending_resume=false
- AND coalesce(o.source_payload->'selectedReimport'->>'mode','')<>'hold'
- AND NOT (o.source_payload ? 'marketplacePendingCorrection')
+ WHERE ((c.message LIKE '%SKU Erplain introuvable%' OR c.message='Produit introuvable dans Erplain') OR position('Création produit · Nom de la référence convertie à confirmer :' IN coalesce(e.error,''))>0 OR position('SKU Erplain LIVE introuvable :' IN coalesce(e.error,''))>0 OR position('SKU Erplain LIVE introuvable :' IN coalesce(o.issue,''))>0)
+ AND o.archived=false
  AND NOT EXISTS(SELECT 1 FROM resolution_jobs x WHERE x.order_id=o.id AND x.status IN ('queued','running','waiting'))
  AND NOT EXISTS(SELECT 1 FROM erp_live_jobs x WHERE x.order_id=o.id AND x.status='processing')
  AND NOT EXISTS(SELECT 1 FROM carrier_jobs x WHERE x.order_id=o.id AND x.status IN ('pending','creating','awaiting_pdf','ready'))
  ORDER BY r.last_checked NULLS FIRST,o.received_at,o.id LIMIT 20`;
 const lineSelection='SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1';
-export const targetSku=(o,l)=>l.target_sku||l.mapped_sku||(['tender','samples'].includes(o.channel)?l.source_sku:null);
-export function historicalMissing(message,sku){return String(message||'').split(/\s;\s/).some(part=>part===`BC · SKU Erplain LIVE introuvable : ${sku}`);}
-function lineIdentity(o,l){return JSON.stringify([o.channel,o.erp_live?.bc,o.erp_live?.bl,l.id,l.source_sku,targetSku(o,l),l.mapped_sku,l.source_qty,l.target_qty,l.quantity,l.source_payload]);}
+export const targetSku=(o,l)=>l.source_payload?.mappingScope==='order'?l.target_sku:l.mapped_sku||l.target_sku||(['tender','samples'].includes(o.channel)?l.source_sku:null);
+export function historicalMissing(message,sku){return String(message||'').split(/\s;\s/).some(part=>part===`BC · SKU Erplain LIVE introuvable : ${sku}`||part===`Création produit · Nom de la référence convertie à confirmer : ${sku}`);}
+export function missingCatalogueMessage(message){return String(message||'').includes('SKU Erplain introuvable')||message==='Produit introuvable dans Erplain';}
+function lineIdentity(o,l){return JSON.stringify([o.channel,o.erp_live?.bc,o.erp_live?.bl,l.id,l.source_sku,l.target_sku,l.target_quantity,targetSku(o,l),l.mapped_sku,l.source_qty,l.target_qty,l.quantity,l.source_payload]);}
 export async function createBlockedMissingProducts(db,api,{blocked,bind}){
  await db.exec(backfillTable);
  const orders=(await db.query(backfillSelection)).rows;
@@ -108,10 +107,10 @@ export async function createBlockedMissingProducts(db,api,{blocked,bind}){
   for(const line of lines){
    const sku=targetSku(o,line);if(!sku)continue;
    const diagnostic=(await db.query('SELECT message FROM catalog_results WHERE sku=$1',[sku])).rows[0]?.message;
-   if(!diagnostic?.includes('SKU Erplain introuvable')&&!historicalMissing(o.creation_job_error,sku)&&!historicalMissing(o.issue,sku))continue;
+   if(!missingCatalogueMessage(diagnostic)&&!historicalMissing(o.creation_job_error,sku)&&!historicalMissing(o.issue,sku))continue;
    let status='review',error=null,variantId=null;
    try{
-    if(blocked(o)||productCreationBlock(o))throw Error('Commande protégée : création suspendue');
+    const protection=blocked(o)||productCreationBlock(o);
     const linked=(await db.query('SELECT live_variant_id FROM erplain_product_bindings WHERE sku=$1',[sku])).rows[0];
     await api.verify();
     const read=async key=>{
@@ -119,12 +118,19 @@ export async function createBlockedMissingProducts(db,api,{blocked,bind}){
      if(linked&&(!rows.length||rows.length!==1||String(rows[0].id)!==String(linked.live_variant_id)))throw Error('Création produit · Référence liée à rapprocher : '+sku);
      return rows;
     };
+    const existing=await read(sku);
+    if(protection){
+     if(!existing.length)throw Error('Commande protégée : création suspendue');
+     const v=uniqueActive(existing,sku);
+     const {refreshLookupDiagnostics}=await import('./catalogue-lookup-diagnostics.mjs');
+     await refreshLookupDiagnostics(db,o,{sku,status:'active',complete:true,sourceReadOnly:true,readAt:new Date().toISOString(),variantId:String(v.id),productId:String(v.product.id),documentId:o.erp_live?.bc?.id??null});
+     variantId=String(v.id);status='existing';
+    }else{
     const result=await ensureMissingProduct(db,api,{sku,label:sourceProductName(line),read,guard:async()=>{
      const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];
      if(blocked(fresh)||productCreationBlock(fresh))throw Error('Commande protégée : création suspendue');
      const current=(await db.query(lineSelection,[o.id,o.channel])).rows.find(l=>l.id===line.id);
      if(!current||lineIdentity(fresh,current)!==lineIdentity(o,line))throw Error('Correspondance ou ligne modifiée : création suspendue');
-     if(line.source_qty&&Number(line.source_qty)!==Number(line.target_qty))throw Error('Création produit · Nom de la référence convertie à confirmer : '+sku);
      const busy=(await db.query("SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status IN ('pending','creating','awaiting_pdf','ready')",[o.id])).rows.length;
      if(busy)throw Error('Traitement en cours : création suspendue');
     }});
@@ -138,6 +144,7 @@ export async function createBlockedMissingProducts(db,api,{blocked,bind}){
     const {refreshLookupDiagnostics}=await import('./catalogue-lookup-diagnostics.mjs');
     await refreshLookupDiagnostics(db,fresh,{sku,status:'active',complete:true,sourceReadOnly:true,readAt:new Date().toISOString(),variantId:String(result.variant.id),productId:String(result.variant.product.id),documentId:fresh.erp_live?.bc?.id??null});
     variantId=String(result.variant.id);status=result.created?'created':'existing';error=binding?.message||null;
+    }
    }catch(e){error=String(e.message).slice(0,1000);}
    await db.query(`INSERT INTO erplain_product_creation_reviews(order_id,line_id,sku,status,error) VALUES($1,$2,$3,$4,$5) ON CONFLICT(order_id,line_id,sku) DO UPDATE SET status=excluded.status,error=excluded.error,updated_at=now()`,[o.id,String(line.id),sku,status,error]);
    report.push({orderId:o.id,lineId:line.id,sku,status,error,variantId});
