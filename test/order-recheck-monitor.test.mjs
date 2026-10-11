@@ -195,7 +195,7 @@ test('a ready TEMU quote awaiting human purchase is not a technical block, and i
   await db.query("INSERT INTO temu_label_jobs(reference,status) VALUES('A','ready')");
   const worker=orderRecheckMonitor(db,{}, {canResume:()=>false});await worker.runLocal();
   const state=(await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state;
-  assert.equal(state.blocked,false);assert.equal(state.followUp,true);assert.match(state.result,/Achat TEMU/);assert.match(state.nextStep,/TEMU/);
+  assert.equal(state.blocked,false);assert.equal(state.followUp,true);assert.match(state.result,/Achat d’étiquette TEMU à confirmer/);assert.match(state.nextStep,/TEMU/);
   const base={channel:'temu',awaiting_purchase:true,label_status:'blocked',erp_status:'live_created',erp_live:{phase:'bl_ready'}};
   assert.equal(monitoringObservation(base).blocked,false);
   assert.equal(monitoringObservation({...base,issue:'Stock insuffisant'}).result,'Stock insuffisant');
