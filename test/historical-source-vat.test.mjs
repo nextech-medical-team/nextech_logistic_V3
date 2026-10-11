@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
-import {sourceVatPlan,alignHistoricalSourceVat,sourceVatResumeEligible,sourceVatError,queueSourceVatReviews,sourceVatResolutionState} from '../src/historical-source-vat.mjs';
+import {sourceVatPlan,alignHistoricalSourceVat,sourceVatResumeEligible,sourceVatError,sourceVatReviewErrors,queueSourceVatReviews,sourceVatResolutionState} from '../src/historical-source-vat.mjs';
 function fixture(){
  const line={id:7,type:'normal',quantity:1,price:10,tax_amount:2,discount:null,discount_rule_amount:null,ecotax:null,tax_codes:[{id:'20'}],variant:{id:3},location:{id:4}};
  const bc={id:1,status:'active',external_reference:'PO',update_stock:false,invoices_count:0,paid_amount:0,tax_type:'exclusive',currency:{label:'EUR'},total:12,line_items:[line],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}};
@@ -45,9 +45,33 @@ test('real SQL queue ignores superseded failures, preserves decisions/suspension
   await db.query("UPDATE resolution_jobs SET result='{\"resume\":true}' WHERE id='target-current'");
   await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result,error,created_at) VALUES('failed-preview','target','failed-preview','equivalent-preview','review',null,'Produit de remplacement : stock insuffisant. Remplacement non enregistré.',now()-interval '2 hours')");
   await db.exec(`INSERT INTO correction_jobs(id,order_id,payload,status,created_at) VALUES('old-correction','target','{"action":"weight"}','review',now()-interval '2 hours'),('new-correction','target','{"action":"weight"}','complete',now()-interval '1 hour');`);
-  await queueSourceVatReviews(db);let jobs=(await db.query("SELECT order_id,action FROM resolution_jobs WHERE request_id LIKE 'source-vat-v1-%'")).rows;assert.deepEqual(jobs,[{order_id:'target',action:'resume-erp'}]);
+  await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result,error) VALUES('v1-prior','target','source-vat-v1-prior','resume-erp','review','{\"resume\":true}',$1)",[sourceVatReviewErrors[1]]);
+  await db.query("UPDATE erp_live_jobs SET error=$1 WHERE order_id='target'",[sourceVatReviewErrors[1]]);
+  await queueSourceVatReviews(db);let jobs=(await db.query("SELECT order_id,action FROM resolution_jobs WHERE request_id LIKE 'source-vat-v2-%'")).rows;assert.deepEqual(jobs,[{order_id:'target',action:'resume-erp'}]);
   assert.deepEqual((await db.query("SELECT detail->'obsoletePreviewIds' ids FROM audit")).rows[0].ids,['failed-preview']);assert.equal((await db.query("SELECT status FROM resolution_jobs WHERE id='failed-preview'")).rows[0].status,'review');
-  await db.query("UPDATE resolution_jobs SET status='review',error=$1,result='{\"resume\":true}' WHERE request_id LIKE 'source-vat-v1-%'",[sourceVatError]);await queueSourceVatReviews(db);assert.equal((await db.query("SELECT count(*) n FROM resolution_jobs WHERE request_id LIKE 'source-vat-v1-%'")).rows[0].n,1);
-  await db.query("UPDATE orders SET source_payload=jsonb_set(source_payload,'{temuAmounts,data,orderList,0,productTaxRate}','22000000') WHERE id='target'");await queueSourceVatReviews(db);assert.equal((await db.query("SELECT count(*) n FROM resolution_jobs WHERE request_id LIKE 'source-vat-v1-%'")).rows[0].n,2);
+  await db.query("UPDATE resolution_jobs SET status='review',error=$1,result='{\"resume\":true}' WHERE request_id LIKE 'source-vat-v2-%'",[sourceVatError]);await queueSourceVatReviews(db);assert.equal((await db.query("SELECT count(*) n FROM resolution_jobs WHERE request_id LIKE 'source-vat-v2-%'")).rows[0].n,1);
+  await db.query("UPDATE orders SET source_payload=jsonb_set(source_payload,'{temuAmounts,data,orderList,0,productTaxRate}','22000000') WHERE id='target'");await queueSourceVatReviews(db);assert.equal((await db.query("SELECT count(*) n FROM resolution_jobs WHERE request_id LIKE 'source-vat-v2-%'")).rows[0].n,2);
  }finally{await db.close();}
+});
+
+test('shipping charge without source location preserves the supplier line id and location; product guards stay strict',()=>{
+ const {bc,o}=fixture();
+ const shipping={...structuredClone(bc.line_items[0]),id:8,type:'shipping_cost',variant:null,price:2.5,tax_amount:0.5};
+ bc.line_items.push(shipping);
+ o.pricing.items.push({...structuredClone(shipping),location:undefined,price:2.44,tax_codes:[{id:'21'}]});
+ const before=structuredClone(bc),plan=sourceVatPlan(bc,o);
+ assert.deepEqual(plan.input.line_items[1],{id:'8',price:2.44,tax_codes:[{id:'21'}]});assert.deepEqual(bc,before);
+ for(const change of [x=>x.pricing.items[0].location=undefined,x=>x.pricing.items[1].location={id:9},x=>x.pricing.items[1].quantity=2,x=>x.pricing.items[1].variant={id:3}]){
+  const changed=structuredClone(o);change(changed);assert.throws(()=>sourceVatPlan(bc,changed));
+ }
+ const duplicateBc=structuredClone(bc),duplicateOrder=structuredClone(o);duplicateBc.line_items.push({...shipping,id:9});duplicateOrder.pricing.items.push(structuredClone(o.pricing.items[1]));assert.throws(()=>sourceVatPlan(duplicateBc,duplicateOrder),/ambigus/);
+});
+test('shipping correction read-back rejects a changed supplier location without another mutation',async()=>{
+ const {bc,o}=fixture();const shipping={...structuredClone(bc.line_items[0]),id:8,type:'shipping_cost',variant:null,price:2.5,tax_amount:0.5};bc.line_items.push(shipping);o.pricing.items.push({...structuredClone(shipping),location:undefined,tax_codes:[{id:'21'}]});let mutations=0;
+ const api={request:async(q,v)=>{if(q.startsWith('mutation')){mutations++;for(const update of v.input.line_items)bc.line_items.find(l=>String(l.id)===update.id).tax_codes=update.tax_codes;bc.line_items[1].location.id=9;}return {Order:structuredClone(bc)};}};
+ await assert.rejects(alignHistoricalSourceVat(api,o,{save:async()=>{},guard:async()=>{},preserveLabels:async()=>{}}),/Résultat fournisseur non confirmé/);assert.equal(mutations,1);assert.equal(o.erp_live.sourceVatAttempt.status,'uncertain');await assert.rejects(alignHistoricalSourceVat(api,o,{save:async()=>{},guard:async()=>{},preserveLabels:async()=>{}}),/Identité des lignes modifiée/);assert.equal(mutations,1);
+});
+test('the corrected shipping guard permits a bounded new review, excluding unrelated or uncertain errors',()=>{
+ const {o}=fixture();Object.assign(o,{archived:false,error:sourceVatReviewErrors[1]});assert.equal(sourceVatResumeEligible(o),true);assert.equal(sourceVatResumeEligible({...o,error:'TVA source · Journal stock modifié'}),false);assert.equal(sourceVatResumeEligible({...o,erp_live:{...o.erp_live,sourceVatAttempt:{status:'uncertain'}}}),false);
+ const resume={id:'new-resume',action:'resume-erp',status:'review',error:sourceVatReviewErrors[1],result:{resume:true},created_at:'2026-10-11T10:10:00Z'};const preview={id:'old',action:'equivalent-preview',status:'review',result:null,error:'stock insuffisant. Remplacement non enregistré.',created_at:'2026-10-09T01:00:00Z'};assert.deepEqual(sourceVatResolutionState([resume,preview]).obsoletePreviewIds,['old']);
 });

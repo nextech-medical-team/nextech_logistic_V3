@@ -11,8 +11,13 @@ const identity=l=>JSON.stringify([l.type||'normal',String(l.variant?.id||''),Str
 const codes=l=>JSON.stringify((l.tax_codes||[]).map(t=>String(t.id)).sort());
 const neutral=l=>l.type==='shipping_cost'&&Number(l.quantity)===1&&['price','tax_amount','discount','discount_rule_amount','ecotax'].every(k=>Object.hasOwn(l,k)&&(l[k]===null||l[k]!==''&&Number(l[k])===0));
 export const sourceVatError='BC · Codes TVA Erplain différents de la source ; produits et quantités identiques';
+export const sourceVatReviewErrors=[sourceVatError,'TVA source · Lignes ou emplacements ambigus'];
+// Source shipping charges omit an inventory location. Match only a single
+// non-product, unit shipping row; supplier identity remains strict on read-back.
+const matchesSourceLine=(actual,expected)=>identity(actual)===identity(expected)||
+ actual.type==='shipping_cost'&&expected.type==='shipping_cost'&&!actual.variant?.id&&!expected.variant?.id&&!expected.location?.id&&Number(actual.quantity)===1&&Number(expected.quantity)===1;
 export function sourceVatResolutionState(actions=[]){
- const resume=actions.find(j=>['resume','resume-erp'].includes(j.action)&&j.status==='review'&&j.error===sourceVatError&&j.result?.resume===true&&!j.result?.partialRemainder);
+ const resume=actions.find(j=>['resume','resume-erp'].includes(j.action)&&j.status==='review'&&sourceVatReviewErrors.includes(j.error)&&j.result?.resume===true&&!j.result?.partialRemainder);
  const started=Date.parse(resume?.created_at),obsolete=[];
  const current=actions.filter(j=>{
   const previous=Date.parse(j.created_at);
@@ -23,24 +28,24 @@ export function sourceVatResolutionState(actions=[]){
  return {...currentResolutionState(current),obsoletePreviewIds:obsolete};
 }
 export function sourceVatResumeEligible(o){
- return o.channel==='temu'&&o.archived===false&&!o.partial_mode&&!mutationBlock(o,{allowHeldBc:true})&&o.erp_live?.phase==='historical_review'&&!!o.erp_live.bc?.id&&!o.erp_live.bl?.id&&!o.erp_live.sourceVatAttempt?.status?.includes('uncertain')&&!o.source_payload?.erplainImported&&!o.source_payload?.visibilityHold&&!o.source_payload?.erplainValidationHold&&o.error===sourceVatError;
+ return o.channel==='temu'&&o.archived===false&&!o.partial_mode&&!mutationBlock(o,{allowHeldBc:true})&&o.erp_live?.phase==='historical_review'&&!!o.erp_live.bc?.id&&!o.erp_live.bl?.id&&!o.erp_live.sourceVatAttempt?.status?.includes('uncertain')&&!o.source_payload?.erplainImported&&!o.source_payload?.visibilityHold&&!o.source_payload?.erplainValidationHold&&sourceVatReviewErrors.includes(o.error);
 }
 // Bounded local scan; one normal resolution per source financial version.
 // No external reads here, and no repeating an unchanged failed intervention.
 export async function queueSourceVatReviews(db){
  await db.transaction(async tx=>{
   const rows=(await tx.query(`SELECT o.*,j.error FROM orders o JOIN erp_live_jobs j ON j.order_id=o.id
-   WHERE j.status='review' AND j.error=$1 AND (${bcAllowedSql}) AND o.channel='temu'
+   WHERE j.status='review' AND j.error=ANY($1::text[]) AND (${bcAllowedSql}) AND o.channel='temu'
    AND o.erp_live->>'phase'='historical_review' AND o.erp_live->'bc'->>'id' IS NOT NULL
    AND o.erp_live->'bl'->>'id' IS NULL
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
    AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND (c.status IN ('queued','applying','checking','waiting') OR c.status='review' AND NOT EXISTS(SELECT 1 FROM correction_jobs n WHERE n.order_id=c.order_id AND (n.payload->>'action') IS NOT DISTINCT FROM (c.payload->>'action') AND (n.created_at,n.id)>(c.created_at,c.id))))
-   ORDER BY j.updated_at LIMIT 10 FOR UPDATE OF o,j SKIP LOCKED`,[sourceVatError])).rows;
+   ORDER BY j.updated_at LIMIT 10 FOR UPDATE OF o,j SKIP LOCKED`,[sourceVatReviewErrors])).rows;
   for(const o of rows){
    if(!sourceVatResumeEligible(o)||!o.source_payload?.temuAmounts?.data?.orderList?.length)continue;
    const state=sourceVatResolutionState((await tx.query(resolutionStateSql,[o.id])).rows);
-   if(state.pendingReplacement||state.reviews.some(r=>!['resume','resume-erp'].includes(r.action)||r.error!==sourceVatError))continue;
-   const requestId='source-vat-v1-'+hash({order:o.id,bc:o.erp_live.bc.id,source:o.source_payload.temuAmounts.data});
+   if(state.pendingReplacement||state.reviews.some(r=>!['resume','resume-erp'].includes(r.action)||!sourceVatReviewErrors.includes(r.error)))continue;
+   const requestId='source-vat-v2-'+hash({order:o.id,bc:o.erp_live.bc.id,source:o.source_payload.temuAmounts.data});
    const id=randomUUID(),payload={id:o.id,requestId,action:'resume-erp',type:'historical-preparation',resumeAfter:true};
    const inserted=await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$3,'resume-erp',$4) ON CONFLICT(request_id) DO NOTHING RETURNING id",[id,o.id,requestId,JSON.stringify(payload)]);
    if(inserted.rows.length)await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','source_vat.continuation_requested',$1)",[JSON.stringify({orderId:o.id,bcId:o.erp_live.bc.id,resolutionId:id,authority:'current_source',labelsPreserved:true,obsoletePreviewIds:state.obsoletePreviewIds})]);
@@ -59,7 +64,7 @@ export function sourceVatPlan(bc,o){
  verifyBcLineIdentity(actual?.map(l=>({...l,tax_codes:[]})),expected.map(l=>({...l,tax_codes:[]})));
  const matched=new Set(),updates=[];let changed=false;
  for(const l of actual){
-  const candidates=expected.map((e,i)=>({e,i})).filter(({e,i})=>!matched.has(i)&&identity(e)===identity(l));
+  const candidates=expected.map((e,i)=>({e,i})).filter(({e,i})=>!matched.has(i)&&matchesSourceLine(l,e));
   if(candidates.length!==1)throw Error('TVA source · Lignes ou emplacements ambigus');
   const {e,i}=candidates[0];matched.add(i);
   if(codes(l)!==codes(e))changed=true;
@@ -81,6 +86,7 @@ export async function alignHistoricalSourceVat(api,o,{save,guard,preserveLabels}
  if(!plan){
   if(attempt?.status==='uncertain'){
    if(attempt.sourceHash!==hash(o.pricing))throw Error('TVA source · Source modifiée après mutation incertaine');
+   if(!Array.isArray(attempt.before?.line_items)||JSON.stringify(bc.line_items.map(l=>[String(l.id),identity(l)]).sort())!==JSON.stringify(attempt.before.line_items.map(l=>[String(l.id),identity(l)]).sort()))throw Error('TVA source · Identité des lignes modifiée après mutation incertaine');
    verifyBcPricing(bc,o.pricing);
    if(bc.update_stock!==attempt.stockPolicy)throw Error('TVA source · Politique de stock modifiée');
    const stock=bc.update_stock?await readHistoricalStock(api,bc):null;
@@ -97,7 +103,7 @@ export async function alignHistoricalSourceVat(api,o,{save,guard,preserveLabels}
  let mutationError;try{await api.request('mutation V3AlignSourceVat($id:ID!,$input:OrderInput!){UpdateOrder(id:$id,input:$input){id}}',{id:String(bc.id),input:plan.input});}catch(e){mutationError=e;}
  // One mutation attempt only. A lost response is confirmed by fresh read-back.
  const after=await read();
- if(String(after?.id)!==String(bc.id)||after.status!==bc.status||after.external_reference!==bc.external_reference||after.update_stock!==bc.update_stock||after.tax_type!==bc.tax_type||after.currency?.label!==bc.currency?.label||Number(after.invoices_count)!==0||Number(after.paid_amount)!==0||after.shipping_orders?.paginatorInfo?.hasMorePages!==false||after.shipping_orders.data.length||JSON.stringify(after.line_items.map(identity).sort())!==JSON.stringify(bc.line_items.map(identity).sort()))throw Error('TVA source · Résultat fournisseur non confirmé');
+ if(String(after?.id)!==String(bc.id)||after.status!==bc.status||after.external_reference!==bc.external_reference||after.update_stock!==bc.update_stock||after.tax_type!==bc.tax_type||after.currency?.label!==bc.currency?.label||Number(after.invoices_count)!==0||Number(after.paid_amount)!==0||after.shipping_orders?.paginatorInfo?.hasMorePages!==false||after.shipping_orders.data.length||JSON.stringify(after.line_items.map(l=>[String(l.id),identity(l)]).sort())!==JSON.stringify(bc.line_items.map(l=>[String(l.id),identity(l)]).sort()))throw Error('TVA source · Résultat fournisseur non confirmé');
  try{verifyBcPricing(after,o.pricing);}catch(e){throw Error((mutationError?'TVA source · Réponse mutation incertaine : ':'')+e.message);}
  const afterStock=bc.update_stock?await readHistoricalStock(api,after):null;
  if(hash(stock)!==hash(afterStock))throw Error('TVA source · Journal stock modifié après correction');
