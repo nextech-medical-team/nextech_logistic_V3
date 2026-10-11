@@ -38,7 +38,13 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await expect(table.locator('.compact-problem[data-problem-type="erp-review"]')).toHaveCount(0);
  await expect(row('stock').locator('.monitoring-result')).toContainText('Stock insuffisant');
  await expect(row('technical').locator('.monitoring-result')).toContainText('Stock non vérifiable');
- for(const id of ['stock','technical']){await row(id).scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/preparation-observation-'+id+'-'+name+'.png',fullPage:false});}
+ const diagnosticBounds=[];
+ for(const id of ['stock','technical']){
+  const card=row(id).locator('.order-processing');await card.scrollIntoViewIfNeeded();
+  const bounds=await card.boundingBox();expect(bounds).not.toBeNull();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(viewport.width+1);
+  const badge=row(id).locator('.compact-problem').first();const badgeBounds=await badge.boundingBox();expect(badgeBounds.x).toBeGreaterThanOrEqual(0);expect(badgeBounds.x+badgeBounds.width).toBeLessThanOrEqual(viewport.width+1);
+  diagnosticBounds.push({id,card:bounds,badge:badgeBounds});await page.screenshot({path:'proofs/preparation-observation-'+id+'-'+name+'.png',fullPage:false});
+ }
  expect(writes).toEqual([]);expect(errors).toEqual([]);
- fs.writeFileSync('proofs/preparation-observation-'+name+'.json',JSON.stringify({status:'PASS',viewport,cases:6,businessStock:true,technicalUnknownStock:true,obsoleteMappingRemoved:true,independentErrorPreserved:true,queuedNotBlocked:true,cancelledExcluded:true,writes,errors,scope:'Actual UI with synthetic source proofs; production verification remains required'}));
+ fs.writeFileSync('proofs/preparation-observation-'+name+'.json',JSON.stringify({status:'PASS',viewport,cases:6,businessStock:true,technicalUnknownStock:true,obsoleteMappingRemoved:true,independentErrorPreserved:true,queuedNotBlocked:true,cancelledExcluded:true,diagnosticBounds,writes,errors,scope:'Actual UI with synthetic source proofs; production verification remains required'}));
 });
