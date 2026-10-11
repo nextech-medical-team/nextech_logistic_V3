@@ -5,7 +5,7 @@ export function testRetirementReason(o,hasProductionHistory){
  if(o.channel==='temu')return 'Circuit achat TEMU indépendant';
  if(o.partial_mode)return 'Livraison partielle à contrôler';
  if(['shipped','in_transit','delivered','delivered_simulated','cancelled'].includes(o.tracking_status))return 'Commande expédiée ou annulée';
- if(['cancelled','closed','completed'].includes(o.erp_live?.bc?.status)||o.source_payload?.cancelled||o.source_payload?.cancelled_at)return 'Commande clôturée ou annulée';
+ if(['cancelled','closed','completed'].includes(o.erp_live?.bc?.status))return 'Commande clôturée ou annulée';
  if(o.source_payload?.marketplacePendingCorrection)return 'Modification plateforme à valider';
  if(hasProductionHistory||o.source_payload?.historicalShipments?.length)return 'Expédition réelle existante à contrôler';
  if(!['gls','gls_shop','gls_pharma','gofo'].includes(o.carrier))return 'Transporteur à déterminer';

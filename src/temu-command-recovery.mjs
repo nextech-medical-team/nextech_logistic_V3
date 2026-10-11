@@ -25,9 +25,8 @@ export async function recoverInitialCommercialReviews(db){
    AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL
    AND o.erp_live->'stockDocument'->>'id' IS NULL AND o.erp_live->>'stockCreationAttemptedAt' IS NULL
    AND coalesce(o.source_payload->>'visibilityHold','false')<>'true'
-   AND coalesce(o.source_payload->>'cancelled','') NOT IN ('true','1') AND coalesce(o.source_payload->>'cancelled_at','')=''
-   AND coalesce(o.source_payload->'temuOrderDetail'->'parentOrderMap'->>'parentOrderStatus','')<>'3'
-   AND NOT jsonb_path_exists(coalesce(o.source_payload,'{}'),'$.temuOrderDetail.parentOrderMap.parentOrderLabel[*] ? (@.name == "pending_buyer_cancellation" && (@.value == 1 || @.value == "1"))')
+
+
    AND (coalesce(o.issue,'')='' OR o.issue=e.error OR o.issue='Données récupérées · Préparation à vérifier')
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit','delivered_simulated')
    AND coalesce(o.label_status,'')<>'cancelled'

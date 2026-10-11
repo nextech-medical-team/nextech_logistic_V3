@@ -9,7 +9,7 @@ const fail=reason=>({verified:false,reason});
 export function pendingBlDiagnosticProof(order,bc,local){
  const state=order?.erp_live||{};
  if(order?.source_payload?.erplainImported!==true||order.source_payload.account!=='live')return fail('not_live_import');
- if(order.archived||order.partial_mode||order.suspension?.active||order.suspension?.erplainCancellation||order.source_payload.marketplacePendingCorrection||order.source_payload.cancelled||order.source_payload.cancelled_at||['cancelled','shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status))return fail('protected_order');
+ if(order.archived||order.partial_mode||order.suspension?.active||order.suspension?.erplainCancellation||order.source_payload.marketplacePendingCorrection||['cancelled','shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status))return fail('protected_order');
  if(order.source_payload.erplainValidationHold&&order.source_payload.erplainValidation!=='approved')return fail('validation_hold');
  if(!id(state.bc?.id)||!id(state.bl?.id)||!id(bc?.id)||String(bc.id)!==String(state.bc.id)||bc.status!=='active'||state.bc.status!=='active')return fail('bc_not_confirmed');
  if(!openStatuses.includes(state.bl.status)||!Array.isArray(state.pendingBlIds)||state.pendingBlIds.length!==1||String(state.pendingBlIds[0])!==String(state.bl.id))return fail('selection_not_confirmed');

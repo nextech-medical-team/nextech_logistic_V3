@@ -8,9 +8,8 @@ export async function acceptMarketplaceChange(db,id,actor){
   if((await tx.query('SELECT order_id FROM carrier_jobs WHERE order_id=$1',[id])).rows.length)throw Error('Traitement transport existant : vérifier le colis avant modification');
   if((await tx.query("SELECT order_id FROM erp_live_jobs WHERE order_id=$1 AND status IN ('processing','review')",[id])).rows.length)throw Error('Traitement Erplain à vérifier avant modification');
   if(order.channel==='temu'&&(await tx.query('SELECT reference FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows.length)throw Error('Préparation TEMU existante : vérifier le colis avant modification');
-  if(order.channel==='shopify'&&(pending.cancelled_at||['fulfilled','partial','partially_fulfilled'].includes(pending.fulfillment_status)))throw Error('Commande annulée ou déjà expédiée sur Shopify : préparation maintenue en pause');
   const normalized=order.channel==='shopify'?normalizeShopifyOrders([pending])[0]:order.channel==='temu'?normalizeTemuReceipt(pending,String(order.source_payload.sourceShop||order.source_payload.mallId)):null;
-  if(!normalized||normalized.cancelled||normalized.reference!==order.reference)throw Error('Nouvelle commande non vérifiable : préparation maintenue en pause');
+  if(!normalized||normalized.reference!==order.reference)throw Error('Nouvelle commande non vérifiable : préparation maintenue en pause');
   const oldLines=(await tx.query('SELECT source_sku,quantity FROM lines WHERE order_id=$1',[id])).rows;
   await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'marketplace.change.accepted',$2)",[actor,JSON.stringify({orderId:id,previousAddress:order.address,previousLines:oldLines})]);
   await tx.query('DELETE FROM lines WHERE order_id=$1',[id]);

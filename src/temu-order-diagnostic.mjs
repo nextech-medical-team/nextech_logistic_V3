@@ -6,7 +6,7 @@ export async function readTemuOrderDiagnostic(api,reference,{knownPackages=[]}={
  const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});
  if(detail?.parentOrderMap?.parentOrderSn!==reference||!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('TEMU · Identité ou articles de commande incohérents');
  const status=Number(detail.parentOrderMap.parentOrderStatus);
- if(!Number.isInteger(status)||status<1)throw Error('TEMU · Statut de commande non vérifiable');
+
  const orderSns=detail.orderList.map(l=>l.orderSn);
  if(orderSns.some(s=>typeof s!=='string'||!s)||new Set(orderSns).size!==orderSns.length)throw Error('TEMU · Références des lignes incomplètes ou dupliquées');
  const flags=[...(detail.parentOrderMap.parentOrderLabel||[]),...detail.orderList.flatMap(l=>l.orderLabel||[])];
@@ -16,7 +16,7 @@ export async function readTemuOrderDiagnostic(api,reference,{knownPackages=[]}={
  const seen=new Set(),packages=new Set([...knownPackages,...detail.orderList.flatMap(l=>(l.packageSnInfo||[]).map(p=>p.packageSn)).filter(Boolean)]);
  // Cancellation is an observation, not proof that an existing parcel disappeared.
  // An already cancelled order without any known parcel needs no shipment lookup.
- for(const orderSn of status===3&&!packages.size?[]:orderSns){
+ for(const orderSn of orderSns){
   let response;
   try{response=await api.read('bg.logistics.shipment.v2.get',{parentOrderSn:reference,orderSn});}
   catch(e){result.errors.push({orderSn,message:String(e?.message||e).slice(0,450)});continue;}
