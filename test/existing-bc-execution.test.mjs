@@ -28,3 +28,17 @@ for(const kind of ['cancelled','wrong-id','missing-location','nonfinite-quantity
  const bc=document();if(kind==='cancelled')bc.status='cancelled';if(kind==='wrong-id')bc.id='other';if(kind==='missing-location')delete bc.line_items[0].location;if(kind==='nonfinite-quantity')bc.line_items[0].quantity='bad';
  assert.throws(()=>{recordedBcPricing(order('shopify'),bc);recordedBcItems(bc);},/BC enregistré/);
 });
+
+import {retiredRecordedBcSourceReview} from '../src/existing-bc-execution.mjs';
+import {currentResolutionState} from '../src/historical-preparation-completion.mjs';
+test('retired source review no longer blocks while history and independent review remain',()=>{
+ const job={action:'resume-erp',status:'review',error:null,result:{bcComparisonRefresh:{previousError:'BC · Produits ou quantités des lignes Erplain différents de la source',currentError:null,proof:{authority:'recorded_bc',readOnly:true,preparationNotStarted:true,bcId:'1',comparison:{scope:'full',different:false},errors:[],mappingFingerprint:'a'.repeat(64),checkedAt:new Date().toISOString()}}}};
+ const stock={action:'stock',status:'review',error:'Stock insuffisant'},before=structuredClone(job);
+ assert.equal(retiredRecordedBcSourceReview(job),true);assert.deepEqual(currentResolutionState([job,stock]).reviews,[stock]);assert.deepEqual(job,before);
+ for(const patch of [{authority:'source'},{comparison:{scope:'partial',different:false}},{errors:[{code:'local_bl_missing'}]},{identityUnconfirmed:true},{bcId:'0'},{readOnly:false}]){
+  const invalid=structuredClone(job);Object.assign(invalid.result.bcComparisonRefresh.proof,patch);
+  assert.equal(retiredRecordedBcSourceReview(invalid),false);assert.equal(currentResolutionState([invalid]).reviews.length,1);
+ }
+ const independent=structuredClone(job);independent.result.bcComparisonRefresh.previousError+=' ; Stock insuffisant';
+ assert.equal(retiredRecordedBcSourceReview(independent),false);
+});

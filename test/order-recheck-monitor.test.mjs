@@ -227,7 +227,7 @@ for(const scenario of ['valid','stale','future','changed-mapping','stock-review'
   const m=orderRecheckMonitor(db,{},options);await m.runLocal();await m.runLocal();
   await continuePreparationFromFreshRead(db,'a',options);
   const jobs=(await db.query("SELECT * FROM resolution_jobs WHERE request_id LIKE 'fresh-bc-continuation-%'")).rows;
-  assert.equal(jobs.length,scenario==='valid'?1:0);
+  assert.equal(jobs.length,['valid','changed-mapping'].includes(scenario)?1:0);
   if(jobs.length){assert.equal(jobs[0].action,'resume-erp');assert.equal(jobs[0].result.erpOnly,true);assert.equal(jobs[0].result.existingLabelsPreserved,true);assert.equal(jobs[0].payload.resumeAfter,true);assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='resolution.requested'")).rows[0].n,1);}
   assert.deepEqual((await db.query("SELECT * FROM orders WHERE id='a'")).rows[0],before);
   assert.deepEqual((await db.query("SELECT packages FROM temu_label_jobs WHERE reference='A'")).rows[0].packages,['existing-package']);
@@ -253,9 +253,9 @@ for(const scenario of ['valid','manual','stock-review','stale-stock','mapping-ch
   if(scenario==='suspended')await db.query("UPDATE orders SET suspension='{\"active\":true}' WHERE id='a'");
   const before=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0],labels=(await db.query("SELECT * FROM temu_label_jobs WHERE reference='A'")).rows;
   const options={now:()=>at,canResume:()=>scenario!=='disabled'};const m=orderRecheckMonitor(db,{},options);await m.runLocal();await m.runLocal();await releaseCompletedContinuationForPurchase(db,'a',options);
-  const after=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0];assert.equal(after.resolution_pending_resume,scenario!=='valid');
+  const after=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0];assert.equal(after.resolution_pending_resume,!['valid','mapping-changed'].includes(scenario));
   assert.deepEqual({...after,resolution_pending_resume:true},before);assert.deepEqual((await db.query("SELECT * FROM temu_label_jobs WHERE reference='A'")).rows,labels);
-  assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='preparation.continuation_completed'")).rows[0].n,scenario==='valid'?1:0);
+  assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='preparation.continuation_completed'")).rows[0].n,['valid','mapping-changed'].includes(scenario)?1:0);
   if(scenario==='existing-pdf')assert.equal((await db.query("SELECT encode(pdf,'hex') bytes FROM temu_label_documents")).rows[0].bytes,'010203');
   assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE status IN ('queued','running','waiting')")).rows[0].n,0);
  }finally{await db.close();}

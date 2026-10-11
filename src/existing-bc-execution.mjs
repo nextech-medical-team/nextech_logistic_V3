@@ -45,3 +45,18 @@ export async function withRecordedOrSourceGuard(api,order,source,fn){
  const {withSourceCommercialGuard}=await import('./bc-pricing.mjs');
  return withSourceCommercialGuard(api,order.erp_live.bc.id,source(),fn);
 }
+
+const retiredBcSourceReasons=new Set([
+ 'Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette',
+ 'Commande V3 et BC différents : vérifier les produits et quantités avant reprise',
+ 'Commande V3 et BC différents : vérifier les quantités avant dérogation',
+ 'BC · Produits ou quantités des lignes Erplain différents de la source',
+ 'Produits ou quantités V3 et BC différents : vérifier les unités, conditionnements et documents avant toute reprise'
+]);
+export function retiredRecordedBcSourceReview(job){
+ const marker=job?.result?.bcComparisonRefresh,p=marker?.proof;
+ return job?.status==='review'&&job.error===null&&marker?.currentError===null&&retiredBcSourceReasons.has(marker.previousError)
+  &&p?.authority==='recorded_bc'&&p.readOnly===true&&p.preparationNotStarted===true&&/^[1-9]\d*$/.test(String(p.bcId))
+  &&p.comparison?.scope==='full'&&p.comparison.different===false&&Array.isArray(p.errors)&&p.errors.length===0&&!p.identityUnconfirmed
+  &&/^[a-f0-9]{64}$/.test(p.mappingFingerprint||'')&&Number.isFinite(Date.parse(p.checkedAt));
+}

@@ -132,3 +132,12 @@ test('same SKU cannot erase an ERP variant identity error or certify automatic r
  assert.equal(result.comparison.different,false);assert.equal(result.concordant,false);assert.equal(result.identityUnconfirmed,true);
  assert.equal(state.jobs[0].error,'BC · Produits ou quantités des lignes Erplain différents de la source');
 });
+
+for(const channel of ['temu','amazon','shopify'])test(channel+' recorded BC read does not compare source quantities or mapping',async()=>{
+ const {state,db}=fixture(q);state.order.channel=channel;
+ state.lines=state.lines.map(l=>({...l,source_sku:'SOURCE-OTHER',mapped_sku:'OTHER',target_sku:'OTHER',quantity:999,target_quantity:false,source_qty:0,target_qty:1000}));
+ const before=clone(state.lines),result=await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));
+ assert.equal(result.concordant,true);assert.equal(result.authority,'recorded_bc');
+ assert.deepEqual(result.comparison.expected,result.comparison.observed);assert.deepEqual(state.lines,before);
+ assert.ok(!result.errors.some(e=>['physical_difference','comparison_unconfirmed','variant_identity_unconfirmed'].includes(e.code)));
+});
