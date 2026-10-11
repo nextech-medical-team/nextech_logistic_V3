@@ -8,7 +8,7 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await page.goto('/');await expect(page.locator('#order-rows tr')).toHaveCount(rows.length);
  for(const [code,label] of Object.entries(labels)){
   const cell=page.locator('#order-rows tr').filter({has:page.locator('[data-detail="synthetic-'+code+'"]')}).locator('[data-platform-status]');
-  await expect(cell).toContainText('Code '+code);await expect(cell.locator('[data-temu-status-label]')).toHaveText(label);
+  await expect(cell).toContainText('Code '+code);await expect(cell.locator('[data-temu-status-label]')).toHaveText(label);await expect(cell.locator('button')).toHaveCount(0);
   const geometry=await cell.evaluate(el=>{const span=el.querySelector('[data-temu-status-label]');const badge=span.parentElement;const range=document.createRange();range.selectNodeContents(badge.firstChild);return {labelY:span.getBoundingClientRect().top,codeY:range.getBoundingClientRect().top};});
   expect(geometry.labelY).toBeGreaterThan(geometry.codeY);
  }
