@@ -45,7 +45,7 @@ for(const fail of [false,true])test('real deferred completion checks current sta
   if(sql.startsWith('SELECT order_id,result'))return {rows:[j]};
   if(sql.includes('FROM erp_live_jobs'))return {rows:[{status:'complete',error:null}]};
   if(sql.includes('FROM carrier_jobs'))return {rows:[{status:'ready',error:null}]};
-  if(sql.startsWith('SELECT action,error'))return {rows:[{action:'equivalent-preview',error:'Remplacement à confirmer'}]};
+  if(sql.startsWith('SELECT action,status,error,result,created_at,id'))return {rows:[{action:'equivalent-preview',status:'review',error:'Remplacement à confirmer',result:null}]};
   if(sql.startsWith('UPDATE resolution_jobs SET status=')){j.status=args[1];j.stage=args[2];if(args[3])j.result=JSON.parse(args[3]);j.error=args[4];}
   return {rows:[]};}};
  await waitingResolutionWorker(db,{regenerate:()=>{throw Error('Étiquette jamais recréée');}}).run();

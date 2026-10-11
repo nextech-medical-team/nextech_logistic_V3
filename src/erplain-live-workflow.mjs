@@ -1,3 +1,4 @@
+import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
 import {ensureMissingProduct,reconcileCreationAttempt,sourceProductName,readCreationSku,createBlockedMissingProducts,productCreationBlock} from './missing-product-creation.mjs';
 import {bindProduct} from './product-bindings.mjs';
 import {selectedProductWeights,cacheSelectedProductWeights} from './selected-product-weights.mjs';
@@ -11,6 +12,8 @@ import {resumeTransientErplain,recordTransientFailure,closeTransientReviews} fro
 import {cancellationBlock,mutationBlock} from './erp-transient-policy.mjs';
 import {confirmDeliveryReady} from './bl-ready.mjs';
 import {historicalPreparationProof} from './historical-stock-proof.mjs';
+import {currentMappingLine,currentMappingFingerprint,mappingSelectionFingerprint} from './current-mapping-line.mjs';
+import {alignMappedBc} from './mapping-bc-alignment.mjs';
 import {normalizeHistoricalDraft} from './historical-bl-draft.mjs';
 import {resumeTemuFinancialReviews} from './financial-review-recovery.mjs';
 import {resumeAcceptedCommercialReviews} from './commercial-tolerance-recovery.mjs';
@@ -124,7 +127,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    }
    const items=await Promise.all(lines.map(async l=>{
 
-    const sku=l.target_sku||l.mapped_sku||(['tender','samples'].includes(o.channel)?l.source_sku:null);
+    const {sku,quantity}=currentMappingLine(l,o.channel);
 
     if(!sku)throw Error('BC · Mapping manquant : '+l.source_sku);
     const binding=bindings.get(sku);
@@ -147,7 +150,6 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     // reconciliation. A global SKU weight must not silently choose another one.
     o.selectedProducts??={};o.selectedProducts[sku]=product;
 
-    const quantity=Number(l.target_quantity??(l.source_qty?convertedQuantity(l.quantity,l.source_qty,l.target_qty):l.quantity));
 
     return {location:{id:String(references.locationId)},variant:{id:String(target.targetVariantId)},quantity,price:0,description:sku};
 
@@ -179,6 +181,14 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    const missing=working.filter(o=>!o.erp_live.bc);
    for(const o of missing){const found=await recoverOrder(api,o);if(found){o.erp_live.bc={id:found.id,label:found.label};o.erp_live.phase='bc_created';await save(o);}}
    for(const o of working)o.documentMetadata=await documentMetadata(o,directory);
+   for(const o of working.filter(o=>o.erp_live.bc?.id)){
+    try{await withShipmentLock(()=>alignMappedBc(api,o,{save,preserveLabels:()=>preserveSubstitutionLabels(db,o.id),guard:async()=>{
+     const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh);if(block)throw Error(block);
+     const rows=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
+     if(JSON.stringify(rows.map(l=>currentMappingLine(l,o.channel)))!==JSON.stringify(o.selectedSourceLines.map(l=>currentMappingLine(l,o.channel))))throw Error('Mapping modifié pendant le contrôle : nouvelle vérification requise');
+    }}));}catch(e){o.failed=true;await fail(o,e);}
+   }
+   working=working.filter(o=>!o.failed);
    // Validate existing BC source amounts before any recovery can create stock.
    for(const o of working.filter(o=>o.erp_live.bc?.id)){try{const {Order:commercial}=await api.request('query V3SourceBeforeRecovery($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});if(String(commercial?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');const confirmed=verifySourceCommercialTotals(commercial,o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing);o.erp_live.pricing={...o.erp_live.pricing,confirmed,status:'verified',error:null,verifiedAt:new Date().toISOString()};await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);
@@ -268,6 +278,8 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     if(o.erp_live.bl&&o.erp_live.bl.status!=='unpublished')continue;
     await withShipmentLock(async()=>{try{
      const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const blocked=!fresh||fresh.archived?'Commande indisponible':fresh.resolution_pending_resume?'Préparation suspendue : validation requise':cancellationBlock(fresh);if(blocked)throw Error(blocked);
+     // Retain the exact served PDF and SKU copy before the BL changes its context.
+     await preserveSubstitutionLabels(db,o.id);
      await assertStockResolved(db,o.items.map(l=>l.variant.id),{orderId:o.id});
      const snapshot=await api.request('query V3CheckFullStock($id:ID!){Order(id:$id){id update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}}}',{id:String(o.erp_live.bc.id)});
      if(!snapshot.Order?.line_items?.length)throw new Error('Stock non vérifiable : BC sans lignes');
@@ -304,6 +316,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     const totals=rows=>{const m=new Map();for(const l of shippingProductLines(rows))m.set(String(l.variant?.id),(m.get(String(l.variant?.id))||0)+Number(l.quantity));return JSON.stringify([...m].sort());};
     if(!actual||!bl||(!o.erp_live.pendingBlIds?.length&&totals(o.items)!==totals(actual.line_items))||totals(o.items)!==totals(bl.line_items)){await fail(o,new Error('Écart BC/BL : références ou quantités à contrôler'));continue;}
     try{const stockOnBc=actual.update_stock===true;if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}const stock=stockOnBc?null:await reconcileFullStock(api,o,{allowCreate:false});o.erp_live.bl=await confirmDeliveryReady(api,{bcId:o.erp_live.bc.id,blId:o.erp_live.bl.id,lines:o.items,stockOnBc,pendingBlScope:Boolean(o.source_payload?.erplainImported&&o.source_payload?.account==='live'&&o.erp_live.pendingBlIds?.length),stockDocument:stock,stockLabel:stock?.label,stockNotes:'LIVE : sortie de stock liée au BL '+bl.label});o.erp_live.stockPendingVariants=[];o.erp_live.phase='bl_ready';await save(o);}catch(e){await fail(o,e);continue;}
+    const mappingProof=mappingSelectionFingerprint(o.selectedSourceLines,o.channel);if(await currentMappingFingerprint(db,o)!==mappingProof){await fail(o,new Error('Mapping modifié pendant la préparation : BC et BL à recontrôler'));continue;}o.erp_live.mappingPreparationFingerprint=mappingProof;
     assertHistoricalBlNumber(bl);o.erp_live.bl={...o.erp_live.bl,label:bl.label};o.erp_live.verifiedAt=new Date().toISOString();o.erp_live.labelPreparationFingerprint=await shipmentFingerprint(db,(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0]);await save(o);await db.query("UPDATE orders SET erp_status='live_created' WHERE id=$1",[o.id]);await db.query("UPDATE erp_live_jobs SET status='complete',error=null,updated_at=now() WHERE order_id=$1",[o.id]);
    }
   }catch(e){for(const o of working)await fail(o,e);}finally{running=false;activeBcOnlyOrderId=null;}

@@ -21,3 +21,13 @@ test('order-level projection exposes the correct filter family and preserves ind
  assert.equal(o.resolution_error,message);
  const result=selectProblemOrders([{...o,id:'order'}],['Confirmer le remplacement'],currentProblemClassifier());assert.equal(result.total,1);assert.equal(result.problemTypes.find(x=>x.label==='Confirmer le remplacement').count,1);
 });
+
+import {PGlite} from '@electric-sql/pglite';import {attachEquivalentDiagnostics} from '../src/equivalent-diagnostics.mjs';import {pendingEquivalentProblemSql} from '../src/order-problem-predicates.mjs';
+test('a completed preparation retires an older failed replacement from list and details; product correction alone preserves the decision',async()=>{
+ const db=new PGlite();try{
+ await db.exec(`CREATE TABLE orders(id text,channel text);CREATE TABLE lines(order_id text,source_sku text,target_sku text);CREATE TABLE mappings(channel text,source_sku text,target_sku text);CREATE TABLE resolution_jobs(id text,order_id text,action text,status text,payload jsonb,result jsonb,error text,created_at timestamptz);INSERT INTO orders VALUES('prepared','temu'),('decision','temu');INSERT INTO lines VALUES('prepared','OLD','OLD'),('decision','OLD','OLD');`);
+ for(const id of ['prepared','decision'])await db.query("INSERT INTO resolution_jobs VALUES($1,$2,$3,$4,$5,null,$6,now()-interval '1 hour')",[id+'-preview',id,'equivalent-preview','review',JSON.stringify({sku:'OLD',replacementSku:'NEW'}),'Stock insuffisant']);
+ await db.query("INSERT INTO resolution_jobs VALUES('resume','prepared','resume-erp','complete','{}','{}',null,now()),('weight','decision','weight','complete','{\"sku\":\"NEW\"}','{}',null,now())");
+ const rows=(await db.query(`SELECT id FROM orders WHERE ${pendingEquivalentProblemSql} ORDER BY id`)).rows;assert.deepEqual(rows.map(r=>r.id),['decision']);const orders=[{id:'prepared'},{id:'decision'}];await attachEquivalentDiagnostics(db,orders);assert.equal(orders[0].pending_equivalent,null);assert.equal(orders[1].pending_equivalent.replacementSku,'NEW');assert.equal((await db.query('SELECT count(*)::int n FROM resolution_jobs')).rows[0].n,4);
+ }finally{await db.close();}
+});
