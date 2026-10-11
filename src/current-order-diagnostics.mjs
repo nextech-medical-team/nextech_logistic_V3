@@ -1,3 +1,4 @@
+import {withoutPreparationObservation,withoutPreparationObservationSql} from './movement-watch-diagnostic.mjs';
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {withoutSharedParcelReason,withoutSharedParcelReasonSql} from './shared-parcel-diagnostic.mjs';
@@ -7,7 +8,7 @@ export const oldFinanceErrors=['TEMU · Remises client et TVA à rapprocher','TE
 export const verifiedFinanceSql="(channel='temu' AND erp_live->'bc'->>'id' IS NOT NULL AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'total')='number' AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'sourceTotal')='number' AND erp_live->'pricing'->>'status'='verified' AND erp_live->'pricing'->>'error' IS NULL AND erp_live->'pricing'->'confirmed'->>'authority'='erplain' AND erp_live->'pricing'->'commercialBasis'->>'field'='estimatedRevenue' AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue' IS NOT NULL AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue'=source_payload->'temuAmounts'->'data'->'parentOrderMap'->'estimatedRevenue')";
 export const awaitingPurchaseSql="coalesce((channel='temu' AND transport_choice IS NULL AND NOT coalesce(partial_mode,false) AND NOT coalesce(resolution_pending_resume,false) AND erp_live->>'phase'='bl_ready' AND EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=orders.id AND e.status='complete' AND e.error IS NULL) AND EXISTS(SELECT 1 FROM temu_label_jobs j WHERE j.reference=orders.reference AND j.status='ready' AND j.error IS NULL) AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=orders.id) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=orders.id AND r.status IN ('queued','running','waiting'))),false)";
 export function currentReasonSql(raw){
- const stripped=withoutSharedParcelReasonSql(raw);raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
+ const stripped="CASE WHEN channel='temu' THEN "+withoutPreparationObservationSql(withoutSharedParcelReasonSql(raw))+" ELSE "+withoutSharedParcelReasonSql(raw)+" END";raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
  const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
  // Project the source reason only once for ordinary rows. The rare case where
  // an old generic job maps to a verified financial error keeps the same result.
@@ -16,7 +17,7 @@ export function currentReasonSql(raw){
 // Boolean form for the problem scope: avoids generating descriptive strings and
 // their nested subqueries when only the presence of a reason is required.
 export function currentReasonEmptySql(raw){
- const stripped=withoutSharedParcelReasonSql(raw);raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
+ const stripped="CASE WHEN channel='temu' THEN "+withoutPreparationObservationSql(withoutSharedParcelReasonSql(raw))+" ELSE "+withoutSharedParcelReasonSql(raw)+" END";raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
  const generic=genericPlatformModificationSql(raw),nonGenericIssue=`issue IS NOT NULL AND issue<>'' AND NOT coalesce(${genericPlatformModificationSql('issue')},false)`;
  const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
  const expression=`coalesce(CASE WHEN ${verifiedFinanceSql} AND ((${raw}) IN (${old}) OR (issue IN (${old}) AND ${generic} AND (${platformChangeVerifiedSql} OR ${recovered}))) THEN NOT coalesce((erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false)),false) WHEN coalesce(${generic},false) THEN CASE WHEN ${platformChangeVerifiedSql} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE source_payload->'marketplacePendingCorrection' IS NULL END WHEN ${recovered} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE false END ELSE false END ELSE (${raw}) IS NULL OR (${raw})='' END,false)`;return `(SELECT ${expression} FROM (SELECT (${stripped}) AS raw_reason OFFSET 0) current_reason)`;
@@ -41,10 +42,10 @@ export function projectCurrentDiagnostics(o){
    if(target&&obsoleteTemuVisibilityError(target[key])&&(key==='issue'&&!dated||Number.isFinite(Date.parse(dated))&&Date.parse(dated)<=Date.parse(fresh.checkedAt)))target[key]=(fresh.requiredComplete&&!fresh.coreComplete?fresh.currentReason:fresh.stageReason)||null;
   }
  }
- for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error']])if(target)target[key]=currentPlatformModificationReason(o,withoutSharedParcelReason(target[key]));
+ for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error']])if(target)target[key]=currentPlatformModificationReason(o,(o.channel==='temu'?withoutPreparationObservation(withoutSharedParcelReason(target[key])):withoutSharedParcelReason(target[key])));
  const p=o.erp_live?.pricing,s=o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue;
  const proof=o.channel==='temu'&&o.erp_live?.bc?.id&&Number.isFinite(p?.confirmed?.total)&&Number.isFinite(p?.confirmed?.sourceTotal)&&p?.status==='verified'&&!p.error&&p.confirmed?.authority==='erplain'&&p.commercialBasis?.field==='estimatedRevenue'&&s&&p.commercialBasis.sourceEstimatedRevenue&&p.commercialBasis.sourceEstimatedRevenue.amount===s.amount&&p.commercialBasis.sourceEstimatedRevenue.currency===s.currency;
  if(proof){const reason=o.erp_live?.phase==='historical_review'&&o.resolution_pending_resume?'Reprise historique à vérifier : BL non créé':null;for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error']])if(target&&oldFinanceErrors.includes(target[key]))target[key]=reason;}
- for(const job of o.resolution_actions||[])if(job)job.error=currentPlatformModificationReason(o,job.error);
+ for(const job of o.resolution_actions||[])if(job)job.error=currentPlatformModificationReason(o,o.channel==='temu'?withoutPreparationObservation(job.error):job.error);
  return o;
 }
