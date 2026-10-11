@@ -84,3 +84,30 @@ const quantityHeading=document.querySelector('#view-orders thead th:nth-child(7)
 $('view-connections').prepend($('erplain-progress'));
 
 
+
+// Export the complete filtered population, independently of table pagination.
+async function collectFilteredLabelOrders(query,readPage,onProgress=()=>{}){
+ const params=new URLSearchParams(query);params.set('pageSize','200');
+ const ids=new Set();let total=null,expectedPages=null;
+ for(let current=1;;current++){
+  params.set('page',String(current));const result=await readPage('/api/orders?'+params);
+  if(!Array.isArray(result.rows)||!Number.isSafeInteger(result.total)||result.total<0||!Number.isSafeInteger(result.pages)||result.pages<1)throw Error('Liste filtrée incomplète. Relancez le téléchargement.');
+  if(total===null){total=result.total;expectedPages=result.pages;}
+  if(result.total!==total||result.pages!==expectedPages)throw Error('La liste filtrée a changé pendant sa lecture. Relancez le téléchargement.');
+  for(const row of result.rows){if(typeof row.id!=='string'||!row.id||ids.has(row.id))throw Error('La liste filtrée a changé pendant sa lecture. Relancez le téléchargement.');ids.add(row.id);}
+  onProgress(ids.size,total);
+  if(current>=expectedPages)break;
+  if(!result.rows.length)throw Error('Liste filtrée incomplète. Relancez le téléchargement.');
+ }
+ if(ids.size!==total)throw Error('Liste filtrée incomplète. Relancez le téléchargement.');
+ return [...ids];
+}
+const filteredBatchLabels=document.createElement('button');filteredBatchLabels.id='download-filtered-labels';filteredBatchLabels.textContent='Télécharger toutes les étiquettes filtrées';document.querySelector('#view-orders .batch').append(filteredBatchLabels);
+filteredBatchLabels.onclick=async()=>{
+ const query=orderFilterParams(1).toString();filteredBatchLabels.disabled=true;
+ try{
+  const ids=await collectFilteredLabelOrders(query,api,(count,total)=>{filteredBatchLabels.textContent='Lecture des commandes filtrées : '+count+'/'+total;});
+  if(!ids.length){flash('Aucune commande pour ces filtres.');return;}
+  await downloadMerged(ids);
+ }catch(e){flash(e.message,true);}finally{filteredBatchLabels.disabled=false;filteredBatchLabels.textContent='Télécharger toutes les étiquettes filtrées';}
+};
