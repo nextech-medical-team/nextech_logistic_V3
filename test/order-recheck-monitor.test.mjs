@@ -205,3 +205,31 @@ test('a ready TEMU quote awaiting human purchase is not a technical block, and i
   assert.equal((await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state.nextStep==='Confirmer l’achat dans le parcours TEMU',false);
  }finally{await db.close();}
 });
+
+import {continuePreparationFromFreshRead} from '../src/preparation-local-continuation.mjs';
+for(const scenario of ['valid','stale','future','changed-mapping','stock-review','provider-error','suspended','read-only','replacement','already-running','disabled','attempted-stock','source-hold'])test('fresh BC local continuation: '+scenario,async()=>{
+ const db=await fixture();try{
+  const at=Date.now();await db.exec('ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false');
+  await db.query("UPDATE orders SET issue=null,erp_live=$1 WHERE id='a'",[JSON.stringify({phase:'bc_created',bc:{id:'1',status:'active'},pricing:{status:'verified'}})]);
+  const o=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0];
+  const proof={bcId:'1',readOnly:true,preparationNotStarted:true,checkedAt:new Date(at+(scenario==='stale'?-16*60000:scenario==='future'?60000:0)).toISOString(),comparison:{scope:'full',different:false},errors:[],mappingFingerprint:await currentMappingFingerprint(db,o)};
+  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bcComparisonRefresh}',$1::jsonb) WHERE id='a'",[JSON.stringify(proof)]);
+  await db.query("INSERT INTO erp_live_jobs(order_id,status,error) VALUES('a','review',$1)",[scenario==='provider-error'?'Stock insuffisant':null]);
+  await db.query("INSERT INTO temu_label_jobs VALUES('A','complete',null,'[\"existing-package\"]')");
+  if(scenario==='changed-mapping')await db.query("UPDATE lines SET quantity=2 WHERE order_id='a'");
+  if(scenario==='suspended')await db.query("UPDATE orders SET suspension='{\"active\":true}' WHERE id='a'");
+  if(scenario==='source-hold')await db.query("UPDATE orders SET source_payload='{\"erplainValidationHold\":true}' WHERE id='a'");
+  if(scenario==='attempted-stock')await db.query("UPDATE orders SET erp_live=erp_live||'{\"stockCreationAttemptedAt\":\"2026-10-11T00:00:00Z\"}' WHERE id='a'");
+  if(['stock-review','read-only','replacement','already-running'].includes(scenario))await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result,error) VALUES('prior','a','prior',$1,$2,$3,$4)",[scenario==='replacement'?'equivalent-preview':'resume-erp',scenario==='stock-review'?'review':scenario==='already-running'?'running':'complete',JSON.stringify(scenario==='read-only'?{readOnly:true}:scenario==='replacement'?{replacementSku:'Y'}:{}),scenario==='stock-review'?'Stock insuffisant':null]);
+  const before=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0];
+  const options={now:()=>at,canResume:()=>scenario!=='disabled'};
+  // Real local monitor, no supplier read, must consume the completed proof.
+  const m=orderRecheckMonitor(db,{},options);await m.runLocal();await m.runLocal();
+  await continuePreparationFromFreshRead(db,'a',options);
+  const jobs=(await db.query("SELECT * FROM resolution_jobs WHERE request_id LIKE 'fresh-bc-continuation-%'")).rows;
+  assert.equal(jobs.length,scenario==='valid'?1:0);
+  if(jobs.length){assert.equal(jobs[0].action,'resume-erp');assert.equal(jobs[0].result.erpOnly,true);assert.equal(jobs[0].result.existingLabelsPreserved,true);assert.equal(jobs[0].payload.resumeAfter,true);assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='resolution.requested'")).rows[0].n,1);}
+  assert.deepEqual((await db.query("SELECT * FROM orders WHERE id='a'")).rows[0],before);
+  assert.deepEqual((await db.query("SELECT packages FROM temu_label_jobs WHERE reference='A'")).rows[0].packages,['existing-package']);
+ }finally{await db.close();}
+});
