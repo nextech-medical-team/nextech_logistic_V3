@@ -1,3 +1,4 @@
+import {consumerInvoice} from './invoice-customer-policy.mjs';
 const id=value=>{if(!/^\d+$/.test(String(value))||!Number.isSafeInteger(Number(value))||Number(value)<=0)throw Error('Identifiant Erplain invalide');return String(value);};
 const lines='line_items{quantity variant{id} location{id}}';
 export function erplainLifecycleGateway(api){
@@ -26,7 +27,16 @@ export function erplainLifecycleGateway(api){
    if(invoice.total==null||!Number.isFinite(Number(invoice.total))||Number(invoice.total)<=0)throw Error('Erplain Â· Montant facture absent ou nul');
   },
   async publishInvoiceDraft(invoice){const r=await api.request('mutation LifecyclePublishInvoice($id:ID!,$input:InvoiceInput!){UpdateInvoice(id:$id,input:$input){id status}}',{id:id(invoice.id),input:{status:'draft',due_at:String(invoice.due_at||invoice.dated_at||'').slice(0,10)}});if(!r.UpdateInvoice?.id)throw Error('Erplain Â· Publication facture non confirmÃ©e');},
-  async finalizeInvoice(invoice){const validation=await api.request('mutation LifecycleValidateInvoice($id:ID!){ValidateEInvoice(id:$id){valid message errors}}',{id:id(invoice.id)});if(validation.ValidateEInvoice?.valid!==true)throw Error('Erplain Â· Facture non validÃ©e : '+(validation.ValidateEInvoice?.errors?.join(' ; ')||validation.ValidateEInvoice?.message||'informations Ã  complÃ©ter'));const r=await api.request('mutation LifecycleFinalizeInvoice($id:ID!,$input:InvoiceInput!){UpdateInvoice(id:$id,input:$input){id status}}',{id:id(invoice.id),input:{status:'unpaid'}});if(!r.UpdateInvoice?.id)throw Error('Erplain Â· Finalisation facture non confirmÃ©e');},
+  async finalizeInvoice(invoice,context={}){
+   // E-invoice validation requires business identifiers. Consumer invoices use
+   // Erplain's ordinary finalization; all BL/amount/quantity checks still apply.
+   if(!consumerInvoice(context)){
+    const validation=await api.request('mutation LifecycleValidateInvoice($id:ID!){ValidateEInvoice(id:$id){valid message errors}}',{id:id(invoice.id)});
+    if(validation.ValidateEInvoice?.valid!==true)throw Error('Erplain · Facture non validée : '+(validation.ValidateEInvoice?.errors?.join(' ; ')||validation.ValidateEInvoice?.message||'informations à compléter'));
+   }
+   const r=await api.request('mutation LifecycleFinalizeInvoice($id:ID!,$input:InvoiceInput!){UpdateInvoice(id:$id,input:$input){id status}}',{id:id(invoice.id),input:{status:'unpaid'}});
+   if(String(r.UpdateInvoice?.id)!==String(invoice.id)||r.UpdateInvoice?.status!=='unpaid')throw Error('Erplain · Finalisation facture non confirmée');
+  },
   async existingPaymentMethod(invoice){
    const r=await api.request('query LifecyclePaymentMethod($id:ID!){Invoice(id:$id){invoice_payments(first:100){data{invoice_payable{... on Payment{payment_method{id}}}} paginatorInfo{hasMorePages}}}}',{id:id(invoice.id)});
    if(r.Invoice?.invoice_payments?.paginatorInfo?.hasMorePages)throw Error('Erplain Â· Historique des rÃ¨glements incomplet');

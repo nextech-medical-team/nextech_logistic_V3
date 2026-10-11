@@ -57,7 +57,7 @@ export function documentLifecycle({gateway,store,onStatus=async()=>{}}){
     if((await gateway.readBL(input.blId)).status!=='delivered')throw Error('Erplain · Livraison modifiée pendant la facturation');
     if(invoice.status==='unpublished'){await gateway.publishInvoiceDraft(invoice);invoice=await gateway.readInvoice(invoiceId);}
     if(invoice.status!=='draft')throw Error('Erplain · Brouillon de facture non confirmé');
-    await gateway.finalizeInvoice(invoice);invoice=await gateway.readInvoice(invoiceId);
+    await gateway.finalizeInvoice(invoice,{channel:input.channel,sourcePayload:input.sourcePayload});invoice=await gateway.readInvoice(invoiceId);
    }
    if(!['unpaid','partially_paid','paid'].includes(invoice.status))throw Error('Erplain · Statut facture incompatible');
    bl=await gateway.readBL(input.blId);
