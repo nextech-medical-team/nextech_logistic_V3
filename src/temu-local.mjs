@@ -38,11 +38,7 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
    if(detail.parentOrderMap?.parentOrderSn!==reference||!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('TEMU · Identité ou articles de commande incohérents');
    const now=new Date().toISOString(),direct={source:'temu_direct',state:'verified',verifiedAt:now,status:Number(detail.parentOrderMap.parentOrderStatus)};
    await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuDirect:direct,temuOrderDetail:detail})]);
-   if(await observeTemuCancellation(db,o,detail))return {reference,status:'cancelled',orderCancelled:true};
-   if(direct.status!==3&&buyerCancellationPending(detail)){
-    await db.query("INSERT INTO temu_label_jobs(reference,status,result) VALUES($1,'cancellation_requested',$2) ON CONFLICT(reference) DO UPDATE SET status='cancellation_requested',plan=null,error=null,result=coalesce(temu_label_jobs.result,'{}'::jsonb)||excluded.result,updated_at=now()",[reference,JSON.stringify({source:'temu_direct',cancellationRequested:true,observedAt:now})]);
-    return {reference,status:'cancellation_requested'};
-   }
+   await observeTemuCancellation(db,o,detail);
    await refreshAmounts(o,api);
    const shipments=await readTemuShipments(api,reference,detail);
    const packages=[...new Set([...(detail.orderList||[]).flatMap(l=>(l.packageSnInfo||[]).map(p=>p.packageSn)),...shipments.shipmentInfoDTO.flatMap(s=>[s,...(s.subPackageShipmentInfoList||[])]).map(s=>{if(s.parentOrderSn&&s.parentOrderSn!==reference)throw Error('TEMU · Colis d’une autre commande');return s.packageSn;})].filter(Boolean))];
@@ -63,8 +59,8 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
    }
    const old=(await db.query('SELECT * FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
    if(old?.attempt_id||old?.packages?.length)throw Error('TEMU · Achat existant sans colis confirmé : vérifier avant tout nouvel achat');
-   if(shipments.shipmentInfoDTO.length||direct.status!==2){
-    const status=direct.status===3?'cancelled':shipments.shipmentInfoDTO.length?'external':'not_to_ship';
+   if(shipments.shipmentInfoDTO.length){
+    const status='external';
     await db.query("INSERT INTO temu_label_jobs(reference,status,result) VALUES($1,$2,$3) ON CONFLICT(reference) DO UPDATE SET status=excluded.status,result=excluded.result,error=null,plan=null,updated_at=now()",[reference,status,JSON.stringify({source:'temu_direct',observedAt:now})]);
     return {reference,status};
    }

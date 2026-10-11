@@ -1,15 +1,15 @@
 // Local routing only. No provider call, label operation, stock or ERP change.
 export const temuRoutingCandidates=`SELECT o.* FROM orders o
- WHERE o.channel='temu' AND (coalesce(o.carrier,'')<>'temu' OR o.transport_choice IS NOT NULL)
+ WHERE o.channel='temu' AND coalesce(o.carrier,'')<>'temu' AND o.transport_choice IS NULL
  AND NOT o.archived AND NOT o.partial_mode
  AND coalesce(o.label_status,'')<>'cancelled'
  AND coalesce(o.erp_live->'bc'->>'status','')<>'cancelled' AND coalesce(o.erp_live->>'phase','') !~ '^(creating|publishing)'
  AND coalesce(o.issue,'') !~* 'commande annulée'
  AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit','delivered_simulated')
  AND coalesce(o.suspension->>'active','false')<>'true' AND NOT coalesce(o.suspension ? 'erplainCancellation',false)
- AND coalesce(o.source_payload->>'cancelled','false') NOT IN ('true','1') AND coalesce(o.source_payload->>'cancelled_at','')=''
+
  AND NOT coalesce(o.source_payload ? 'marketplacePendingCorrection',false)
- AND coalesce(o.source_payload->'temuOrderDetail'->'parentOrderMap'->>'parentOrderStatus','')<>'3'
+
  AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id AND (c.status NOT IN ('failed','superseded') OR c.result IS NOT NULL OR jsonb_array_length(coalesce(c.tracking,'[]'))>0))
  AND NOT EXISTS(SELECT 1 FROM carrier_documents d WHERE d.order_id=o.id)
  AND NOT EXISTS(SELECT 1 FROM carrier_label_history h WHERE h.order_id=o.id)
@@ -18,7 +18,7 @@ export const temuRoutingCandidates=`SELECT o.* FROM orders o
  AND NOT EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status='processing')
  AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
  AND NOT EXISTS(SELECT 1 FROM correction_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','applying','checking','waiting'))
- AND NOT EXISTS(SELECT 1 FROM temu_label_jobs t WHERE t.reference=o.reference AND t.status IN ('purchasing','uncertain','cancelled','cancellation_requested','not_to_ship'))
+ AND NOT EXISTS(SELECT 1 FROM temu_label_jobs t WHERE t.reference=o.reference AND t.status IN ('purchasing','uncertain'))
  ORDER BY o.id LIMIT 100`;
 export async function reconcileTemuRouting(db,{apply=false,backup}={}){
  if(!apply)return {candidates:(await db.query(temuRoutingCandidates)).rows.length,applied:0};

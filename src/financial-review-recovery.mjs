@@ -21,7 +21,7 @@ export const recoveryPolicy='financial-recovery-unified-tolerance-20261007-v2';
 export function safeFinancialRecovery(o){
  return o.archived===false&&!o.partial_mode&&!o.resolution_pending_resume&&!cancellationBlock(o)&&!String(o.reference||'').startsWith('DEMO-')
  && !Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection')
- && ![true,'true',1,'1'].includes(o.source_payload?.cancelled)&&!o.source_payload?.cancelled_at
+
  && !/commande annulée/i.test(o.issue||'')&&!['cancelled','shipped','delivered','in_transit'].includes(o.tracking_status)
  && o.label_status!=='cancelled'&&!/^creating|^publishing/.test(o.erp_live?.phase||'')
  && !o.erp_live?.bl?.id&&!o.erp_live?.stockDocument?.id;
@@ -33,8 +33,7 @@ export async function resumeTemuFinancialReviews(db){
  const rows=(await db.query(`SELECT o.*,e.error FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
  WHERE e.status='review' AND o.channel IN ('temu','amazon') AND (${bcAllowedSql}) AND NOT o.partial_mode AND NOT o.resolution_pending_resume
  AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
- AND coalesce(o.source_payload->'temuOrderDetail'->'parentOrderMap'->>'parentOrderStatus','')<>'3'
- AND NOT jsonb_path_exists(coalesce(o.source_payload,'{}'),'$.temuOrderDetail.parentOrderMap.parentOrderLabel[*] ? (@.name == "pending_buyer_cancellation" && (@.value == 1 || @.value == "1"))')
+
  AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
  AND o.erp_live->'bc'->>'id' IS NULL AND coalesce(o.erp_live->>'phase','')=''
  AND ((o.channel='temu' AND (e.error LIKE 'TEMU · Remises client et TVA à rapprocher%' OR e.error LIKE 'TEMU · Nombre de lignes financières%' OR e.error LIKE 'TEMU · Annulation partielle%'

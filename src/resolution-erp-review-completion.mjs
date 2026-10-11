@@ -14,7 +14,7 @@ export function completedErpReview(x,currentFingerprint){
   &&o.erp_status==='live_created'&&o.label_status!=='cancelled'
   &&!Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection')
   &&!o.source_payload?.erplainValidationHold&&!cancellationBlock(o)
-  &&![true,'true',1,'1'].includes(o.source_payload?.cancelled)&&!o.source_payload?.cancelled_at
+
   &&!['cancelled','shipped','delivered','in_transit'].includes(o.tracking_status)
   &&!String(o.reference||'').startsWith('DEMO-')
   &&s.phase==='bl_ready'&&s.bc?.id&&s.bc.status==='active'&&s.bl?.id&&s.bl.status==='ready_to_ship'

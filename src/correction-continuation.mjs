@@ -22,9 +22,9 @@ export function historicalPriceContinuationAllowed(o,job,{action,bc,pricing}) {
   && !['cancelled','shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status)
   && o.label_status!=='cancelled' && !String(o.reference||'').startsWith('DEMO-')
   && !Object.hasOwn(p,'marketplacePendingCorrection') && !p.visibilityHold && !p.erplainImported && !p.erplainValidationHold
-  && ![true,'true',1,'1'].includes(p.cancelled) && !p.cancelled_at
-  && String(p.temuOrderDetail?.parentOrderMap?.parentOrderStatus||'')!=='3'
-  && !(p.temuOrderDetail?.parentOrderMap?.parentOrderLabel||[]).some(x=>x.name==='pending_buyer_cancellation'&&String(x.value)==='1')
+
+
+
   && !!p.sourceShop && p.selectedReimport?.mode==='hold' && financialReason.test(p.selectedReimport.reason||'')
   && o.resolution_pending_resume===true && s.phase==='historical_review'
   && !s.bl?.id && !s.stockDocument?.id && !s.stockCreationAttemptedAt

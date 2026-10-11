@@ -1,8 +1,8 @@
 import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
-export function assertManualLabelOrder(o,carrier){const suspended=suspensionBlock(o);if(suspended)throw Error(suspended);
+export function assertManualLabelOrder(o,carrier,{manualChoice=false}={}){const suspended=suspensionBlock(o);if(suspended)throw Error(suspended);
  if(!o)throw Error('Commande introuvable');
- assertDirectCarrierAllowed(o);
+ assertDirectCarrierAllowed(o,carrier,{manualChoice});
  if(o.archived||o.tracking_status==='cancelled'||o.erp_live?.bc?.status==='cancelled')throw Error('Commande annulée ou archivée : création d’étiquette indisponible');
  if(o.partial_mode)throw Error('Choisir le transporteur dans la préparation de la livraison partielle concernée');
  if(['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande déjà expédiée : vérifier la livraison avant de créer une nouvelle étiquette');
@@ -10,7 +10,6 @@ export function assertManualLabelOrder(o,carrier){const suspended=suspensionBloc
 }
 export function assertTemuManualLabel(job){
  if(['purchasing','uncertain'].includes(job?.status))throw Error('Achat TEMU en cours ou incertain : vérifier son résultat avant une nouvelle étiquette');
- if(['cancelled','cancellation_requested','not_to_ship'].includes(job?.status))throw Error('Commande TEMU annulée ou non expédiable : vérifier son statut');
 }
 // Read actual mapped product weights; the default TEMU parcel weight is not a measured weight.
 export async function additionalLabelWeight(db,o){

@@ -869,11 +869,11 @@ function renderResolution(ctx,problem){
 
 
 
-  const canApply=pending&&!ctx.order.erp_live?.bc?.id&&!ctx.order.erp_live?.bl?.id&&!ctx.job&&!pending.cancelled_at&&!['fulfilled','partial','partially_fulfilled'].includes(pending.fulfillment_status);
+  const canApply=pending&&!ctx.order.erp_live?.bc?.id&&!ctx.order.erp_live?.bl?.id&&!ctx.job;
 
 
 
-  if(canApply)button('Appliquer les nouvelles données',async()=>saved(await task('accept-source-change',{resumeAfter:false})));else{const p=document.createElement('p');p.textContent='Des documents existent ou la commande a été annulée/expédiée. Vérifiez ces éléments avant toute nouvelle préparation.';fields.append(p);}
+  if(canApply)button('Appliquer les nouvelles données',async()=>saved(await task('accept-source-change',{resumeAfter:false})));else{const p=document.createElement('p');p.textContent='Des documents existent. Vérifiez les modifications des articles, quantités et adresse avant toute nouvelle préparation.';fields.append(p);}
 
 
 
@@ -1404,7 +1404,7 @@ async function openCarrierChoice(id){
 
 
  if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');
- if(ctx.order.channel==='temu'){flash('TEMU · Étiquettes TEMU obligatoires : utiliser le parcours Étiquettes TEMU.',true);return;}
+
 
 
 
@@ -1416,7 +1416,7 @@ async function openCarrierChoice(id){
 
 
 
- d.body.innerHTML='<p>Choix pour cette commande uniquement. Les règles partagées restent inchangées. Les contrôles de poids, de stock et de livraison restent nécessaires.</p><form>'+(existing?'<label>La nouvelle étiquette sera<select name="mode" required><option value="">Choisir…</option><option value="add">En plus de l’ancienne</option><option value="replace">À la place de l’ancienne</option></select></label>':'')+'<label>Transporteur<select name="carrier" required><option value="gls">GLS</option><option value="gofo">GOFO</option></select></label><p>Une nouvelle création peut être facturée. L’ancienne étiquette reste conservée ; aucune annulation ni aucun remboursement automatique chez le transporteur ou TEMU.</p><p data-mode-note></p><label style="display:flex;gap:8px;align-items:center"><input style="width:18px;min-width:18px;flex:none" type="checkbox" name="confirmed" required> Je confirme la création de cette nouvelle étiquette.</label><button type="submit">Créer la nouvelle étiquette</button><p role="status" data-feedback></p></form>';
+ d.body.innerHTML=(ctx.order.channel==='temu'?'<p>TEMU reste le parcours automatique. Ce choix manuel concerne uniquement cette commande.</p>':'')+'<p>Choix pour cette commande uniquement. Les règles partagées restent inchangées. Les contrôles de poids, de stock et de livraison restent nécessaires.</p><form>'+(existing?'<label>La nouvelle étiquette sera<select name="mode" required><option value="">Choisir…</option><option value="add">En plus de l’ancienne</option><option value="replace">À la place de l’ancienne</option></select></label>':'')+'<label>Transporteur<select name="carrier" required><option value="gls">GLS</option><option value="gofo">GOFO</option></select></label><p>Une nouvelle création peut être facturée. L’ancienne étiquette reste conservée ; aucune annulation ni aucun remboursement automatique chez le transporteur ou TEMU.</p><p data-mode-note></p><label style="display:flex;gap:8px;align-items:center"><input style="width:18px;min-width:18px;flex:none" type="checkbox" name="confirmed" required> Je confirme la création de cette nouvelle étiquette.</label><button type="submit">Créer la nouvelle étiquette</button><p role="status" data-feedback></p></form>';
 
 
 

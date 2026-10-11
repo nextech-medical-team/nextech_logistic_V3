@@ -1,3 +1,4 @@
+import {assertTemuManualLabel} from './manual-label-policy.mjs';
 import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {assertPreparedLabelOrder} from './equivalent-auto-label.mjs';
 import {initializePriority,carrierEligible,priorityOrder} from './order-priority.mjs';
@@ -61,7 +62,8 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
     o.glsInternational={...(await loadRouting(db)).international,...o.source_payload?.glsInternationalOverride};
     o.lines=(await db.query('SELECT source_sku,target_sku,quantity,target_quantity FROM lines WHERE order_id=$1 ORDER BY source_line',[o.id])).rows;
     if(!result){
-     assertDirectCarrierAllowed(o);
+     assertDirectCarrierAllowed(o,carrier);
+     if(o.channel==='temu')assertTemuManualLabel((await db.query('SELECT status FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0]);
      if(job.environment!=='production')throw new Error('Création TEST désactivée : reprendre la commande en production');
      await assertLabelStockGate(db,o,job.stock_override);
      if(carrier==='gls'&&o.carrier==='gls_shop'){

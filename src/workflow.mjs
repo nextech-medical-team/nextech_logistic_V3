@@ -51,7 +51,7 @@ export async function prepareLabel(db,o){
 
   }
 
-  if(o.channel!=='temu'){
+  if(o.channel!=='temu'||o.transport_choice){
 
     if(unmapped.length)throw new Error('Correspondance SKU absente : '+unmapped.join(', '));
 
@@ -62,7 +62,8 @@ export async function prepareLabel(db,o){
   }
 
   const routing=await loadRouting(db);if(o.channel==='shopify'&&!o.transport_choice){const mode=configuredShopifyMode(o.source_payload,routing);if(mode==='unknown')throw Error('Shopify · Règle transport manquante : '+(o.source_payload?.shipping_lines||[]).map(l=>l.title||l.code).filter(Boolean).join(', '));o.source_payload={...o.source_payload,shopifyDeliveryMode:mode};await db.query('UPDATE orders SET source_payload=$2 WHERE id=$1',[o.id,JSON.stringify(o.source_payload)]);}
-  const r=chosenRoute(o,Math.round(weight*1000)/1000,routing);
+  // Never round a positive sub-gram weight down to zero before routing.
+  const r=chosenRoute(o,Math.ceil(weight*1000)/1000,routing);
 
   const tracking='SIM-'+o.id.slice(0,8).toUpperCase();
 
