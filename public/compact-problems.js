@@ -21,6 +21,7 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/inactif/i.test(text)&&!/absent ou|introuvable ou/i.test(text))return result('inactive','Inactif dans Erplain');
  if(/Produit.*introuvable|SKU\s+Erplain(?:\s+(?:LIVE|TEST))?\s+(?:introuvable|absent)|SKU absent ou inactif|Aucun produit actif/i.test(text))return result('missing','SKU Erplain introuvable',sku||text.match(/(?:introuvable|absent(?: ou inactif)?)\s*:\s*(.+?)\s*$/i)?.[1]?.trim()||'');
  if(/Poids non exploitable/i.test(text))return result('weight','Poids trop faible');
+ if(text==='Reprise historique à vérifier : BL non créé')return result('historical-preparation',text,'');
  if(/Étiquette existante sans (BC|BL) Erplain/i.test(text))return result('preparation',/sans BC/.test(text)?'BC Erplain non créé':'BL Erplain non créé','');
  if(/City-to-Postal Code mapping/i.test(text))return result('city','GOFO · Ville / code postal refusés','');
  if(/Unité de poids/i.test(text))return result('weight-unit','Unité de poids invalide');

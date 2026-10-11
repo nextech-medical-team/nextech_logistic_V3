@@ -24,6 +24,7 @@ import {saveManualPricing,pricingFingerprint} from './temu-manual-pricing.mjs';
 import {assertManualLabelOrder,assertTemuManualLabel} from './manual-label-policy.mjs';
 import {erplainWeightInput} from './erplain-weight-input.mjs';
 import {attachEquivalentDiagnostics} from './equivalent-diagnostics.mjs';
+import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
 import {readComparisonLines} from './bc-comparison-lines.mjs';
 import {applyMappingScope,validateMappingScope} from './mapping-scope.mjs';
 import {substitution,validateSubstitution} from './stock-substitution.mjs';
@@ -63,7 +64,7 @@ const actionTypes={
  'accept-source-change':['platform'],
  'create-product':['mapping','missing'],'activate-product':['inactive'],
  'weight':['weight','weight-unit'],'address':['address','city'],
- 'relay':['relay','relay-search'],'compare-bc':['bc','stock','api-stock'],'resume-erp':['stock','api-stock'],'force-stock-label':['stock'],
+ 'relay':['relay','relay-search'],'compare-bc':['bc','stock','api-stock','historical-preparation'],'resume-erp':['stock','api-stock','historical-preparation'],'force-stock-label':['stock'],
  'refresh':['preparation','unknown','routing','stock','bc',...productTypes,'api-access','api-limit','api-server','api-timeout','api-network','api-stock','api-incomplete','api-http','uncertain','pdf'],
  'recover-pdf':['pdf','uncertain'],'resume':['resolved']
 };
@@ -163,6 +164,7 @@ async function context(db,directory,id){
  const active=(await db.query("SELECT id,action,status,stage,created_at FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting')",[id])).rows[0];
  const latest=(await db.query('SELECT status,error FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1',[id])).rows[0];order.resolution_error=latest?.status==='review'?latest.error:null;await attachEquivalentDiagnostics(db,[order]);
  const temuJob=order.channel==='temu'?(await db.query('SELECT status,error,packages,attempt_id FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]:null;
+ projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob}));
  return projectSharedParcelContext({order,lines,job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
 }
 export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic}={}){
