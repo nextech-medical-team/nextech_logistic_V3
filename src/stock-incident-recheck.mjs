@@ -34,7 +34,7 @@ export function evaluateStockIncident(order,bc,{historicalProof=null}={}){
 }
 export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,now=()=>Date.now()}={}){
  const initial=(await db.query('SELECT * FROM orders WHERE id=$1',[id])).rows[0];if(!initial)return {notApplicable:true};
- if(initial.archived||initial.partial_mode||suspensionBlock(initial)||initial.source_payload?.erplainValidationHold||initial.source_payload?.visibilityHold||initial.source_payload?.marketplacePendingCorrection||initial.erp_live?.mappingAlignmentAttempt?.status==='uncertain')return {deferred:true};
+ if(initial.archived||initial.partial_mode||suspensionBlock(initial)||initial.erp_live?.mappingAlignmentAttempt?.status==='uncertain')return {deferred:true,reason:'Périmètre archivé, partiel, suspendu ou résultat de mapping incertain'};
  const jobs=(await db.query("SELECT id,action,status,error,result,created_at,updated_at FROM resolution_jobs WHERE order_id=$1 AND status='review'",[id])).rows;
  const completedRows=(await db.query("SELECT id,action,status,error,result,created_at,updated_at FROM resolution_jobs WHERE order_id=$1 AND status='complete' ORDER BY created_at DESC,id DESC",[id])).rows;
  const completed=completedRows.find(j=>['resume','resume-erp','replace-equivalent'].includes(j.action)&&!j.error&&!j.result?.partialRemainder);
