@@ -13,12 +13,13 @@ test('disabled worker performs no reads or purchases',async()=>{
  const worker=temuAutomaticPurchaseWorker({query(){throw Error('unexpected read');}},{},{},{enabled:()=>false});await worker.run();assert.equal(worker.running,false);
 });
 test('latest negative margin prevents buy claim',async()=>{
+ const executionNow=Date.now(),currentOrder={...order,erp_live:{...order.erp_live,documentSource:{checkedAt:new Date(executionNow).toISOString(),stockHolds:[]}}};
  let calls=0,bought=0;const saved=[];
- const plan={id:'p',currency:'EUR',amount:6,selected:1,expiresAt:now+60000,offers:[{channelId:1,shippingCompanyName:'GLS'}]};
+ const plan={id:'p',currency:'EUR',amount:6,selected:1,expiresAt:executionNow+60000,offers:[{channelId:1,shippingCompanyName:'GLS'}]};
  const db={async query(sql,args){
  if(sql.startsWith('INSERT INTO temu_automatic'))return {rows:[]};
  if(sql.startsWith('SELECT c.reference'))return {rows:[{reference:order.reference}]};
- if(sql.startsWith('SELECT * FROM orders'))return {rows:[order]};
+ if(sql.startsWith('SELECT * FROM orders'))return {rows:[currentOrder]};
  if(sql.startsWith('SELECT coalesce'))return {rows:[{lines:[]}]};
  if(sql.startsWith('SELECT o.id'))return {rows:[{id:'o'}]};
  if(sql.startsWith('UPDATE temu_automatic')){saved.push(JSON.parse(args[1]));return {rows:[]};}
