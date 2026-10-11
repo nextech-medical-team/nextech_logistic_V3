@@ -245,3 +245,36 @@ test('periodic source refresh preserves a frozen address on masking and detects 
  await db.exec("UPDATE orders SET address='{}' WHERE id='A'");order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];await assert.rejects(db.transaction(tx=>reconcileTemuCatchup(tx,order,observation)),/Adresse initiale complète/);
  }finally{await db.close();}
 });
+
+
+test('stable stage supersedes a refusal combined only with obsolete list absence',async()=>{
+ const {obsoleteTemuVisibilityError,pureTemuSourceReadError}=await import('../src/temu-catchup-policy.mjs');
+ const refusal='TEMU refuse l’opération : 180020006 The current order status cannot be viewed.';
+ assert.equal(obsoleteTemuVisibilityError(refusal+' ; TEMU · Commande absente de la liste source'),true);
+ assert.equal(obsoleteTemuVisibilityError('TEMU · Commande absente de la liste source ; '+refusal),true);
+ assert.equal(obsoleteTemuVisibilityError(refusal+' ; Stock insuffisant'),false);
+ assert.equal(obsoleteTemuVisibilityError(refusal+' ; TEMU · Commande absente de la liste source ; Stock insuffisant'),false);
+ assert.equal(obsoleteTemuVisibilityError('TEMU · Commande absente de la liste source'),false);
+ assert.equal(pureTemuSourceReadError(refusal+' ; TEMU · Commande absente de la liste source'),false);
+});
+
+
+test('pending detail retires compound list refusal and preserves hold and documents',async()=>{
+ const {observeTemuSourceStage}=await import('../src/temu-catchup-reconcile.mjs');
+ const {projectCurrentDiagnostics}=await import('../src/current-order-diagnostics.mjs');
+ const refusal='TEMU refuse l’opération : 180020006 The current order status cannot be viewed. ; TEMU · Commande absente de la liste source';
+ for(const independent of [false,true]){
+  const db=await fixture();try{
+   const issue=refusal+(independent?' ; Stock insuffisant':'');
+   await db.query("INSERT INTO orders(id,reference,source_reference,issue,source_payload) VALUES('STAGE',$1,$1,$2,$3::jsonb)",[reference,issue,JSON.stringify({mallId:'M',visibilityHold:true})]);
+   const before=(await db.query("SELECT * FROM orders WHERE id='STAGE'")).rows[0],p=payload();p.detail.parentOrderMap.parentOrderStatus=1;
+   const observation=await readTemuSource(apiFor(p,{'bg.order.decryptshippinginfo.get':Object.assign(Error('refus'),{code:'180020006'})}),reference);
+   assert.equal(observation.requiredComplete,true);await db.transaction(tx=>observeTemuSourceStage(tx,before,observation));
+   const after=(await db.query("SELECT * FROM orders WHERE id='STAGE'")).rows[0];
+   assert.equal(after.issue,independent?issue:'TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée');
+   for(const key of ['address','erp_live','label_status','tracking_status','recipient'])assert.deepEqual(after[key],before[key]);assert.equal(after.source_payload.visibilityHold,true);
+   const projected=projectCurrentDiagnostics({...before,source_payload:after.source_payload});assert.equal(projected.issue,after.issue);
+   const newer=projectCurrentDiagnostics({...before,source_payload:{...after.source_payload,temuDirect:{attemptedAt:new Date(Date.parse(observation.checkedAt)+1000).toISOString()}}});assert.equal(newer.issue,issue);
+  }finally{await db.close();}
+ }
+});
