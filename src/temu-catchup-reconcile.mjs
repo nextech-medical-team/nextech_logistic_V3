@@ -30,7 +30,7 @@ export async function reconcileTemuCatchup(tx,order,observation){
  source.temuCatchup={checkedAt:observation.checkedAt,coverage:observation.coverage,complete:observation.complete,coreComplete:true,conflicts,errors:observation.errors,shipments:fresh.shipments||[],packages:fresh.packages||[],externalWrites:0};
  let nextAddress=order.address,recipient=order.recipient,issue=order.issue;
  const initialIncomplete=!protectedData&&((source.visibilityHold===true&&!lines.length)||source.temuInitialPreparationPending===true);
- const initialSourceOnly=initialIncomplete&&(!issue||obsoleteTemuVisibilityError(issue)||issue==='Données TEMU récupérées · Préparation à vérifier'||issue==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'||issue==='TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée');
+ const initialSourceOnly=initialIncomplete&&(!issue||obsoleteTemuVisibilityError(issue)||issue==='Données TEMU récupérées · Préparation à vérifier'||issue==='Adresse masquée : adresse initiale complète requise avant préparation'||issue==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'||issue==='TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée');
  if(!conflicts.length){
   if(!protectedData){if(!usableFrozenAddress(order.address)){nextAddress={...order.address,...address};recipient=address.name;}
    if(!sameLines){const keep=new Set(active.map(l=>l.orderSn));for(const l of lines)if(!keep.has(l.source_line))await tx.query('DELETE FROM lines WHERE id=$1 AND order_id=$2',[l.id,order.id]);
