@@ -1,4 +1,5 @@
 import {apiAcquireSlot,apiDefer} from './api-budget.mjs';
+import {temuReadWaitMs} from './temu-read-deferral.mjs';
 import {relayConfig,readThroughRelay} from './temu-read-relay.mjs';
 import {createHash,randomBytes} from 'node:crypto';
 export function documentHeaders(config,url){const u=new URL(url);if(u.origin!=='https://openapi-b-eu.temu.com'||!/^\/pkg-label-eu\/[^/]+\/[^/]+\.pdf$/.test(u.pathname)||u.username||u.password)return undefined;const headers={'toa-app-key':config.TEMU_APP_KEY,'toa-access-token':config.TEMU_ACCESS_TOKEN,'toa-random':randomBytes(16).toString('hex'),'toa-timestamp':String(Math.floor(Date.now()/1000))};const assembled=Object.keys(headers).sort().map(k=>k+headers[k]).join('');headers['toa-sign']=createHash('md5').update(config.TEMU_APP_SECRET+assembled+config.TEMU_APP_SECRET).digest('hex').toUpperCase();return headers;}
@@ -11,7 +12,7 @@ export function temuApi(config,{fetchImpl=fetch,relay=relayConfig(),relayRead=re
   if(!(reads.has(type)||(purchase&&type==='bg.logistics.shipment.create')))throw new Error('Opération TEMU interdite');
   if(purchase&&relay&&relay.purchaseEnabled!==true)throw new Error('TEMU · Relais temporaire en lecture seule : aucun achat autorisé');
   for(const k of ['TEMU_APP_KEY','TEMU_APP_SECRET','TEMU_ACCESS_TOKEN'])if(!config[k])throw new Error(k+' absent de la configuration privée TEMU');
-  await apiAcquireSlot(budgetKey,500,{maxWaitMs:purchase?Infinity:1000,shouldStop:options.shouldStop});
+  await apiAcquireSlot(budgetKey,500,{maxWaitMs:purchase?Infinity:temuReadWaitMs,shouldStop:options.shouldStop,onProgress:options.onProgress,fair:true});
   const payload={app_key:config.TEMU_APP_KEY,access_token:config.TEMU_ACCESS_TOKEN,data_type:'JSON',timestamp:String(Math.floor(Date.now()/1000)),type,...data};
   const assembled=Object.keys(payload).sort().map(k=>k+(typeof payload[k]==='object'?JSON.stringify(payload[k]):String(payload[k]))).join('');
   const sign=createHash('md5').update(config.TEMU_APP_SECRET+assembled+config.TEMU_APP_SECRET).digest('hex').toUpperCase();
