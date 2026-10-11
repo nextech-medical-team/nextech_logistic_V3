@@ -109,7 +109,7 @@ const config=runtimeConfig();
 const db=await openDatabase({directory:path.join(directory,'postgres'),url:process.env.DATABASE_URL});
 db.recoverInterrupted=config.background;
 const releaseLeader=config.background?await db.acquireLeader():async()=>{};
-await initializeAppSchema(db,[initializeCarrierJobs,initializeComments2005,initializeTemuShipping,initializeTemuAutomaticPurchase,initializeStocks,initializeErplainLive,initializePartialDeliveries,initializeCorrections,initializeResolutions,initializeProcurement,initializeLifecycle,initializeErplainRefresh,initializeMarketplaceInbox,initializeLabelDownloads,initializeReadServiceJobs,initializeProcessingClock],{background:config.background});
+await initializeAppSchema(db,[initializeCarrierJobs,initializeComments2005,initializeTemuShipping,initializeStocks,initializeErplainLive,initializePartialDeliveries,initializeCorrections,initializeTemuAutomaticPurchase,initializeResolutions,initializeProcurement,initializeLifecycle,initializeErplainRefresh,initializeMarketplaceInbox,initializeLabelDownloads,initializeReadServiceJobs,initializeProcessingClock],{background:config.background});
 await db.withLocks(['schema'],()=>initializeSkuCopies(db));
 await db.withLocks(['schema'],()=>initializeEquivalences(db));
 await db.withLocks(['schema'],()=>initializeEquivalenceImports(db));
