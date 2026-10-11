@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
-import {sourceVatPlan,alignHistoricalSourceVat,sourceVatResumeEligible,sourceVatError,queueSourceVatReviews} from '../src/historical-source-vat.mjs';
+import {sourceVatPlan,alignHistoricalSourceVat,sourceVatResumeEligible,sourceVatError,queueSourceVatReviews,sourceVatResolutionState} from '../src/historical-source-vat.mjs';
 function fixture(){
  const line={id:7,type:'normal',quantity:1,price:10,tax_amount:2,discount:null,discount_rule_amount:null,ecotax:null,tax_codes:[{id:'20'}],variant:{id:3},location:{id:4}};
  const bc={id:1,status:'active',external_reference:'PO',update_stock:false,invoices_count:0,paid_amount:0,tax_type:'exclusive',currency:{label:'EUR'},total:12,line_items:[line],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}};
@@ -20,6 +20,15 @@ test('normal workflow journals before a single mutation and confirms a lost resp
 test('uncertain failed mutation never retries while supplier still shows old VAT',async()=>{const {bc,o}=fixture();let mutations=0;const api={request:async q=>{if(q.startsWith('mutation')){mutations++;throw Error('lost');}return {Order:bc};}},hooks={save:async()=>{},guard:async()=>{},preserveLabels:async()=>{}};await assert.rejects(alignHistoricalSourceVat(api,o,hooks));assert.equal(o.erp_live.sourceVatAttempt.status,'uncertain');await assert.rejects(alignHistoricalSourceVat(api,o,hooks),/aucune réécriture/);assert.equal(mutations,1);});
 test('source, mapping or suspension guard failure prevents mutation; completed BL and partial delivery excluded',async()=>{const {bc,o}=fixture();let mutations=0;const api={request:async q=>{if(q.startsWith('mutation'))mutations++;return {Order:bc};}};await assert.rejects(alignHistoricalSourceVat(api,o,{save:async()=>{},preserveLabels:async()=>{},guard:async()=>{throw Error('suspended');}}),/suspended/);assert.equal(mutations,0);for(const patch of [{partial_mode:true},{erp_live:{...o.erp_live,bl:{id:2}}}])assert.equal((await alignHistoricalSourceVat(api,{...o,...patch},{})).skipped,true);});
 test('automatic fiscal resume preserves explicit suspensions and uncertain writes; platform shipment alone never blocks',()=>{const {o}=fixture();Object.assign(o,{archived:false,error:sourceVatError});for(const tracking_status of ['shipped','delivered','in_transit'])assert.equal(sourceVatResumeEligible({...o,tracking_status}),true);for(const patch of [{suspension:{active:true}},{partial_mode:true},{error:'another error'},{erp_live:{...o.erp_live,sourceVatAttempt:{status:'uncertain'}}}])assert.equal(sourceVatResumeEligible({...o,...patch}),false);});
+test('explicit newer fiscal resume supersedes only a failed, unrecorded stock preview; uncertain and newer choices stay protected',()=>{
+ const resume={id:'resume',action:'resume-erp',status:'review',error:sourceVatError,result:{resume:true},created_at:'2026-10-11T01:35:00Z'};
+ const preview={id:'old-preview',action:'equivalent-preview',status:'review',result:null,error:'Produit de remplacement : stock insuffisant. Remplacement non enregistré.',created_at:'2026-10-09T08:21:00Z'};
+ assert.deepEqual(sourceVatResolutionState([resume,preview]).obsoletePreviewIds,['old-preview']);assert.equal(sourceVatResolutionState([resume,preview]).reviews.length,1);
+ for(const patch of [{created_at:'2026-10-11T01:36:00Z'},{created_at:resume.created_at},{result:{}},{error:'Réponse fournisseur incertaine'},{status:'complete',error:null,result:{replacementSku:'OTHER'}}]){
+  const state=sourceVatResolutionState([{...preview,...patch},resume]);assert.deepEqual(state.obsoletePreviewIds,[]);assert.ok(state.reviews.length>1||state.pendingReplacement);
+ }
+ for(const patch of [{result:{}},{error:'autre blocage'},{result:{resume:true,partialRemainder:true}}])assert.deepEqual(sourceVatResolutionState([{...resume,...patch},preview]).obsoletePreviewIds,[]);
+});
 test('real SQL queue ignores superseded failures, preserves decisions/suspension and deduplicates unchanged source',async()=>{
  const db=new PGlite();db.transaction=fn=>fn(db);
  try{
@@ -33,9 +42,12 @@ test('real SQL queue ignores superseded failures, preserves decisions/suspension
    await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,error,created_at) VALUES($1,$2,$1,'resume-erp','review','Stock insuffisant',now()-interval '1 hour'),($3,$2,$3,'resume-erp','review',$4,now()-interval '30 minutes')",[id+'-old',id,id+'-current',sourceVatError]);
   }
   await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result) VALUES('preview-choice','preview','preview-choice','equivalent-preview','complete','{\"replacementSku\":\"OTHER\"}')");
+  await db.query("UPDATE resolution_jobs SET result='{\"resume\":true}' WHERE id='target-current'");
+  await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result,error,created_at) VALUES('failed-preview','target','failed-preview','equivalent-preview','review',null,'Produit de remplacement : stock insuffisant. Remplacement non enregistré.',now()-interval '2 hours')");
   await db.exec(`INSERT INTO correction_jobs(id,order_id,payload,status,created_at) VALUES('old-correction','target','{"action":"weight"}','review',now()-interval '2 hours'),('new-correction','target','{"action":"weight"}','complete',now()-interval '1 hour');`);
   await queueSourceVatReviews(db);let jobs=(await db.query("SELECT order_id,action FROM resolution_jobs WHERE request_id LIKE 'source-vat-v1-%'")).rows;assert.deepEqual(jobs,[{order_id:'target',action:'resume-erp'}]);
-  await db.query("UPDATE resolution_jobs SET status='review',error=$1 WHERE request_id LIKE 'source-vat-v1-%'",[sourceVatError]);await queueSourceVatReviews(db);assert.equal((await db.query("SELECT count(*) n FROM resolution_jobs WHERE request_id LIKE 'source-vat-v1-%'")).rows[0].n,1);
+  assert.deepEqual((await db.query("SELECT detail->'obsoletePreviewIds' ids FROM audit")).rows[0].ids,['failed-preview']);assert.equal((await db.query("SELECT status FROM resolution_jobs WHERE id='failed-preview'")).rows[0].status,'review');
+  await db.query("UPDATE resolution_jobs SET status='review',error=$1,result='{\"resume\":true}' WHERE request_id LIKE 'source-vat-v1-%'",[sourceVatError]);await queueSourceVatReviews(db);assert.equal((await db.query("SELECT count(*) n FROM resolution_jobs WHERE request_id LIKE 'source-vat-v1-%'")).rows[0].n,1);
   await db.query("UPDATE orders SET source_payload=jsonb_set(source_payload,'{temuAmounts,data,orderList,0,productTaxRate}','22000000') WHERE id='target'");await queueSourceVatReviews(db);assert.equal((await db.query("SELECT count(*) n FROM resolution_jobs WHERE request_id LIKE 'source-vat-v1-%'")).rows[0].n,2);
  }finally{await db.close();}
 });

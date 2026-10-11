@@ -11,6 +11,17 @@ const identity=l=>JSON.stringify([l.type||'normal',String(l.variant?.id||''),Str
 const codes=l=>JSON.stringify((l.tax_codes||[]).map(t=>String(t.id)).sort());
 const neutral=l=>l.type==='shipping_cost'&&Number(l.quantity)===1&&['price','tax_amount','discount','discount_rule_amount','ecotax'].every(k=>Object.hasOwn(l,k)&&(l[k]===null||l[k]!==''&&Number(l[k])===0));
 export const sourceVatError='BC · Codes TVA Erplain différents de la source ; produits et quantités identiques';
+export function sourceVatResolutionState(actions=[]){
+ const resume=actions.find(j=>['resume','resume-erp'].includes(j.action)&&j.status==='review'&&j.error===sourceVatError&&j.result?.resume===true&&!j.result?.partialRemainder);
+ const started=Date.parse(resume?.created_at),obsolete=[];
+ const current=actions.filter(j=>{
+  const previous=Date.parse(j.created_at);
+  const superseded=j.action==='equivalent-preview'&&j.status==='review'&&j.result==null&&/stock insuffisant/.test(j.error||'')&&/Remplacement non enregistré\./.test(j.error||'')&&Number.isFinite(started)&&Number.isFinite(previous)&&previous<started;
+  if(superseded)obsolete.push(j.id);
+  return !superseded;
+ });
+ return {...currentResolutionState(current),obsoletePreviewIds:obsolete};
+}
 export function sourceVatResumeEligible(o){
  return o.channel==='temu'&&o.archived===false&&!o.partial_mode&&!mutationBlock(o,{allowHeldBc:true})&&o.erp_live?.phase==='historical_review'&&!!o.erp_live.bc?.id&&!o.erp_live.bl?.id&&!o.erp_live.sourceVatAttempt?.status?.includes('uncertain')&&!o.source_payload?.erplainImported&&!o.source_payload?.visibilityHold&&!o.source_payload?.erplainValidationHold&&o.error===sourceVatError;
 }
@@ -27,12 +38,12 @@ export async function queueSourceVatReviews(db){
    ORDER BY j.updated_at LIMIT 10 FOR UPDATE OF o,j SKIP LOCKED`,[sourceVatError])).rows;
   for(const o of rows){
    if(!sourceVatResumeEligible(o)||!o.source_payload?.temuAmounts?.data?.orderList?.length)continue;
-   const state=currentResolutionState((await tx.query(resolutionStateSql,[o.id])).rows);
+   const state=sourceVatResolutionState((await tx.query(resolutionStateSql,[o.id])).rows);
    if(state.pendingReplacement||state.reviews.some(r=>!['resume','resume-erp'].includes(r.action)||r.error!==sourceVatError))continue;
    const requestId='source-vat-v1-'+hash({order:o.id,bc:o.erp_live.bc.id,source:o.source_payload.temuAmounts.data});
    const id=randomUUID(),payload={id:o.id,requestId,action:'resume-erp',type:'historical-preparation',resumeAfter:true};
    const inserted=await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$3,'resume-erp',$4) ON CONFLICT(request_id) DO NOTHING RETURNING id",[id,o.id,requestId,JSON.stringify(payload)]);
-   if(inserted.rows.length)await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','source_vat.continuation_requested',$1)",[JSON.stringify({orderId:o.id,bcId:o.erp_live.bc.id,resolutionId:id,authority:'current_source',labelsPreserved:true})]);
+   if(inserted.rows.length)await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','source_vat.continuation_requested',$1)",[JSON.stringify({orderId:o.id,bcId:o.erp_live.bc.id,resolutionId:id,authority:'current_source',labelsPreserved:true,obsoletePreviewIds:state.obsoletePreviewIds})]);
   }
  });
 }
