@@ -63,3 +63,8 @@ test('UI identifies waiting separately and retains independent stock and uncerta
  const held=currentHoldDiagnostic({...order,issue:null,temu_job:{status:'complete',error:null}});assert.equal(held.code,'temu_read_deferred');assert.equal(held.decisionRequired,false);
  assert.equal(currentHoldDiagnostic({...order,temu_job:{status:'uncertain',error:'Achat incertain'}}).code,'temu_error');
 });
+
+test('a requested stop never writes an order or shipment error',async()=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'temu-stop-'));try{
+ const writes=[],order={id:'A',reference:'PO-069-12345',channel:'temu',address:{country:'FR'},source_payload:{mallId:'M',temuDirect:{state:'verified'}}};const db={query:async(s,a)=>s.startsWith('SELECT')?{rows:[order]}:(writes.push({s,a}),{rows:[]})};
+ const local=temuLocalService(db,dir,{configLoader:async()=>({}),shopLoader:async()=>[],apiFactory:()=>({read:async()=>{throw Object.assign(Error('Arrêt demandé'),{code:'TEMU_STOPPING'});}})});await assert.rejects(local.recover(order.reference),e=>e.code==='TEMU_STOPPING');assert.equal(writes.length,0);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}});

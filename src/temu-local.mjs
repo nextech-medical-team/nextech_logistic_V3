@@ -23,6 +23,7 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
  async function context(reference){const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(!o)throw Error('Commande TEMU absente de V3');const mall=String(o.source_payload.mallId||'');if(!clients.has(mall))await connect(o.address?.country);const api=clients.get(mall);if(!api){const error=connectionErrors.get(String(o.address?.country||'').toUpperCase());if(error)throw error;throw Error('TEMU · Autorisation manquante pour la boutique '+mall);}if(!services.has(mall))services.set(mall,temuShipping(db,api));return {o,api,service:services.get(mall)};}
  const locked=(ref,fn)=>withShipmentLock(fn,['temu-order:'+ref]);
  async function fail(o,e){
+  if(e.code==='TEMU_STOPPING')throw e;
   if(isTemuReadDeferred(e)){const deferred=temuReadDeferral(e,{reference:o.reference});await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuReadDeferred:deferred})]);return deferred;}
   if(hasExternalLabel(o)){await db.query("UPDATE temu_label_jobs SET result=coalesce(result,'{}'::jsonb)||$2::jsonb WHERE reference=$1",[o.reference,JSON.stringify({trackingErrors:[{error:directError(e)}]})]);return {reference:o.reference,status:'external',error:null,trackingWarning:directError(e)};}
   const error=directError(e),shipmentIssue=['TEMU_SHIPMENT_FAILED','TEMU_SHIPMENT_PENDING'].includes(e.code);
