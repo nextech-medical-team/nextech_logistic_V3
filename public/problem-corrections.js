@@ -368,7 +368,7 @@ function resolutionDialog(title,reference){
 
 
 
-   let queued=ctx.active||queuedHandle;if(!queued){const requested={id:ctx.order.id,action,type,...data};if(pendingRequest){const {requestId,...previous}=pendingRequest;if(JSON.stringify(previous)!==JSON.stringify(requested))throw Error('L’enregistrement précédent reste à vérifier. Ne changez pas son contenu avant de vérifier la commande.');}else pendingRequest=JSON.parse(JSON.stringify({...requested,requestId:crypto.randomUUID()}));queued=await api('/api/resolutions',pendingRequest);}queuedHandle={...queued,action:queued.action||action};pendingRequest=null;
+   let queued=ctx.active||queuedHandle;if(!queued){const requested={id:ctx.order.id,action,type,...data};if(pendingRequest){const {requestId,...previous}=pendingRequest;if(JSON.stringify(previous)!==JSON.stringify(requested))throw Error('L’enregistrement précédent reste à vérifier. Ne changez pas son contenu avant de vérifier la commande.');}else pendingRequest=JSON.parse(JSON.stringify({...requested,requestId:crypto.randomUUID()}));queued=await api('/api/resolutions',pendingRequest);}queuedHandle={...queued,action:queued.action||action};pendingRequest=null;if((queued.action||action)==='replace-equivalent'){modal.dataset.equivalentSubmitted='true';delete modal.dataset.unsavedEquivalent;}
 
 
 
@@ -449,7 +449,7 @@ function resolutionDialog(title,reference){
     const recorded=r.result?.readOnly!==true&&recordedResolution(effectiveAction,r.result);
     if(r.result?.readOnly===true)renderProviderDiagnostic(body,r.result);
     if(recorded)delete modal.dataset.unsavedEquivalent;
-    if(recorded&&!r.error&&!['review','complete'].includes(r.status))state.textContent=(r.result.message||'Correction enregistrée.')+' Suite du traitement : '+(r.stage||r.status)+'. Aucun nouvel enregistrement nécessaire.';
+    if(recorded&&!r.error&&!['review','complete'].includes(r.status))state.textContent=effectiveAction==='replace-equivalent'?'Remplacement enregistré. '+(observedStatus==='review'?'Préparation bloquée : '+observedStep:observedStatus==='queued'?'Préparation en attente.':'Contrôle du stock et du BL en cours.')+' Vous pouvez fermer cette fenêtre ; le traitement continue dans V3.':(r.result.message||'Correction enregistrée.')+' Suite du traitement : '+(r.stage||r.status)+'. Aucun nouvel enregistrement nécessaire.';
 
 
 
@@ -457,7 +457,7 @@ function resolutionDialog(title,reference){
 
 
 
-    if(effectiveAction==='replace-equivalent'&&(recorded||(r.status==='complete'&&r.result?.partialRemainder===true))){const preview=body.querySelector('[data-preview]');if(preview)preview.textContent='Remplacement enregistré. Contrôle du stock et du BL en cours. Aucun nouvel enregistrement nécessaire.';const note=body.querySelector('[data-quantity-note]');if(note)note.textContent=note.textContent.replace('Le changement reste à vérifier et à confirmer.','Remplacement enregistré.');}
+    if(effectiveAction==='replace-equivalent'&&(recorded||(r.status==='complete'&&r.result?.partialRemainder===true))){const preview=body.querySelector('[data-preview]');if(preview)preview.textContent=r.status==='complete'?'Remplacement enregistré. Vérification terminée.':r.error||['review','failed','cancelled'].includes(r.status)?'Remplacement enregistré. Préparation à vérifier : '+(r.error||r.stage):'Remplacement enregistré. '+(observedStatus==='review'?'Préparation bloquée : '+observedStep:observedStatus==='queued'?'Préparation en attente.':'Contrôle du stock et du BL en cours.')+' Vous pouvez fermer cette fenêtre ; le traitement continue dans V3.';const note=body.querySelector('[data-quantity-note]');if(note)note.textContent=note.textContent.replace('Le changement reste à vérifier et à confirmer.','Remplacement enregistré.');}
 
 
 
@@ -1356,7 +1356,7 @@ function openStockEquivalent(ctx,problem){
 
 
 
- const enabled=()=>{if(done)delete d.modal.dataset.unsavedEquivalent;else if(!busy&&!d.modal.dataset.unsavedEquivalent?.includes('tentée')&&(checked||initialValues()!==originalValues))d.modal.dataset.unsavedEquivalent=checked?.reconcileOnly?'La synchronisation V3 n’est pas confirmée. Fermer sans la confirmer ?':'Le remplacement n’est pas enregistré. La commande conserve son produit actuel et son blocage. Fermer sans enregistrer ?';apply.disabled=busy||done||!form.elements.confirmed.checked;apply.textContent=checked?.reconcileOnly?'Synchroniser V3 avec le BC vérifié':partialRemainder?'Enregistrer le remplacement du reliquat':'Enregistrer et reprendre la commande';};
+ const enabled=()=>{if(done||d.modal.dataset.equivalentSubmitted)delete d.modal.dataset.unsavedEquivalent;else if(!busy&&!d.modal.dataset.unsavedEquivalent?.includes('tentée')&&(checked||initialValues()!==originalValues))d.modal.dataset.unsavedEquivalent=checked?.reconcileOnly?'La synchronisation V3 n’est pas confirmée. Fermer sans la confirmer ?':'Le remplacement n’est pas enregistré. La commande conserve son produit actuel et son blocage. Fermer sans enregistrer ?';apply.disabled=busy||done||!form.elements.confirmed.checked;apply.textContent=checked?.reconcileOnly?'Synchroniser V3 avec le BC vérifié':partialRemainder?'Enregistrer le remplacement du reliquat':'Enregistrer et reprendre la commande';};
 
 
 
