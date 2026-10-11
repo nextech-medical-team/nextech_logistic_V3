@@ -9,3 +9,5 @@ export function consumerInvoice({channel,sourcePayload={}}={}){
  if(p.company||p.billing_address?.company||p.billingAddress?.company)return false;
  return true;
 }
+
+export function invoiceCustomerType(context){return consumerInvoice(context)?'individual':'company';}

@@ -1,3 +1,4 @@
+import {ensureConsumerCustomer} from './invoice-customer-correction.mjs';
 import {consumerInvoice} from './invoice-customer-policy.mjs';
 const id=value=>{if(!/^\d+$/.test(String(value))||!Number.isSafeInteger(Number(value))||Number(value)<=0)throw Error('Identifiant Erplain invalide');return String(value);};
 const lines='line_items{quantity variant{id} location{id}}';
@@ -30,6 +31,7 @@ export function erplainLifecycleGateway(api){
   async finalizeInvoice(invoice,context={}){
    // E-invoice validation requires business identifiers. Consumer invoices use
    // Erplain's ordinary finalization; all BL/amount/quantity checks still apply.
+   if(consumerInvoice(context))await ensureConsumerCustomer(api,invoice,context);
    if(!consumerInvoice(context)){
     const validation=await api.request('mutation LifecycleValidateInvoice($id:ID!){ValidateEInvoice(id:$id){valid message errors}}',{id:id(invoice.id)});
     if(validation.ValidateEInvoice?.valid!==true)throw Error('Erplain · Facture non validée : '+(validation.ValidateEInvoice?.errors?.join(' ; ')||validation.ValidateEInvoice?.message||'informations à compléter'));

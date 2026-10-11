@@ -37,7 +37,7 @@ export function lifecycleWorker(db,directory,{gateway=erplainLifecycleGateway(er
    await discover();
    const row=(await db.query(lifecycleCandidateSql)).rows[0];if(!row)return;
    const o=(await db.query('SELECT * FROM orders WHERE id=$1',[row.order_id])).rows[0];
-   let input={blId:row.bl_id,bcId:o.erp_live?.bc?.id,channel:o.channel,sourcePayload:o.source_payload,expectedTracking:[],events:[],preparationComplete:false};
+   let input={blId:row.bl_id,bcId:o.erp_live?.bc?.id,orderId:o.id,channel:o.channel,sourcePayload:o.source_payload,expectedTracking:[],events:[],preparationComplete:false};
    try{
     if(row.partial_id){const d=(await db.query('SELECT * FROM partial_deliveries WHERE id=$1',[row.partial_id])).rows[0];input.expectedTracking=d.tracking||[];input.preparationComplete=d.status==='ready'&&readyWeightAllowed(o.channel,d.weight_kg)&&!!d.stock_document&&!!d.selection?.length;}
     else{
