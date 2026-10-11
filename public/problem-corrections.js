@@ -1469,3 +1469,19 @@ async function openCarrierChoice(id){
 
 
 
+
+document.addEventListener('click',event=>{const button=event.target.closest('[data-external-label]');if(button)openExternalLabel(button.dataset.externalLabel);});
+async function openExternalLabel(id){
+ const request=++resolutionContextRequestVersion;
+ try{
+  const ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));if(request!==resolutionContextRequestVersion)return;
+  const saved=ctx.order.source_payload?.externalLabel;
+  const d=resolutionDialog('Étiquette externe',ctx.order.reference);
+  d.body.innerHTML=saved?.active?'<p>Étiquette externe enregistrée chez '+esc(saved.carrier)+'.</p><p>'+saved.tracking.map(esc).join('<br>')+'</p><p>Le suivi reste assuré via TEMU. Les anciens refus d’étiquette sont conservés dans l’historique.</p>':`<form data-external-label-form><p>Enregistrez les étiquettes déjà achetées à l’extérieur. Aucun achat ne sera lancé par V3. Renseignez également ces suivis dans TEMU ; V3 n’exige aucune validation supplémentaire.</p><label>Transporteur<input name="carrier" required maxlength="80" placeholder="FedEx"></label><label>Numéros de suivi — un par ligne<textarea name="tracking" required rows="3"></textarea></label><label>Étiquette PDF (facultatif, 10 Mo maximum)<input name="pdf" type="file" accept="application/pdf"></label><label><input name="confirmed" type="checkbox" required> Je confirme avoir acheté les étiquettes externes couvrant tous les colis de cette commande.</label><p>Les refus du parcours d’achat TEMU seront classés dans l’historique. Les autres problèmes restent visibles. Le suivi reprendra via TEMU.</p><button type="submit">Enregistrer l’étiquette externe</button><p data-feedback role="status"></p></form>`;
+  const form=d.body.querySelector('form');if(!form)return;
+  let busy=false;form.onsubmit=async event=>{event.preventDefault();if(busy)return;busy=true;const button=form.querySelector('button');button.disabled=true;try{
+   let pdf=null;const file=form.elements.pdf.files[0];if(file){if(file.size>10*1024*1024)throw Error('PDF trop volumineux (maximum 10 Mo)');pdf=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error('Lecture du PDF impossible'));reader.readAsDataURL(file);});}
+   const result=await api('/api/temu/external-label',{id,carrier:form.elements.carrier.value,tracking:form.elements.tracking.value,confirmed:form.elements.confirmed.checked,pdf});form.querySelector('[data-feedback]').textContent=result.message||'Étiquette déjà enregistrée';await orders();
+  }catch(e){form.querySelector('[data-feedback]').textContent=e.message;busy=false;button.disabled=false;}};
+ }catch(e){alert(e.message);}
+}
