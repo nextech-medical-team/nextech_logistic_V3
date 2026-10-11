@@ -38,11 +38,11 @@ export function automaticPreparationHold(o,now=Date.now()){
  if(o.issue||o.source_payload?.visibilityHold||o.source_payload?.marketplacePendingCorrection||o.resolution_pending_resume||o.partial_mode)return o.issue||'Préparation à recontrôler avant achat';
  const p=o.erp_live;
  if(p?.phase!=='bl_ready'||p.pricing?.status!=='verified'||!p.bl?.id||!p.stockDocument)return 'Préparation Erplain non terminée';
- for(const value of [p.verifiedAt,p.stockCheckedAt]){const at=Date.parse(value);if(!Number.isFinite(at)||at>now||now-at>86400000)return 'Validation de préparation et stock à actualiser';}
+ for(const value of [p.verifiedAt,p.stockCheckedAt]){const at=Date.parse(value);if(!Number.isFinite(at)||at>now)return 'Validation de préparation et stock à actualiser';}
  if(o.source_payload?.temuDirect?.state!=='verified')return 'Commande TEMU à vérifier';
  return null;
 }
-export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,stockGate=assertLabelStockGate}={}){
+export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,stockGate=assertLabelStockGate,refreshPreparation=async()=>{throw Error('Relecture Erplain avant achat non configurée');}}={}){
  let running=false;
  async function admission(reference,plan){
   if(!enabled())throw Error('Achat automatique suspendu');
@@ -60,10 +60,13 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,s
   const lineProof=(await db.query("SELECT coalesce(jsonb_agg(to_jsonb(l) ORDER BY source_line,id),'[]'::jsonb) lines FROM lines l WHERE order_id=$1",[o.id])).rows[0]?.lines||[];
   await stockGate(db,o);
   if(plan){
+   const source=o.erp_live?.documentSource,checked=Date.parse(source?.checkedAt);
+   if(!Number.isFinite(checked)||checked>Date.now()||Date.now()-checked>5*60000||!Array.isArray(source.stockHolds)||source.stockHolds.length)throw Error('Achat d’étiquette TEMU à confirmer : relecture Erplain et stock avant achat non validée');
    const decision=automaticTemuMarginDecision(await margins.get({fresh:true}),reference,plan);
    if(!decision.allowed)throw Error(decision.message+' : '+decision.reason);
    return {...decision,orderProof:{id:o.id,erpLive:o.erp_live,sourcePayload:o.source_payload,address:o.address,suspension:o.suspension,weight:o.weight_kg,lines:lineProof}};
   }
+  return o;
  }
  return {get running(){return running;},async run(){
   if(running||!enabled())return;running=true;
@@ -81,6 +84,9 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,s
    if(!candidate)return;
    const reference=candidate.reference;let result;
    try{
+    const admitted=await admission(reference);
+    const documents=await refreshPreparation(admitted.id);
+    if(documents.notFound||!Array.isArray(documents.stockHolds)||documents.stockHolds.length)throw Error(documents.stockHolds?.map(h=>h.message).filter(Boolean).join(' ; ')||'Documents ou stock Erplain à rapprocher avant achat');
     await admission(reference);
     const amounts=await local.amounts(reference,{force:true});if(amounts.error)throw Error('Achat d’étiquette TEMU à confirmer : '+amounts.error);
     const plan=await local.prepare(reference);

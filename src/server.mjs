@@ -167,7 +167,7 @@ const interruptedErplain=interruptedErplainRecovery(db,directory,{shouldStop:()=
 backgroundInterval(()=>interruptedErplain.run(),15000,'erplain-interrupted-recovery');
 const erplainRefresh=erplainRefreshService(db,directory);const erplainRefreshTimer=backgroundInterval(()=>erplainRefresh.run(),1200,'erplain-refresh');erplainRefreshTimer.unref();
 const temuLocal=temuLocalService(db,directory);
-const temuAutoPurchase=temuAutomaticPurchaseWorker(db,temuLocal,margins,{enabled:()=>!runtime.stopping&&runtime.enabled('temu-automatic-purchase')&&runtime.enabled('temu-logistics')&&runtime.enabled('automatic-preparation')});
+const temuAutoPurchase=temuAutomaticPurchaseWorker(db,temuLocal,margins,{refreshPreparation:id=>refreshErplainDocuments(db,erplainAccount(directory,'source'),id),enabled:()=>!runtime.stopping&&runtime.enabled('temu-automatic-purchase')&&runtime.enabled('temu-logistics')&&runtime.enabled('automatic-preparation')});
 backgroundInterval(()=>temuAutoPurchase.run(),30000,'temu-automatic-purchase');
 await db.withLocks(['schema'],()=>initializeTemuSync(db));
 const temuSync=temuSyncJobs(db,temuLocal,{shouldStop:()=>runtime.stopping});
