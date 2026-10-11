@@ -1,3 +1,4 @@
+import {reconcileStockIncident,stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {currentMappingFingerprint} from './current-mapping-line.mjs';
 import {assertDocumentIdle} from './erplain-document-read.mjs';
 import {completedHistoricalPreparation,reconcileHistoricalPreparation,currentReplacementPreview,currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
@@ -12,8 +13,10 @@ export const recheckCadence={local:5*60000,external:15*60000,alert:60*60000};
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 export function monitoringObservation(order,previous={},now=Date.now()){
  const o=projectCurrentDiagnostics(structuredClone(order)),erp=o.erp_live||{};
+ const stockCheck=erp.stockIncidentRecheck;
+ const stockDisplay=stockCheck&&stockCheck.status!=='resolved'&&stockCheck.currentError&&now-Date.parse(stockCheck.checkedAt)<recheckCadence.external+recheckCadence.local?stockCheck.currentError:null;
  const issue=oldFinanceErrors.includes(o.issue)&&o.erp_live_job?.error?o.erp_live_job.error:o.issue;
- let reason=suspensionBlock(o)||issue||o.erp_live_job?.error||o.resolution_error||currentResolutionState(o.resolution_actions).reviews.map(j=>j.error).filter(Boolean).join(' ; ')||o.carrier_error||(o.resolution_pending_resume?'Reprise de préparation à vérifier':null)||(o.label_status==='blocked'||o.erp_status==='blocked'?'Préparation bloquée : vérification à reprendre':null);
+ let reason=suspensionBlock(o)||issue||stockDisplay||o.erp_live_job?.error||o.resolution_error||currentResolutionState(o.resolution_actions).reviews.map(j=>j.error).filter(Boolean).join(' ; ')||o.carrier_error||(o.resolution_pending_resume?'Reprise de préparation à vérifier':null)||(o.label_status==='blocked'||o.erp_status==='blocked'?'Préparation bloquée : vérification à reprendre':null);
  const preview=currentResolutionState(o.resolution_actions).pendingReplacement||currentReplacementPreview(o.latest_resolution);if(preview&&!suspensionBlock(o)&&(!reason||/Reprise historique|Reprise de préparation/.test(reason)))reason='Remplacement à confirmer';
  // Supplier reads and timestamps are deliberately absent: no artificial progress.
  const progress=hash([erp.bc?.id,erp.bl?.id,erp.bl?.status,erp.stockDocument?.id,erp.verifiedAt?true:false,o.suspension?.version,o.mapping_lines]);
@@ -28,7 +31,7 @@ export async function initializeOrderRecheckMonitor(db,{afterPublication=false}=
  CREATE INDEX IF NOT EXISTS order_recheck_due ON order_recheck_monitor(next_check);
  CREATE OR REPLACE FUNCTION v3_request_order_recheck() RETURNS trigger AS $$ DECLARE oid text; BEGIN
  IF TG_TABLE_NAME='orders' THEN oid=NEW.id; ELSE oid=NEW.order_id; END IF;
- IF oid IS NOT NULL THEN INSERT INTO order_recheck_monitor(order_id) VALUES(oid) ON CONFLICT(order_id) DO UPDATE SET next_check=now(),next_external=CASE WHEN TG_TABLE_NAME IN ('correction_jobs','lines') THEN now() ELSE order_recheck_monitor.next_external END,requested=order_recheck_monitor.requested+1; END IF;
+ IF oid IS NOT NULL THEN INSERT INTO order_recheck_monitor(order_id) VALUES(oid) ON CONFLICT(order_id) DO UPDATE SET next_check=now(),next_external=CASE WHEN TG_TABLE_NAME IN ('resolution_jobs','correction_jobs','lines') THEN now() ELSE order_recheck_monitor.next_external END,requested=order_recheck_monitor.requested+1; END IF;
  RETURN NEW; END; $$ LANGUAGE plpgsql;
  DROP TRIGGER IF EXISTS v3_recheck_order ON orders;
  CREATE TRIGGER v3_recheck_order AFTER INSERT OR UPDATE OF source_payload,issue,erp_live,resolution_pending_resume,suspension ON orders FOR EACH ROW EXECUTE FUNCTION v3_request_order_recheck();
@@ -71,7 +74,7 @@ export function orderRecheckMonitor(db,api,{enabled=()=>true,canResume=()=>true,
    for(const o of external){if(!enabled())break;let result={notRequested:true};
     const orderSkus=lines.filter(l=>l.order_id===o.id).map(l=>l.sku).filter(Boolean),needsDocuments=!!o.erp_live?.bc?.id||/historique|document|\bBC\b|\bBL\b|annul/i.test(o.state?.result||'');
     if(orderSkus.some(sku=>!covered.has(sku))||needsDocuments&&docReads>=maxDocReads){await db.query("UPDATE order_recheck_monitor SET next_external=now()+interval '1 minute',next_check=now(),requested=requested+1,state=state||$2::jsonb WHERE order_id=$1",[o.id,JSON.stringify({externalResult:'Controles cibles partiels : suite planifiee au prochain passage'})]);continue;}
-    if(needsDocuments){docReads++;try{result=await readDocuments(db,api,o.id);}catch(e){result={error:e.message};}}
+    if(needsDocuments){docReads++;try{result=await readDocuments(db,api,o.id);}catch(e){result={error:e.message};if(stockIncidentOnly(o.issue)||/stock insuffisant/i.test(o.state?.result||''))await reconcileStockIncident(db,api,o.id,{readError:e.message});}}
 
     await db.query("UPDATE order_recheck_monitor SET next_external=now()+interval '15 minutes',next_check=now(),requested=requested+1,state=state||$2::jsonb WHERE order_id=$1",[o.id,JSON.stringify({lastExternalCheck:new Date(now()).toISOString(),externalResult:result?.error|| (orderSkus.some(sku=>errors.has(sku))?'Certaines lectures produit restent à vérifier':'Lectures ciblées terminées')})]);
     const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];
