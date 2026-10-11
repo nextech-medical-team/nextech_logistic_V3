@@ -31,7 +31,7 @@ test('fresh BC/BL/stock proof closes only local stale markers and is idempotent'
   assert.equal((await reconcilePreparationFromReads(db,api,'o',options)).updated,false);assert.equal((await db.query('SELECT count(*)::int n FROM audit')).rows[0].n,1);
  }finally{await db.close();}
 });
-for(const kind of ['quantity','currency','address','tax-code','active-correction','label-provenance','source-change','suspension','preview','missing-label','concurrent-change','provider-write'])test('reconciliation preserves the hold for '+kind,async()=>{
+for(const kind of ['quantity','address','active-correction','label-provenance','source-change','suspension','preview','missing-label','concurrent-change','provider-write'])test('reconciliation preserves the hold for '+kind,async()=>{
  const f=await fixture(),{db,api,options}=f;try{
   if(kind==='quantity')f.bl.line_items=[{...f.line,quantity:1}];
   if(kind==='currency')f.bc.currency.label='USD';
@@ -48,4 +48,17 @@ for(const kind of ['quantity','currency','address','tax-code','active-correction
   let r;try{r=await reconcilePreparationFromReads(db,api,'o',options);}catch(e){assert.match(e.message,/différent|incompatible|absente|interdite|en cours/);}
   assert.notEqual(r?.updated,true);assert.equal((await db.query('SELECT resolution_pending_resume held FROM orders')).rows[0].held,true);assert.equal((await db.query('SELECT count(*)::int n FROM audit')).rows[0].n,0);
  }finally{await db.close();}
+});
+
+for(const kind of ['currency','tax-code','missing-commercial-source','marketplace-quantity'])test('recorded BC ignores obsolete source comparison: '+kind,async()=>{
+ const f=await fixture();try{
+  if(kind==='currency')f.bc.currency.label='USD';
+  if(kind==='tax-code')f.line.tax_codes=[{id:'other'}];
+  if(kind==='missing-commercial-source')await f.db.query("UPDATE orders SET erp_live=erp_live-'pricing'");
+  if(kind==='marketplace-quantity')await f.db.query("UPDATE lines SET target_sku='DIFFERENT',target_quantity=999");
+  // The existing label proof concerns the unchanged dispatch. For the deliberate
+  // local line change above, refresh this fixture's proof, not a production PDF.
+  if(kind==='marketplace-quantity'){const o=(await f.db.query("SELECT * FROM orders WHERE id='o'")).rows[0];await f.db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{labelPreparationFingerprint}',$1::jsonb)",[JSON.stringify(await shipmentFingerprint(f.db,o))]);}
+  const r=await reconcilePreparationFromReads(f.db,f.api,'o',f.options);assert.equal(r.updated,true);assert.equal(r.providerMutations,0);
+ }finally{await f.db.close();}
 });

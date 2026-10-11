@@ -1,3 +1,4 @@
+import {usesRecordedBc,recordedBcPricing,recordedBcFingerprint} from './existing-bc-execution.mjs';
 import {createHash} from 'node:crypto';
 import {currentMappingLine,currentMappingFingerprint} from './current-mapping-line.mjs';
 import {shipmentFingerprint} from './label-stock-gate.mjs';
@@ -44,20 +45,22 @@ export async function reconcilePreparationFromReads(db,api,id,{readDocuments=rea
  if(!await labelProof(db,o))return {updated:false};
  const shipment=await shipmentFingerprint(db,o);
  if(o.erp_live.labelPreparationFingerprint!==shipment)throw Error('Étiquette existante · Preuve de préparation absente ou différente : rapprochement requis, document conservé');
- const mapping=await currentMappingFingerprint(db,o),before=digest(o);
+ let mapping;const before=digest(o);
  const lines=(await db.query('SELECT l.*,m.target_sku mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[id,o.channel])).rows;
  const bc=await readDocuments(provider,o.erp_live.bc.id),bl=bc.shipping_orders?.data?.find(b=>String(b.id)===String(o.erp_live.bl.id));
  if(bc.status!=='active'||bc.external_reference!==o.reference||!bl||!['ready_to_ship','shipped','delivered','completed'].includes(bl.status))throw Error('Préparation · Identité ou état du BC/BL existant différent');
- assertPreparationAddress(o,bc,bl);
- if(skuTotals(lines.map(l=>currentMappingLine(l,o.channel)))!==skuTotals(bc.line_items)||skuTotals(bc.line_items)!==skuTotals(bl.line_items)||deliveryTotals(bc.line_items)!==deliveryTotals(bl.line_items))throw Error('Préparation · Mapping actuel, produits, lieux ou quantités BC/BL différents');
- const source=o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.erp_live.pricing;
+ const frozen=usesRecordedBc(o);mapping=frozen?recordedBcFingerprint(bc):await currentMappingFingerprint(db,o);
+ const bcAddress=bc.shipping_address;
+ assertPreparationAddress(frozen?{address:{name:bcAddress?.label,street:bcAddress?.address_1,postal:bcAddress?.postal_code,city:bcAddress?.city,country:bcAddress?.country}}:o,bc,bl);
+ if((!frozen&&skuTotals(lines.map(l=>currentMappingLine(l,o.channel)))!==skuTotals(bc.line_items))||skuTotals(bc.line_items)!==skuTotals(bl.line_items)||deliveryTotals(bc.line_items)!==deliveryTotals(bl.line_items))throw Error('Préparation · Mapping actuel, produits, lieux ou quantités BC/BL différents');
+ const source=frozen?recordedBcPricing(o,bc):o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.erp_live.pricing;
  const commercial=await readCommercial(provider,bc.id);
  if(String(commercial?.id)!==String(bc.id)||commercial.status!=='active'||commercial.external_reference!==o.reference||!['exclusive','inclusive'].includes(commercial.tax_type)||commercial.tax_type!==source?.tax_type||skuTotals(commercial.line_items)!==skuTotals(bc.line_items)||deliveryTotals(commercial.line_items)!==deliveryTotals(bc.line_items))throw Error('Préparation · Preuve commerciale différente du BC ou de la source');
  const zero=(l,k)=>Object.hasOwn(l,k)&&(l[k]===null||typeof l[k]!=='boolean'&&String(l[k]).trim()!==''&&Number.isFinite(Number(l[k]))&&Number(l[k])===0);
  const neutral=l=>l.type==='shipping_cost'&&Number(l.quantity)===1&&['price','tax_amount','discount','discount_rule_amount','ecotax'].every(k=>zero(l,k));
  const compared=source.items?.some(l=>l.type==='shipping_cost')?commercial.line_items:commercial.line_items.filter(l=>!neutral(l));
- verifyBcLineIdentity(compared,source.items);
- const confirmed=verifySourceCommercialTotals(commercial,source);let historicalStockProof=o.erp_live.historicalStockProof,stockDocument=o.erp_live.stockDocument;
+ if(!frozen)verifyBcLineIdentity(compared,source.items);
+ const confirmed=frozen?recordedBcPricing(o,commercial).confirmed:verifySourceCommercialTotals(commercial,source);let historicalStockProof=o.erp_live.historicalStockProof,stockDocument=o.erp_live.stockDocument;
  if(bc.update_stock===true){historicalStockProof=await proveHistorical(provider,{...o,items:bc.line_items,erp_live:{...o.erp_live,bc,bl}});}
  else{
   if(bc.update_stock!==false||bl.update_stock!==false||!stockDocument?.id)throw Error('Préparation · Sortie de stock existante non identifiée');
@@ -71,8 +74,8 @@ export async function reconcilePreparationFromReads(db,api,id,{readDocuments=rea
   await tx.query('SELECT order_id FROM correction_jobs WHERE order_id=$1 FOR SHARE',[id]);
   const latest=currentResolutionState((await tx.query(resolutionStateSql,[id])).rows);
   const job=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1 FOR SHARE',[id])).rows[0];
-  if(protectedOrder(fresh)||digest(fresh)!==before||latest.reviews.length||latest.pendingReplacement||job?.status!=='complete'||job.error!==null||await currentMappingFingerprint(tx,fresh)!==mapping||await shipmentFingerprint(tx,fresh)!==shipment||!await labelProof(tx,fresh))return {updated:false,changedDuringRead:true};
-  const at=new Date(now()).toISOString(),proof={...fresh.erp_live,bc,bl,phase:'bl_ready',stockDocument,historicalStockProof,mappingPreparationFingerprint:mapping,verifiedAt:at,stockCheckedAt:at,pricing:{...fresh.erp_live.pricing,confirmed,status:'verified',error:null,commercialBasis:source.commercialBasis},periodicReconciliation:{checkedAt:at,providerMutations:0,labelsPreserved:true}};
+  if(protectedOrder(fresh)||digest(fresh)!==before||latest.reviews.length||latest.pendingReplacement||job?.status!=='complete'||job.error!==null||(!frozen&&await currentMappingFingerprint(tx,fresh)!==mapping)||await shipmentFingerprint(tx,fresh)!==shipment||!await labelProof(tx,fresh))return {updated:false,changedDuringRead:true};
+  const at=new Date(now()).toISOString(),proof={...fresh.erp_live,bc,bl,phase:'bl_ready',stockDocument,historicalStockProof,mappingPreparationFingerprint:mapping,...(frozen?{preparationAuthority:{kind:'recorded_bc',bcId:String(bc.id),fingerprint:mapping}}:{}),verifiedAt:at,stockCheckedAt:at,pricing:{...fresh.erp_live.pricing,confirmed,status:'verified',error:null,commercialBasis:source.commercialBasis},periodicReconciliation:{checkedAt:at,providerMutations:0,labelsPreserved:true}};
   await tx.query("UPDATE orders SET erp_live=$2::jsonb,resolution_pending_resume=false,label_status='production_ready',simulation=false WHERE id=$1",[id,JSON.stringify(proof)]);
   await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:order-recheck','preparation.read_reconciled',$1)",[JSON.stringify({orderId:id,bcId:bc.id,blId:bl.id,mappingFingerprint:mapping,shipmentFingerprint:shipment,checkedAt:at,providerMutations:0,labelsPreserved:true})]);
   return {updated:true,labelsPreserved:true,providerMutations:0};

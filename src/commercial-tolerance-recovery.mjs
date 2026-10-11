@@ -1,3 +1,4 @@
+import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
 import {sourceTemuTotals} from './financial-review-recovery.mjs';
 import {repairUnpreparedSourceBc} from './source-bc-repair.mjs';
 import {bcAllowedSql} from './bc-authorization.mjs';
@@ -35,12 +36,12 @@ export async function resumeAcceptedCommercialReviews(db,api){
  for(const o of rows){
   if(!commercialResumeEligible(o))continue;
   let source;
-  try{source=o.channel==='temu'?sourceTemuTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.erp_live.pricing;}catch{continue;}
+  try{source=usesRecordedBc(o)?null:o.channel==='temu'?sourceTemuTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.erp_live.pricing;}catch{continue;}
   let confirmed,error;
   try{
-   const {Order:actual}=await api.request('query V3ToleranceReadOnly($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});
+   const {Order:actual}=await api.request('query V3ToleranceReadOnly($id:ID!){Order(id:$id){id status total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});
    if(String(actual?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');
-   confirmed=verifySourceCommercialTotals(actual,source);
+   confirmed=usesRecordedBc(o)?recordedBcPricing(o,actual).confirmed:verifySourceCommercialTotals(actual,source);
   }catch(e){error=e.message;
    if(monetaryReviewError(error)&&!o.erp_live?.bl?.id&&!o.erp_live?.stockDocument?.id&&!o.erp_live?.stockCreationAttemptedAt){
     try{confirmed=await repairUnpreparedSourceBc(db,api,o,source);error=null;}catch(repairError){error=repairError.message;}
