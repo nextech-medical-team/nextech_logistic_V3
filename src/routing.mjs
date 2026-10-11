@@ -1,5 +1,5 @@
 import {erplainTransportChannel,isImportedErplain} from './erplain-label-required.mjs';
-import {defaultShopifyServices} from './shopify-delivery.mjs';
+import {defaultShopifyServices,configuredShopifyMode} from './shopify-delivery.mjs';
 export const defaultInternational={product:'PARCEL',flexDelivery:true,incoterm:''};
 export const defaultRouting={maxParcelKg:30,shopifyServices:defaultShopifyServices,international:defaultInternational,rules:[
  {channel:'amazon',type:'threshold',threshold:3,below:'gofo',above:'gls'},
@@ -20,6 +20,13 @@ export function validateRouting(c){
 }
 export function configuredRoute(channel,weight,config=defaultRouting,country='FR'){
  if(channel==='temu')return {carrier:'temu',weight:0.25,parcels:1};
+ if(channel==='relay'){
+  const rule=config.rules.find(r=>r.channel==='relay');
+  if(rule?.type!=='fixed'||rule.fixed!=='gls_shop')throw Error('Relais · Règle fixe GLS ShopDelivery requise');
+  if(!/^[A-Z]{2}$/.test(String(country).trim().toUpperCase()))throw Error('Pays ISO requis avant routage');
+  if(!Number.isFinite(weight)||weight<=0)throw Error('Poids produit Erplain manquant');
+  return {carrier:'gls_shop',weight,parcels:Math.ceil(weight/config.maxParcelKg)};
+ }
  if(String(country).trim().toUpperCase()!=='FR'){if(!/^[A-Z]{2}$/.test(String(country).trim().toUpperCase()))throw Error('Pays ISO requis avant routage');if(!Number.isFinite(weight)||weight<=0)throw Error('Poids produit Erplain manquant');return {carrier:'gls',weight,parcels:Math.ceil(weight/config.maxParcelKg)};}
  const r=config.rules.find(r=>r.channel===channel);if(!r)throw new Error('Gestionnaire transport à configurer : '+channel);
  const carrier=r.type==='fixed'?r.fixed:(weight<=Number(r.threshold)?r.below:r.above);
@@ -37,6 +44,11 @@ export function chosenRoute(order,weight,config=defaultRouting){
   if(r?.type!=='fixed'||r.fixed!=='gls_pharma')throw Error('Appels d’offres · Règle fixe GLS Pharma requise');
   if(String(order.address?.country).trim().toUpperCase()!=='FR')throw Error('Appels d’offres · GLS Pharma : pays hors France à vérifier avant préparation');
   return configuredRoute('tender',weight,config,order.address.country);
+ }
+ if(order.channel==='shopify'){
+  const mode=configuredShopifyMode(order.source_payload,config);
+  if(mode==='unknown')throw Error('Shopify · Mode de livraison à identifier avant préparation');
+  if(mode==='relay')return configuredRoute('relay',weight,config,order.address?.country);
  }
  const carrier=order.transport_choice;
  if(!carrier)return configuredRoute(order.channel==='shopify'&&order.source_payload?.shopifyDeliveryMode==='relay'?'relay':order.channel,weight,config,order.address?.country);
