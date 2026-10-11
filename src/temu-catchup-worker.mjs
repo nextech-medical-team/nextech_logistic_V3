@@ -59,7 +59,7 @@ export function temuCatchupWorker(db,loadSources,{shouldStop=()=>false,now=()=>D
     const review=observation.coreComplete?await reconcile(tx,fresh,observation):observation.requiredComplete?await observeTemuSourceStage(tx,fresh,observation):null;
     if(!observation.coreComplete&&!observation.requiredComplete){
      const partial=partialTemuReadProof(fresh,observation);
-     if(partial){const source={...fresh.source_payload,temuCatchupPartial:partial};const issue=pureTemuSourceReadError(fresh.issue)||fresh.source_payload?.temuCatchupPartial?.currentReason&&fresh.issue===fresh.source_payload.temuCatchupPartial.currentReason?partial.currentReason:fresh.issue;
+     if(partial){const source={...fresh.source_payload,temuCatchupPartial:partial,platformStatusObservation:{channel:'temu',payload:{detail:observation.payload.detail,country:observation.payload.country},observedAt:observation.checkedAt,indicative:true}};const issue=pureTemuSourceReadError(fresh.issue)||fresh.source_payload?.temuCatchupPartial?.currentReason&&fresh.issue===fresh.source_payload.temuCatchupPartial.currentReason?partial.currentReason:fresh.issue;
       await tx.query('UPDATE orders SET source_payload=$2::jsonb,issue=$3 WHERE id=$1',[fresh.id,JSON.stringify(source),issue]);}
     }
     const expectedStage=observation.requiredComplete&&!observation.coreComplete;

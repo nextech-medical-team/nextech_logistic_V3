@@ -214,7 +214,7 @@ test('stable partial read retains financial hold and replaces source error only'
  await db.query("UPDATE orders SET issue=$1,source_payload=$2::jsonb WHERE id='A'",[old,JSON.stringify({mallId:'M',visibilityHold:true})]);
  const observed=await readTemuSource(apiFor(payload(),{'bg.order.amount.query':Error(error)}),reference);
  const worker=temuCatchupWorker(db,async()=>[{channel:'temu',shop:'M',refreshSource:async()=>observed}],{withLock:fn=>fn()});await worker.run();
- const after=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.match(after.issue,/Autorisation API des montants/);assert.ok(!after.issue.includes('180020006'));assert.equal(after.source_payload.visibilityHold,true);assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);
+ const after=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.match(after.issue,/Autorisation API des montants/);assert.ok(!after.issue.includes('180020006'));assert.equal(after.source_payload.visibilityHold,true);assert.equal(after.source_payload.platformStatusObservation.payload.detail.parentOrderMap.parentOrderStatus,2);assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);
  }finally{await db.close();}
 });
 test('partial proof rejects stale, unstable and foreign source, preserves independent issues',async()=>{

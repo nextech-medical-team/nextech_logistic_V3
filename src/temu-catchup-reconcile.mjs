@@ -6,7 +6,7 @@ export async function reconcileTemuCatchup(tx,order,observation){
  if(observation.reference!==(order.source_reference||order.reference)||!observation.coreComplete)throw Error('TEMU · Rapprochement source incomplet');
  const source=structuredClone(order.source_payload||{}),fresh=observation.payload;
  const priorPartial=source.temuCatchupPartial;delete source.temuCatchupPartial;
- const previousVersion=Math.max(Number(source.temuOrderDetail?.parentOrderMap?.updateTime)||0,Number(source.temuReceiptObservation?.payload?.detail?.parentOrderMap?.updateTime)||0);
+ const previousVersion=Math.max(Number(source.temuOrderDetail?.parentOrderMap?.updateTime)||0,Number(source.temuReceiptObservation?.payload?.detail?.parentOrderMap?.updateTime)||0,Number(priorPartial?.sourceVersion)||0,Number(source.temuSourceRead?.sourceVersion)||0);
  if(Number.isFinite(previousVersion)&&previousVersion>0&&Number(observation.sourceVersion)<previousVersion)throw Object.assign(Error('TEMU · Réponse source antérieure à la version enregistrée'),{code:'TEMU_STALE_SOURCE',field:'version'});
  const lines=(await tx.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line FOR UPDATE',[order.id])).rows;
  const context=(await tx.query(`SELECT
@@ -77,7 +77,7 @@ export async function observeTemuSourceStage(tx,order,observation){
  if(!observation.requiredComplete||!['pending','cancelled'].includes(observation.sourceStage)||observation.reference!==(order.source_reference||order.reference))throw Error('TEMU · État source non vérifiable');
  const source=structuredClone(order.source_payload||{}),fresh=observation.payload;
  const priorPartial=source.temuCatchupPartial;delete source.temuCatchupPartial;
- const previousVersion=Math.max(Number(source.temuOrderDetail?.parentOrderMap?.updateTime)||0,Number(source.temuReceiptObservation?.payload?.detail?.parentOrderMap?.updateTime)||0);
+ const previousVersion=Math.max(Number(source.temuOrderDetail?.parentOrderMap?.updateTime)||0,Number(source.temuReceiptObservation?.payload?.detail?.parentOrderMap?.updateTime)||0,Number(priorPartial?.sourceVersion)||0,Number(source.temuSourceRead?.sourceVersion)||0);
  if(Number.isFinite(previousVersion)&&previousVersion>0&&Number(observation.sourceVersion)<previousVersion)throw Object.assign(Error('TEMU · État source antérieur à la version enregistrée'),{code:'TEMU_STALE_SOURCE',field:'version'});
  source.platformStatusObservation={channel:'temu',payload:{detail:fresh.detail,country:fresh.country},observedAt:observation.checkedAt,indicative:true};
  source.sourceCoverage={complete:observation.complete,coreComplete:observation.coreComplete,requiredComplete:true,sourceStage:observation.sourceStage,fields:observation.coverage,errors:observation.errors};

@@ -20,7 +20,7 @@ export function pureTemuSourceReadError(message){
 }
 export function partialTemuReadProof(order,observation){
  if(observation.reference!==(order.source_reference||order.reference)||!observation.coverage?.detail||!observation.coverage?.version||!observation.coverage?.consistency||!Number.isSafeInteger(observation.sourceVersion)||observation.sourceVersion<=0||observation.payload?.detail?.parentOrderMap?.parentOrderSn!==observation.reference||!observation.errors?.length||observation.errors.some(e=>!['shipping','amounts','shipments','packages'].includes(e.field)))return null;
- const previous=Math.max(Number(order.source_payload?.temuOrderDetail?.parentOrderMap?.updateTime)||0,Number(order.source_payload?.temuReceiptObservation?.payload?.detail?.parentOrderMap?.updateTime)||0);
+ const previous=Math.max(Number(order.source_payload?.temuOrderDetail?.parentOrderMap?.updateTime)||0,Number(order.source_payload?.temuReceiptObservation?.payload?.detail?.parentOrderMap?.updateTime)||0,Number(order.source_payload?.temuCatchupPartial?.sourceVersion)||0,Number(order.source_payload?.temuSourceRead?.sourceVersion)||0);
  if(observation.sourceVersion<previous)return null;
  const reason=observation.errors.some(e=>String(e.code)==='3000032'&&e.field==='amounts')?'TEMU · Autorisation API des montants manquante (3000032) · Boutique à réautoriser':observation.errors.map(e=>'TEMU · '+e.field+' : '+e.code).join(' ; ');
  return {checkedAt:observation.checkedAt,sourceVersion:observation.sourceVersion,coverage:observation.coverage,errors:observation.errors,sourceStage:observation.sourceStage,currentReason:reason,externalWrites:0};
