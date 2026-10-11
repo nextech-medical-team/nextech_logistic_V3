@@ -1,3 +1,4 @@
+import {bcAuthorityIdentityMatches} from './erplain-bc-line-authority.mjs';
 import {erplainWeightKg} from './erplain-readonly.mjs';
 import {importedLabelMissingFields} from './erplain-label-required.mjs';
 import {pendingScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
@@ -55,7 +56,7 @@ export async function synchronizeRecoveredOrder(db,o,d){
  const issues=documentIssues(d,o),problems=[...issues.admissionIssues,...issues.preparationIssues];
  let scope;try{scope=recoveredPendingScope(d,o);}catch(e){problems.push(e.message);}
  const partials=(await db.query("SELECT 1 FROM partial_deliveries WHERE order_id=$1 AND status<>'cancelled'",[o.id])).rows.length;
- if(scope?.scoped&&!issued&&!partials&&!o.partial_mode&&!o.archived&&o.source_payload?.erplainImported&&o.source_payload?.account==='live'){
+ if(scope?.scoped&&!issued&&!partials&&!o.partial_mode&&!o.archived&&o.source_payload?.erplainImported&&o.source_payload?.account==='live'&&!bcAuthorityIdentityMatches(o,d,local)){
   // Reconcile only after a human reread; never replace issued or engaged shipments.
   for(const line of scope.lines){
    const matches=local.filter(l=>String(l.source_payload?.erplainVariantId)===String(line.variant.id)&&String(l.source_line)===String(line.id));
