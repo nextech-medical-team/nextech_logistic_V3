@@ -18,7 +18,7 @@ export function readShopifyRelay(source,{mode=shopifyDeliveryMode(source)}={}){
  if(declaredId&&sourceId&&declaredId!==sourceId)throw Error('GLS · Sélection relais Shopify contradictoire');
  const original=metadata.originalShippingAddress;
  if(original!==undefined&&original!==null&&(typeof original!=='object'||Array.isArray(original)))throw Error('GLS · Adresse client d’origine invalide');
- if((declaredId||defaultId||sourceId)&&!original)throw Error('GLS · Adresse client d’origine non reçue pour le relais choisi');
+ if(declaredId&&!original)throw Error('GLS · Adresse client d’origine non reçue pour le relais choisi');
  const clientAddress=normalizeRelayAddress(original||source.shipping_address||{});
  if(['name','street','postal','city','country'].some(k=>typeof clientAddress[k]!=='string'||!clientAddress[k].trim())||!/^[A-Z]{2}$/.test(clientAddress.country))throw Error('GLS · Adresse client d’origine incomplète');
  return {source:'shopify_gls_france',sourceId:String(source.id),reference:String(source.name),sourceVersion:source.updated_at,
