@@ -196,7 +196,7 @@ orders=async function(){await correctionRows();for(const row of $('order-rows').
 
 
 
- const cell=row.cells[row.cells.length-2];if(!cell?.querySelector('[data-exact-problem]'))for(const b of cell?.querySelectorAll('.badge')||[])if(/compléter|vérifier|erreur|attente/i.test(b.textContent)){const button=document.createElement('button');button.textContent=b.textContent;button.className=b.className;button.onclick=()=>openCorrection(id).catch(e=>flash(e.message,true));b.replaceWith(button);}
+ const cell=row.cells[row.cells.length-2];if(!cell?.matches('[data-platform-status],[data-erplain-tracking]')&&!cell?.querySelector('[data-exact-problem]'))for(const b of cell?.querySelectorAll('.badge')||[])if(/compléter|vérifier|erreur|attente/i.test(b.textContent)){const button=document.createElement('button');button.textContent=b.textContent;button.className=b.className;button.onclick=()=>openCorrection(id).catch(e=>flash(e.message,true));b.replaceWith(button);}
 
 
 
