@@ -18,7 +18,7 @@ export function catalogueLookupProof({sku,response,locationId,document,readAt}){
 export function reconcileCatalogueMessage(message,proof,{errorUpdatedAt,now=Date.now(),maxAgeMs=300000}={}){
  const at=Date.parse(proof?.readAt),errorAt=errorUpdatedAt instanceof Date?errorUpdatedAt.getTime():Date.parse(errorUpdatedAt);
  if(proof?.status!=='active'||proof.complete!==true||proof.sourceReadOnly!==true||!proof.variantId||!proof.productId||!Number.isFinite(at)||!Number.isFinite(errorAt)||at<=errorAt||at>now||now-at>maxAgeMs)return {message,retired:[]};
- const exact=new Set([`BC · SKU Erplain LIVE introuvable : ${proof.sku}`,`BC · SKU Erplain LIVE ambigu : ${proof.sku}`,`Référence Erplain absente ou ambiguë : ${proof.sku}`]);
+ const exact=new Set([`Création produit · Nom de la référence convertie à confirmer : ${proof.sku}`,`BC · SKU Erplain LIVE introuvable : ${proof.sku}`,`BC · SKU Erplain LIVE ambigu : ${proof.sku}`,`Référence Erplain absente ou ambiguë : ${proof.sku}`]);
  const retired=[],parts=String(message??'').split(/\s;\s/),kept=[];
  for(const part of parts){if(exact.has(part)){retired.push({previousMessage:part,proof});}else kept.push(part);}
  return retired.length?{message:kept.filter(Boolean).join(' ; ')||null,retired}:{message,retired};
@@ -34,7 +34,7 @@ export async function refreshLookupDiagnostics(db,order,proof){
   if(!current||current.archived!==false)throw Error('Commande absente ou archivée : diagnostic conservé');
   const currentBc=String(current.erp_live?.bc?.id||''),previousBc=String(order.erp_live?.bc?.id||'');
   if(currentBc!==previousBc||currentBc!==String(proof.documentId||''))throw Error('Identité du BC modifiée : diagnostic conservé');
-  const lines=(await tx.query('SELECT coalesce(l.target_sku,m.target_sku,l.source_sku) sku FROM lines l JOIN orders o ON o.id=l.order_id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku WHERE l.order_id=$1',[order.id])).rows;
+  const lines=(await tx.query(`SELECT CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_sku ELSE coalesce(m.target_sku,l.target_sku,l.source_sku) END sku FROM lines l JOIN orders o ON o.id=l.order_id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku WHERE l.order_id=$1`,[order.id])).rows;
   if(!lines.some(l=>l.sku===proof.sku))throw Error('SKU absent des lignes actuelles : diagnostic conservé');
   const job=(await tx.query('SELECT status,error,updated_at FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[order.id])).rows[0];
   if(job&&['pending','processing'].includes(job.status))throw Error('Traitement Erplain actif : diagnostic conservé');
