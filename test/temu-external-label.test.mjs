@@ -53,3 +53,10 @@ test('stale quote, direct buy and old recovery cannot recreate an external order
  await assert.rejects(()=>service.buy('PO-053-19027229409911181','stale',1),/externe/);
  assert.equal((await service.recover('PO-053-19027229409911181')).status,'external');assert.equal(calls,0);
 });
+test('TEMU physical events mark delivered only when every declared parcel is covered',async()=>{
+ const queries=[],db={async query(sql,args){queries.push({sql,args});return {rows:[]};}};
+ const o={id:'follow-up',reference:'PO-053-19027229409911181',channel:'temu',tracking_status:'not_shipped',source_payload:{externalLabel:{active:true,tracking:['123','456']}}};
+ const api={async read(method,{packageSn}){return {trackingNum:packageSn==='PK-1'?'123':'456',trackingInfo:[{logisticsStatus:'DELIVERED',statusText:'Delivered',logisticsUpdatedAt:'1700000000000'}]};}};
+ await readExternalTemuTracking(db,o,api,{shipmentInfoDTO:[{packageSn:'PK-1'}]});assert.equal(queries.find(q=>q.sql.includes('UPDATE orders')).args[1],'shipped');
+ queries.length=0;await readExternalTemuTracking(db,o,api,{shipmentInfoDTO:[{packageSn:'PK-1'},{packageSn:'PK-2'}]});assert.equal(queries.find(q=>q.sql.includes('UPDATE orders')).args[1],'delivered');
+});
