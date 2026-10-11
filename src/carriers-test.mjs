@@ -1,3 +1,5 @@
+import {readShopifyRelay,assertFreshShopifyRelay,chooseNearestParcelShop} from './shopify-relay-source.mjs';
+import {shopifyCollector,loadShopifyConfig} from './marketplace-collection.mjs';
 import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {isImportedErplain,resolveImportedLabelOrder} from './erplain-label-required.mjs';
 import {tenderGlsAddress,resolveTenderLabelOrder} from './tender-label-fields.mjs';
@@ -16,12 +18,12 @@ export function createTestCarriers(c,{fetchImpl=fetch}={}){
   if(c.GLS_AUTH_BASE_URL!==GLS||c.GLS_BASE_URL!==GLS+'/shipit-farm/v1/backend/rs'||c.GOFO_BASE_URL!==GOFO)throw new Error('Seuls GLS sandbox et GOFO UAT sont autorisés');
   return createCarriers(c,{fetchImpl,gls:GLS,gofo:GOFO,production:false});
 }
-export function createProductionCarriers(c,{fetchImpl=fetch,erplainApi}={}){
+export function createProductionCarriers(c,{fetchImpl=fetch,erplainApi,shopifyReader}={}){
   const gls='https://api.gls-group.net',gofo='https://api-eu.gofoexpress.com';
   if(c.GLS_AUTH_BASE_URL!==gls||c.GLS_BASE_URL!==gls+'/shipit-farm/v1/backend/rs'||c.GOFO_BASE_URL!==gofo)throw new Error('Adresses de production GLS/GOFO inattendues');
-  return createCarriers(c,{fetchImpl,erplainApi,gls,gofo,production:true});
+  return createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls,gofo,production:true});
 }
-function createCarriers(c,{fetchImpl,erplainApi,gls:GLS,gofo:GOFO,production}){
+function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,production}){
   const text=(value,max)=>String(value||'').replace(/\s+/g,' ').trim().slice(0,max);
   const tokens={};
   async function request(url,options,creation=false){
@@ -45,15 +47,31 @@ function createCarriers(c,{fetchImpl,erplainApi,gls:GLS,gofo:GOFO,production}){
   }
   return {
     async resolveParcelShop(o){
-      const id=existingParcelShop(o.source_payload);
+
+      let searchAddress=o.address;
+      if(production&&o.channel==='shopify'){
+       const reader=shopifyReader||shopifyCollector(await loadShopifyConfig(process.env.DATA_DIR||'/var/lib/nextech-live'));
+       const raw=await reader.order(String(o.source_payload?.id||''));
+       if(raw.name!==o.reference||String(raw.id)!==String(o.source_payload?.id))throw Error('GLS · Identité Shopify différente');
+       const relay=readShopifyRelay(raw);if(!relay)throw Error('GLS · Métadonnées relais Shopify non reçues');
+       o.source_payload={...o.source_payload,shopifyRelay:relay};searchAddress=relay.clientAddress;
+       if(relay.selectedId){const a=relay.destinationAddress;return {parcelShopId:relay.selectedId,selection:'customer_selected',resolvedAt:new Date().toISOString(),environment:'production',sourceVersion:relay.sourceVersion,address:{Name1:raw.shipping_address?.address2||'',Street:a.street,ZIPCode:a.postal,City:a.city,CountryCode:a.country}};}
+      }
+      const id=production&&o.channel==='shopify'?null:existingParcelShop(o.source_payload);
       if(id)return o.source_payload?.glsParcelShop?.parcelShopId===id?o.source_payload.glsParcelShop:{parcelShopId:id,selection:'provided',address:null};
-      const payload=await request(GLS+'/shipit-farm/v1/backend/rs/parcelshop/address',{method:'POST',headers:{Authorization:'Bearer '+await token('gls'),Accept:'application/glsVersion1+json, application/json','Content-Type':'application/glsVersion1+json'},body:JSON.stringify(parcelShopSearch(o.address))});
-      const shops=normalizeParcelShops(payload),shop=shops[0];if(!shop)throw new Error('GLS · Aucun relais trouvé');if(shops.length>1&&shop.distance===null)throw Error('GLS · API : distances des relais non reçues');
+      const payload=await request(GLS+'/shipit-farm/v1/backend/rs/parcelshop/address',{method:'POST',headers:{Authorization:'Bearer '+await token('gls'),Accept:'application/glsVersion1+json, application/json','Content-Type':'application/glsVersion1+json'},body:JSON.stringify(parcelShopSearch(searchAddress))});
+      const shops=normalizeParcelShops(payload),shop=chooseNearestParcelShop(shops);
       return {...shop,selection:'nearest_gls',resolvedAt:new Date().toISOString(),environment:production?'production':'test'};
     },
     async authenticate(carrier){if(!['gls','gofo'].includes(carrier))throw new Error('Transporteur inconnu');await token(carrier);return {carrier,authenticated:true,environment:production?'production':'test'};},
     async gls(o,{onParcel}={}){
       assertDirectCarrierAllowed(o,'gls');
+      if(production&&o.channel==='shopify'&&o.carrier==='gls_shop'){
+       const relay=assertFreshShopifyRelay(o),id=existingParcelShop(o.source_payload);
+       if(relay.selectedId&&id!==relay.selectedId)throw Error('GLS · Relais différent du choix client');
+       if(!relay.selectedId&&(o.source_payload?.glsParcelShop?.selection!=='nearest_gls'||!Number.isFinite(o.source_payload.glsParcelShop.distance)))throw Error('GLS · Relais le plus proche non vérifié');
+       o={...o,address:relay.clientAddress};
+      }
       if(isImportedErplain(o))o=await resolveImportedLabelOrder(o,erplainApi);
       else if(o.channel==='tender')o=await resolveTenderLabelOrder(o,erplainApi);
       const tenderAddress=o.channel==='tender'||isImportedErplain(o)?tenderGlsAddress(o):null;

@@ -38,6 +38,7 @@ export function chosenRoute(order,weight,config=defaultRouting){
   if(String(order.address?.country).trim().toUpperCase()!=='FR')throw Error('Appels d’offres · GLS Pharma : pays hors France à vérifier avant préparation');
   return configuredRoute('tender',weight,config,order.address.country);
  }
+ if(order.channel==='shopify'&&order.source_payload?.shopifyDeliveryMode==='relay')return configuredRoute('relay',weight,config,order.address?.country);
  const carrier=order.transport_choice;
  if(!carrier)return configuredRoute(order.channel==='shopify'&&order.source_payload?.shopifyDeliveryMode==='relay'?'relay':order.channel,weight,config,order.address?.country);
  if(!['gls','gofo'].includes(carrier))throw Error('Choix transporteur non autorisé pour cette commande');

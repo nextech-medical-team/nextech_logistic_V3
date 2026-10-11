@@ -1,3 +1,4 @@
+import {relayComparisonAddress,sameRelayAddress} from './shopify-relay-source.mjs';
 // Marketplace receipts describe what was ordered, not the replacement sent.
 export function sourceFingerprint(rows) {
  if (!Array.isArray(rows) || !rows.length) return null;
@@ -14,5 +15,5 @@ export function marketplaceChanged(existing, prior, incoming) {
  const originals=existing.erp_live?.equivalentOriginalLines;
  const baseline=sourceFingerprint(originals===undefined?prior:originals);
  return !!(!baseline || baseline!==sourceFingerprint(incoming.lines) ||
-  ['name','street','postal','city','country'].some(k=>String(existing.address?.[k]||'')!==String(incoming.address?.[k]||'')));
+  (incoming.source_payload?.shopifyRelay? !sameRelayAddress(relayComparisonAddress(existing,incoming.source_payload.shopifyRelay),incoming.address):['name','street','postal','city','country'].some(k=>String(existing.address?.[k]||'')!==String(incoming.address?.[k]||''))));
 }
