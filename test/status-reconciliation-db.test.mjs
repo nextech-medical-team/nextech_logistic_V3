@@ -3,8 +3,8 @@ import {reconcileVerifiedWeights} from '../src/verified-weight-diagnostics.mjs';
 import {waitingResolutionWorker} from '../src/resolution-waiting.mjs';
 test('real SQL reconciliation covers replacement, newer failures, variant conflicts, no-audit and repeat',async()=>{
  const db=new PGlite();try{
- await db.exec(`CREATE TABLE orders(id text primary key,archived boolean default false,issue text,erp_live jsonb default '{}',updated_at timestamptz default now()-interval '1 hour');
- CREATE TABLE lines(order_id text,target_sku text,source_sku text,source_payload jsonb);
+ await db.exec(`CREATE TABLE orders(id text primary key,channel text default 'amazon',archived boolean default false,issue text,erp_live jsonb default '{}',received_at timestamptz default now()-interval '1 hour');
+ CREATE TABLE mappings(channel text,source_sku text,target_sku text);CREATE TABLE lines(order_id text,target_sku text,source_sku text,source_payload jsonb);
  CREATE TABLE erplain_product_bindings(sku text,live_variant_id text,product jsonb,verified_at timestamptz);
  CREATE TABLE resolution_jobs(id text,order_id text,status text,action text,stage text,payload jsonb,error text,created_at timestamptz,updated_at timestamptz);
  CREATE TABLE erp_live_jobs(order_id text,status text,error text,updated_at timestamptz);
@@ -38,6 +38,7 @@ for(const fail of [false,true])test('real deferred completion checks current sta
  const j={id:'j',order_id:'o',action:'recover-pdf',status:'waiting',result:{pdfOnly:true}},queries=[];let orderReads=0;
  const db={query:async(sql,args)=>{
   queries.push(sql);
+  if(sql.startsWith('SELECT o.id,o.issue'))return {rows:[]};
   if(sql.startsWith('SELECT * FROM resolution_jobs WHERE status='))return {rows:[j]};
   if(sql==='SELECT * FROM orders WHERE id=$1'){orderReads++;if(fail&&orderReads===2)throw Error('Snapshot indisponible');return {rows:[{id:'o',archived:false,label_status:'production_ready'}]};}
   if(sql.startsWith('SELECT * FROM erplain_product_bindings'))return {rows:[]};
