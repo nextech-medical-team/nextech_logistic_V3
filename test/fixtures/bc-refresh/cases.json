@@ -1,0 +1,1718 @@
+{
+  "orders": [
+    {
+      "id": "87171f23-0b01-403f-b443-78877e1b0358",
+      "reference": "PH2/00638941",
+      "order": {
+        "id": "87171f23-0b01-403f-b443-78877e1b0358",
+        "reference": "PH2/00638941",
+        "channel": "tender",
+        "source_payload": {},
+        "partial_mode": true,
+        "erp_live": {
+          "bc": {
+            "id": 1934151,
+            "label": "C00014862",
+            "total": 223.08,
+            "status": "active",
+            "currency": {
+              "id": 100237,
+              "label": "EUR"
+            },
+            "dated_at": "2026-10-08",
+            "line_items": [
+              {
+                "id": 27833705,
+                "type": "normal",
+                "label": "Connecteur de perfusion à bouchon",
+                "price": 0.0169,
+                "on_hand": 150735,
+                "variant": {
+                  "id": 642391,
+                  "sku": "SHHMP-0019",
+                  "track_inventory": true
+                },
+                "location": {
+                  "id": 100934
+                },
+                "quantity": 10000,
+                "available": 150735,
+                "tax_amount": 33.8,
+                "shipped_quantity": 0,
+                "reserved_quantity": 0
+              },
+              {
+                "id": 27840783,
+                "type": "normal",
+                "label": "Bouchon obturateur universel",
+                "price": 0.0169,
+                "on_hand": 57216,
+                "variant": {
+                  "id": 615905,
+                  "sku": "SHHMP_0018",
+                  "track_inventory": true
+                },
+                "location": {
+                  "id": 100934
+                },
+                "quantity": 1000,
+                "available": 57216,
+                "tax_amount": 3.38,
+                "shipped_quantity": 0,
+                "reserved_quantity": 0
+              }
+            ],
+            "update_stock": false,
+            "shipping_orders": {
+              "data": [],
+              "paginatorInfo": {
+                "hasMorePages": false
+              }
+            },
+            "external_reference": "PH2/00638941",
+            "account_representative": {
+              "id": 100367,
+              "label": "Appels d'offres"
+            }
+          },
+          "phase": "bc_created",
+          "pricing": {
+            "tax": 37.18,
+            "error": null,
+            "total": 223.08,
+            "source": "tender",
+            "status": "verified",
+            "version": 2,
+            "currency": "EUR",
+            "tax_type": "exclusive",
+            "confirmed": {
+              "tax": 37.18,
+              "total": 223.08,
+              "authority": "erplain",
+              "sourceTax": 37.18,
+              "sourceTotal": 223.08,
+              "tolerancePolicy": "lt-0.50-eur-or-lt-5-percent-order-total"
+            },
+            "taxPolicy": "source",
+            "verifiedAt": "2026-10-09T13:21:33.681Z",
+            "sourceLinesTotal": 223.08
+          },
+          "partialSource": {
+            "lines": [
+              {
+                "sku": "SHHMP-0019",
+                "lineId": "27833705",
+                "quantity": 10000
+              },
+              {
+                "sku": "SHHMP_0018",
+                "lineId": "27840783",
+                "quantity": 1000
+              }
+            ],
+            "pricing": {
+              "tax": 37.18,
+              "total": 223.08,
+              "currency": "EUR"
+            },
+            "checkedAt": "2026-10-09T21:46:46.118Z",
+            "stockHolds": [],
+            "allocations": [],
+            "allocatedBlIds": []
+          },
+          "documentSource": {
+            "lines": [
+              {
+                "sku": "SHHMP-0019",
+                "lineId": "27833705",
+                "quantity": 10000
+              },
+              {
+                "sku": "SHHMP_0018",
+                "lineId": "27840783",
+                "quantity": 1000
+              }
+            ],
+            "pricing": {
+              "tax": 37.18,
+              "total": 223.08,
+              "currency": "EUR"
+            },
+            "checkedAt": "2026-10-09T21:46:46.118Z",
+            "stockHolds": [],
+            "allocations": [],
+            "allocatedBlIds": [],
+            "shippingOrders": []
+          },
+          "equivalentItems": [
+            {
+              "price": 0.0169,
+              "variant": {
+                "id": "642391"
+              },
+              "location": {
+                "id": "100934"
+              },
+              "quantity": 10000
+            },
+            {
+              "price": 0.0169,
+              "variant": {
+                "id": "615905"
+              },
+              "location": {
+                "id": "100934"
+              },
+              "quantity": 1000
+            }
+          ],
+          "status_checked_at": "2026-10-09T13:58:17.306Z",
+          "transientRecovery": {
+            "lastError": null,
+            "lastFailureAt": "2026-10-09T13:21:35.356Z"
+          },
+          "equivalentRefreshedAt": "2026-10-09T21:45:02.747Z",
+          "equivalentOriginalLines": [
+            {
+              "id": "17e9389f-2564-4c05-8a66-702b9a069a9c",
+              "order_id": "87171f23-0b01-403f-b443-78877e1b0358",
+              "quantity": "1000",
+              "source_sku": "SHHMP-0018",
+              "target_sku": "SHHMP-0018",
+              "source_line": "39",
+              "source_payload": {
+                "qte": "1000",
+                "rem": "0",
+                "row": 39,
+                "prix": "0.0169",
+                "taxes": "20",
+                "total": "20.28",
+                "client": "",
+                "devise": "",
+                "produits": "BOUCHON OBTURATEUR LUER LOCK MALE FEMELLE",
+                "disponible": "",
+                "skuproduit": "SHHMP-0018",
+                "niveaudeprix": "",
+                "remiseglobale": "0",
+                "datedudocument": "",
+                "datedexpedition": "",
+                "coutsdexpedition": "0",
+                "quantitestotales": "",
+                "referenceexterne": "",
+                "numerodetelephone": "",
+                "gestionnairedecompte": "",
+                "adressedelivraisonnom": "",
+                "adressedelivraisonpays": "",
+                "erplainSourceVariantId": "2825159",
+                "adressedefacturationnom": "",
+                "adressedelivraisonville": "",
+                "adressedefacturationpays": "",
+                "adressedefacturationville": "",
+                "adressedelivraisonadresse1": "",
+                "adressedelivraisonadresse2": "",
+                "adressedelivraisontelephone": "",
+                "adressedefacturationadresse1": "",
+                "adressedefacturationadresse2": "",
+                "adressedelivraisoncodepostal": "",
+                "adressedefacturationtelephone": "",
+                "adressedefacturationcodepostal": ""
+              },
+              "target_quantity": "1000"
+            },
+            {
+              "id": "db21f145-2a84-4c1b-8ac7-ff6e3bbead19",
+              "order_id": "87171f23-0b01-403f-b443-78877e1b0358",
+              "quantity": "10000",
+              "source_sku": "SHHMP-0019",
+              "target_sku": "SHHMP-0019",
+              "source_line": "38",
+              "source_payload": {
+                "qte": "10000",
+                "rem": "0",
+                "row": 38,
+                "prix": "0.0169",
+                "taxes": "20",
+                "total": "202.8",
+                "client": "CENTRE HOSPITALIER JURA SUD - LONS LE SAUNIER",
+                "devise": "EUR",
+                "produits": "BOUCHON OBTURATEUR LUER LOCK MALE",
+                "disponible": "",
+                "skuproduit": "SHHMP-0019",
+                "niveaudeprix": "Wholesale price",
+                "remiseglobale": "0",
+                "datedudocument": "08/10/2026",
+                "datedexpedition": "09/10/2026",
+                "coutsdexpedition": "0",
+                "quantitestotales": "11000",
+                "referenceexterne": "PH2/00638941",
+                "numerodetelephone": "0384356038",
+                "gestionnairedecompte": "Appels d'offres",
+                "adressedelivraisonnom": "PHARMACIE - SITE LONS LE SAUNIER",
+                "adressedelivraisonpays": "FR",
+                "erplainSourceVariantId": "642391",
+                "adressedefacturationnom": "CENTRE HOSPITALIER JURA SUD",
+                "adressedelivraisonville": "LONS LE SAUNIER CEDEX",
+                "adressedefacturationpays": "FR",
+                "erplainCorrectedWeightKg": 0.0016,
+                "adressedefacturationville": "LONS LE SAUNIER CEDEX",
+                "adressedelivraisonadresse1": "55 RUE DU DOCTEUR JEAN MICHEL",
+                "adressedelivraisonadresse2": "",
+                "adressedelivraisontelephone": "0384356038",
+                "adressedefacturationadresse1": "55 RUE DU DOCTEUR JEAN MICHEL",
+                "adressedefacturationadresse2": "CS 50364",
+                "adressedelivraisoncodepostal": "39016",
+                "adressedefacturationtelephone": "0384356038",
+                "adressedefacturationcodepostal": "39016"
+              },
+              "target_quantity": "10000"
+            }
+          ],
+          "labelPreparationFingerprint": null
+        }
+      },
+      "lines": [
+        {
+          "id": "46b63275-dc33-4372-b598-3382f25b045c",
+          "order_id": "87171f23-0b01-403f-b443-78877e1b0358",
+          "source_line": "ERP:27833705",
+          "source_sku": "SHHMP-0019",
+          "quantity": "10000",
+          "target_sku": "SHHMP-0019",
+          "target_quantity": "10000",
+          "source_payload": {},
+          "mapped_sku": null,
+          "source_qty": null,
+          "target_qty": null
+        },
+        {
+          "id": "2084f3ad-0779-4d5e-9df7-b214facc2fa5",
+          "order_id": "87171f23-0b01-403f-b443-78877e1b0358",
+          "source_line": "ERP:27840783",
+          "source_sku": "SHHMP_0018",
+          "quantity": "1000",
+          "target_sku": "SHHMP_0018",
+          "target_quantity": "1000",
+          "source_payload": {},
+          "mapped_sku": null,
+          "source_qty": null,
+          "target_qty": null
+        }
+      ],
+      "jobs": [
+        {
+          "id": "c4c74316-8486-49be-870c-c29aba6bc1f4",
+          "action": "refresh",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T16:07:16.793Z",
+          "updated_at": "2026-10-09T16:07:19.577Z"
+        },
+        {
+          "id": "106218d7-3a55-48a8-bbd5-a75ca16eafed",
+          "action": "refresh",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T14:29:56.092Z",
+          "updated_at": "2026-10-09T14:30:01.374Z"
+        },
+        {
+          "id": "506bf057-3685-4b93-a820-06d97d68e0a2",
+          "action": "refresh",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T14:29:38.941Z",
+          "updated_at": "2026-10-09T14:29:43.844Z"
+        },
+        {
+          "id": "fdb372c6-7778-4895-94e1-13ec440f2276",
+          "action": "weight",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T14:29:11.370Z",
+          "updated_at": "2026-10-09T14:29:24.029Z"
+        },
+        {
+          "id": "0b2706b6-d9b3-4634-815b-09936d2b1899",
+          "action": "refresh",
+          "status": "review",
+          "error": "SHHMP-0018 · Unité de poids Erplain absente ou non prise en charge",
+          "stage": "Erplain à compléter",
+          "created_at": "2026-10-09T13:21:06.557Z",
+          "updated_at": "2026-10-09T13:21:35.474Z"
+        }
+      ],
+      "erp": [
+        {
+          "status": "partial",
+          "error": null,
+          "updated_at": "2026-10-09T21:45:02.747Z"
+        }
+      ],
+      "bc": {
+        "id": 1934151,
+        "label": "C00014862",
+        "external_reference": "PH2/00638941",
+        "dated_at": "2026-10-08",
+        "status": "active",
+        "total": 223.08,
+        "currency": {
+          "id": 100237,
+          "label": "EUR"
+        },
+        "update_stock": false,
+        "account_representative": {
+          "id": 100367,
+          "label": "Appels d'offres"
+        },
+        "line_items": [
+          {
+            "id": 27833705,
+            "type": "normal",
+            "label": "Connecteur de perfusion à bouchon",
+            "quantity": 10000,
+            "price": 0.0169,
+            "tax_amount": 33.8,
+            "shipped_quantity": 0,
+            "reserved_quantity": 0,
+            "available": 140735,
+            "on_hand": 140735,
+            "location": {
+              "id": 100934
+            },
+            "variant": {
+              "id": 642391,
+              "sku": "SHHMP-0019",
+              "track_inventory": true
+            }
+          },
+          {
+            "id": 27840783,
+            "type": "normal",
+            "label": "Bouchon obturateur universel",
+            "quantity": 1000,
+            "price": 0.0169,
+            "tax_amount": 3.38,
+            "shipped_quantity": 0,
+            "reserved_quantity": 0,
+            "available": 56216,
+            "on_hand": 56216,
+            "location": {
+              "id": 100934
+            },
+            "variant": {
+              "id": 615905,
+              "sku": "SHHMP_0018",
+              "track_inventory": true
+            }
+          }
+        ],
+        "shipping_orders": {
+          "data": [
+            {
+              "id": 1904433,
+              "label": "SHO00744036",
+              "external_reference": "PH2/00638941",
+              "status": "ready_to_ship",
+              "update_stock": false,
+              "line_items": [
+                {
+                  "id": 27849030,
+                  "type": "normal",
+                  "parent_id": 27833705,
+                  "quantity": 10000,
+                  "price": 0.0169,
+                  "tax_amount": null,
+                  "variant": {
+                    "id": 642391,
+                    "sku": "SHHMP-0019"
+                  },
+                  "location": {
+                    "id": 100934
+                  }
+                },
+                {
+                  "id": 27849031,
+                  "type": "normal",
+                  "parent_id": 27840783,
+                  "quantity": 1000,
+                  "price": 0.0169,
+                  "tax_amount": null,
+                  "variant": {
+                    "id": 615905,
+                    "sku": "SHHMP_0018"
+                  },
+                  "location": {
+                    "id": 100934
+                  }
+                }
+              ]
+            }
+          ],
+          "paginatorInfo": {
+            "hasMorePages": false
+          }
+        }
+      },
+      "diagnostic": {
+        "readOnly": true,
+        "provider": "Erplain",
+        "message": "BC et BL relus ; produits et quantités concordants dans le périmètre comparé",
+        "bc": {
+          "id": 1934151,
+          "label": "C00014862",
+          "external_reference": "PH2/00638941",
+          "dated_at": "2026-10-08",
+          "status": "active",
+          "total": 223.08,
+          "currency": {
+            "id": 100237,
+            "label": "EUR"
+          },
+          "update_stock": false,
+          "account_representative": {
+            "id": 100367,
+            "label": "Appels d'offres"
+          },
+          "line_items": [
+            {
+              "id": 27833705,
+              "type": "normal",
+              "label": "Connecteur de perfusion à bouchon",
+              "quantity": 10000,
+              "price": 0.0169,
+              "tax_amount": 33.8,
+              "shipped_quantity": 0,
+              "reserved_quantity": 0,
+              "available": 140735,
+              "on_hand": 140735,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 642391,
+                "sku": "SHHMP-0019",
+                "track_inventory": true
+              }
+            },
+            {
+              "id": 27840783,
+              "type": "normal",
+              "label": "Bouchon obturateur universel",
+              "quantity": 1000,
+              "price": 0.0169,
+              "tax_amount": 3.38,
+              "shipped_quantity": 0,
+              "reserved_quantity": 0,
+              "available": 56216,
+              "on_hand": 56216,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 615905,
+                "sku": "SHHMP_0018",
+                "track_inventory": true
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [
+              {
+                "id": 1904433,
+                "label": "SHO00744036",
+                "external_reference": "PH2/00638941",
+                "status": "ready_to_ship",
+                "update_stock": false,
+                "line_items": [
+                  {
+                    "id": 27849030,
+                    "type": "normal",
+                    "parent_id": 27833705,
+                    "quantity": 10000,
+                    "price": 0.0169,
+                    "tax_amount": null,
+                    "variant": {
+                      "id": 642391,
+                      "sku": "SHHMP-0019"
+                    },
+                    "location": {
+                      "id": 100934
+                    }
+                  },
+                  {
+                    "id": 27849031,
+                    "type": "normal",
+                    "parent_id": 27840783,
+                    "quantity": 1000,
+                    "price": 0.0169,
+                    "tax_amount": null,
+                    "variant": {
+                      "id": 615905,
+                      "sku": "SHHMP_0018"
+                    },
+                    "location": {
+                      "id": 100934
+                    }
+                  }
+                ]
+              }
+            ],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        "lines": [
+          {
+            "id": "46b63275-dc33-4372-b598-3382f25b045c",
+            "order_id": "87171f23-0b01-403f-b443-78877e1b0358",
+            "source_line": "ERP:27833705",
+            "source_sku": "SHHMP-0019",
+            "quantity": "10000",
+            "target_sku": "SHHMP-0019",
+            "target_quantity": "10000",
+            "source_payload": {
+              "origin": "erplain_live_bc",
+              "bcLineId": 27833705
+            },
+            "mapped_sku": null,
+            "source_qty": null,
+            "target_qty": null
+          },
+          {
+            "id": "2084f3ad-0779-4d5e-9df7-b214facc2fa5",
+            "order_id": "87171f23-0b01-403f-b443-78877e1b0358",
+            "source_line": "ERP:27840783",
+            "source_sku": "SHHMP_0018",
+            "quantity": "1000",
+            "target_sku": "SHHMP_0018",
+            "target_quantity": "1000",
+            "source_payload": {
+              "origin": "erplain_live_bc",
+              "bcLineId": 27840783
+            },
+            "mapped_sku": null,
+            "source_qty": null,
+            "target_qty": null
+          }
+        ],
+        "comparison": {
+          "scope": "partial",
+          "expected": [
+            [
+              "SHHMP-0019",
+              10000
+            ],
+            [
+              "SHHMP_0018",
+              1000
+            ]
+          ],
+          "observed": [
+            [
+              "SHHMP-0019",
+              10000
+            ],
+            [
+              "SHHMP_0018",
+              1000
+            ]
+          ],
+          "different": false
+        },
+        "errors": []
+      }
+    },
+    {
+      "id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+      "reference": "Q1936380",
+      "order": {
+        "id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+        "reference": "Q1936380",
+        "channel": "tender",
+        "source_payload": {},
+        "partial_mode": false,
+        "erp_live": {
+          "bc": {
+            "id": 1934336,
+            "label": "C00014877",
+            "total": 110,
+            "status": "active",
+            "currency": {
+              "id": 100237,
+              "label": "EUR"
+            },
+            "dated_at": "2026-10-08",
+            "line_items": [
+              {
+                "id": 27839070,
+                "type": "normal",
+                "label": "Crayon dermographique Pointe standard de 1 mm",
+                "price": 0.36,
+                "on_hand": -5,
+                "variant": {
+                  "id": 642510,
+                  "sku": "TR03",
+                  "track_inventory": true
+                },
+                "location": {
+                  "id": 100934
+                },
+                "quantity": 100,
+                "available": -1305,
+                "tax_amount": 7.2,
+                "shipped_quantity": 0,
+                "reserved_quantity": 0
+              },
+              {
+                "id": 27839071,
+                "type": "normal",
+                "label": "CHAMP DE SOIN LATERAL ADHESIF 90x150cm",
+                "price": 0.7917,
+                "on_hand": 604,
+                "variant": {
+                  "id": 642615,
+                  "sku": "4245504",
+                  "track_inventory": true
+                },
+                "location": {
+                  "id": 100934
+                },
+                "quantity": 50,
+                "available": 604,
+                "tax_amount": 7.92,
+                "shipped_quantity": 0,
+                "reserved_quantity": 0
+              },
+              {
+                "id": 27839220,
+                "type": "normal",
+                "label": "Sonde Rectale CH22, 40cm",
+                "price": 0.1608,
+                "on_hand": -120,
+                "variant": {
+                  "id": 641327,
+                  "sku": "508 22 00 2",
+                  "track_inventory": true
+                },
+                "location": {
+                  "id": 100934
+                },
+                "quantity": 100,
+                "available": -275,
+                "tax_amount": 3.21,
+                "shipped_quantity": 0,
+                "reserved_quantity": 0
+              }
+            ],
+            "update_stock": false,
+            "shipping_orders": {
+              "data": [],
+              "paginatorInfo": {
+                "hasMorePages": false
+              }
+            },
+            "external_reference": "Q1936380"
+          },
+          "phase": "bc_created",
+          "pricing": {
+            "tax": 18.34,
+            "error": null,
+            "total": 110,
+            "source": "tender",
+            "status": "verified",
+            "version": 2,
+            "currency": "EUR",
+            "tax_type": "exclusive",
+            "confirmed": {
+              "tax": 18.33,
+              "total": 110,
+              "authority": "erplain",
+              "sourceTax": 18.34,
+              "sourceTotal": 110,
+              "tolerancePolicy": "lt-0.50-eur-or-lt-5-percent-order-total"
+            },
+            "taxPolicy": "source",
+            "verifiedAt": "2026-10-09T12:52:37.203Z",
+            "sourceLinesTotal": 110
+          },
+          "documentSource": {
+            "lines": [
+              {
+                "sku": "TR03",
+                "lineId": "27839070",
+                "quantity": 100
+              },
+              {
+                "sku": "4245504",
+                "lineId": "27839071",
+                "quantity": 50
+              },
+              {
+                "sku": "508 22 00 2",
+                "lineId": "27839220",
+                "quantity": 100
+              }
+            ],
+            "checkedAt": "2026-10-09T12:57:57.819Z",
+            "stockHolds": [],
+            "allocations": [],
+            "shippingOrders": []
+          },
+          "equivalentItems": [
+            {
+              "price": 0.36,
+              "variant": {
+                "id": "642510"
+              },
+              "location": {
+                "id": "100934"
+              },
+              "quantity": 100
+            },
+            {
+              "price": 0.7917,
+              "variant": {
+                "id": "642615"
+              },
+              "location": {
+                "id": "100934"
+              },
+              "quantity": 50
+            },
+            {
+              "price": 0.1608,
+              "variant": {
+                "id": "641327"
+              },
+              "location": {
+                "id": "100934"
+              },
+              "quantity": 100
+            }
+          ],
+          "status_checked_at": "2026-10-09T13:58:15.974Z",
+          "transientRecovery": {
+            "lastError": null,
+            "lastFailureAt": "2026-10-09T12:52:48.230Z"
+          },
+          "equivalentRefreshedAt": "2026-10-09T21:01:13.112Z",
+          "equivalentOriginalLines": [
+            {
+              "id": "387977d2-50f3-4eb3-9768-0b260d509521",
+              "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+              "quantity": "100",
+              "source_sku": "TR03",
+              "target_sku": "TR03",
+              "source_line": "43",
+              "source_payload": {
+                "qte": "100",
+                "rem": "0",
+                "row": 43,
+                "prix": "0.36",
+                "taxes": "20",
+                "total": "43.2",
+                "client": "",
+                "devise": "",
+                "produits": "MARQUEUR CHIRURGICAL POINTE STANDARD AVEC REGLETTE",
+                "disponible": "",
+                "skuproduit": "TR03",
+                "niveaudeprix": "",
+                "remiseglobale": "0",
+                "datedudocument": "",
+                "datedexpedition": "",
+                "coutsdexpedition": "0",
+                "quantitestotales": "",
+                "referenceexterne": "",
+                "numerodetelephone": "",
+                "gestionnairedecompte": "",
+                "adressedelivraisonnom": "",
+                "adressedelivraisonpays": "",
+                "erplainSourceVariantId": "642510",
+                "adressedefacturationnom": "",
+                "adressedelivraisonville": "",
+                "adressedefacturationpays": "",
+                "erplainCorrectedWeightKg": 0.01,
+                "adressedefacturationville": "",
+                "adressedelivraisonadresse1": "",
+                "adressedelivraisonadresse2": "",
+                "adressedelivraisontelephone": "",
+                "adressedefacturationadresse1": "",
+                "adressedefacturationadresse2": "",
+                "adressedelivraisoncodepostal": "",
+                "adressedefacturationtelephone": "",
+                "adressedefacturationcodepostal": ""
+              },
+              "target_quantity": "100"
+            },
+            {
+              "id": "2a35264d-2cf4-4028-9aaf-d7a8f23c1766",
+              "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+              "quantity": "50",
+              "source_sku": "4245504",
+              "target_sku": "4245504",
+              "source_line": "42",
+              "source_payload": {
+                "qte": "50",
+                "rem": "0",
+                "row": 42,
+                "prix": "0.7916666666666666",
+                "taxes": "20",
+                "total": "47.5",
+                "client": "CH DE ROUBAIX",
+                "devise": "EUR",
+                "produits": "CHAMP 90X150CM AVEC ADHESIF",
+                "disponible": "",
+                "skuproduit": "4245504",
+                "niveaudeprix": "Wholesale price",
+                "remiseglobale": "0",
+                "datedudocument": "08/10/2026",
+                "datedexpedition": "10/10/2026",
+                "coutsdexpedition": "0",
+                "quantitestotales": "250",
+                "referenceexterne": "Q1936380",
+                "numerodetelephone": "0320991304",
+                "gestionnairedecompte": "Appels d'offres",
+                "adressedelivraisonnom": "CH ROUBAIX PHARMACIE CENTRALE",
+                "adressedelivraisonpays": "FR",
+                "erplainSourceVariantId": "642615",
+                "adressedefacturationnom": "CH DE ROUBAIX",
+                "adressedelivraisonville": "ROUBAIX",
+                "adressedefacturationpays": "FR",
+                "erplainCorrectedWeightKg": 0.07,
+                "adressedefacturationville": "ROUBAIX",
+                "adressedelivraisonadresse1": "PARKING BIOMEDICAL 11-17 BOULEVARD LACORDAIRE",
+                "adressedelivraisonadresse2": "",
+                "adressedelivraisontelephone": "0320991304",
+                "adressedefacturationadresse1": "135 RUE DE BARBIEUX",
+                "adressedefacturationadresse2": "",
+                "adressedelivraisoncodepostal": "59100",
+                "adressedefacturationtelephone": "0320991304",
+                "adressedefacturationcodepostal": "59100"
+              },
+              "target_quantity": "50"
+            },
+            {
+              "id": "04f80300-ee3f-4395-8177-98d82e8781e0",
+              "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+              "quantity": "100",
+              "source_sku": "50822002",
+              "target_sku": "50822002",
+              "source_line": "44",
+              "source_payload": {
+                "qte": "100",
+                "rem": "0",
+                "row": 44,
+                "prix": "0.16083333333333336",
+                "taxes": "20",
+                "total": "19.3",
+                "client": "",
+                "devise": "",
+                "produits": "SONDE RECTALE PVC CH22 40CM 2 OEILS",
+                "disponible": "",
+                "skuproduit": "50822002",
+                "niveaudeprix": "",
+                "remiseglobale": "0",
+                "datedudocument": "",
+                "datedexpedition": "",
+                "coutsdexpedition": "0",
+                "quantitestotales": "",
+                "referenceexterne": "",
+                "numerodetelephone": "",
+                "gestionnairedecompte": "",
+                "adressedelivraisonnom": "",
+                "adressedelivraisonpays": "",
+                "erplainSourceVariantId": "2898712",
+                "adressedefacturationnom": "",
+                "adressedelivraisonville": "",
+                "adressedefacturationpays": "",
+                "erplainCorrectedWeightKg": 0.01,
+                "adressedefacturationville": "",
+                "adressedelivraisonadresse1": "",
+                "adressedelivraisonadresse2": "",
+                "adressedelivraisontelephone": "",
+                "adressedefacturationadresse1": "",
+                "adressedefacturationadresse2": "",
+                "adressedelivraisoncodepostal": "",
+                "adressedefacturationtelephone": "",
+                "adressedefacturationcodepostal": ""
+              },
+              "target_quantity": "100"
+            }
+          ],
+          "labelPreparationFingerprint": null
+        }
+      },
+      "lines": [
+        {
+          "id": "e8a01b5d-8310-4b84-9c49-bf8f5295666a",
+          "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+          "source_line": "ERP:27839070",
+          "source_sku": "TR03",
+          "quantity": "100",
+          "target_sku": "TR03",
+          "target_quantity": "100",
+          "source_payload": {},
+          "mapped_sku": null,
+          "source_qty": null,
+          "target_qty": null
+        },
+        {
+          "id": "929ecf47-801f-4423-9566-c66edb659e3b",
+          "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+          "source_line": "ERP:27839071",
+          "source_sku": "4245504",
+          "quantity": "50",
+          "target_sku": "4245504",
+          "target_quantity": "50",
+          "source_payload": {},
+          "mapped_sku": null,
+          "source_qty": null,
+          "target_qty": null
+        },
+        {
+          "id": "e0ff4a65-da2c-4e96-8e69-6b77ed0a6845",
+          "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+          "source_line": "ERP:27839220",
+          "source_sku": "508 22 00 2",
+          "quantity": "100",
+          "target_sku": "508 22 00 2",
+          "target_quantity": "100",
+          "source_payload": {},
+          "mapped_sku": null,
+          "source_qty": null,
+          "target_qty": null
+        }
+      ],
+      "jobs": [
+        {
+          "id": "d814df92-08a2-411f-a4f0-7f873d664fca",
+          "action": "refresh",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T21:00:22.886Z",
+          "updated_at": "2026-10-09T21:00:40.047Z"
+        },
+        {
+          "id": "a108c6a1-8f5b-41de-a8b7-45d04d41b712",
+          "action": "refresh",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T20:59:48.757Z",
+          "updated_at": "2026-10-09T21:00:04.615Z"
+        },
+        {
+          "id": "e7d23caf-b750-4917-bb30-e732941d6c37",
+          "action": "compare-bc",
+          "status": "review",
+          "error": "Produits ou quantités V3 et BC différents : vérifier les unités, conditionnements et documents avant toute reprise",
+          "stage": "BC et BL relus ; rapprochement requis, aucune reprise effectuée",
+          "created_at": "2026-10-09T20:59:11.128Z",
+          "updated_at": "2026-10-09T20:59:13.437Z"
+        },
+        {
+          "id": "d8b2cc34-a669-4c63-9292-2123fcd4ae6b",
+          "action": "refresh",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T12:58:40.216Z",
+          "updated_at": "2026-10-09T12:58:42.738Z"
+        },
+        {
+          "id": "fc131832-e174-4f4c-afc9-9b94950cbc5c",
+          "action": "refresh",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T12:58:09.536Z",
+          "updated_at": "2026-10-09T12:58:16.907Z"
+        },
+        {
+          "id": "b06f2396-6643-4992-8fa6-1b74373d2a56",
+          "action": "refresh",
+          "status": "review",
+          "error": "Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette",
+          "stage": "À vérifier",
+          "created_at": "2026-10-09T12:57:20.985Z",
+          "updated_at": "2026-10-09T12:57:27.233Z"
+        },
+        {
+          "id": "61a9f005-af96-483e-8024-563235b21fa9",
+          "action": "create-product",
+          "status": "review",
+          "error": "BL bloqué — stock insuffisant : TR03 : 100 nécessaires, 0 utilisables, manque 100 ; 50822002 : 100 nécessaires, 0 utilisables, manque 100",
+          "stage": "Erplain à compléter",
+          "created_at": "2026-10-09T12:50:48.927Z",
+          "updated_at": "2026-10-09T12:52:49.010Z"
+        }
+      ],
+      "erp": [
+        {
+          "status": "pending",
+          "error": null,
+          "updated_at": "2026-10-09T21:01:13.111Z"
+        }
+      ],
+      "bc": {
+        "id": 1934336,
+        "label": "C00014877",
+        "external_reference": "Q1936380",
+        "dated_at": "2026-10-08",
+        "status": "active",
+        "total": 110,
+        "currency": {
+          "id": 100237,
+          "label": "EUR"
+        },
+        "update_stock": false,
+        "account_representative": {
+          "id": 100367,
+          "label": "Appels d'offres"
+        },
+        "line_items": [
+          {
+            "id": 27839070,
+            "type": "normal",
+            "label": "Crayon dermographique Pointe standard de 1 mm",
+            "quantity": 100,
+            "price": 0.36,
+            "tax_amount": 7.2,
+            "shipped_quantity": 0,
+            "reserved_quantity": 0,
+            "available": -1305,
+            "on_hand": -5,
+            "location": {
+              "id": 100934
+            },
+            "variant": {
+              "id": 642510,
+              "sku": "TR03",
+              "track_inventory": true
+            }
+          },
+          {
+            "id": 27839071,
+            "type": "normal",
+            "label": "CHAMP DE SOIN LATERAL ADHESIF 90x150cm",
+            "quantity": 50,
+            "price": 0.7917,
+            "tax_amount": 7.92,
+            "shipped_quantity": 0,
+            "reserved_quantity": 0,
+            "available": 604,
+            "on_hand": 604,
+            "location": {
+              "id": 100934
+            },
+            "variant": {
+              "id": 642615,
+              "sku": "4245504",
+              "track_inventory": true
+            }
+          },
+          {
+            "id": 27839220,
+            "type": "normal",
+            "label": "Sonde Rectale CH22, 40cm",
+            "quantity": 100,
+            "price": 0.1608,
+            "tax_amount": 3.21,
+            "shipped_quantity": 0,
+            "reserved_quantity": 0,
+            "available": -275,
+            "on_hand": -120,
+            "location": {
+              "id": 100934
+            },
+            "variant": {
+              "id": 641327,
+              "sku": "508 22 00 2",
+              "track_inventory": true
+            }
+          }
+        ],
+        "shipping_orders": {
+          "data": [],
+          "paginatorInfo": {
+            "hasMorePages": false
+          }
+        }
+      },
+      "diagnostic": {
+        "readOnly": true,
+        "provider": "Erplain",
+        "message": "BC et BL relus ; produits et quantités concordants dans le périmètre comparé",
+        "bc": {
+          "id": 1934336,
+          "label": "C00014877",
+          "external_reference": "Q1936380",
+          "dated_at": "2026-10-08",
+          "status": "active",
+          "total": 110,
+          "currency": {
+            "id": 100237,
+            "label": "EUR"
+          },
+          "update_stock": false,
+          "account_representative": {
+            "id": 100367,
+            "label": "Appels d'offres"
+          },
+          "line_items": [
+            {
+              "id": 27839070,
+              "type": "normal",
+              "label": "Crayon dermographique Pointe standard de 1 mm",
+              "quantity": 100,
+              "price": 0.36,
+              "tax_amount": 7.2,
+              "shipped_quantity": 0,
+              "reserved_quantity": 0,
+              "available": -1305,
+              "on_hand": -5,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 642510,
+                "sku": "TR03",
+                "track_inventory": true
+              }
+            },
+            {
+              "id": 27839071,
+              "type": "normal",
+              "label": "CHAMP DE SOIN LATERAL ADHESIF 90x150cm",
+              "quantity": 50,
+              "price": 0.7917,
+              "tax_amount": 7.92,
+              "shipped_quantity": 0,
+              "reserved_quantity": 0,
+              "available": 604,
+              "on_hand": 604,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 642615,
+                "sku": "4245504",
+                "track_inventory": true
+              }
+            },
+            {
+              "id": 27839220,
+              "type": "normal",
+              "label": "Sonde Rectale CH22, 40cm",
+              "quantity": 100,
+              "price": 0.1608,
+              "tax_amount": 3.21,
+              "shipped_quantity": 0,
+              "reserved_quantity": 0,
+              "available": -275,
+              "on_hand": -120,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 641327,
+                "sku": "508 22 00 2",
+                "track_inventory": true
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        "lines": [
+          {
+            "id": "e8a01b5d-8310-4b84-9c49-bf8f5295666a",
+            "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+            "source_line": "ERP:27839070",
+            "source_sku": "TR03",
+            "quantity": "100",
+            "target_sku": "TR03",
+            "target_quantity": "100",
+            "source_payload": {
+              "origin": "erplain_live_bc",
+              "bcLineId": 27839070
+            },
+            "mapped_sku": null,
+            "source_qty": null,
+            "target_qty": null
+          },
+          {
+            "id": "929ecf47-801f-4423-9566-c66edb659e3b",
+            "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+            "source_line": "ERP:27839071",
+            "source_sku": "4245504",
+            "quantity": "50",
+            "target_sku": "4245504",
+            "target_quantity": "50",
+            "source_payload": {
+              "origin": "erplain_live_bc",
+              "bcLineId": 27839071
+            },
+            "mapped_sku": null,
+            "source_qty": null,
+            "target_qty": null
+          },
+          {
+            "id": "e0ff4a65-da2c-4e96-8e69-6b77ed0a6845",
+            "order_id": "8f2c0847-224a-4b05-b002-736ef0a3c5f6",
+            "source_line": "ERP:27839220",
+            "source_sku": "508 22 00 2",
+            "quantity": "100",
+            "target_sku": "508 22 00 2",
+            "target_quantity": "100",
+            "source_payload": {
+              "origin": "erplain_live_bc",
+              "bcLineId": 27839220
+            },
+            "mapped_sku": null,
+            "source_qty": null,
+            "target_qty": null
+          }
+        ],
+        "comparison": {
+          "scope": "full",
+          "expected": [
+            [
+              "4245504",
+              50
+            ],
+            [
+              "508 22 00 2",
+              100
+            ],
+            [
+              "TR03",
+              100
+            ]
+          ],
+          "observed": [
+            [
+              "4245504",
+              50
+            ],
+            [
+              "508 22 00 2",
+              100
+            ],
+            [
+              "TR03",
+              100
+            ]
+          ],
+          "different": false
+        },
+        "errors": []
+      }
+    },
+    {
+      "id": "d2d59d34-1f5e-460f-beec-8df5bb551196",
+      "reference": "2610813",
+      "order": {
+        "id": "d2d59d34-1f5e-460f-beec-8df5bb551196",
+        "reference": "2610813",
+        "channel": "tender",
+        "source_payload": {},
+        "partial_mode": true,
+        "erp_live": {
+          "bc": {
+            "id": 1934351,
+            "label": "C00014878",
+            "total": 309.12,
+            "status": "active",
+            "currency": {
+              "id": 100237,
+              "label": "EUR"
+            },
+            "dated_at": "2026-10-08",
+            "line_items": [
+              {
+                "id": 27840516,
+                "type": "normal",
+                "label": "FULL-OPTY G19 CM 5, (Boite de 10 pièces)",
+                "price": 25.76,
+                "on_hand": 50,
+                "variant": {
+                  "id": 641797,
+                  "sku": "FLP1915",
+                  "track_inventory": true
+                },
+                "location": {
+                  "id": 100934
+                },
+                "quantity": 10,
+                "available": 50,
+                "tax_amount": 51.52,
+                "shipped_quantity": 0,
+                "reserved_quantity": 0
+              }
+            ],
+            "update_stock": false,
+            "shipping_orders": {
+              "data": [],
+              "paginatorInfo": {
+                "hasMorePages": false
+              }
+            },
+            "external_reference": "2610813",
+            "account_representative": {
+              "id": 100367,
+              "label": "Appels d'offres"
+            }
+          },
+          "phase": "bc_created",
+          "pricing": {
+            "tax": 51.52,
+            "error": "BC · Produits ou quantités des lignes Erplain différents de la source",
+            "total": 309.12,
+            "source": "tender",
+            "status": "blocked",
+            "version": 2,
+            "currency": "EUR",
+            "tax_type": "exclusive",
+            "confirmed": {
+              "tax": 51.52,
+              "total": 309.12,
+              "authority": "erplain",
+              "sourceTax": 51.52,
+              "sourceTotal": 309.12,
+              "tolerancePolicy": "lt-0.50-eur-or-lt-5-percent-order-total"
+            },
+            "taxPolicy": "source",
+            "verifiedAt": "2026-10-09T13:23:30.384Z",
+            "sourceLinesTotal": 309.12
+          },
+          "partialSource": {
+            "lines": [
+              {
+                "sku": "FLP1915",
+                "lineId": "27840516",
+                "quantity": 10
+              }
+            ],
+            "pricing": {
+              "tax": 51.52,
+              "total": 309.12,
+              "currency": "EUR"
+            },
+            "checkedAt": "2026-10-09T21:49:37.861Z",
+            "stockHolds": [],
+            "allocations": [],
+            "allocatedBlIds": []
+          },
+          "documentSource": {
+            "lines": [
+              {
+                "sku": "FLP1915",
+                "lineId": "27840516",
+                "quantity": 10
+              }
+            ],
+            "pricing": {
+              "tax": 51.52,
+              "total": 309.12,
+              "currency": "EUR"
+            },
+            "checkedAt": "2026-10-09T21:49:37.861Z",
+            "stockHolds": [],
+            "allocations": [],
+            "allocatedBlIds": [],
+            "shippingOrders": []
+          },
+          "status_checked_at": "2026-10-09T13:57:57.928Z",
+          "transientRecovery": {
+            "lastError": null,
+            "lastFailureAt": "2026-10-09T13:23:32.379Z"
+          },
+          "labelPreparationFingerprint": null
+        }
+      },
+      "lines": [
+        {
+          "id": "055b98ba-d3ff-4bb8-9851-293911616539",
+          "order_id": "d2d59d34-1f5e-460f-beec-8df5bb551196",
+          "source_line": "40",
+          "source_sku": "FULL-OPTY",
+          "quantity": "10",
+          "target_sku": "FULL-OPTY",
+          "target_quantity": "10",
+          "source_payload": {
+            "erplainSourceVariantId": "2898714"
+          },
+          "mapped_sku": null,
+          "source_qty": null,
+          "target_qty": null
+        }
+      ],
+      "jobs": [
+        {
+          "id": "c8378f5d-c196-4a59-95c2-52a34170a939",
+          "action": "resume-erp",
+          "status": "review",
+          "error": "BC · Produits ou quantités des lignes Erplain différents de la source",
+          "stage": "Erplain à compléter",
+          "created_at": "2026-10-09T13:23:19.173Z",
+          "updated_at": "2026-10-09T13:23:32.517Z"
+        },
+        {
+          "id": "cfa750ea-3c93-4381-bc61-923337d2ebc0",
+          "action": "create-product",
+          "status": "review",
+          "error": "BL bloqué — stock insuffisant : FULL-OPTY : 10 nécessaires, 0 utilisables, manque 10",
+          "stage": "Erplain à compléter",
+          "created_at": "2026-10-09T13:00:29.589Z",
+          "updated_at": "2026-10-09T13:01:15.713Z"
+        },
+        {
+          "id": "ef7f8861-84f7-4630-91b9-b0e2a96471b8",
+          "action": "check-sku",
+          "status": "complete",
+          "error": null,
+          "stage": "Terminé",
+          "created_at": "2026-10-09T13:00:13.982Z",
+          "updated_at": "2026-10-09T13:00:17.077Z"
+        }
+      ],
+      "erp": [
+        {
+          "status": "partial",
+          "error": null,
+          "updated_at": "2026-10-09T13:23:32.381Z"
+        }
+      ],
+      "bc": {
+        "id": 1934351,
+        "label": "C00014878",
+        "external_reference": "2610813",
+        "dated_at": "2026-10-08",
+        "status": "active",
+        "total": 309.12,
+        "currency": {
+          "id": 100237,
+          "label": "EUR"
+        },
+        "update_stock": false,
+        "account_representative": {
+          "id": 100367,
+          "label": "Appels d'offres"
+        },
+        "line_items": [
+          {
+            "id": 27840516,
+            "type": "normal",
+            "label": "FULL-OPTY G19 CM 5, (Boite de 10 pièces)",
+            "quantity": 10,
+            "price": 25.76,
+            "tax_amount": 51.52,
+            "shipped_quantity": 0,
+            "reserved_quantity": 0,
+            "available": 40,
+            "on_hand": 40,
+            "location": {
+              "id": 100934
+            },
+            "variant": {
+              "id": 641797,
+              "sku": "FLP1915",
+              "track_inventory": true
+            }
+          }
+        ],
+        "shipping_orders": {
+          "data": [
+            {
+              "id": 1904435,
+              "label": "SHO00744037",
+              "external_reference": "2610813",
+              "status": "ready_to_ship",
+              "update_stock": false,
+              "line_items": [
+                {
+                  "id": 27849059,
+                  "type": "normal",
+                  "parent_id": 27840516,
+                  "quantity": 10,
+                  "price": 25.76,
+                  "tax_amount": null,
+                  "variant": {
+                    "id": 641797,
+                    "sku": "FLP1915"
+                  },
+                  "location": {
+                    "id": 100934
+                  }
+                }
+              ]
+            }
+          ],
+          "paginatorInfo": {
+            "hasMorePages": false
+          }
+        }
+      },
+      "diagnostic": {
+        "readOnly": true,
+        "provider": "Erplain",
+        "message": "BC et BL relus ; rapprochement requis, aucune reprise effectuée",
+        "bc": {
+          "id": 1934351,
+          "label": "C00014878",
+          "external_reference": "2610813",
+          "dated_at": "2026-10-08",
+          "status": "active",
+          "total": 309.12,
+          "currency": {
+            "id": 100237,
+            "label": "EUR"
+          },
+          "update_stock": false,
+          "account_representative": {
+            "id": 100367,
+            "label": "Appels d'offres"
+          },
+          "line_items": [
+            {
+              "id": 27840516,
+              "type": "normal",
+              "label": "FULL-OPTY G19 CM 5, (Boite de 10 pièces)",
+              "quantity": 10,
+              "price": 25.76,
+              "tax_amount": 51.52,
+              "shipped_quantity": 0,
+              "reserved_quantity": 0,
+              "available": 40,
+              "on_hand": 40,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 641797,
+                "sku": "FLP1915",
+                "track_inventory": true
+              }
+            }
+          ],
+          "shipping_orders": {
+            "data": [
+              {
+                "id": 1904435,
+                "label": "SHO00744037",
+                "external_reference": "2610813",
+                "status": "ready_to_ship",
+                "update_stock": false,
+                "line_items": [
+                  {
+                    "id": 27849059,
+                    "type": "normal",
+                    "parent_id": 27840516,
+                    "quantity": 10,
+                    "price": 25.76,
+                    "tax_amount": null,
+                    "variant": {
+                      "id": 641797,
+                      "sku": "FLP1915"
+                    },
+                    "location": {
+                      "id": 100934
+                    }
+                  }
+                ]
+              }
+            ],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        },
+        "lines": [
+          {
+            "id": "055b98ba-d3ff-4bb8-9851-293911616539",
+            "order_id": "d2d59d34-1f5e-460f-beec-8df5bb551196",
+            "source_line": "40",
+            "source_sku": "FULL-OPTY",
+            "quantity": "10",
+            "target_sku": "FULL-OPTY",
+            "target_quantity": "10",
+            "source_payload": {
+              "qte": "10",
+              "rem": "0",
+              "row": 40,
+              "prix": "25.76",
+              "taxes": "20",
+              "total": "309.12",
+              "client": "CHI DE CORNOUAILLE - SITE QUIMPER",
+              "devise": "EUR",
+              "produits": "AIGUILLE PONCTION BIOPSIE TRANSPARIETALE 19G TCBN",
+              "disponible": "",
+              "skuproduit": "FULL-OPTY",
+              "niveaudeprix": "Wholesale price",
+              "remiseglobale": "0",
+              "datedudocument": "08/10/2026",
+              "datedexpedition": "08/10/2026",
+              "coutsdexpedition": "0",
+              "quantitestotales": "10",
+              "referenceexterne": "2610813",
+              "numerodetelephone": "0298526124",
+              "gestionnairedecompte": "Appels d'offres",
+              "adressedelivraisonnom": "CHI CORNOUAILLE - SITE QUIMPER PHARMACIE",
+              "adressedelivraisonpays": "FR",
+              "erplainSourceVariantId": "2898714",
+              "adressedefacturationnom": "CHI DE CORNOUAILLE",
+              "adressedelivraisonville": "QUIMPER",
+              "adressedefacturationpays": "FR",
+              "erplainCorrectedWeightKg": 0.01,
+              "adressedefacturationville": "QUIMPER",
+              "adressedelivraisonadresse1": "RUE EMILE ZOLA",
+              "adressedelivraisonadresse2": "",
+              "adressedelivraisontelephone": "0298526124",
+              "adressedefacturationadresse1": "14 BIS AVENUE YVES THEPOT",
+              "adressedefacturationadresse2": "",
+              "adressedelivraisoncodepostal": "29107",
+              "adressedefacturationtelephone": "0298526124",
+              "adressedefacturationcodepostal": "29107"
+            },
+            "mapped_sku": null,
+            "source_qty": null,
+            "target_qty": null
+          }
+        ],
+        "comparison": {
+          "scope": "partial",
+          "expected": [
+            [
+              "FULL-OPTY",
+              10
+            ]
+          ],
+          "observed": [
+            [
+              "FLP1915",
+              10
+            ]
+          ],
+          "different": true
+        },
+        "errors": [
+          {
+            "code": "physical_difference",
+            "message": "Écart entre la commande partielle et le BC complet : vérifier le périmètre des livraisons et les unités"
+          }
+        ]
+      }
+    }
+  ]
+}
