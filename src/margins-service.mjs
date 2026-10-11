@@ -85,6 +85,6 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
  }
  return {source:{url:snapshot.url,version:snapshot.version,capturedAt:snapshot.capturedAt},calculatedAt:new Date().toISOString(),rows:output};
  }
- return {async get(){if(cache&&Date.now()-last<30000)return cache;if(!inflight)inflight=calculate().then(r=>{cache=r;last=Date.now();return r;}).finally(()=>inflight=null);return inflight;}};
+ return {async get({fresh=false}={}){if(fresh)return calculate();if(cache&&Date.now()-last<30000)return cache;if(!inflight)inflight=calculate().then(r=>{cache=r;last=Date.now();return r;}).finally(()=>inflight=null);return inflight;}};
 }
 

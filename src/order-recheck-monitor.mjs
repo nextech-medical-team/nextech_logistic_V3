@@ -1,3 +1,4 @@
+import {initializeTemuAutomaticPurchase} from './temu-automatic-purchase.mjs';
 import {reconcilePreparationFromReads} from './preparation-read-reconciliation.mjs';
 import {initializeRecoverySweeps,requestRecoverySweeps,currentHoldDiagnostic,externalCoverage} from './preparation-recheck-policy.mjs';
 import {currentMappingFingerprint} from './current-mapping-line.mjs';
@@ -16,18 +17,20 @@ export function localObservationPatch(state){const patch={};for(const key of ['l
 export function monitoringObservation(order,previous={},now=Date.now()){
  const o=projectCurrentDiagnostics(structuredClone(order)),erp=o.erp_live||{};
  const issue=oldFinanceErrors.includes(o.issue)&&o.erp_live_job?.error?o.erp_live_job.error:o.issue;
- let reason=suspensionBlock(o)||issue||o.erp_live_job?.error||o.resolution_error||currentResolutionState(o.resolution_actions).reviews.map(j=>j.error).filter(Boolean).join(' ; ')||o.carrier_error||(o.resolution_pending_resume?(previous.externalReadIssue||currentHoldDiagnostic(o).label):null)||(o.label_status==='blocked'||o.erp_status==='blocked'?'Préparation bloquée : vérification à reprendre':null);
+ let reason=suspensionBlock(o)||issue||o.erp_live_job?.error||o.resolution_error||currentResolutionState(o.resolution_actions).reviews.map(j=>j.error).filter(Boolean).join(' ; ')||o.carrier_error||(o.resolution_pending_resume?(previous.externalReadIssue||currentHoldDiagnostic(o).label):null)||(o.label_status==='blocked'||o.erp_status==='blocked'?currentHoldDiagnostic(o).label:null);
+ if(!suspensionBlock(o)&&((!reason&&o.temu_job?.error)||/^Pr[ée]paration bloqu[ée]e(?:\s*:\s*v[ée]rification [àa] reprendre| à vérifier)?$/i.test(reason||'')))reason=currentHoldDiagnostic(o).label;
  const preview=currentResolutionState(o.resolution_actions).pendingReplacement||currentReplacementPreview(o.latest_resolution);if(preview&&!suspensionBlock(o)&&(!reason||/Reprise historique|Reprise de préparation/.test(reason)||o.resolution_pending_resume&&!issue&&!o.erp_live_job?.error&&!o.resolution_error&&!o.carrier_error&&!currentResolutionState(o.resolution_actions).reviews.length))reason='Remplacement à confirmer';
  // Supplier reads and timestamps are deliberately absent: no artificial progress.
  const progress=hash([erp.bc?.id,erp.bl?.id,erp.bl?.status,erp.stockDocument?.id,erp.verifiedAt?true:false,o.suspension?.version,o.mapping_lines]);
  const lastProgress=previous.progress===progress&&Number.isFinite(Date.parse(previous.lastProgress))?previous.lastProgress:!previous.progress&&Number.isFinite(Date.parse(o.blocked_since))?new Date(o.blocked_since).toISOString():new Date(now).toISOString();
  const action=reason==='Remplacement à confirmer'?'Confirmer le remplacement ou reprendre explicitement le BC actuel':suspensionBlock(o)?'Attendre une décision explicite de réactivation dans V3':erp.mappingAlignmentAttempt?.status==='uncertain'?'Rapprocher le résultat de la modification du BC dans Erplain':/mapping/i.test(reason||'')?'Compléter le mapping applicable puis aligner le BC':/poids/i.test(reason||'')?'Vérifier le poids du produit puis reprendre la préparation':/SKU.*introuvable|produit.*absent/i.test(reason||'')?'Vérifier ou compléter la fiche produit Erplain du SKU concerné':/stock insuffisant/i.test(reason||'')?'Vérifier le stock disponible ou choisir un remplacement autorisé':/historique|BL non créé/i.test(reason||'')?'Rapprocher le BC et son débit existant, puis créer le BL manquant':/codes TVA/i.test(reason||'')?'Rapprocher les taux et codes TVA du BC avec la source avant de reprendre le BL':/prix|TVA|totaux/i.test(reason||'')?'Corriger les montants source puis recontrôler le BC':reason?'Recontrôler les données et reprendre les étapes autorisées dès validation':'Aucune action attendue';
  const coverage=externalCoverage({attemptedAt:previous.firstExternalDueAt||previous.lastExternalAttempt||previous.lastCheck,checkedAt:previous.lastExternalCheck,now});
- const hold=o.resolution_pending_resume?currentHoldDiagnostic(o):null;
+ const hold=o.resolution_pending_resume||reason===currentHoldDiagnostic(o).label?currentHoldDiagnostic(o):null;
  const alert=!!reason&&(now-Date.parse(lastProgress)>=recheckCadence.alert||coverage.overdue);
  return {...previous,firstExternalDueAt:previous.firstExternalDueAt||(reason?new Date(now).toISOString():null),lastCheck:new Date(now).toISOString(),nextCheck:new Date(now+recheckCadence.local).toISOString(),result:reason||'Aucun blocage constaté',holdCode:hold?.code||null,externalOverdue:!!reason&&coverage.overdue,nextStep:hold&&reason===hold.label?hold.nextStep:action,blocked:!!reason,followUp:!!reason||previous.followUp===true||previous.blocked===true,progress,lastProgress,alert,alertSince:alert?(previous.alertSince||new Date(now).toISOString()):null};
 }
 export async function initializeOrderRecheckMonitor(db,{afterPublication=false}={}){
+ await initializeTemuAutomaticPurchase(db);
  await db.exec(`CREATE TABLE IF NOT EXISTS order_recheck_monitor(order_id text PRIMARY KEY REFERENCES orders(id),state jsonb NOT NULL DEFAULT '{}',next_check timestamptz NOT NULL DEFAULT now(),next_external timestamptz NOT NULL DEFAULT now(),requested bigint NOT NULL DEFAULT 1,checked bigint NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS order_recheck_resources(resource text PRIMARY KEY,next_check timestamptz NOT NULL,result jsonb NOT NULL);
  CREATE INDEX IF NOT EXISTS order_recheck_due ON order_recheck_monitor(next_check);
@@ -54,6 +57,7 @@ export function orderRecheckMonitor(db,api,{enabled=()=>true,canResume=()=>true,
    await requestRecoverySweeps(db);
    const due=(await db.query(`SELECT o.*,m.state monitoring_previous,m.requested monitor_version,e.status erp_job_status,e.error erp_job_error,e.state_since blocked_since,c.error carrier_error,jsonb_build_object('status',c.status,'error',c.error) carrier_job,
     (SELECT jsonb_build_object('status',t.status,'error',t.error) FROM temu_label_jobs t WHERE t.reference=o.reference) temu_job,
+    (SELECT jsonb_build_object('result',a.result,'checkedAt',a.checked_at) FROM temu_automatic_purchase_checks a WHERE a.reference=o.reference) temu_auto_purchase,
     (SELECT jsonb_agg(to_jsonb(current_actions) ORDER BY created_at DESC,id DESC) FROM (SELECT DISTINCT ON(action) action,status,error,result,created_at,id FROM resolution_jobs WHERE order_id=o.id ORDER BY action,created_at DESC,id DESC) current_actions) resolution_actions,
     (SELECT CASE WHEN status='review' THEN error ELSE null END FROM resolution_jobs WHERE order_id=o.id ORDER BY created_at DESC,id DESC LIMIT 1) resolution_error,
     (SELECT jsonb_agg(jsonb_build_object('source',l.source_sku,'sku',CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_sku ELSE coalesce(p.target_sku,l.target_sku,l.source_sku) END,'quantity',CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_quantity WHEN p.source_qty>0 THEN round(l.quantity*p.target_qty/p.source_qty,6) ELSE coalesce(l.target_quantity,l.quantity) END) ORDER BY l.id) FROM lines l LEFT JOIN mappings p ON p.channel=o.channel AND p.source_sku=l.source_sku WHERE l.order_id=o.id) mapping_lines
