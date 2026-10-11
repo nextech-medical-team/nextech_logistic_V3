@@ -38,7 +38,7 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
  const jobs=(await db.query("SELECT id,action,status,error,result,created_at,updated_at FROM resolution_jobs WHERE order_id=$1 AND status='review'",[id])).rows;
  const completedRows=(await db.query("SELECT id,action,status,error,result,created_at,updated_at FROM resolution_jobs WHERE order_id=$1 AND status='complete' ORDER BY created_at DESC,id DESC",[id])).rows;
  const completed=completedRows.find(j=>['resume','resume-erp','replace-equivalent'].includes(j.action)&&!j.error&&!j.result?.partialRemainder);
- const laterDecision=completed&&completedRows.some(j=>Date.parse(j.created_at)>Date.parse(completed.created_at)&&['choose-carrier','address','mapping','weight','select-product','create-product','activate-product','equivalent-preview','manual-temu-pricing'].includes(j.action));
+
  const erp=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[id])).rows[0];
  if(!stockIncidentOnly(initial.issue)&&!stockIncidentOnly(erp?.error)&&!jobs.some(j=>stockIncidentOnly(j.error)))return {notApplicable:true};
  const mapping=await currentMappingFingerprint(db,initial),fingerprint=await shipmentFingerprint(db,initial);
@@ -69,15 +69,11 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
    for(const j of retired)await tx.query("UPDATE resolution_jobs SET error=null,result=(CASE WHEN jsonb_typeof(result)='object' THEN result ELSE jsonb_build_object('previousResult',result) END)||$2::jsonb,updated_at=now() WHERE id=$1 AND error=$3",[j.id,JSON.stringify({stockIncidentRecheck:{...proof,previousError:j.error}}),j.error]);
    if(!proof.preparationRequired&&stockIncidentOnly(e?.error))await tx.query('UPDATE erp_live_jobs SET error=null,updated_at=now() WHERE order_id=$1 AND error=$2',[id,e.error]);
    const previousError=o.erp_live?.stockIncidentRecheck?.previousError||o.issue;
-   const others=retained.length>0||laterDecision||current.some(j=>j.action==='replace-equivalent'&&!j.error&&Date.parse(j.created_at)>Date.parse(completed?.created_at||0))||(e?.error&&!stockIncidentOnly(e.error));
-   let ready=false;
-   if(!proof.preparationRequired&&!others&&e?.status==='complete'&&o.erp_live?.phase==='bl_ready'&&o.erp_live.labelPreparationFingerprint===fingerprint){
-    if(o.channel==='temu'){const j=(await tx.query('SELECT status,error,packages FROM temu_label_jobs WHERE reference=$1 FOR SHARE',[o.reference])).rows[0],docs=(await tx.query('SELECT package,octet_length(pdf) bytes FROM temu_label_documents WHERE reference=$1 FOR SHARE',[o.reference])).rows;ready=j?.status==='complete'&&!j.error&&Array.isArray(j.packages)&&j.packages.length>0&&j.packages.every(p=>docs.some(d=>d.package===p&&Number(d.bytes)>0));}
-    else{const j=(await tx.query('SELECT status,error,environment,tracking,stock_override FROM carrier_jobs WHERE order_id=$1 FOR SHARE',[id])).rows[0],docs=(await tx.query('SELECT document_index,octet_length(pdf) bytes FROM carrier_documents WHERE order_id=$1 FOR SHARE',[id])).rows;ready=j?.status==='ready'&&!j.error&&j.environment==='production'&&!j.stock_override&&Array.isArray(j.tracking)&&j.tracking.length>0&&j.tracking.every((t,i)=>t&&docs.some(d=>Number(d.document_index)===i&&Number(d.bytes)>0));}
-   }
    const trackedIssue=stockIncidentOnly(o.erp_live?.stockIncidentRecheck?.previousError)&&o.issue===o.erp_live.stockIncidentRecheck.currentError;
    const issue=(stockIncidentOnly(o.issue)||trackedIssue)&&!retained.some(j=>stockIncidentOnly(j.error))?(proof.preparationRequired?'Préparation à reprendre : stock disponible':null):o.issue;
-   await tx.query("UPDATE orders SET issue=$2,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$3::jsonb,true),label_status=CASE WHEN $4 AND issue IS NOT DISTINCT FROM $5 THEN 'production_ready' ELSE label_status END,resolution_pending_resume=CASE WHEN $4 AND issue IS NOT DISTINCT FROM $5 THEN false ELSE resolution_pending_resume END WHERE id=$1",[id,issue,JSON.stringify({...proof,previousError,currentIssue:issue}),ready&&!others&&(!o.issue||stockIncidentOnly(o.issue)||trackedIssue),o.issue]);
+   // Incident closure never grants preparation readiness; the existing full
+   // reconciliation must still validate addresses, pricing, labels and holds.
+   await tx.query("UPDATE orders SET issue=$2,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$3::jsonb,true) WHERE id=$1",[id,issue,JSON.stringify({...proof,previousError,currentIssue:issue})]);
    await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:stock-incident-recheck','diagnostic.stock_incident_resolved',$1)",[JSON.stringify({orderId:id,proof,previousError,retiredJobs:retired.map(j=>({id:j.id,error:j.error})),labelsPreserved:true,businessCompleted:false})]);
   }else {const old=o.erp_live?.stockIncidentRecheck,tracked=stockIncidentOnly(o.issue)||(stockIncidentOnly(old?.previousError)&&o.issue===old.currentError);proof.previousError=old?.previousError||o.issue;await tx.query("UPDATE orders SET issue=CASE WHEN $3 THEN $4 ELSE issue END,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(proof),tracked,proof.currentError]);}
   return proof;
