@@ -141,7 +141,7 @@ body{font-size:13px}main input,main select,main button,dialog input,dialog selec
 
 #import-select-new.import-selection-active{background:#176e5d;color:white;border-color:#176e5d;font-weight:700;box-shadow:0 0 0 3px #bce3d8}#import-select-all{background:white;color:#173e46}.import-warning-dialog{max-width:620px;width:90vw}.import-warning-dialog label{display:block;margin:14px 0}.import-warning-dialog input{display:block;width:100%;margin-top:6px}
 
-/* Per-order queue information; no fixed height or clipped diagnostics. */
+/* Per-order queue information: uniform preview, full details on request. */
 #view-orders #order-rows .order-processing{margin-top:7px;padding:6px;border-left:2px solid #7b9ab6;color:#26445a;text-align:left;font-size:10px;line-height:1.4;overflow-wrap:break-word}
 #view-orders #order-rows .processing-stage{font-weight:600}
 #view-orders #order-rows .processing-elapsed{color:#627680;font-variant-numeric:tabular-nums}
@@ -201,3 +201,9 @@ body{font-size:13px}main input,main select,main button,dialog input,dialog selec
 /* Keep partial shipment quantities horizontally scrollable within their table. */
 .partial-quantity-dialog #partial-content{min-width:0;max-width:100%}
 .partial-quantity-dialog .partial-table-scroll{width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
+
+#view-orders #order-rows .processing-content{height:8.4em;overflow:hidden;position:relative}
+#view-orders #order-rows .order-processing:not(.processing-expanded) .processing-content::after{content:"";position:absolute;bottom:0;left:0;right:0;height:1.4em;background:linear-gradient(transparent,#fff);pointer-events:none}
+#view-orders #order-rows .processing-expanded .processing-content{height:auto;overflow:visible}
+#view-orders #order-rows .processing-details-toggle{display:block;width:100%;min-height:32px;margin-top:5px;padding:4px 6px;border:1px solid #b8cad8;border-radius:5px;background:#fff;color:#173b65;font:inherit;text-align:left;white-space:normal;cursor:pointer}
+#view-orders #order-rows .processing-details-toggle:focus-visible{outline:2px solid #173b65;outline-offset:2px}

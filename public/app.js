@@ -7,9 +7,13 @@ function logisticsReadHtml(o){
 }
 function platformStatusHtml(o){
  const v=o.platform_status||{},raw=v.status;
- const text=v.channel==='shopify'?({unfulfilled:'Non expédiée',fulfilled:'Expédiée',partial:'Partiellement expédiée',partially_fulfilled:'Partiellement expédiée'})[raw]||raw:v.channel==='temu'?(raw?'Statut TEMU : '+raw:null):raw;
- return '<span class="badge" title="Information du canal de vente, sans effet sur la préparation">'+esc(text||'Statut non renseigné')+esc(v.cancelled?' · Annulée':'')+esc(v.financialStatus==='refunded'?' · Remboursée':'')+'</span><small>'+esc(v.observedAt?'Lu le '+new Date(v.observedAt).toLocaleString('fr-FR'):'Date de lecture non disponible')+'</small>'+(v.error?'<small>Lecture indisponible · dernière observation conservée</small>':'');
+ const temuLabels={'1':'En attente','2':'À expédier','3':'Annulée','4':'Expédiée','5':'Reçue','41':'Partiellement expédiée','51':'Partiellement reçue'};
+ const isTemu=v.channel==='temu',hasCode=raw!==null&&raw!==undefined&&String(raw).trim()!=='';
+ const text=v.channel==='shopify'?({unfulfilled:'Non expédiée',fulfilled:'Expédiée',partial:'Partiellement expédiée',partially_fulfilled:'Partiellement expédiée'})[raw]||raw:isTemu?(hasCode?'Code '+raw:'Statut TEMU indisponible'):raw;
+ const message=isTemu&&hasCode?'<br><span data-temu-status-label>'+esc(temuLabels[String(raw)]||'Statut non reconnu')+'</span>':'';
+ return '<span class="badge" title="Information du canal de vente, sans effet sur la préparation. Le suivi logistique indique l’évolution physique du colis.">'+esc(text||'Statut non renseigné')+message+esc(!isTemu&&v.cancelled?' · Annulée':'')+esc(v.financialStatus==='refunded'?' · Remboursée':'')+'</span><small>'+esc(v.observedAt?'Lu le '+new Date(v.observedAt).toLocaleString('fr-FR'):'Date de lecture non disponible')+'</small>'+(v.error?'<small>Lecture indisponible · dernière observation conservée</small>':'');
 }
+
 function erplainTrackingHtml(o){
  const bls=o.erplain_tracking_bls||[];
  return bls.length?bls.map(b=>'<span class="erp-status">'+esc(b.label||b.id||'BL')+' · '+esc(erpStatusText(b.status))+'</span>').join('<br>'):'<span class="badge">BL non créé</span>';
