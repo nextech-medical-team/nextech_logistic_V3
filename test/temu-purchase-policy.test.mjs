@@ -6,7 +6,7 @@ const now=Date.now(),reference='PO-069-123456789';
 const offer=(id,name,amount)=>({channelId:id,shipCompanyId:id,shipCompanyName:name,estimatedAmount:String(amount),estimatedCurrencyCode:'EUR'});
 const detail={parentOrderMap:{parentOrderSn:reference,parentOrderStatus:2,expectShipLatestTime:Math.floor(now/1000)+86400},orderList:[{orderSn:'line-1',quantity:1}]};
 function harness(offers){let job=null,bought=0,claimed=0;return {get job(){return job;},get bought(){return bought;},get claimed(){return claimed;},db:{async query(sql,args){
- if(sql.startsWith('SELECT suspension'))return {rows:[{suspension:{}}]};
+ if(sql.startsWith('SELECT * FROM orders'))return {rows:[{suspension:{}}]};
  if(sql.startsWith('SELECT channel'))return {rows:[{channel:'temu',source_payload:{}}]};
  if(sql.startsWith('SELECT * FROM temu_label_jobs'))return {rows:job?[job]:[]};
  if(sql.startsWith('INSERT INTO temu_label_jobs(reference,status,plan)')){job={reference,status:'ready',plan:JSON.parse(args[1]),packages:[]};return {rows:[]};}
@@ -64,6 +64,10 @@ test('atomic order guard refuses a changed command without provider purchase',as
 
 test('quote never understates the known order weight when recomputing transport and margin',async()=>{
  const h=harness([offer(1,'GLS',2)]),read=h.db.query;
- h.db.query=async(sql,args)=>sql.startsWith('SELECT suspension')?{rows:[{suspension:{},weight_kg:'1.2345'}]}:read(sql,args);
+ h.db.query=async(sql,args)=>sql.startsWith('SELECT * FROM orders')?{rows:[{suspension:{},weight_kg:'1.2345'}]}:read(sql,args);
  const p=await temuShipping(h.db,h.api).prepare(reference);assert.equal(p.request.sendRequestList[0].weight,'1.235');
+});
+
+test('Filled BC quotes use saved lines and recheck only live cancellation/refund',async()=>{
+ for(const state of ['active','cancelled','refunded']){const h=harness([offer(1,'GLS',2)]),saved={...detail,parentOrderMap:{...detail.parentOrderMap,parentOrderTime:1700000000}},order={channel:'temu',reference,erp_live:{bc:{id:'BC'}},source_payload:{temuOrderDetail:saved},suspension:{}};const query=h.db.query;h.db.query=async(s,a)=>s.startsWith('SELECT * FROM orders')?{rows:[order]}:query(s,a);const read=h.api.read,calls=[];h.api.read=async(type,...a)=>{calls.push(type);if(type==='bg.order.detail.v2.get')throw Error('Forbidden content reread');if(type==='bg.order.list.v2.get')return {totalItemNum:1,pageItems:[{parentOrderMap:{...saved.parentOrderMap,parentOrderStatus:state==='cancelled'?3:2}}]};if(type==='bg.order.amount.query')return {parentOrderMap:{parentOrderSn:reference,refundsTotal:{amount:state==='refunded'?100:0,currency:'EUR'},customerPaid:{amount:100,currency:'EUR'}}};return read(type,...a);};const shipping=temuShipping(h.db,h.api);if(state==='active')assert.equal((await shipping.prepare(reference)).selected,1);else await assert.rejects(shipping.prepare(reference),state==='cancelled'?/annulée/:/remboursée/);assert.equal(h.bought,0);assert.ok(!calls.includes('bg.order.detail.v2.get'));}
 });

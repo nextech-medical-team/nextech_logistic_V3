@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 import {createHash,randomUUID} from 'node:crypto';import {open,rename,unlink,readFile,stat,realpath} from 'node:fs/promises';import {dirname} from 'node:path';import {loadEnvFile} from 'node:process';import {fileURLToPath} from 'node:url';import {spawn} from 'node:child_process';
 import {shopifyCollector,loadShopifyConfig} from './marketplace-collection.mjs';import {normalizeShopifyOrders} from './marketplace-local-import.mjs';
 import {readShopifyRelay} from './shopify-relay-source.mjs';
@@ -24,6 +25,7 @@ export async function runRelaySourceMaintenance({db,collect,nearestProof=async()
  const lease=await pauseProbe();if(lease?.paused!==true||!lease.epoch)throw Error('Arrêt de tous les écrivains requis');
  const orders=(await db.query("SELECT * FROM orders WHERE NOT archived AND channel='shopify' AND label_status <> 'cancelled' ORDER BY id")).rows.filter(o=>o.source_payload?.shopifyDeliveryMode==='relay'||diagnostic.test(o.delivery_mode||o.carrier_service||'')||o.source_payload?.shipping_lines?.some(l=>diagnostic.test(l.title||l.code||'')));
  for(const order of orders){
+  if(marketplaceContentFrozen(order)){report.rows.push({orderId:order.id,reference:order.reference,status:'EXCLUDED',reason:'BC rempli · Contenu plateforme figé'});continue;}
   let row={orderId:order.id,reference:order.reference};
   if(order.suspension?.active||order.suspension?.erplainCancellation){row.status='EXCLUDED';row.reason='Suspension humaine conservée';report.rows.push(row);continue;}
   try{

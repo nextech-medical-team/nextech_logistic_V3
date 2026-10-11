@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
 import {chooseDocumentStockVariant} from './document-stock-choice.mjs';
 import {proveShopifyStatusOnly} from './shopify-status-only-proof.mjs';
@@ -68,7 +69,7 @@ export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,histor
 function totals(lines){const sums=new Map();for(const l of lines)sums.set(l.sku,(sums.get(l.sku)||0)+Number(l.quantity));return JSON.stringify([...sums].sort());}
 export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},directory,shopifyReader,deferResume=false}={}){
  validateSubstitution(b,apply);
- if(o.archived||o.erp_live?.bl?.id||o.erp_live?.stockDocument||/^(creating|publishing)/.test(o.erp_live?.phase||'')||(o.source_payload?.marketplacePendingCorrection&&!(o.channel==='shopify'&&o.partial_mode===true))||['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande livrée, fractionnée ou modifiée : rapprochement requis avant remplacement');
+ if(o.archived||o.erp_live?.bl?.id||o.erp_live?.stockDocument||/^(creating|publishing)/.test(o.erp_live?.phase||'')||(!marketplaceContentFrozen(o)&&o.source_payload?.marketplacePendingCorrection&&!(o.channel==='shopify'&&o.partial_mode===true))||['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande livrée, fractionnée ou modifiée : rapprochement requis avant remplacement');
  if(!o.erp_live?.bc?.id)throw Error('Créer ou retrouver le BC LIVE avant de remplacer ses produits');
  if(o.partial_mode&&b.scope!=='order')throw Error('Remplacement du reliquat limité à cette commande');
  const partials=o.partial_mode?(await db.query('SELECT id,status,selection,bl,error FROM partial_deliveries WHERE order_id=$1',[o.id])).rows:null;
@@ -109,7 +110,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  if(historicalStock)plan.historicalStockProof=historicalStock.proof;
  }
  const mappingLines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty AS mapping_source_qty,m.target_qty AS mapping_target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
- if(o.source_payload?.marketplacePendingCorrection||(o.channel==='shopify'&&o.partial_mode&&o.source_payload?.id)){
+ if(!marketplaceContentFrozen(o)&&(o.source_payload?.marketplacePendingCorrection||(o.channel==='shopify'&&o.partial_mode&&o.source_payload?.id))){
   if(!plan.partialProof)throw Error('Modification marketplace : rapprochement requis');
   const read=shopifyReader||(directory?async id=>{const config=await loadShopifyConfig(directory);if(String(config.SHOPIFY_STORE_DOMAIN||'').toLowerCase()!==String(o.source_payload.sourceShop||'').toLowerCase())throw Error('Shopify · Boutique différente de la commande');return shopifyCollector(config).order(id,{remaining:true});}:null);
   if(!read)throw Error('Shopify · Lecture du reliquat indisponible');

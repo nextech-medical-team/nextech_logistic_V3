@@ -51,7 +51,7 @@ export function temuCatchupWorker(db,loadSources,{shouldStop=()=>false,now=()=>D
    const matches=sources.filter(s=>s.shop===mall);if(!mall||matches.length!==1||typeof matches[0].refreshSource!=='function')throw Object.assign(Error('TEMU · Boutique source indisponible pour le rattrapage'),{code:'TEMU_SHOP_UNAVAILABLE',field:'shop'});
    const known=(await db.query('SELECT packages FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]?.packages||[];
    const onProgress=async()=>{if(shouldStop())throw Object.assign(Error('Arrêt demandé'),{code:'TEMU_STOPPING'});const r=await db.query("UPDATE temu_source_catchup SET lease_until=now()+interval '5 minutes' WHERE order_id=$1 AND lease_token=$2 AND lease_until>now() RETURNING order_id",[order.id,token]);if(!r.rows.length)throw Object.assign(Error('TEMU · Réservation perdue'),{code:'TEMU_LEASE_LOST'});};
-   const observation=await matches[0].refreshSource(order.source_reference||order.reference,{shouldStop,onProgress,knownPackages:known});
+   const observation=await matches[0].refreshSource(order.source_reference||order.reference,{shouldStop,onProgress,knownPackages:known,order});
    if(shouldStop())throw Object.assign(Error('Arrêt demandé'),{code:'TEMU_STOPPING'});
    return await withLock(()=>db.transaction(async tx=>{
     const lease=(await tx.query('SELECT * FROM temu_source_catchup WHERE order_id=$1 AND lease_token=$2 AND lease_until>now() FOR UPDATE',[order.id,token])).rows[0];if(!lease)return {skipped:true,reason:'lease-lost'};

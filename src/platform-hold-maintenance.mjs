@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 import {createHash,randomUUID} from 'node:crypto';import {open,rename,unlink,readFile,stat,realpath} from 'node:fs/promises';import {dirname} from 'node:path';import {loadEnvFile} from 'node:process';import {fileURLToPath} from 'node:url';import {spawn} from 'node:child_process';
 import {shopifyCollector,loadShopifyConfig} from './marketplace-collection.mjs';import {normalizeShopifyOrders} from './marketplace-local-import.mjs';
 import {platformHoldDatabaseAdapter} from './platform-shipment-hold-db.mjs';import {platformHoldEvidenceHash,reconcilePlatformShipmentHold,platformHoldWriteLockSql} from './platform-shipment-hold-transaction.mjs';import {systemdWriterPauseProbe} from './platform-writer-pause.mjs';
@@ -21,6 +22,7 @@ export async function runPlatformHoldMaintenance({db,collect,pauseProbe,apply=fa
  const lease=await pauseProbe();if(lease?.paused!==true||!lease.epoch)throw Error('Arrêt de tous les écrivains requis');
  const orders=(await db.query("SELECT * FROM orders WHERE NOT archived AND channel='shopify' AND issue IS NOT NULL ORDER BY id")).rows.filter(o=>diagnostic.test(o.issue));
  for(const order of orders){
+  if(marketplaceContentFrozen(order)){report.rows.push({orderId:order.id,reference:order.reference,status:'EXCLUDED',reason:'BC rempli · Contenu plateforme figé'});continue;}
   let row={orderId:order.id,reference:order.reference};
   try{
    const sourceRead=await collect(order),normalizedIncoming=normalizeShopifyOrders([sourceRead.payload])[0];

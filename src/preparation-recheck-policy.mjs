@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 export const recoveryCadence={local:300000,external:900000,hourly:3600000,daily:86400000,alert:3600000};
 
 // This schedules observations, never a provider mutation or a new label.
@@ -42,7 +43,7 @@ export async function requestRecoverySweeps(db){
 
 export function currentHoldDiagnostic(o,{erpJob=o.erp_live_job,carrierJob=o.carrier_job,temuJob=o.temu_job}={}){
  const state=o.erp_live||{},p=o.source_payload||{};
- if(p.marketplacePendingCorrection)return {code:'source_change',label:'Commande source modifiée : rapprochement des données en attente',nextStep:'Comparer la version source aux documents existants avant toute reprise',decisionRequired:true};
+ if(p.marketplacePendingCorrection&&!marketplaceContentFrozen(o))return {code:'source_change',label:'Commande source modifiée : rapprochement des données en attente',nextStep:'Comparer la version source aux documents existants avant toute reprise',decisionRequired:true};
  if(temuJob?.error)return {code:'temu_error',label:temuJob.status==='shipment_error'?'Étiquette refusée par TEMU : '+temuJob.error:temuJob.error,nextStep:'Recontrôler le résultat TEMU ; conserver toute création existante ou incertaine',decisionRequired:false};
  if(['pending','processing'].includes(erpJob?.status))return {code:o.resolution_pending_resume&&state.bc?.id?'erp_admission_hold':'erp_processing',label:o.resolution_pending_resume&&state.bc?.id?'BC existant : admission à la préparation Erplain suspendue':'Préparation Erplain en attente ou en cours',nextStep:o.resolution_pending_resume&&state.bc?.id?'Vérifier l’origine du verrou et les prérequis avant admission au worker':'Suivre le traitement Erplain jusqu’à son résultat',decisionRequired:false};
  if(['pending','creating','awaiting_pdf'].includes(carrierJob?.status))return {code:'carrier_processing',label:'Traitement transport existant en cours',nextStep:'Suivre ou récupérer le document existant, sans nouvelle création',decisionRequired:false};

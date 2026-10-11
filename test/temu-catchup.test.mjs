@@ -232,7 +232,7 @@ test('older unattempted orders precede repeated initial holds',async()=>{
 test('every new blocker registers immediately without waiting for discovery',async()=>{
  const db=await fixture();try{await initializeTemuCatchup(db);await db.query('INSERT INTO orders(id,reference) VALUES($1,$1)',['new']);assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,0);await db.query("INSERT INTO erp_live_jobs(order_id,status,error) VALUES('new','review','Stock')");assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,1);await db.query("UPDATE orders SET issue='Poids' WHERE id='new'");assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,1);}finally{await db.close();}
 });
-test('periodic source refresh preserves a frozen address on masking and detects disclosed address or money changes',async()=>{
+test('post-BC source refresh preserves saved addresses and documents without retroactive source comparisons',async()=>{
  const db=await fixture();try{
  const address={name:'TEST',street:'1 rue Test',postal:'75001',city:'Paris',country:'FR'};
  await db.query('UPDATE orders SET address=$1,erp_live=$2 WHERE id=$3',[JSON.stringify(address),JSON.stringify({bc:{id:'BC'}}),'A']);
@@ -241,7 +241,7 @@ test('periodic source refresh preserves a frozen address on masking and detects 
  let observation=await readTemuSource(apiFor(p),reference);assert.equal(observation.coreComplete,true);assert.equal(observation.payload.country,'FR');
  let order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];const docs=(await db.query('SELECT * FROM carrier_documents')).rows;
  let result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.deepEqual(result.conflicts,[]);order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.deepEqual(order.address,address);assert.deepEqual((await db.query('SELECT * FROM carrier_documents')).rows,docs);
- p.shipping.postCode='10000';observation=await readTemuSource(apiFor(p),reference);result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.ok(result.conflicts.includes('adresse'));assert.deepEqual((await db.query("SELECT address FROM orders WHERE id='A'")).rows[0].address,address);
- await db.exec("UPDATE orders SET address='{}' WHERE id='A'");order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];await assert.rejects(db.transaction(tx=>reconcileTemuCatchup(tx,order,observation)),/Adresse initiale complète/);
+ p.shipping.postCode='10000';observation=await readTemuSource(apiFor(p),reference);result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.deepEqual(result.conflicts,[]);assert.deepEqual((await db.query("SELECT address FROM orders WHERE id='A'")).rows[0].address,address);
+ await db.exec("UPDATE orders SET address='{}' WHERE id='A'");order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.deepEqual((await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation))).conflicts,[]);
  }finally{await db.close();}
 });

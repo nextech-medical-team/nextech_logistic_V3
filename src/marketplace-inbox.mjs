@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen,lifecycleObservation,recordPostBcLifecycle} from './marketplace-content-freeze.mjs';
 import {maskedTemuAddressFields} from './temu-address-observation.mjs';
 import {relayLabelObservation} from './relay-label-observation.mjs';
 import {readShopifyRelay,relayComparisonAddress} from './shopify-relay-source.mjs';
@@ -46,6 +47,23 @@ export function normalizeTemuReceipt(payload,shop){
 export async function applyMarketplaceReceipt(db,r,options={}){
  const fresh=authorizedFreshTemu(r,options);
  const window=(await db.query("SELECT value FROM settings WHERE key='marketplace_automatic'")).rows[0]?.value;if(!window?.enabled)return {skipped:true,reason:'disabled'};
+ // Route before normalizing articles or attempting a relay/address reread.
+ if(!fresh){
+  const reference=r.channel==='temu'?(r.payload.lifecycle?.reference||r.payload.detail?.parentOrderMap?.parentOrderSn):r.payload.name;
+  if(reference){
+   const frozen=await withShipmentLock(()=>db.transaction(async tx=>{
+    const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,reference])).rows[0];
+    if(!marketplaceContentFrozen(existing))return null;
+    const shop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;
+    if(shop&&String(shop)!==r.shop)throw Error('Boutique source différente');
+    if(r.channel==='shopify'&&existing.source_payload?.id&&String(existing.source_payload.id)!==String(r.payload.id))throw Error('Shopify · Identifiant source différent');
+    const observation=r.payload.lifecycle||lifecycleObservation(r.channel,r.payload,{reference});
+    await recordPostBcLifecycle(tx,existing,observation);
+    return {existing:true,review:false,contentFrozen:true};
+   }));
+   if(frozen)return frozen;
+  }
+ }
  if(!fresh&&!withinReceptionStart(r.channel,r.payload,window))return {skipped:true,reason:'outside-start-date'};
  if(r.channel==='shopify'&&shopifyDeliveryMode(r.payload)==='relay'&&!readShopifyRelay(r.payload)){
   const {shopifyCollector,loadShopifyConfig}=await import('./marketplace-collection.mjs');
@@ -65,6 +83,7 @@ export async function applyMarketplaceReceipt(db,r,options={}){
   const routed=await withShipmentLock(()=>db.transaction(async tx=>{
    const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,o.reference])).rows[0];
    if(!existing)return null;
+   if(!fresh&&marketplaceContentFrozen(existing)){const shop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(shop&&String(shop)!==String(r.shop))throw Error('Boutique source différente');if(r.channel==='shopify'&&existing.source_payload?.id&&String(existing.source_payload.id)!==String(r.payload.id))throw Error('Shopify · Identifiant source différent');await recordPostBcLifecycle(tx,existing,r.payload.lifecycle||lifecycleObservation(r.channel,r.payload,{reference:existing.source_reference||existing.reference}));return {existing:true,review:false,contentFrozen:true};}
    if(existing.archived||existing.duplicate_of)return {skipped:true,reason:'inactive-existing-order'};
    const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;
    if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
@@ -75,11 +94,12 @@ export async function applyMarketplaceReceipt(db,r,options={}){
   }));
   if(routed)return routed;
  }
- if(o.visibilityHold)return withShipmentLock(()=>db.transaction(async tx=>{const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 FOR UPDATE',[r.channel,o.reference])).rows[0];if(existing&&(existing.archived||existing.label_status==='cancelled'))return {excluded:true,id:existing.id};return {retained:true,id:await retainVisibleOrder(tx,o,o.source_payload.visibilityReason)};}));
+ if(o.visibilityHold)return withShipmentLock(()=>db.transaction(async tx=>{const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 FOR UPDATE',[r.channel,o.reference])).rows[0];if(!fresh&&marketplaceContentFrozen(existing)){const shop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(shop&&String(shop)!==String(r.shop))throw Error('Boutique source différente');if(r.channel==='shopify'&&existing.source_payload?.id&&String(existing.source_payload.id)!==String(r.payload.id))throw Error('Shopify · Identifiant source différent');await recordPostBcLifecycle(tx,existing,r.payload.lifecycle||lifecycleObservation(r.channel,r.payload,{reference:existing.source_reference||existing.reference}));return {existing:true,review:false,contentFrozen:true};}if(existing&&(existing.archived||existing.label_status==='cancelled'))return {excluded:true,id:existing.id};return {retained:true,id:await retainVisibleOrder(tx,o,o.source_payload.visibilityReason)};}));
  return withShipmentLock(()=>db.transaction(async tx=>{
   const link=(await tx.query('SELECT * FROM marketplace_order_links WHERE channel=$1 AND shop=$2 AND reference=$3 FOR UPDATE',[r.channel,r.shop,o.reference])).rows[0];
   if(fresh&&link)throw Error('Ancien lien marketplace encore présent : reprise interrompue');
   const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,o.reference])).rows[0];
+  if(!fresh&&marketplaceContentFrozen(existing)){const shop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(shop&&String(shop)!==String(r.shop))throw Error('Boutique source différente');if(r.channel==='shopify'&&existing.source_payload?.id&&String(existing.source_payload.id)!==String(r.payload.id))throw Error('Shopify · Identifiant source différent');await recordPostBcLifecycle(tx,existing,r.payload.lifecycle||lifecycleObservation(r.channel,r.payload,{reference:existing.source_reference||existing.reference}));return {existing:true,review:false,contentFrozen:true};}
   if(platformReceiptDisposition({observedVersion:link?.version,incomingVersion:o.version,pending:!!existing?.source_payload?.marketplacePendingCorrection})==='skip')return {unchanged:true};
   if(fresh&&existing)throw Error('Ancienne fiche V3 encore présente : reprise interrompue');
   if(existing){const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');

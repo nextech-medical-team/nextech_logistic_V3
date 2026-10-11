@@ -1,3 +1,4 @@
+import {retirePostBcSourceReviews} from './marketplace-content-freeze.mjs';
 import {continuePreparationFromFreshRead,freshContinuationProof,completedContinuationForPurchase,releaseCompletedContinuationForPurchase} from './preparation-local-continuation.mjs';
 import {initializeTemuAutomaticPurchase} from './temu-automatic-purchase.mjs';
 import {reconcileStockIncident,stockIncidentOnly} from './stock-incident-recheck.mjs';
@@ -60,6 +61,7 @@ export function orderRecheckMonitor(db,api,{enabled=()=>true,canResume=()=>true,
  async function runLocal(){
   if(localRunning||!enabled())return;localRunning=true;
   try{await db.withLocks(['order-recheck-local'],async()=>{
+   await retirePostBcSourceReviews(db);
    await requestRecoverySweeps(db);
    const due=(await db.query(`SELECT o.*,(${awaitingPurchaseSql.replace(/\borders\./g,'o.')} AND o.erp_live->'bc'->>'id' IS NOT NULL AND o.erp_live->'bl'->>'id' IS NOT NULL) awaiting_purchase,m.state monitoring_previous,m.requested monitor_version,e.status erp_job_status,e.error erp_job_error,e.updated_at erp_job_updated_at,e.state_since blocked_since,c.error carrier_error,jsonb_build_object('status',c.status,'error',c.error) carrier_job,
     (SELECT jsonb_build_object('status',t.status,'error',t.error) FROM temu_label_jobs t WHERE t.reference=o.reference) temu_job,

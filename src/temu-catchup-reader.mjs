@@ -1,3 +1,5 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
+import {readTemuLifecycle} from './temu-lifecycle-reader.mjs';
 import {isMaskedAddressValue} from './temu-address-observation.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {temuSourceError} from './temu-catchup-policy.mjs';
@@ -21,7 +23,8 @@ export function validateTemuSource(payload,reference,{requireShipping=true}={}){
  return {...payload,country:countries.get(sourceCountry)};
 }
 // No database, purchase, cancellation or PDF capability is accepted.
-export async function readTemuSource(api,reference,{shouldStop=()=>false,onProgress=async()=>{},knownPackages=[]}={}){
+export async function readTemuSource(api,reference,{shouldStop=()=>false,onProgress=async()=>{},knownPackages=[],order}={}){
+ if(marketplaceContentFrozen(order))return readTemuLifecycle(api,order,{shouldStop,onProgress});
  if(!/^PO-\d+-\d+$/.test(reference||''))throw Error('Référence TEMU invalide');
  const result={reference,checkedAt:new Date().toISOString(),coverage:{},errors:[],payload:{}};
  async function read(field,type,args){if(shouldStop())throw Object.assign(Error('Arrêt demandé'),{code:'TEMU_STOPPING'});await onProgress();try{const data=await api.read(type,args,{shouldStop});result.coverage[field]=result.coverage[field]!==false;return data;}catch(e){if(shouldStop()||['TEMU_STOPPING','TEMU_LEASE_LOST','source_budget_deferred'].includes(e.code))throw e;result.coverage[field]=false;result.errors.push(temuSourceError(e,field));return undefined;}}

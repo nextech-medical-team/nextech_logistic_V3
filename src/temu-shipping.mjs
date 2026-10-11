@@ -1,3 +1,5 @@
+import {readTemuLifecycle} from './temu-lifecycle-reader.mjs';
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {excludedTemuCarrier} from './temu-purchase-policy.mjs';
@@ -41,9 +43,9 @@ export function temuShipping(db,api){
  async function locked(reference,fn){if(!/^PO-\d+(?:-\d+)+$/.test(reference))throw new Error('Référence TEMU invalide');if(active.has(reference))throw new Error('Cette commande est déjà en traitement');active.add(reference);try{return await fn();}finally{active.delete(reference);}}
  const job=async reference=>(await db.query('SELECT * FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
  async function quote(reference,channelId,fresh={}){
-  const localOrders=(await db.query('SELECT suspension,weight_kg FROM orders WHERE reference=$1',[reference])).rows;for(const order of localOrders){const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);}
+  const localOrders=(await db.query('SELECT * FROM orders WHERE reference=$1',[reference])).rows;for(const order of localOrders){const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);}
   const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=Number.isFinite(knownWeight)&&knownWeight>0.25?String(Math.ceil(knownWeight*1000)/1000):'0.25';
-  const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),info=inspectTemu(detail,reference);
+  const frozen=localOrders.find(marketplaceContentFrozen);if(frozen){const lifecycle=await readTemuLifecycle(api,frozen);if(lifecycle.cancelled)throw Error('TEMU · Commande annulée sur la plateforme');if(lifecycle.refundStatus==='full')throw Error('TEMU · Commande entièrement remboursée sur la plateforme');}const detail=(frozen?frozen.source_payload?.temuOrderDetail:fresh.detail)||(!frozen?await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}):null),info=inspectTemu(detail,reference);
   const existing=fresh.shipments||await readTemuShipments(api,reference,detail);
   if(info.packages.length||(existing.shipmentInfoDTO||[]).length)throw new Error('Une expédition existe déjà dans TEMU : utiliser Récupérer les étiquettes');
   if(!info.lines.length)throw new Error('Commande TEMU non entièrement à expédier');
@@ -59,9 +61,9 @@ export function temuShipping(db,api){
   const plan={reference,offers,selected:chosen.channelId,amount:chosen.amount,currency:chosen.currency,request,orderFingerprint:info.fingerprint,expiresAt:Date.now()+600000};plan.id=hash({request,amount:plan.amount,currency:plan.currency,orderFingerprint:plan.orderFingerprint});return plan;
  }
  async function recover(reference,fresh={}){return locked(reference,async()=>{
-  if(hasExternalLabel((await db.query("SELECT channel,source_payload FROM orders WHERE reference=$1 AND channel='temu'",[reference])).rows[0]))return job(reference);
+  const local=(await db.query("SELECT * FROM orders WHERE reference=$1 AND channel='temu'",[reference])).rows[0];if(hasExternalLabel(local))return job(reference);
   let j=await job(reference),packages=fresh.packages||j?.packages||[];const verifiedBefore=j?.result?.source==='temu_direct';
-  if(!packages.length){const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});const raw=await readTemuShipments(api,reference,detail);const items=raw.shipmentInfoDTO;packages=[...new Set([...inspectTemu(detail,reference).packages,...items.flatMap(p=>[p,...(p.subPackageShipmentInfoList||[])]).map(p=>{if(p.parentOrderSn&&p.parentOrderSn!==reference)throw new Error('Colis d’une autre commande');return p.packageSn;}).filter(Boolean)])];}
+  if(!packages.length){const detail=marketplaceContentFrozen(local)?local.source_payload?.temuOrderDetail:await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});const raw=await readTemuShipments(api,reference,detail);const items=raw.shipmentInfoDTO;packages=[...new Set([...inspectTemu(detail,reference).packages,...items.flatMap(p=>[p,...(p.subPackageShipmentInfoList||[])]).map(p=>{if(p.parentOrderSn&&p.parentOrderSn!==reference)throw new Error('Colis d’une autre commande');return p.packageSn;}).filter(Boolean)])];}
   if(!packages.length)throw new Error('Aucun colis retrouvé : vérifier TEMU avant tout nouvel achat');if(packages.some(p=>!/^PK-\d+$/.test(p)))throw new Error('Identifiant de colis invalide');
   await db.query(`INSERT INTO temu_label_jobs(reference,status,packages) VALUES($1,'pending',$2) ON CONFLICT(reference) DO UPDATE SET packages=excluded.packages`,[reference,JSON.stringify(packages)]);
   const result=await api.read('bg.logistics.shipment.result.get',{packageSnList:packages});result.source='temu_direct';result.observedAt=new Date().toISOString();

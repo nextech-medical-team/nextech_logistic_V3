@@ -1,8 +1,10 @@
+import {marketplaceContentFrozen,retirePostBcSourceReview} from './marketplace-content-freeze.mjs';
 import {normalizeShopifyOrders} from './marketplace-local-import.mjs';
 import {normalizeTemuReceipt} from './marketplace-inbox.mjs';
 export async function acceptMarketplaceChange(db,id,actor){
  return db.transaction(async tx=>{
   const order=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];
+  if(marketplaceContentFrozen(order)){await retirePostBcSourceReview(tx,order);return {contentFrozen:true,message:'BC rempli : contenu conservé, ancien contrôle plateforme retiré.'};}
   const pending=order?.source_payload?.marketplacePendingCorrection;if(!pending)throw Error('Aucune modification de plateforme en attente');
   if(order.archived||order.partial_mode||order.erp_live?.bc?.id||order.erp_live?.bl?.id)throw Error('Documents déjà préparés : comparer la commande avec les BC et BL avant modification');
   if((await tx.query('SELECT order_id FROM carrier_jobs WHERE order_id=$1',[id])).rows.length)throw Error('Traitement transport existant : vérifier le colis avant modification');

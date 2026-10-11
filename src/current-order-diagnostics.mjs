@@ -1,3 +1,4 @@
+import {projectFrozenSourceDiagnostics,sourceReviewReasonSql} from './marketplace-content-freeze.mjs';
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {withoutSharedParcelReason,withoutSharedParcelReasonSql} from './shared-parcel-diagnostic.mjs';
@@ -7,7 +8,7 @@ export const oldFinanceErrors=['TEMU · Remises client et TVA à rapprocher','TE
 export const verifiedFinanceSql="(channel='temu' AND erp_live->'bc'->>'id' IS NOT NULL AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'total')='number' AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'sourceTotal')='number' AND erp_live->'pricing'->>'status'='verified' AND erp_live->'pricing'->>'error' IS NULL AND erp_live->'pricing'->'confirmed'->>'authority'='erplain' AND erp_live->'pricing'->'commercialBasis'->>'field'='estimatedRevenue' AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue' IS NOT NULL AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue'=source_payload->'temuAmounts'->'data'->'parentOrderMap'->'estimatedRevenue')";
 export const awaitingPurchaseSql="coalesce((channel='temu' AND transport_choice IS NULL AND NOT coalesce(partial_mode,false) AND NOT coalesce(resolution_pending_resume,false) AND erp_live->>'phase'='bl_ready' AND EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=orders.id AND e.status='complete' AND e.error IS NULL) AND EXISTS(SELECT 1 FROM temu_label_jobs j WHERE j.reference=orders.reference AND j.status='ready' AND j.error IS NULL) AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=orders.id) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=orders.id AND r.status IN ('queued','running','waiting'))),false)";
 export function currentReasonSql(raw){
- const stripped=withoutSharedParcelReasonSql(raw);raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
+ const stripped=withoutSharedParcelReasonSql(sourceReviewReasonSql(raw));raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
  const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
  // Project the source reason only once for ordinary rows. The rare case where
  // an old generic job maps to a verified financial error keeps the same result.
@@ -16,12 +17,13 @@ export function currentReasonSql(raw){
 // Boolean form for the problem scope: avoids generating descriptive strings and
 // their nested subqueries when only the presence of a reason is required.
 export function currentReasonEmptySql(raw){
- const stripped=withoutSharedParcelReasonSql(raw);raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
+ const stripped=withoutSharedParcelReasonSql(sourceReviewReasonSql(raw));raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
  const generic=genericPlatformModificationSql(raw),nonGenericIssue=`issue IS NOT NULL AND issue<>'' AND NOT coalesce(${genericPlatformModificationSql('issue')},false)`;
  const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
  const expression=`coalesce(CASE WHEN ${verifiedFinanceSql} AND ((${raw}) IN (${old}) OR (issue IN (${old}) AND ${generic} AND (${platformChangeVerifiedSql} OR ${recovered}))) THEN NOT coalesce((erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false)),false) WHEN coalesce(${generic},false) THEN CASE WHEN ${platformChangeVerifiedSql} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE source_payload->'marketplacePendingCorrection' IS NULL END WHEN ${recovered} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE false END ELSE false END ELSE (${raw}) IS NULL OR (${raw})='' END,false)`;return `(SELECT ${expression} FROM (SELECT (${stripped}) AS raw_reason OFFSET 0) current_reason)`;
 }
 export function projectCurrentDiagnostics(o){
+ projectFrozenSourceDiagnostics(o);
  if(o.archived||o.label_status==='cancelled'||o.tracking_status==='cancelled'){for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o,'resolution_error']])if(target)target[key]=null;return o;}
  const partial=o.source_payload?.temuCatchupPartial;
  if(o.channel==='temu'&&partial?.currentReason&&Number.isFinite(Date.parse(partial.checkedAt))&&partial.coverage?.detail&&partial.coverage?.version&&partial.coverage?.consistency&&(!o.source_payload?.temuDirect?.attemptedAt||Date.parse(o.source_payload.temuDirect.attemptedAt)<=Date.parse(partial.checkedAt))){

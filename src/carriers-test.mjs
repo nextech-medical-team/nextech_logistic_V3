@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 import {relayCommercialFingerprint} from './relay-source-reconciliation.mjs';
 import {shopifyDeliveryMode} from './shopify-delivery.mjs';
 import {readShopifyRelay,assertFreshShopifyRelay,chooseNearestParcelShop,relayComparisonAddress,sameRelayAddress} from './shopify-relay-source.mjs';
@@ -51,7 +52,8 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
     async resolveParcelShop(o){
 
       let searchAddress=o.address;
-      if(production&&o.channel==='shopify'){
+      if(production&&o.channel==='shopify'&&marketplaceContentFrozen(o)){const relay=assertFreshShopifyRelay(o,{maxAge:Infinity});searchAddress=relayComparisonAddress(o,relay);if(relay.selectedId){const a=relay.destinationAddress;return {parcelShopId:relay.selectedId,selection:'customer_selected',resolvedAt:new Date().toISOString(),environment:'production',sourceVersion:relay.sourceVersion,address:{Name1:o.source_payload.shipping_address?.address2||'',Street:a.street,ZIPCode:a.postal,City:a.city,CountryCode:a.country}};}}
+      if(production&&o.channel==='shopify'&&!marketplaceContentFrozen(o)){
        const reader=shopifyReader||shopifyCollector(await loadShopifyConfig(process.env.DATA_DIR||'/var/lib/nextech-live'));
        const raw=await reader.order(String(o.source_payload?.id||''));
        if(raw.name!==o.reference||String(raw.id)!==String(o.source_payload?.id))throw Error('GLS · Identité Shopify différente');
@@ -80,11 +82,11 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
        if(mode==='relay'&&o.carrier!=='gls_shop')o={...o,carrier:'gls_shop'};
       }
       if(production&&o.channel==='shopify'&&o.carrier==='gls_shop'){
-       let relay;try{relay=assertFreshShopifyRelay(o);}catch{}
+       let relay;try{relay=assertFreshShopifyRelay(o,{maxAge:marketplaceContentFrozen(o)?Infinity:60000});}catch{}
        const shop=o.source_payload?.glsParcelShop,age=Date.now()-Date.parse(shop?.resolvedAt);
-       const needsResolve=!relay||relay.commercialVerified!==true||relay.commercialBaselineFingerprint!==relayCommercialFingerprint(o.source_payload)||(relay.selectedId?o.source_payload?.glsParcelShopId!==relay.selectedId:shop?.selection!=='nearest_gls'||shop.environment!=='production'||!Number.isFinite(shop.distance)||!Number.isFinite(age)||age<0||age>60000);
+       const needsResolve=marketplaceContentFrozen(o)?(!relay||!existingParcelShop(o.source_payload)):!relay||relay.commercialVerified!==true||relay.commercialBaselineFingerprint!==relayCommercialFingerprint(o.source_payload)||(relay.selectedId?o.source_payload?.glsParcelShopId!==relay.selectedId:shop?.selection!=='nearest_gls'||shop.environment!=='production'||!Number.isFinite(shop.distance)||!Number.isFinite(age)||age<0||age>60000);
        if(needsResolve){let current;try{current=await clients.resolveParcelShop(o);}catch(e){throw Error('GLS · Choix relais Shopify à relire avant création : '+e.message);}o.source_payload={...o.source_payload,glsParcelShopId:current.parcelShopId,glsParcelShop:current};}
-       relay=assertFreshShopifyRelay(o);const id=existingParcelShop(o.source_payload);
+       relay=assertFreshShopifyRelay(o,{maxAge:marketplaceContentFrozen(o)?Infinity:60000});const id=existingParcelShop(o.source_payload);
        if(relay.selectedId&&id!==relay.selectedId)throw Error('GLS · Relais différent du choix client');
        if(!relay.selectedId&&(o.source_payload?.glsParcelShop?.selection!=='nearest_gls'||!Number.isFinite(o.source_payload.glsParcelShop.distance)))throw Error('GLS · Relais le plus proche non vérifié');
        o={...o,address:{...o.address,...relay.clientAddress}};

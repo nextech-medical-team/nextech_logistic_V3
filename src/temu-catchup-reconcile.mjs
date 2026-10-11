@@ -1,9 +1,11 @@
+import {marketplaceContentFrozen,lifecycleObservation,recordPostBcLifecycle} from './marketplace-content-freeze.mjs';
 import {maskedTemuAddressFields,usableFrozenAddress} from './temu-address-observation.mjs';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {obsoleteTemuVisibilityError,pureTemuSourceReadError} from './temu-catchup-policy.mjs';
 const ordered=rows=>rows.map(l=>({id:String(l.source_line||l.orderSn),sku:l.source_sku||[...new Set((l.productList||[]).map(p=>p.extCode).filter(Boolean))][0],quantity:Number(l.quantity)})).sort((a,b)=>a.id.localeCompare(b.id));
 export async function reconcileTemuCatchup(tx,order,observation){
+ if(marketplaceContentFrozen(order))return recordPostBcLifecycle(tx,order,observation.scope==='cancellation-refund-only'?observation:lifecycleObservation('temu',observation.payload,{reference:order.source_reference||order.reference,checkedAt:observation.checkedAt}));
  if(observation.reference!==(order.source_reference||order.reference)||!observation.coreComplete)throw Error('TEMU · Rapprochement source incomplet');
  const source=structuredClone(order.source_payload||{}),fresh=observation.payload;
  const priorPartial=source.temuCatchupPartial;delete source.temuCatchupPartial;
@@ -76,6 +78,7 @@ export async function reconcileTemuCatchup(tx,order,observation){
 }
 
 export async function observeTemuSourceStage(tx,order,observation){
+ if(marketplaceContentFrozen(order))return recordPostBcLifecycle(tx,order,lifecycleObservation('temu',observation.payload,{reference:order.source_reference||order.reference,checkedAt:observation.checkedAt}));
  if(!observation.requiredComplete||!['pending','cancelled'].includes(observation.sourceStage)||observation.reference!==(order.source_reference||order.reference))throw Error('TEMU · État source non vérifiable');
  const source=structuredClone(order.source_payload||{}),fresh=observation.payload;
  const priorPartial=source.temuCatchupPartial;delete source.temuCatchupPartial;

@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 import {maskedTemuAddressFields,usableFrozenAddress} from './temu-address-observation.mjs';
 import {relayComparisonAddress,sameRelayAddress} from './shopify-relay-source.mjs';
 // Marketplace receipts describe what was ordered, not the replacement sent.
@@ -11,7 +12,8 @@ export function sourceFingerprint(rows) {
  }
  return JSON.stringify(result.sort((a,b)=>a.line.localeCompare(b.line)));
 }
-export function marketplaceChangeFields(existing,prior,incoming){
+export function marketplaceChangeFields(existing,prior,incoming){return marketplaceContentFrozen(existing)?[]:marketplaceSnapshotChangeFields(existing,prior,incoming);}
+export function marketplaceSnapshotChangeFields(existing,prior,incoming){
  const originals=existing.erp_live?.equivalentOriginalLines,rows=originals===undefined?prior:originals;
  const baseline=sourceFingerprint(rows),fresh=sourceFingerprint(incoming.lines),fields=[];
  if(!baseline||!fresh)fields.push('articles : références ou quantités non vérifiables');
