@@ -206,3 +206,16 @@ test('complete initial recovery queues existing preparation only within authoriz
   }finally{await db.close();}
  }
 });
+test('periodic source refresh preserves a frozen address on masking and detects disclosed address or money changes',async()=>{
+ const db=await fixture();try{
+ const address={name:'TEST',street:'1 rue Test',postal:'75001',city:'Paris',country:'FR'};
+ await db.query('UPDATE orders SET address=$1,erp_live=$2 WHERE id=$3',[JSON.stringify(address),JSON.stringify({bc:{id:'BC'}}),'A']);
+ await db.exec("INSERT INTO lines(id,order_id,source_line,source_sku,quantity) VALUES('LINE','A','069-1234','SKU',1);INSERT INTO carrier_documents VALUES('A',decode('25504446','hex'));");
+ const p=payload();for(const k of ['receiptName','addressLine1','regionName1','regionName3'])p.shipping[k]='******';
+ let observation=await readTemuSource(apiFor(p),reference);assert.equal(observation.coreComplete,true);assert.equal(observation.payload.country,'FR');
+ let order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];const docs=(await db.query('SELECT * FROM carrier_documents')).rows;
+ let result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.deepEqual(result.conflicts,[]);order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.deepEqual(order.address,address);assert.deepEqual((await db.query('SELECT * FROM carrier_documents')).rows,docs);
+ p.shipping.postCode='10000';observation=await readTemuSource(apiFor(p),reference);result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.ok(result.conflicts.includes('adresse'));assert.deepEqual((await db.query("SELECT address FROM orders WHERE id='A'")).rows[0].address,address);
+ await db.exec("UPDATE orders SET address='{}' WHERE id='A'");order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];await assert.rejects(db.transaction(tx=>reconcileTemuCatchup(tx,order,observation)),/Adresse initiale complète/);
+ }finally{await db.close();}
+});

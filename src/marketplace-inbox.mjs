@@ -1,3 +1,4 @@
+import {maskedTemuAddressFields} from './temu-address-observation.mjs';
 import {relayLabelObservation} from './relay-label-observation.mjs';
 import {readShopifyRelay,relayComparisonAddress} from './shopify-relay-source.mjs';
 import {shopifyDeliveryMode} from './shopify-delivery.mjs';
@@ -7,7 +8,7 @@ import {authorizedFreshTemu} from './temu-authorized-reimport.mjs';
 import {recoverCompleteTemuImport} from './temu-import-recovery.mjs';
 import {initialMarketplaceHold} from './temu-initial-hold.mjs';
 import {incompleteOrder,retainVisibleOrder,withinReceptionStart} from './order-visibility.mjs';
-import {marketplaceChanged} from './marketplace-comparison.mjs';
+import {marketplaceChanged,marketplaceChangeFields} from './marketplace-comparison.mjs';
 import {confirmedCancelledTemuLine} from './temu-active-amounts.mjs';
 import {createHash,createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {marketplaceAllowed} from './marketplace-window.mjs';
@@ -74,7 +75,7 @@ export async function applyMarketplaceReceipt(db,r,options={}){
   }));
   if(routed)return routed;
  }
- if(o.visibilityHold)return withShipmentLock(()=>db.transaction(async tx=>({retained:true,id:await retainVisibleOrder(tx,o,o.source_payload.visibilityReason)})));
+ if(o.visibilityHold)return withShipmentLock(()=>db.transaction(async tx=>{const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 FOR UPDATE',[r.channel,o.reference])).rows[0];if(existing&&(existing.archived||existing.label_status==='cancelled'))return {excluded:true,id:existing.id};return {retained:true,id:await retainVisibleOrder(tx,o,o.source_payload.visibilityReason)};}));
  return withShipmentLock(()=>db.transaction(async tx=>{
   const link=(await tx.query('SELECT * FROM marketplace_order_links WHERE channel=$1 AND shop=$2 AND reference=$3 FOR UPDATE',[r.channel,r.shop,o.reference])).rows[0];
   if(fresh&&link)throw Error('Ancien lien marketplace encore présent : reprise interrompue');
@@ -83,6 +84,7 @@ export async function applyMarketplaceReceipt(db,r,options={}){
   if(fresh&&existing)throw Error('Ancienne fiche V3 encore présente : reprise interrompue');
   if(existing){const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
    if(existing.source_payload?.visibilityHold){
+    if(r.channel==='temu'&&maskedTemuAddressFields(o.source_payload.temuShippingInfo).length)throw Error('TEMU · Adresse masquée : adresse initiale complète requise avant récupération');
     const source={...o.source_payload,...(existing.source_payload?.externalLabel?{externalLabel:existing.source_payload.externalLabel}:{}),sourceShop:r.shop,visibilityHold:false,visibilityRecoveredAt:new Date().toISOString()};
     await tx.query('UPDATE orders SET recipient=$2,address=$3,source_date=$4,source_payload=$5,issue=$6 WHERE id=$1',[existing.id,o.recipient,JSON.stringify(o.address),o.source_date,JSON.stringify(source),'Données récupérées · Préparation à vérifier']);
     for(const l of o.lines)await tx.query('INSERT INTO lines(id,order_id,source_line,source_sku,quantity,source_payload) VALUES($1,$2,$3,$4,$5,$6)',[l.id,existing.id,l.source_line,l.source_sku,l.quantity,JSON.stringify(l.source_payload)]);
@@ -107,9 +109,10 @@ export async function applyMarketplaceReceipt(db,r,options={}){
      if(observation)await tx.query('UPDATE orders SET issue=$2,label_status=$3,source_payload=source_payload||$4::jsonb WHERE id=$1',[existing.id,observation.issue,observation.labelStatus,JSON.stringify({relayDestinationHold:observation.record})]);
     }
    }
-   if(changed){await tx.query("UPDATE orders SET resolution_pending_resume=true,label_status='blocked',issue=$2,source_payload=source_payload||$3::jsonb WHERE id=$1",[existing.id,'Commande modifiée dans '+r.channel+' · Vérifier la préparation',JSON.stringify({marketplacePendingCorrection:r.payload,sourceShop:r.shop})]);}
-   await tx.query('INSERT INTO marketplace_order_links(channel,shop,reference,order_id,version) VALUES($1,$2,$3,$4,$5) ON CONFLICT(channel,shop,reference) DO UPDATE SET version=excluded.version',[r.channel,r.shop,o.reference,existing.id,o.version]);return {existing:true,review:changed};
+   if(changed&&!existing.archived&&existing.label_status!=='cancelled'){await tx.query("UPDATE orders SET resolution_pending_resume=true,label_status='blocked',issue=$2,source_payload=source_payload||$3::jsonb WHERE id=$1",[existing.id,'Commande modifiée dans '+r.channel+' · Vérifier la préparation',JSON.stringify({marketplacePendingCorrection:r.payload,platformModificationFields:{version:o.version,fields:marketplaceChangeFields(existing,prior,o)},sourceShop:r.shop})]);}
+   await tx.query('INSERT INTO marketplace_order_links(channel,shop,reference,order_id,version) VALUES($1,$2,$3,$4,$5) ON CONFLICT(channel,shop,reference) DO UPDATE SET version=excluded.version',[r.channel,r.shop,o.reference,existing.id,o.version]);return {existing:true,review:changed&&!existing.archived&&existing.label_status!=='cancelled'};
   }
+  if(r.channel==='temu'&&maskedTemuAddressFields(o.source_payload.temuShippingInfo).length){const reason='TEMU · Adresse masquée : adresse initiale complète requise avant préparation';const retained=incompleteOrder(r.channel,r.payload,r.shop,reason);return {retained:true,id:await retainVisibleOrder(tx,retained,reason)};}
   const id=o.id;await tx.query(`INSERT INTO orders(id,channel,reference,source_reference,recipient,address,source_date,source_payload,resolution_pending_resume,label_status,issue,carrier) VALUES($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,[id,r.channel,o.reference,o.recipient,JSON.stringify(o.address),o.source_date,JSON.stringify({...o.source_payload,sourceShop:r.shop,...(r.channel==='shopify'&&o.cancelled?{cancelled:true}:{}),...(r.channel==='temu'?{temuLabelPurchaseConfirmationRequired:true}:{})}),initialMarketplaceHold(o),'pending',null,r.channel==='temu'?'temu':null]);
   for(const l of o.lines)await tx.query('INSERT INTO lines(id,order_id,source_line,source_sku,quantity,source_payload) VALUES($1,$2,$3,$4,$5,$6)',[l.id,id,l.source_line,l.source_sku,l.quantity,JSON.stringify(l.source_payload)]);
   if(r.channel==='shopify')for(const kind of ['label','erp'])await tx.query('INSERT INTO jobs(id,order_id,kind) VALUES($1,$2,$3)',[randomUUID(),id,kind]);
