@@ -1,5 +1,5 @@
 // Transport observations describe the parcel only, never an ERP preparation gate.
-export const preparationObservation='Suivi TEMU relu : seuls des événements de préparation sont observés. Aucun mouvement physique confirmé ; information de suivi sans effet sur les BC et BL.';
+export const preparationObservation='Suivi TEMU relu : seuls des événements de préparation sont observés. Aucun mouvement physique confirmé. Information de suivi sans effet sur les BC et BL.';
 export const obsoletePreparationObservations=[
  'Absence de mouvement non vérifiable',
  'Suivi TEMU relu : seuls des événements de préparation sont observés. Reprise historique et autres contrôles à valider. Suspension conservée.',

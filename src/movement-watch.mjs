@@ -40,7 +40,7 @@ export async function movementWatchdog(db){
  // Preserve statuses, documents, stock, histories and all independent reasons.
  await db.query('UPDATE orders SET issue='+withoutPreparationObservationSql('issue')+" WHERE channel='temu' AND issue IS DISTINCT FROM ("+withoutPreparationObservationSql('issue')+')');
  await db.query('UPDATE erp_live_jobs SET error='+withoutPreparationObservationSql('error')+" WHERE order_id IN (SELECT id FROM orders WHERE channel='temu') AND error IS DISTINCT FROM ("+withoutPreparationObservationSql('error')+')');
- await db.query("UPDATE movement_watch SET detail=$1 WHERE reason_code='preparation_only_observed' AND detail<>$1",[currentMovementDetail('preparation_only_observed')]);
+ await db.query("UPDATE movement_watch SET detail=$1,alerted_at=NULL,alert_key=NULL WHERE reason_code='preparation_only_observed' AND (detail<>$1 OR alerted_at IS NOT NULL OR alert_key IS NOT NULL)",[currentMovementDetail('preparation_only_observed')]);
  await db.query("UPDATE movement_watch SET state='waiting',lease_token=NULL,lease_until=NULL,next_check_at=least(next_check_at,clock_timestamp()),detail='Vérification interrompue : reprise en lecture seule programmée',updated_at=clock_timestamp() WHERE lease_until<=clock_timestamp()");
  // Alert keys are stable for an unchanged reason and source; no alert spam.
  const rows=(await db.query("SELECT order_id,reason_code,source_fingerprint,alert_key FROM movement_watch WHERE first_observed_at<=clock_timestamp()-interval '1 hour' AND reason_code<>'preparation_only_observed'")).rows;
@@ -60,7 +60,7 @@ export function movementWatchWorker(db,directory,{api,observe=observeMovement,sh
 }
 export async function movementWatchStatus(db){
  const stored=(await db.query(`SELECT w.order_id,o.reference,row_to_json(o) AS current_order,w.state,w.reason_code,w.detail,w.first_observed_at,w.last_check_at,w.next_check_at,w.alerted_at,w.source_fingerprint,w.evidence,((w.next_check_at<clock_timestamp()-interval '5 minutes') AND (w.lease_until IS NULL OR w.lease_until<=clock_timestamp())) AS overdue,(w.check_started_at<clock_timestamp()-interval '20 minutes' AND w.state='checking') AS stalled FROM movement_watch w JOIN orders o ON o.id=w.order_id ORDER BY w.next_check_at,w.order_id`)).rows;
- const rows=stored.map(({current_order,evidence,source_fingerprint,...row})=>source_fingerprint&&source_fingerprint!==observationFingerprint(current_order)?{...row,reason_code:'order_changed',detail:'Commande modifiée depuis la dernière lecture : preuve à actualiser.',proofCurrent:false}:{...row,detail:currentMovementDetail(row.reason_code,row.detail),proofCurrent:!!source_fingerprint});
+ const rows=stored.map(({current_order,evidence,source_fingerprint,...row})=>source_fingerprint&&source_fingerprint!==observationFingerprint(current_order)?{...row,reason_code:'order_changed',detail:'Commande modifiée depuis la dernière lecture : preuve à actualiser.',proofCurrent:false}:{...row,detail:currentMovementDetail(row.reason_code,row.detail),alerted_at:row.reason_code==='preparation_only_observed'?null:row.alerted_at,proofCurrent:!!source_fingerprint});
  const watchdog=(await db.query("SELECT value FROM settings WHERE key='movement_watchdog'")).rows[0]?.value||{};
  return {at:new Date().toISOString(),checkEveryMinutes:15,watchdogEveryMinutes:5,alertAfterMinutes:60,watchdog,rows};
 }

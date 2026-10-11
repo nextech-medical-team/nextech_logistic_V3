@@ -1,3 +1,4 @@
+import {temuReadDeferral} from './temu-read-deferral.mjs';
 // Read-only TEMU reconciliation. This worker never calls the purchase endpoint.
 export async function initializeTemuSync(db){await db.exec(`CREATE TABLE IF NOT EXISTS temu_sync_jobs(reference text PRIMARY KEY,status text NOT NULL DEFAULT 'queued',priority int NOT NULL DEFAULT 0,attempts int NOT NULL DEFAULT 0,error text,last_checked_at timestamptz,last_success_at timestamptz,next_at timestamptz NOT NULL DEFAULT now(),started_at timestamptz,updated_at timestamptz NOT NULL DEFAULT now());CREATE INDEX IF NOT EXISTS temu_sync_due ON temu_sync_jobs(next_at,status);`);}
 export function temuSyncJobs(db,local,{shouldStop=()=>false,concurrency=2}={}){
@@ -22,7 +23,9 @@ export function temuSyncJobs(db,local,{shouldStop=()=>false,concurrency=2}={}){
    await Promise.all(jobs.map(async j=>{
     if(shouldStop()){await db.query("UPDATE temu_sync_jobs SET status='queued' WHERE reference=$1",[j.reference]);return;}
     let error=null,delay=480;
-    try{const r=await local.recover(j.reference);error=r.error||null;if(r.status==='document_unavailable')delay=21600;else if(['complete','cancelled','not_to_ship','external'].includes(r.status))delay=1800;else if(r.status==='pending')delay=300;else if(error)delay=900;}catch(e){error=String(e.message||e).slice(0,450);delay=900;}
+    let deferred=null;
+    try{const r=await local.recover(j.reference);if(r.deferred)deferred=r;else{error=r.error||null;if(r.status==='document_unavailable')delay=21600;else if(['complete','cancelled','not_to_ship','external'].includes(r.status))delay=1800;else if(r.status==='pending')delay=300;else if(error)delay=900;}}catch(e){if(e.code==='source_budget_deferred')deferred=temuReadDeferral(e,{reference:j.reference});else if(e.code==='TEMU_STOPPING'){await db.query("UPDATE temu_sync_jobs SET status='queued',next_at=now()+interval '1 second' WHERE reference=$1",[j.reference]);return;}else{error=String(e.message||e).slice(0,450);delay=900;}}
+    if(deferred){await db.query("UPDATE temu_sync_jobs SET status='deferred',error=CASE WHEN error='Quota partagé : lecture différée' THEN null ELSE error END,priority=0,next_at=now()+($2::double precision*interval '1 millisecond'),updated_at=now() WHERE reference=$1",[j.reference,deferred.retryAfterMs]);return;}
     await db.query(`UPDATE temu_sync_jobs SET status=$2,error=$3,attempts=attempts+1,priority=0,last_checked_at=now(),last_success_at=CASE WHEN $3::text IS NULL THEN now() ELSE last_success_at END,next_at=now()+($4::int*interval '1 second'),updated_at=now() WHERE reference=$1`,[j.reference,error?'failed':'idle',error,delay]);
    }));
   }finally{running=false;}

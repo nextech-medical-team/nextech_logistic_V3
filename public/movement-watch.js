@@ -19,7 +19,7 @@
       if([401,403].includes(response.status)){panel.hidden=true;return;}
       if(!response.ok)throw Error('Lecture de la surveillance indisponible');
       const data=await response.json();if(!Array.isArray(data.rows))throw Error('État de surveillance incomplet');
-      const errors=data.rows.filter(r=>r.overdue||r.stalled).length,alerts=data.rows.filter(r=>r.alerted_at).length;
+      const errors=data.rows.filter(r=>r.overdue||r.stalled).length,alerts=data.rows.filter(r=>r.alerted_at&&r.reason_code!=='preparation_only_observed').length;
       const unhealthy=isOld(data.watchdog?.lastSuccessAt),key=JSON.stringify([data.rows,unhealthy]);
       panel.hidden=data.rows.length===0&&!unhealthy;
       if(key===lastKey)return;lastKey=key;
@@ -30,7 +30,8 @@
         line(card,'Dernière vérification : '+date(row.last_check_at));
         line(card,'Prochaine vérification : '+date(row.next_check_at));
         if(row.overdue||row.stalled)line(card,'Vérification en retard ou interrompue : surveillance à contrôler.','movement-watch-alert');
-        if(row.alerted_at)line(card,'Blocage persistant : consulter le motif ci-dessus.','movement-watch-alert');
+        if(row.alerted_at&&row.reason_code!=='preparation_only_observed')line(card,'Vérification du suivi à résoudre : consulter le motif ci-dessus.','movement-watch-alert');
+        line(card,'Prochaine étape : '+(row.reason_code==='preparation_only_observed'?'relire le suivi à l’échéance, sans bloquer la préparation des BC et BL.':'poursuivre la vérification du suivi ; les contrôles métier restent indépendants.'));
         const button=document.createElement('button');button.type='button';button.textContent='Voir la commande';button.addEventListener('click',()=>{const search=document.getElementById('search'),ordersButton=app.querySelector('button[data-view="orders"]');ordersButton?.click();if(search){search.value=row.reference;search.dispatchEvent(new Event('input',{bubbles:true}));search.focus();search.scrollIntoView({block:'center'});}});card.append(button);list.append(card);
       }
     }catch{panel.hidden=false;summary.textContent='Surveillance momentanément indisponible : aucune reprise déduite de cette erreur.';summary.className='movement-watch-alert';lastKey='';}
