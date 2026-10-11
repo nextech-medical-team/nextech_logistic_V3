@@ -14,6 +14,7 @@ export function stockIncidentOnly(message){
  return /^BL bloqué [—-] stock insuffisant : [^:;]+ : [\d.]+ nécessaires, [\d.]+ utilisables, manque [\d.]+(?: ; [^:;]+ : [\d.]+ nécessaires, [\d.]+ utilisables, manque [\d.]+)*$/.test(text);
 }
 export function closedStockReview(job){return job?.error==null&&job?.result?.stockIncidentRecheck?.status==='resolved'&&stockIncidentOnly(job.result.stockIncidentRecheck.previousError);}
+export function reopenedStockReview(job){return !!job?.error&&job?.result?.stockIncidentRecheck?.status==='resolved'&&stockIncidentOnly(job.result.stockIncidentRecheck.previousError);}
 const sum=rows=>{if(!Array.isArray(rows))throw Error('Lignes non reçues');const totals=new Map();for(const l of rows){if(!l.variant){if(l.type==='normal')throw Error('Variante non vérifiable');continue;}const q=l.quantity;if(!l.variant.id||!l.location?.id||q==null||typeof q==='boolean'||String(q).trim()===''||!Number.isFinite(Number(q))||Number(q)<=0)throw Error('Quantités ou emplacements non vérifiables');const key=String(l.variant.id)+':'+String(l.location.id);totals.set(key,(totals.get(key)||0)+Number(q));}if(!totals.size)throw Error('Aucun produit vérifiable');return totals;};
 const equal=(a,b)=>a.size===b.size&&[...a].every(([k,q])=>Math.abs(q-(b.get(k)??NaN))<1e-6);
 export function evaluateStockIncident(order,bc,{historicalProof=null}={}){
