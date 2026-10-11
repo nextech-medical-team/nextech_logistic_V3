@@ -17,7 +17,7 @@ export function currentReasonSql(raw){
 // their nested subqueries when only the presence of a reason is required.
 export function currentReasonEmptySql(raw){
  raw=withoutSharedParcelReasonSql(raw);const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
- const generic=genericPlatformModificationSql(raw),nonGenericIssue=`issue IS NOT NULL AND NOT coalesce(${genericPlatformModificationSql('issue')},false)`;
+ const generic=genericPlatformModificationSql(raw),nonGenericIssue=`issue IS NOT NULL AND issue<>'' AND NOT coalesce(${genericPlatformModificationSql('issue')},false)`;
  const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
  return `coalesce(CASE WHEN ${verifiedFinanceSql} AND ((${raw}) IN (${old}) OR (issue IN (${old}) AND ${generic} AND (${platformChangeVerifiedSql} OR ${recovered}))) THEN NOT coalesce((erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false)),false) WHEN coalesce(${generic},false) THEN CASE WHEN ${platformChangeVerifiedSql} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE source_payload->'marketplacePendingCorrection' IS NULL END WHEN ${recovered} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE false END ELSE false END ELSE (${raw}) IS NULL OR (${raw})='' END,false)`;
 }
