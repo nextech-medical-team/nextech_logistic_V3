@@ -1,6 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {bcAllowedSql} from './bc-authorization.mjs';
 import {mutationBlock} from './erp-transient-policy.mjs';
+import {currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
 import {alignmentFields} from './mapping-bc-alignment.mjs';
 import {readHistoricalStock,assertNoHistoricalStockRemoval} from './historical-stock-proof.mjs';
 import {verifyBcLineIdentity,verifyBcPricing} from './bc-pricing.mjs';
@@ -21,11 +22,13 @@ export async function queueSourceVatReviews(db){
    WHERE j.status='review' AND j.error=$1 AND (${bcAllowedSql}) AND o.channel='temu'
    AND o.erp_live->>'phase'='historical_review' AND o.erp_live->'bc'->>'id' IS NOT NULL
    AND o.erp_live->'bl'->>'id' IS NULL
-   AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND (r.status IN ('queued','running','waiting') OR r.status='review' AND (r.action NOT IN ('resume','resume-erp') OR r.error IS DISTINCT FROM $1)))
-   AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting','review'))
+   AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
+   AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND (c.status IN ('queued','applying','checking','waiting') OR c.status='review' AND NOT EXISTS(SELECT 1 FROM correction_jobs n WHERE n.order_id=c.order_id AND (n.payload->>'action') IS NOT DISTINCT FROM (c.payload->>'action') AND (n.created_at,n.id)>(c.created_at,c.id))))
    ORDER BY j.updated_at LIMIT 10 FOR UPDATE OF o,j SKIP LOCKED`,[sourceVatError])).rows;
   for(const o of rows){
    if(!sourceVatResumeEligible(o)||!o.source_payload?.temuAmounts?.data?.orderList?.length)continue;
+   const state=currentResolutionState((await tx.query(resolutionStateSql,[o.id])).rows);
+   if(state.pendingReplacement||state.reviews.some(r=>!['resume','resume-erp'].includes(r.action)||r.error!==sourceVatError))continue;
    const requestId='source-vat-v1-'+hash({order:o.id,bc:o.erp_live.bc.id,source:o.source_payload.temuAmounts.data});
    const id=randomUUID(),payload={id:o.id,requestId,action:'resume-erp',type:'historical-preparation',resumeAfter:true};
    const inserted=await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$3,'resume-erp',$4) ON CONFLICT(request_id) DO NOTHING RETURNING id",[id,o.id,requestId,JSON.stringify(payload)]);
