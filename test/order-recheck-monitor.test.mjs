@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
-import {monitoringObservation,initializeOrderRecheckMonitor,orderRecheckMonitor,recheckCadence} from '../src/order-recheck-monitor.mjs';
+import {monitoringObservation,localObservationPatch,initializeOrderRecheckMonitor,orderRecheckMonitor,recheckCadence} from '../src/order-recheck-monitor.mjs';
+
+test('local diagnostic writes preserve newer external evidence and independent sweep requests',()=>{
+ const old={lastExternalCheck:'2026-10-11T10:00:00Z',auditRequested:true,externalResult:'previous'},fresh={lastExternalCheck:'2026-10-11T11:00:00Z',auditRequested:false,externalResult:'complete'};
+ const observation=monitoringObservation({issue:'Stock insuffisant'},old),merged={...fresh,...localObservationPatch(observation)};
+ assert.equal(merged.lastExternalCheck,fresh.lastExternalCheck);assert.equal(merged.auditRequested,false);assert.equal(merged.externalResult,'complete');assert.equal(merged.blocked,true);
+});
 
 test('five families retain clocks, deadlines, next actions and persistent alerts',()=>{
  const at=Date.parse('2026-10-10T20:00:00Z');
@@ -10,12 +16,19 @@ test('five families retain clocks, deadlines, next actions and persistent alerts
   const first=monitoringObservation(o,{},at),later=monitoringObservation({...o,updated_at:new Date(at+3600000)},first,at+3600000);
   assert.equal(later.alert,true);assert.equal(later.lastProgress,first.lastProgress);assert.equal(Date.parse(later.nextCheck)-Date.parse(later.lastCheck),recheckCadence.local);
   const again=monitoringObservation(o,later,at+3900000);assert.equal(again.alertSince,later.alertSince);
-  const progressed=monitoringObservation({...o,erp_live:{bc:{id:'1'},bl:{id:'2',status:'pending'}}},again,at+4000000);assert.equal(progressed.alert,false);
+  const progressed=monitoringObservation({...o,erp_live:{bc:{id:'1'},bl:{id:'2',status:'pending'}}},again,at+4000000);assert.equal(progressed.lastProgress,new Date(at+4000000).toISOString());assert.equal(progressed.externalOverdue,true);assert.equal(progressed.alert,true);
  }
 });
 test('old block alerts immediately on installation and fresh reads never reset it',()=>{
  const now=Date.now(),o={issue:'BL non créé',blocked_since:new Date(now-7200000),erp_live:{}};
  assert.equal(monitoringObservation(o,{},now).alert,true);
+});
+
+test('external failures are explicit and local polling cannot hide two missed external cycles',()=>{
+ const at=Date.parse('2026-10-11T12:00:00Z'),o={resolution_pending_resume:true,erp_live:{bc:{id:'1'},bl:{id:'2'}},channel:'temu',temu_job:{status:'complete'}};
+ const first=monitoringObservation(o,{},at),next=monitoringObservation(o,{...first,externalReadIssue:'Stock existant incompatible'},at+1800000);
+ assert.equal(next.result,'Stock existant incompatible');assert.equal(next.externalOverdue,true);assert.equal(next.alert,true);assert.equal(next.lastProgress,first.lastProgress);
+ const done=monitoringObservation({...o,resolution_pending_resume:false},next,at+1800001);assert.equal(done.externalOverdue,false);assert.equal(done.alert,false);
 });
 
 test('current Erplain failure replaces an obsolete finance message without hiding independent or suspended issues',()=>{
@@ -32,9 +45,10 @@ test('commercial platform states do not create a diagnostic or next-step suspens
 
 async function fixture(){
  const db=new PGlite();db.withLocks=async(keys,fn)=>fn();db.transaction=fn=>fn(db);
- await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
+ await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,label_status text,erp_status text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
  CREATE TABLE erp_live_jobs(order_id text,status text,error text,state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text);
  CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,created_at timestamptz DEFAULT now());
+ CREATE TABLE temu_label_jobs(reference text,status text,error text,packages jsonb);
  CREATE TABLE correction_jobs(order_id text,status text,result jsonb,error text);
  CREATE TABLE lines(id text,order_id text,source_sku text,target_sku text,quantity numeric,target_quantity numeric,source_payload jsonb DEFAULT '{}');CREATE TABLE mappings(channel text,source_sku text,target_sku text,source_qty numeric,target_qty numeric);
  INSERT INTO orders(id,reference,issue) VALUES('a','A','SKU Erplain introuvable'),('b','B','Stock insuffisant');
@@ -48,6 +62,7 @@ test('real PostgreSQL triggers enqueue immediate checks; periodic checks persist
   await monitor.runLocal();const first=(await db.query('SELECT * FROM order_recheck_monitor ORDER BY order_id')).rows;
   assert.equal(first.length,2);assert.ok(first.every(r=>r.state.lastCheck&&r.state.nextCheck&&r.checked===r.requested));
   await monitor.runExternal();assert.equal(reads,1);assert.equal(docs,0);assert.ok(max<=2);
+  const failed=(await db.query('SELECT state FROM order_recheck_monitor')).rows;assert.ok(failed.every(r=>!r.state.lastExternalCheck&&r.state.lastExternalAttempt&&r.state.externalStatus==='error'));
   await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second'");await monitor.runExternal();assert.equal(reads,1);assert.equal(docs,0);
   await db.query("UPDATE correction_jobs SET status='complete' WHERE order_id='a'");
   await db.query("INSERT INTO correction_jobs VALUES('a','complete','{}',null)");const queued=(await db.query("SELECT requested,checked FROM order_recheck_monitor WHERE order_id='a'")).rows[0];assert.ok(queued.requested>queued.checked);
@@ -55,6 +70,18 @@ test('real PostgreSQL triggers enqueue immediate checks; periodic checks persist
   // The same persistent deadlines survive a service instance restart.
   await orderRecheckMonitor(db,{}, {readProduct:()=>assert.fail('premature read'),readDocuments:()=>assert.fail('premature read')}).runExternal();
  }finally{await db.close();}
+});
+
+test('read-only corrections and unavailable products never authorize automatic continuation',async()=>{
+ for(const kind of ['read-only','missing-product','legacy-cache']){
+  const db=await fixture();try{
+   await db.query(`UPDATE orders SET resolution_pending_resume=true,erp_live='{"phase":"bc_created","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
+   if(kind==='read-only')await db.query(`INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result) VALUES('r','a','r','check-sku','complete','{"readOnly":true,"resumeAfter":false}'),('s','b','s','check-sku','complete','{"readOnly":true,"resumeAfter":false}')`);
+   if(kind==='legacy-cache')await db.query(`INSERT INTO order_recheck_resources(resource,next_check,result) VALUES('sku:X',now()+interval '15 minutes','{"status":"missing"}')`);
+   const m=orderRecheckMonitor(db,{}, {readProduct:async()=>kind==='missing-product'?{usable:false,status:'missing'}:{usable:true,status:'active',variant:{sku:'X'}},cacheProduct:async()=>{},readDocuments:async()=>({})});
+   await m.run();assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);
+  }finally{await db.close();}
+ }
 });
 test('suspended orders remain visible locally and never trigger external resume or read',async()=>{
  const db=await fixture();try{await db.query("UPDATE orders SET suspension='{\"active\":true,\"note\":\"humaine\"}'");
@@ -68,7 +95,7 @@ test('a slow external read never delays local checks; automatic resume respects 
  const db=await fixture();try{
  await db.query(`UPDATE orders SET issue='Reprise historique : BL non cree',erp_live='{"phase":"historical_review","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
  let release,started;const begin=new Promise(r=>started=r),pause=new Promise(r=>release=r);let allow=false;
- const m=orderRecheckMonitor(db,{}, {canResume:()=>allow,readProduct:async()=>{started();await pause;return {usable:false,status:'missing'};},readDocuments:async()=>({})});
+ const m=orderRecheckMonitor(db,{}, {canResume:()=>allow,readProduct:async()=>{started();await pause;return {usable:true,variant:{sku:'X'},status:'active'};},cacheProduct:async()=>{},readDocuments:async()=>({})});
  await m.runLocal();const reading=m.runExternal();await begin;
  await db.query("INSERT INTO correction_jobs VALUES('a','complete','{}',null)");await m.runLocal();
  assert.equal((await db.query("SELECT requested=checked ok FROM order_recheck_monitor WHERE order_id='a'")).rows[0].ok,true);
@@ -116,7 +143,7 @@ test('automatic historical resume preserves an unconfirmed preview and rechecks 
  const db=await fixture();try{
  await db.query(`UPDATE orders SET issue='Reprise historique : BL non cree',erp_live='{"phase":"historical_review","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
  await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result) VALUES('preview','a','preview','equivalent-preview','complete','{\"replacementSku\":\"NEW\"}')");
- const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:false,status:'missing'}),readDocuments:async()=>({})});await m.runLocal();
+ const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:true,variant:{sku:'X'},status:'active'}),cacheProduct:async()=>{},readDocuments:async()=>({})});await m.runLocal();
  const transaction=db.transaction;db.transaction=async fn=>{await db.query("UPDATE orders SET suspension='{\"active\":true}' WHERE id='b'");return transaction(fn);};await m.runExternal();
  assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);assert.equal((await db.query("SELECT result->>'replacementSku' sku FROM resolution_jobs WHERE id='preview'")).rows[0].sku,'NEW');
  }finally{await db.close();}
