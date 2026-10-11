@@ -1,4 +1,4 @@
-import {currentPlatformModificationReason,currentPlatformModificationSql} from './platform-change-diagnostics.mjs';
+import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {withoutSharedParcelReason,withoutSharedParcelReasonSql} from './shared-parcel-diagnostic.mjs';
 import {obsoleteTemuVisibilityError} from './temu-catchup-policy.mjs';
@@ -6,7 +6,13 @@ import {obsoleteTemuVisibilityError} from './temu-catchup-policy.mjs';
 export const oldFinanceErrors=['TEMU · Remises client et TVA à rapprocher','TEMU · Totaux client source incohérents','TEMU · Prix client et TVA source incohérents'];
 export const verifiedFinanceSql="(channel='temu' AND erp_live->'bc'->>'id' IS NOT NULL AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'total')='number' AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'sourceTotal')='number' AND erp_live->'pricing'->>'status'='verified' AND erp_live->'pricing'->>'error' IS NULL AND erp_live->'pricing'->'confirmed'->>'authority'='erplain' AND erp_live->'pricing'->'commercialBasis'->>'field'='estimatedRevenue' AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue' IS NOT NULL AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue'=source_payload->'temuAmounts'->'data'->'parentOrderMap'->'estimatedRevenue')";
 export const awaitingPurchaseSql="coalesce((channel='temu' AND transport_choice IS NULL AND NOT coalesce(partial_mode,false) AND NOT coalesce(resolution_pending_resume,false) AND erp_live->>'phase'='bl_ready' AND EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=orders.id AND e.status='complete' AND e.error IS NULL) AND EXISTS(SELECT 1 FROM temu_label_jobs j WHERE j.reference=orders.reference AND j.status='ready' AND j.error IS NULL) AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=orders.id) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=orders.id AND r.status IN ('queued','running','waiting'))),false)";
-export function currentReasonSql(raw){raw=currentPlatformModificationSql(withoutSharedParcelReasonSql(raw));return "CASE WHEN "+verifiedFinanceSql+" AND ("+raw+") IN ("+oldFinanceErrors.map(s=>"'"+s+"'").join(',')+") THEN CASE WHEN erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false) THEN 'Reprise historique à vérifier : BL non créé' ELSE NULL END ELSE ("+raw+") END";}
+export function currentReasonSql(raw){
+ raw=withoutSharedParcelReasonSql(raw);const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
+ const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
+ // Project the source reason only once for ordinary rows. The rare case where
+ // an old generic job maps to a verified financial error keeps the same result.
+ return `CASE WHEN ${verifiedFinanceSql} AND ((${raw}) IN (${old}) OR (issue IN (${old}) AND ${genericPlatformModificationSql(raw)} AND (${platformChangeVerifiedSql} OR ${recovered}))) THEN CASE WHEN erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false) THEN 'Reprise historique à vérifier : BL non créé' ELSE NULL END ELSE (${currentPlatformModificationSql(raw)}) END`;
+}
 export function projectCurrentDiagnostics(o){
  if(o.archived||o.label_status==='cancelled'||o.tracking_status==='cancelled'){for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o,'resolution_error']])if(target)target[key]=null;return o;}
  const deferred=o.source_payload?.platformChangeReconciliation;
