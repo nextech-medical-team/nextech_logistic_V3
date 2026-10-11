@@ -10,7 +10,7 @@ async function snapshot(db,id,{lock=false,assertIdle}){
  const reviews=(await db.query('SELECT * FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC,id DESC'+suffix,[id])).rows;
  const current=[...new Map([...reviews].reverse().map(j=>[j.action,j])).values()];
  const review=current.find(j=>j.action==='replace-equivalent');
- const done=Date.parse(order.erp_live?.verifiedAt);
+ const done=Date.parse(order.erp_live?.bl?.readyConfirmedAt||order.erp_live?.verifiedAt);
  const validDone=Number.isFinite(done)&&done<=Date.now();
  const historicalStockReviews=current.filter(j=>j.id!==review?.id&&j.status==='review'&&/^(BL bloqué — stock insuffisant|Stock insuffisant)/.test(j.error||'')&&validDone&&Date.parse(j.updated_at)<=done);
  const historicalIds=new Set(historicalStockReviews.map(j=>j.id));
@@ -18,7 +18,14 @@ async function snapshot(db,id,{lock=false,assertIdle}){
  if(!validDone)otherErrors.push('Verified BL date unconfirmed');
  const job=(await db.query('SELECT status,error,packages,result FROM temu_label_jobs WHERE reference=$1'+suffix,[order.reference])).rows[0];
  const docs=(await db.query('SELECT package,pdf FROM temu_label_documents WHERE reference=$1 ORDER BY package'+suffix,[order.reference])).rows;
- const labels=docs.map(d=>({package:d.package,source:job?.result?.source,jobStatus:job?.status,jobError:job?.error,bytes:d.pdf?.length||0,signature:d.pdf?Buffer.from(d.pdf).subarray(0,5).toString('ascii'):null,sha256:d.pdf?createHash('sha256').update(Buffer.from(d.pdf)).digest('hex'):null}));
+ const copies=(await db.query("SELECT document_key,source_hash,pdf,id,created_at FROM label_sku_copies WHERE order_id=$1 AND document_key LIKE 'preserved:temu:%' ORDER BY document_key,created_at DESC,id DESC"+suffix,[id])).rows;
+ const labels=docs.map(d=>{
+  const raw=d.pdf?Buffer.from(d.pdf):null,rawSha256=raw?createHash('sha256').update(raw).digest('hex'):null;
+  const copy=copies.find(c=>c.document_key==='preserved:temu:'+order.reference+':'+d.package);
+  if(copy&&copy.source_hash!==rawSha256)otherErrors.push('Preserved TEMU source changed');
+  const served=copy?.pdf?Buffer.from(copy.pdf):raw;
+  return {package:d.package,source:job?.result?.source,jobStatus:job?.status,jobError:job?.error,bytes:served?.length||0,signature:served?.subarray(0,5).toString('ascii')||null,sha256:served?createHash('sha256').update(served).digest('hex'):null,rawSha256,preservedCopyId:copy?.id||null};
+ });
  if(!Array.isArray(job?.packages)||job.packages.length!==labels.length||job.packages.some(p=>!labels.some(l=>l.package===p)))otherErrors.push('TEMU package evidence incomplete');
  const busy=(await db.query("SELECT 1 FROM correction_jobs WHERE order_id=$1 AND status IN ('pending','queued','running','applying','checking','waiting') UNION ALL SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('pending','processing') UNION ALL SELECT 1 FROM extra_parcels WHERE order_id=$1 UNION ALL SELECT 1 FROM partial_deliveries WHERE order_id=$1",[id])).rows.length>0;
  return {order,erp,review,labels,busy,otherErrors,historicalStockReviews:historicalStockReviews.map(j=>({id:j.id,error:j.error,updatedAt:j.updated_at}))};
