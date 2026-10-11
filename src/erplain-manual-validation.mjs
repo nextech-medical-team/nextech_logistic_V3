@@ -39,7 +39,7 @@ export function manualReviewService(db,api){return {
    if(id){
     const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];
     if(!o||String(o.erp_live?.bc?.id)!==b.bcId||o.source_payload?.account!=='live')throw Error('Identité Erplain de la commande à rapprocher');
-    if(o.source_payload?.cancelled||o.source_payload?.cancelled_at||o.erp_live.bc.status==='cancelled')throw Error('Commande annulée : réactivation interdite');
+    if(o.erp_live.bc.status==='cancelled')throw Error('Commande annulée : réactivation interdite');
     const local=(await tx.query('SELECT * FROM lines WHERE order_id=$1',[id])).rows;
     const totals=ls=>JSON.stringify(ls.map(l=>[l.variant?.sku||l.target_sku,Number(l.variant?l.quantity:l.target_quantity)]).sort());
     if(totals(local)!==totals(pendingScope(d).lines))throw Error('Produits ou quantités de la commande existante différents : rapprochement requis');

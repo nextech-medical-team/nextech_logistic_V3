@@ -24,7 +24,9 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/Étiquette existante sans (BC|BL) Erplain/i.test(text))return result('preparation',/sans BC/.test(text)?'BC Erplain non créé':'BL Erplain non créé','');
  if(/City-to-Postal Code mapping/i.test(text))return result('city','GOFO · Ville / code postal refusés','');
  if(/Unité de poids/i.test(text))return result('weight-unit','Unité de poids invalide');
- if(/Poids.*(?:non renseigné|manquant|absent)|synchronisation Erplain/i.test(text))return result('weight','Poids manquant');
+ if(text==='Poids ou nombre de colis absent')return result('parcel-preparation','Poids du colis / nombre de colis à vérifier','');
+ if(/synchronisation Erplain/i.test(text))return result('catalog-sync','Catalogue Erplain à synchroniser');
+ if(/Poids.*(?:non renseigné|manquant|absent)/i.test(text))return result('weight','Poids manquant');
  if(/stock insuffisant/i.test(text))return result('stock','Bloqué : stock insuffisant');
  if(/BC existant contient d’autres|Commande V3 et BC différents|Écart BC\/BL|BC modifié/i.test(text))return result('bc','Commande V3 et BC différents');
  if(/^BC · Produits ou quantités des lignes Erplain différents de la source$/.test(text))return result('bc','Commande V3 et BC différents','');

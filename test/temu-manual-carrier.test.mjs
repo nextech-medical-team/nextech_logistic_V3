@@ -28,9 +28,9 @@ test('TEMU stays automatic; only an explicit valid manual choice routes to a par
  assert.equal(defaultRouting.rules.find(r=>r.channel==='temu').fixed,'temu');
 });
 test('manual choice retains suspension, cancellation, shipment and uncertain purchase protection',()=>{
- for(const status of ['purchasing','uncertain','cancelled','cancellation_requested','not_to_ship'])assert.throws(()=>assertTemuManualLabel({status}));
- for(const status of ['shipment_error','ready','complete'])assert.doesNotThrow(()=>assertTemuManualLabel({status}));
- for(const extra of [{archived:true},{tracking_status:'delivered'},{tracking_status:'in_transit'},{partial_mode:true},{suspension:{active:true}}])assert.throws(()=>assertManualLabelOrder({...order('gls'),...extra},'gls'));
+ for(const status of ['purchasing','uncertain'])assert.throws(()=>assertTemuManualLabel({status}));
+ for(const status of ['shipment_error','ready','complete','cancelled','cancellation_requested','not_to_ship'])assert.doesNotThrow(()=>assertTemuManualLabel({status}));
+ for(const extra of [{archived:true},{tracking_status:'cancelled'},{erp_live:{bc:{status:'cancelled'}}},{tracking_status:'delivered'},{tracking_status:'in_transit'},{partial_mode:true},{suspension:{active:true}}])assert.throws(()=>assertManualLabelOrder({...order('gls'),...extra},'gls'));
 });
 test('manual production queue preserves TEMU package, PDF and tracking; no-choice and uncertain requests cannot queue',async()=>{
  const db=await openDatabase();try{

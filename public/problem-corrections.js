@@ -869,11 +869,11 @@ function renderResolution(ctx,problem){
 
 
 
-  const canApply=pending&&!ctx.order.erp_live?.bc?.id&&!ctx.order.erp_live?.bl?.id&&!ctx.job&&!pending.cancelled_at&&!['fulfilled','partial','partially_fulfilled'].includes(pending.fulfillment_status);
+  const canApply=pending&&!ctx.order.erp_live?.bc?.id&&!ctx.order.erp_live?.bl?.id&&!ctx.job;
 
 
 
-  if(canApply)button('Appliquer les nouvelles données',async()=>saved(await task('accept-source-change',{resumeAfter:false})));else{const p=document.createElement('p');p.textContent='Des documents existent ou la commande a été annulée/expédiée. Vérifiez ces éléments avant toute nouvelle préparation.';fields.append(p);}
+  if(canApply)button('Appliquer les nouvelles données',async()=>saved(await task('accept-source-change',{resumeAfter:false})));else{const p=document.createElement('p');p.textContent='Des documents existent. Vérifiez les modifications des articles, quantités et adresse avant toute nouvelle préparation.';fields.append(p);}
 
 
 

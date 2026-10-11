@@ -2,7 +2,7 @@
 // Raw API records stay untouched; no inferred cancellation or prorated refund.
 export function confirmedCancelledTemuLine(line){
  const original=Number(line?.originalOrderQuantity),cancelled=Number(line?.canceledQuantityBeforeShipment);
- return typeof line?.orderSn==='string'&&line.orderSn.trim()!==''&&Number(line?.orderStatus)===3
+ return typeof line?.orderSn==='string'&&line.orderSn.trim()!==''
   &&line.quantity!==null&&line.quantity!==undefined&&String(line.quantity).trim()!==''&&Number(line.quantity)===0
   &&Number.isSafeInteger(original)&&original>0&&cancelled===original;
 }
@@ -24,7 +24,7 @@ export function temuActiveAmounts(order,raw){
   if(!d)fail('ligne financière sans correspondance dans la commande');
   if(!Number.isSafeInteger(q)||q<=0)fail('quantité financière non vérifiable');
   if(cancelledIds.has(String(l.orderSn))){if(q!==Number(d.originalOrderQuantity))fail('quantité annulée différente de la ligne financière');}
-  else if(q!==Number(d.quantity)||Number(d.orderStatus)===3)fail('quantité active différente de la ligne financière');
+  else if(q!==Number(d.quantity))fail('quantité active différente de la ligne financière');
  }
  for(const l of detail.orderList)if(!cancelledIds.has(String(l.orderSn))&&!financial.has(String(l.orderSn)))fail('prix d’un article actif absent');
  const currency=parent.basePriceTotal?.currency;

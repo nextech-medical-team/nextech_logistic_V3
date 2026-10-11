@@ -37,7 +37,6 @@ export function lifecycleWorker(db,directory,{gateway=erplainLifecycleGateway(er
    await discover();
    const row=(await db.query(lifecycleCandidateSql)).rows[0];if(!row)return;
    const o=(await db.query('SELECT * FROM orders WHERE id=$1',[row.order_id])).rows[0];
-   if(o.channel==='shopify'&&o.source_payload?.shopifyCancellationSync?.proof?.reason){await db.query('UPDATE document_lifecycle SET requested=false,checked_at=now(),preparation_revision=$2 WHERE bl_id=$1',[row.bl_id,row.current_revision]);return;}
    let input={blId:row.bl_id,bcId:o.erp_live?.bc?.id,channel:o.channel,expectedTracking:[],events:[],preparationComplete:false};
    try{
     if(row.partial_id){const d=(await db.query('SELECT * FROM partial_deliveries WHERE id=$1',[row.partial_id])).rows[0];input.expectedTracking=d.tracking||[];input.preparationComplete=d.status==='ready'&&readyWeightAllowed(o.channel,d.weight_kg)&&!!d.stock_document&&!!d.selection?.length;}

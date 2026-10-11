@@ -10,7 +10,6 @@ export function assertManualLabelOrder(o,carrier,{manualChoice=false}={}){const 
 }
 export function assertTemuManualLabel(job){
  if(['purchasing','uncertain'].includes(job?.status))throw Error('Achat TEMU en cours ou incertain : vérifier son résultat avant une nouvelle étiquette');
- if(['cancelled','cancellation_requested','not_to_ship'].includes(job?.status))throw Error('Commande TEMU annulée ou non expédiable : vérifier son statut');
 }
 // Read actual mapped product weights; the default TEMU parcel weight is not a measured weight.
 export async function additionalLabelWeight(db,o){
