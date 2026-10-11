@@ -215,7 +215,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   if(['equivalent-preview','replace-equivalent'].includes(j.action)){const result=await substitution(db,api,o,b,{apply:j.action==='replace-equivalent',stage,directory});if(j.action==='equivalent-preview'||result.partialRemainder)return result;await update(j.id,'waiting','Équivalent enregistré · contrôle stock et BL',{...result,equivalent:true});return null;}
   if(j.action==='manual-temu-pricing'){await stage('Enregistrement des prix et quantités');const result=await saveManualPricing(db,o.id,b,j.id);return {...result,manualPricing:true,erpOnly:true,checks:await recheckOrders(db,[o.id])};}
   if(j.action==='choose-carrier'){
-   assertManualLabelOrder(o,b.carrier);
+   assertManualLabelOrder(o,b.carrier,{manualChoice:true});
    await assertOrderEditable(o,true);
    const previous=(await db.query('SELECT status,carrier FROM carrier_jobs WHERE order_id=$1',[o.id])).rows[0];
    if(previous?.status==='ready'&&b.confirmReplace!==true)throw Error('Confirmez le remplacement et la réimpression de l’étiquette existante');

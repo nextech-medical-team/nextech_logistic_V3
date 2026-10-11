@@ -51,7 +51,7 @@ export async function prepareLabel(db,o){
 
   }
 
-  if(o.channel!=='temu'){
+  if(o.channel!=='temu'||o.transport_choice){
 
     if(unmapped.length)throw new Error('Correspondance SKU absente : '+unmapped.join(', '));
 
