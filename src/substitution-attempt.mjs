@@ -20,4 +20,5 @@ export async function startSubstitutionAttempt(db,order,b,plan,permanent,mapping
 export async function finishSubstitutionAttempt(tx,orderId,requestId,attempt,result){
  const saved=await tx.query("UPDATE resolution_jobs SET payload=payload||jsonb_build_object('substitutionAttempt',$3::jsonb),status='waiting',stage='Équivalent enregistré · contrôle stock et BL',result=$4::jsonb,error=null,updated_at=now() WHERE order_id=$1 AND request_id=$2 AND action='replace-equivalent' AND status='running' RETURNING id",[orderId,requestId,JSON.stringify({...attempt,phase:'local_committed',completedAt:new Date().toISOString(),completionResult:result}),JSON.stringify({...result,equivalent:true})]);
  if(saved.rows.length!==1)throw Error('Fin du remplacement non enregistrée : synchronisation locale annulée, BC à rapprocher.');
+ if(result.importDeferred)await tx.query("UPDATE resolution_jobs SET status='complete',stage='Remplacement enregistré · autres lignes de l’import en attente' WHERE order_id=$1 AND request_id=$2 AND action='replace-equivalent' AND status='waiting'",[orderId,requestId]);
 }
