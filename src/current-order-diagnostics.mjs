@@ -13,6 +13,14 @@ export function currentReasonSql(raw){
  // an old generic job maps to a verified financial error keeps the same result.
  return `CASE WHEN ${verifiedFinanceSql} AND ((${raw}) IN (${old}) OR (issue IN (${old}) AND ${genericPlatformModificationSql(raw)} AND (${platformChangeVerifiedSql} OR ${recovered}))) THEN CASE WHEN erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false) THEN 'Reprise historique à vérifier : BL non créé' ELSE NULL END ELSE (${currentPlatformModificationSql(raw)}) END`;
 }
+// Boolean form for the problem scope: avoids generating descriptive strings and
+// their nested subqueries when only the presence of a reason is required.
+export function currentReasonEmptySql(raw){
+ raw=withoutSharedParcelReasonSql(raw);const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
+ const generic=genericPlatformModificationSql(raw),nonGenericIssue=`issue IS NOT NULL AND NOT coalesce(${genericPlatformModificationSql('issue')},false)`;
+ const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
+ return `coalesce(CASE WHEN ${verifiedFinanceSql} AND ((${raw}) IN (${old}) OR (issue IN (${old}) AND ${generic} AND (${platformChangeVerifiedSql} OR ${recovered}))) THEN NOT coalesce((erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false)),false) WHEN coalesce(${generic},false) THEN CASE WHEN ${platformChangeVerifiedSql} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE source_payload->'marketplacePendingCorrection' IS NULL END WHEN ${recovered} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE false END ELSE false END ELSE (${raw}) IS NULL OR (${raw})='' END,false)`;
+}
 export function projectCurrentDiagnostics(o){
  if(o.archived||o.label_status==='cancelled'||o.tracking_status==='cancelled'){for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o,'resolution_error']])if(target)target[key]=null;return o;}
  const deferred=o.source_payload?.platformChangeReconciliation;

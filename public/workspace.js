@@ -13,7 +13,7 @@ nav.innerHTML=`<small class="nav-label">COMMANDES</small><button data-view="orde
 nav.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>{if(el.dataset.view==='orders')$('channel').value='';show(el.dataset.view);});
 nav.querySelectorAll('[data-channel]').forEach(el=>el.onclick=()=>{$('channel').value=el.dataset.channel;page=1;selected.clear();show('orders');});
 nav.querySelectorAll('[data-carrier]').forEach(el=>el.onclick=()=>{$('shipment-carrier').value=el.dataset.carrier;show('shipments');});
-document.querySelector('.notice').innerHTML='V3 · ERPLAIN LIVE <span>Nouvelles commandes TEMU et Shopify depuis le 6 octobre à 10 h 45 min 34 s. Traitements activés. Achats TEMU sur confirmation. Reprise historique suspendue.</span>';
+document.querySelector('.notice').innerHTML='V3 · ERPLAIN LIVE <span>Nouvelles commandes TEMU et Shopify depuis le 6 octobre à 10 h 45 min 34 s. Traitements activés. Achats TEMU automatiques après contrôles, si marge nette positive et transporteur hors Cainiao ; sinon confirmation. Reprise historique suspendue.</span>';
 document.querySelector('#login small').textContent='Erplain LIVE connecté';
 const batch=document.querySelector('#view-orders .batch');const create=document.createElement('button');create.id='sandbox-labels';create.textContent='Créer les étiquettes transporteurs PROD';batch.append(create);
 const exportButton=document.createElement('button');exportButton.textContent='Exporter la sélection';batch.append(exportButton);

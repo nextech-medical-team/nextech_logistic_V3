@@ -8,12 +8,12 @@ import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
 // document, stock or label operations. A successful correction is not delivery.
 export function correctionStatusSnapshot(order,{erpJob,carrierJob,temuJob,otherReviews=[]}={}){
  const current=projectCurrentDiagnostics({...order,erp_live_job:erpJob?{...erpJob}:null});
- const blockers=[current.issue,current.erp_live_job?.error,carrierJob?.error,...otherReviews.map(j=>j.error)].filter(Boolean);
+ const blockers=[current.issue,current.erp_live_job?.error,carrierJob?.error,...otherReviews.map(j=>j.error)].filter(Boolean).map(reason=>/^Pr[ée]paration bloqu[ée]e(?:\s*:\s*v[ée]rification [àa] reprendre| à vérifier)?$/i.test(reason)?currentHoldDiagnostic(order,{erpJob,carrierJob,temuJob}).label:reason);
  if(order.pendingReplacement)blockers.push('Remplacement à confirmer');
  if(order.resolution_pending_resume)blockers.push(currentHoldDiagnostic(order,{erpJob,carrierJob,temuJob}).label);
  if(order.suspension?.active||order.suspension?.erplainCancellation)blockers.push('Commande suspendue');
  if(['pending','processing'].includes(erpJob?.status)||['pending','creating','awaiting_pdf'].includes(carrierJob?.status))blockers.push('Traitement en cours');
- if(order.label_status==='blocked'||order.erp_status==='blocked')blockers.push('Préparation bloquée à vérifier');
+ if(order.label_status==='blocked'||order.erp_status==='blocked')blockers.push(currentHoldDiagnostic(order,{erpJob,carrierJob,temuJob}).label);
  return {checkedAt:new Date().toISOString(),state:blockers.length?'needs_review':'observed',blockers:[...new Set(blockers)],businessCompleted:false,source:'current-local-diagnostics',providerFreshness:'existing-verified-proofs-only'};
 }
 export async function refreshCorrectionStatuses(db,orderId){
