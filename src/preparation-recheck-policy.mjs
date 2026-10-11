@@ -40,6 +40,21 @@ export async function requestRecoverySweeps(db){
  });
 }
 
+export function currentTemuPurchaseHoldDetail(o,{now=Date.now()}={}){
+ const held=o.temu_auto_purchase;
+ if(held?.result?.status!=='held')return '';
+ const message=String(held.result.message||'').replace(/^Achat d’étiquette TEMU à confirmer\s*:\s*/, '').trim();
+ const p=o.source_payload||{},read=Date.parse(p.temuDirect?.verifiedAt),checked=Date.parse(held.checkedAt||held.result.at);
+ const quota=/^(?:TEMU\s*[·:]\s*)?Quota partagé\s*:\s*lecture différée$/i.test(message);
+ // A later successful read retires this exact old observation. It does not
+ // authorize a purchase or retire any commercial, stock or supplier refusal.
+ if(quota&&o.channel==='temu'&&o.reference&&p.temuOrderDetail?.parentOrderMap?.parentOrderSn===o.reference
+  &&p.temuDirect?.source==='temu_direct'&&p.temuDirect.state==='verified'&&!p.temuDirect.error
+  &&Number.isFinite(read)&&Number.isFinite(checked)&&read>checked&&read<=now
+  &&o.temu_job?.status==='ready'&&!o.temu_job.error&&!p.temuReadDeferred&&!p.marketplacePendingCorrection&&p.visibilityHold!==true)return '';
+ return message;
+}
+
 export function currentHoldDiagnostic(o,{erpJob=o.erp_live_job,carrierJob=o.carrier_job,temuJob=o.temu_job}={}){
  const state=o.erp_live||{},p=o.source_payload||{};
  if(p.marketplacePendingCorrection)return {code:'source_change',label:'Commande source modifiée : rapprochement des données en attente',nextStep:'Comparer la version source aux documents existants avant toute reprise',decisionRequired:true};
@@ -49,7 +64,7 @@ export function currentHoldDiagnostic(o,{erpJob=o.erp_live_job,carrierJob=o.carr
  if(['pending','creating','awaiting_pdf'].includes(carrierJob?.status))return {code:'carrier_processing',label:'Traitement transport existant en cours',nextStep:'Suivre ou récupérer le document existant, sans nouvelle création',decisionRequired:false};
  if(!state.bc?.id)return {code:'bc_unverified',label:'Préparation initiale : BC et prérequis non validés',nextStep:'Relire les prérequis et vérifier l’autorisation de préparation',decisionRequired:false};
  if(!state.bl?.id)return {code:'bl_missing',label:'BC existant : BL restant à préparer après validation',nextStep:'Rapprocher produits, quantités, prix et stock puis poursuivre la préparation autorisée',decisionRequired:false};
- if(o.channel==='temu'&&temuJob?.status==='ready')return {code:'temu_confirmation',label:'Achat d’étiquette TEMU à confirmer'+(o.temu_auto_purchase?.result?.status==='held'?' : '+o.temu_auto_purchase.result.message.replace(/^Achat d’étiquette TEMU à confirmer\s*:\s*/, ''):''),nextStep:'Achat automatique TEMU après vérification de préparation et marge nette positive sur le devis sans Cainiao ; sinon confirmation nécessaire',decisionRequired:true};
+ if(o.channel==='temu'&&temuJob?.status==='ready')return {code:'temu_confirmation',label:'Achat d’étiquette TEMU à confirmer'+(currentTemuPurchaseHoldDetail(o)?' : '+currentTemuPurchaseHoldDetail(o):''),nextStep:'Achat automatique TEMU après vérification de préparation et marge nette positive sur le devis sans Cainiao ; sinon confirmation nécessaire',decisionRequired:true};
  if(o.channel==='temu'&&temuJob?.status!=='complete')return {code:'temu_result',label:'BL présent : résultat du parcours TEMU à compléter',nextStep:'Relire le traitement TEMU et conserver les éventuelles créations existantes',decisionRequired:false};
  if(o.channel!=='temu'&&carrierJob?.status!=='ready')return {code:'label_missing',label:'BL présent : étape étiquette distincte de la préparation',nextStep:'Contrôler l’autorisation et le parcours d’étiquette applicable',decisionRequired:true};
  if(!state.mappingPreparationFingerprint||!state.labelPreparationFingerprint)return {code:'legacy_proof',label:'Documents existants : preuve de cohérence de préparation à reconstruire',nextStep:'Comparer les données actuelles au BC, BL et stock, puis rapprocher le verrou sans recréer les documents',decisionRequired:false};
