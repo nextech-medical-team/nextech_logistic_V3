@@ -1,3 +1,5 @@
+// Register the diagnostic regressions through the existing runner entry.
+import './movement-watch-diagnostic.test.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {initializeMovementWatch,seedMovementWatch,claimMovementObservation,finishMovementObservation,movementWatchdog,movementWatchWorker,movementWatchStatus} from '../src/movement-watch.mjs';
