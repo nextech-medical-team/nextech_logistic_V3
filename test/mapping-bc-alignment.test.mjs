@@ -6,7 +6,7 @@ function fixture({lostResponse=false,applyBeforeLoss=true,bcExtras={}}={}){
  const item={id:'3',type:'normal',quantity:3000,price:20/3000,discount:0,discount_rule_amount:0,ecotax:0,tax_amount:0,tax_codes:[],location:{id:'1'},variant:{id:'2',sku:'680483',track_inventory:true}};
  let bc={id:'10',label:'C1',external_reference:'PO',created_at:'2026-09-30 10:00:00',status:'active',update_stock:true,total:20,paid_amount:0,invoices_count:0,tax_type:'exclusive',currency:{label:'EUR'},line_items:[item],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}},...bcExtras};
  const desired={type:'normal',quantity:20,price:1,tax_codes:[],location:{id:'1'},variant:{id:'2'}};
- const order={id:'o',reference:'PO',channel:'temu',source_payload:{},items:[desired],erp_live:{bc:{id:'10'}},pricing:{total:20,tax:0,currency:'EUR',tax_type:'exclusive',items:[desired]}};
+ const order={id:'o',reference:'PO',channel:'tender',source_payload:{},items:[desired],erp_live:{bc:{id:'10'}},pricing:{total:20,tax:0,currency:'EUR',tax_type:'exclusive',items:[desired]}};
  const calls=[];const api={request:async(query,variables)=>{
   calls.push(query);
   if(query.includes('V3MappingBC'))return {Order:structuredClone(bc)};
@@ -20,7 +20,7 @@ function fixture({lostResponse=false,applyBeforeLoss=true,bcExtras={}}={}){
  }};
  return {order,api,calls,options:{save:async()=>{},guard:async()=>{},preserveLabels:async()=>{}},get bc(){return bc;}};
 }
-test('current mapping 20 aligns BC 3000 through normal Erplain edit and verifies net debit 20',async()=>{
+test('legacy non-marketplace mapping 20 aligns BC 3000 through normal Erplain edit and verifies net debit 20',async()=>{
  const f=fixture(),result=await alignMappedBc(f.api,f.order,f.options);
  assert.equal(result.aligned,true);assert.equal(f.bc.line_items[0].quantity,20);assert.equal(f.order.erp_live.mappingAlignmentAttempt.status,'verified');
  assert.equal(f.calls.filter(q=>q.startsWith('mutation')).length,1);

@@ -42,3 +42,17 @@ test('retired source review no longer blocks while history and independent revie
  const independent=structuredClone(job);independent.result.bcComparisonRefresh.previousError+=' ; Stock insuffisant';
  assert.equal(retiredRecordedBcSourceReview(independent),false);
 });
+
+import {alignMappedBc} from '../src/mapping-bc-alignment.mjs';
+import {sourceRepairPlan,repairUnpreparedSourceBc} from '../src/source-bc-repair.mjs';
+import {sellerBcPlan} from '../src/temu-seller-bc-plan.mjs';
+for(const channel of ['temu','amazon','shopify'])test(channel+' historical mapping and source repair cannot rewrite a recorded BC',async()=>{
+ const o={channel,erp_live:{bc:{id:'1'}},source_payload:{temuAmountsError:'unavailable'}};
+ const bc={id:'1',status:'active',total:10,currency:{label:'EUR'},line_items:[{type:'normal',quantity:1,tax_amount:0,variant:{id:'2',sku:'BC'},location:{id:'3'}}]};
+ const forbidden=()=>assert.fail('Unexpected source, mutation or database call');
+ assert.equal((await alignMappedBc({request:forbidden},o,{save:forbidden,guard:forbidden,preserveLabels:forbidden})).sourceAlignmentDisabled,true);
+ assert.equal(sourceRepairPlan(o,[],bc,[]).authority,'recorded_erplain_bc');
+ assert.equal(sellerBcPlan(o,bc,[]).action,'retain');
+ const api={request:async query=>{assert.match(query,/^query V3RecordedBcExecution/);return {Order:bc};}};
+ assert.equal((await repairUnpreparedSourceBc({query:forbidden},api,o,{total:999,currency:'USD'})).total,10);
+});

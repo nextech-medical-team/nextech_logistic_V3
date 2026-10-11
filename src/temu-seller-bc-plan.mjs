@@ -1,7 +1,9 @@
+import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
 import {temuCommercialSource,temuSellerTotals} from './temu-commercial-source.mjs';
 import {temuCountryAmounts} from './temu-country-vat.mjs';
 import {verifySourceCommercialTotals} from './bc-pricing.mjs';
 export function sellerBcPlan(order,actual,codes){
+ if(usesRecordedBc(order)){const source=recordedBcPricing(order,actual);return {action:'retain',source,confirmed:source.confirmed,authority:'recorded_bc'};}
  const source=temuSellerTotals(order);
  if(String(actual?.id)!==String(order.erp_live?.bc?.id))throw Error('Identité BC différente');
  try{return {action:'retain',source,confirmed:verifySourceCommercialTotals(actual,source)};}catch{}

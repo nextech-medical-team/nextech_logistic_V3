@@ -1,6 +1,8 @@
+import {usesRecordedBc,recordedBcPricing,readRecordedBc} from './existing-bc-execution.mjs';
 import {buildBcPricing,verifyBcPricing,verifySourceCommercialTotals} from './bc-pricing.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 export function sourceRepairPlan(o,lines,actual,codes){
+ if(usesRecordedBc(o))return recordedBcPricing(o,actual);
  if(o.partial_mode||o.erp_live?.bl?.id||o.erp_live?.stockDocument?.id||o.erp_live?.stockCreationAttemptedAt
  ||!['active','pending','unpublished'].includes(actual?.status)||actual.update_stock!==false
  ||actual.shipping_orders?.paginatorInfo?.hasMorePages||!Array.isArray(actual.shipping_orders?.data)||actual.shipping_orders.data.length)
@@ -23,6 +25,7 @@ export function sourceRepairPlan(o,lines,actual,codes){
  return pricing;
 }
 export async function repairUnpreparedSourceBc(db,api,o,source){
+ if(usesRecordedBc(o))return (await readRecordedBc(api,o)).pricing.confirmed;
  return withShipmentLock(async()=>{
   const current=(await db.query("SELECT o.*,j.error FROM orders o JOIN erp_live_jobs j ON j.order_id=o.id WHERE o.id=$1 AND j.status='review'",[o.id])).rows[0];
   if(!current||current.error!==o.error||JSON.stringify(current.erp_live)!==JSON.stringify(o.erp_live)||JSON.stringify(current.source_payload)!==JSON.stringify(o.source_payload))throw Error('BC · Commande modifiée pendant le rapprochement');
