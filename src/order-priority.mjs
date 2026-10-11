@@ -62,10 +62,9 @@ export async function processingRows(db,ids){
   const current=projectCurrentDiagnostics({...row.diagnostic_order,
    erp_live_job:{error:row.erp_error,updated_at:row.erp_updated},
    carrier_job:{error:row.carrier_error,updated_at:row.carrier_updated},
-   temu_job:{error:row.temu_error,updated_at:row.temu_updated},
+   temu_job:row.temu_status?{error:row.temu_error,updated_at:row.temu_updated}:null,
    resolution_error:row.resolution_error,resolution_error_updated_at:row.resolution_updated});
   return processingView({...row,erp_error:current.erp_live_job.error,
-   carrier_error:current.carrier_job.error,temu_error:current.temu_job.error,
    resolution_error:current.resolution_error});
  });
 }
