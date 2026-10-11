@@ -18,6 +18,7 @@ test('latest negative margin prevents buy claim',async()=>{
  if(sql.startsWith('INSERT INTO temu_automatic'))return {rows:[]};
  if(sql.startsWith('SELECT c.reference'))return {rows:[{reference:order.reference}]};
  if(sql.startsWith('SELECT * FROM orders'))return {rows:[order]};
+ if(sql.startsWith('SELECT coalesce'))return {rows:[{lines:[]}]};
  if(sql.startsWith('SELECT o.id'))return {rows:[{id:'o'}]};
  if(sql.startsWith('UPDATE temu_automatic')){saved.push(JSON.parse(args[1]));return {rows:[]};}
  throw Error(sql);

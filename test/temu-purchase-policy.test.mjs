@@ -61,3 +61,9 @@ test('atomic order guard refuses a changed command without provider purchase',as
  await assert.rejects(s.buy(reference,p.id,p.amount,{beforeClaim:async()=>({orderProof:{id:'o',erpLive:{},sourcePayload:{},address:{},suspension:{},weight:null}})}),/modifiés/);
  assert.equal(guarded,true);assert.equal(h.bought,0);
 });
+
+test('quote never understates the known order weight when recomputing transport and margin',async()=>{
+ const h=harness([offer(1,'GLS',2)]),read=h.db.query;
+ h.db.query=async(sql,args)=>sql.startsWith('SELECT suspension')?{rows:[{suspension:{},weight_kg:'1.2345'}]}:read(sql,args);
+ const p=await temuShipping(h.db,h.api).prepare(reference);assert.equal(p.request.sendRequestList[0].weight,'1.235');
+});

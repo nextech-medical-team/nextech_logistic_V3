@@ -6,7 +6,20 @@ import {automaticTemuMarginDecision} from './temu-purchase-policy.mjs';
 export async function initializeTemuAutomaticPurchase(db){
  await db.exec(`CREATE TABLE IF NOT EXISTS temu_automatic_purchase_checks(
  reference text PRIMARY KEY,checked_at timestamptz,next_at timestamptz NOT NULL DEFAULT now(),
- result jsonb NOT NULL DEFAULT '{}');`);
+ result jsonb NOT NULL DEFAULT '{}');
+ CREATE OR REPLACE FUNCTION v3_wake_temu_automatic_purchase() RETURNS trigger AS $$
+ DECLARE oid text; BEGIN
+ IF TG_TABLE_NAME='orders' THEN oid=NEW.id; ELSE oid=NEW.order_id; END IF;
+ INSERT INTO temu_automatic_purchase_checks(reference)
+ SELECT reference FROM orders WHERE id=oid AND channel='temu' AND NOT archived
+ ON CONFLICT(reference) DO UPDATE SET next_at=now();
+ RETURN NEW; END; $$ LANGUAGE plpgsql;
+ DROP TRIGGER IF EXISTS v3_wake_temu_purchase_order ON orders;
+ CREATE TRIGGER v3_wake_temu_purchase_order AFTER INSERT OR UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION v3_wake_temu_automatic_purchase();
+ DROP TRIGGER IF EXISTS v3_wake_temu_purchase_lines ON lines;
+ CREATE TRIGGER v3_wake_temu_purchase_lines AFTER INSERT OR UPDATE ON lines FOR EACH ROW EXECUTE FUNCTION v3_wake_temu_automatic_purchase();
+ DROP TRIGGER IF EXISTS v3_wake_temu_purchase_corrections ON correction_jobs;
+ CREATE TRIGGER v3_wake_temu_purchase_corrections AFTER INSERT OR UPDATE ON correction_jobs FOR EACH ROW EXECUTE FUNCTION v3_wake_temu_automatic_purchase();`);
 }
 export function automaticPreparationHold(o,now=Date.now()){
  const blocked=suspensionBlock(o);if(blocked)return blocked;
@@ -34,11 +47,12 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,s
    AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting','review'))
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting','review'))`,[o.id])).rows;
   if(!idle.length)throw Error('Correction, reprise ou étiquette existante à rapprocher avant achat');
+  const lineProof=(await db.query("SELECT coalesce(jsonb_agg(to_jsonb(l) ORDER BY source_line,id),'[]'::jsonb) lines FROM lines l WHERE order_id=$1",[o.id])).rows[0]?.lines||[];
   await stockGate(db,o);
   if(plan){
    const decision=automaticTemuMarginDecision(await margins.get({fresh:true}),reference,plan);
    if(!decision.allowed)throw Error(decision.message+' : '+decision.reason);
-   return {...decision,orderProof:{id:o.id,erpLive:o.erp_live,sourcePayload:o.source_payload,address:o.address,suspension:o.suspension,weight:o.weight_kg}};
+   return {...decision,orderProof:{id:o.id,erpLive:o.erp_live,sourcePayload:o.source_payload,address:o.address,suspension:o.suspension,weight:o.weight_kg,lines:lineProof}};
   }
  }
  return {get running(){return running;},async run(){
