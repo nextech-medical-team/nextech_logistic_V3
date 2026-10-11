@@ -40,7 +40,9 @@ export async function refreshLookupDiagnostics(db,order,proof){
   if(job&&['pending','processing'].includes(job.status))throw Error('Traitement Erplain actif : diagnostic conservé');
   const carrier=(await tx.query('SELECT status FROM carrier_jobs WHERE order_id=$1 FOR UPDATE',[order.id])).rows[0];
   if(carrier&&['pending','creating','awaiting_pdf'].includes(carrier.status))throw Error('Traitement transporteur actif : diagnostic conservé');
-  const resolutions=(await tx.query('SELECT id,action,status,error,updated_at FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC FOR UPDATE',[order.id])).rows;
+  // pg converts timestamptz to Date and drops microseconds. Keep the original
+  // text for the conditional update and audit while holding the row lock.
+  const resolutions=(await tx.query('SELECT id,action,status,error,updated_at::text AS updated_at FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC FOR UPDATE',[order.id])).rows;
   if(resolutions.some(j=>j.action!=='check-sku'&&['queued','running','waiting'].includes(j.status)))throw Error('Résolution active : diagnostic conservé');
   const latest=resolutions.find(j=>!['refresh','check-sku'].includes(j.action));
   const resolution=latest?.status==='review'?latest:null;

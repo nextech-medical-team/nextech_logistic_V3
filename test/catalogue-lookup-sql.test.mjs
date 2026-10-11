@@ -13,7 +13,7 @@ test('SQL reconciliation clears only stale catalogue components, audits history,
  INSERT INTO orders VALUES('o','temu',false,'COLL200200 : SKU Erplain introuvable ; Adresse à vérifier','{}',true,'{"temuManualPricing":{"vatRate":27}}');
  INSERT INTO lines VALUES('o','COLL200200',null,'{}');
  INSERT INTO erp_live_jobs VALUES('o','review','Accès aux montants refusé (3000032)',now()-interval '1 hour');
- INSERT INTO resolution_jobs VALUES('r','o','manual-temu-pricing','review','COLL200200 : SKU Erplain introuvable',now()-interval '1 hour',now()-interval '1 hour');`);
+ INSERT INTO resolution_jobs VALUES('r','o','manual-temu-pricing','review','COLL200200 : SKU Erplain introuvable','2026-10-06T20:41:54.729123Z','2026-10-11T07:16:28.302123Z');`);
  const db={transaction:fn=>engine.transaction(tx=>fn({query:(...a)=>tx.query(...a)}))},order={id:'o',erp_live:{}};
  const before=(await engine.query('SELECT * FROM orders')).rows[0],jobBefore=(await engine.query('SELECT * FROM resolution_jobs')).rows[0];
  const proof={sku:'COLL200200',status:'active',complete:true,sourceReadOnly:true,variantId:'2899571',productId:'2009207',readAt:new Date(Date.now()-1).toISOString(),documentId:null};
