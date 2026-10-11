@@ -17,6 +17,14 @@ test('old block alerts immediately on installation and fresh reads never reset i
  const now=Date.now(),o={issue:'BL non créé',blocked_since:new Date(now-7200000),erp_live:{}};
  assert.equal(monitoringObservation(o,{},now).alert,true);
 });
+
+test('current Erplain failure replaces an obsolete finance message without hiding independent or suspended issues',()=>{
+ const error='BC · Codes TVA Erplain différents de la source ; produits et quantités identiques',o={issue:'TEMU · Prix client et TVA source incohérents',erp_live:{pricing:{status:'blocked'}},erp_live_job:{status:'review',error}};
+ assert.equal(monitoringObservation(o).result,error);assert.match(monitoringObservation(o).nextStep,/taux et codes TVA du BC/);
+ assert.equal(monitoringObservation({...o,issue:'Adresse incomplète'}).result,'Adresse incomplète');
+ assert.match(monitoringObservation({...o,suspension:{active:true,note:'Décision humaine'}}).nextStep,/réactivation/);
+ assert.equal(monitoringObservation({...o,erp_live_job:{status:'pending',error:null}}).result,o.issue);
+});
 test('commercial platform states do not create a diagnostic or next-step suspension',()=>{
  for(const status of ['shipped','cancelled','delivered'])assert.equal(monitoringObservation({tracking_status:status,source_payload:{cancelled:true,financial_status:'refunded'},erp_live:{}}).blocked,false);
  assert.match(monitoringObservation({suspension:{active:true,note:'Décision humaine'}}).nextStep,/réactivation/);
