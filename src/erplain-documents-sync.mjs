@@ -1,3 +1,4 @@
+import {reconcileStockIncident} from './stock-incident-recheck.mjs';
 import {reconcileRefreshedBcDiagnostics,assertRefreshedBcDocument,documentReadVersion} from './bc-comparison-refresh.mjs';
 import {synchronizeRecoveredOrder} from './erplain-targeted-orders.mjs';
 import {pendingScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
@@ -43,5 +44,6 @@ export async function refreshErplainDocuments(db,api,id){
   if(fresh.source_payload?.erplainImported&&fresh.source_payload?.account==='live')await synchronizeRecoveredOrder(tx,{...fresh,erp_live:state},bc);
   comparison=await reconcileRefreshedBcDiagnostics(tx,id,bc);
  });
- return {message:'BC et tous les BL associés actualisés depuis Erplain. Étiquettes conservées.',stockHolds:source.stockHolds,comparison,bc,notFound:false};
+ const stockIncident=await reconcileStockIncident(db,api,id,{bc,comparison});
+ return {stockIncident,message:'BC et tous les BL associés actualisés depuis Erplain. Étiquettes conservées.',stockHolds:source.stockHolds,comparison,bc,notFound:false};
 }

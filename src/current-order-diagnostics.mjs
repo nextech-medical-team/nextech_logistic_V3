@@ -1,3 +1,4 @@
+import {stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {withoutSharedParcelReason,withoutSharedParcelReasonSql} from './shared-parcel-diagnostic.mjs';
 import {obsoleteTemuVisibilityError,pureTemuSourceReadError} from './temu-catchup-policy.mjs';
 // Current diagnostic projection only. Never changes jobs or business data.
@@ -12,6 +13,9 @@ export function projectCurrentDiagnostics(o){
   const job=o.erp_live_job;
   if(job&&Number.isFinite(Date.parse(job.updated_at))&&Date.parse(job.updated_at)<=Date.parse(partial.checkedAt)&&(pureTemuSourceReadError(job.error)||job.error==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'))job.error=partial.currentReason;
  }
+ const stock=o.erp_live?.stockIncidentRecheck,stamp=Date.parse(stock?.checkedAt),stockFresh=Number.isFinite(stamp)&&stamp<=Date.now()&&Date.now()-stamp<=15*60000;
+ if(stock&&((stock.preparationRequired&&o.issue===stock.currentIssue)||(stock.status!=='resolved'&&o.issue===stock.currentError))){for(const [target,key] of [[o.erp_live_job,'error'],[o,'resolution_error']])if(target&&stockIncidentOnly(target[key])&&(target===o.erp_live_job?target[key]===stock.erpError:(stock.status==='resolved'?stock.retiredErrors:stock.observedErrors)?.includes(target[key])))target[key]=stock.status==='resolved'?(stockFresh?null:'Stock : vérification à reprendre — dernier contrôle expiré'):stock.currentError;}
+
  const fresh=o.source_payload?.temuCatchup;
  if(o.channel==='temu'&&(fresh?.complete===true&&fresh.coreComplete===true||fresh?.requiredComplete===true&&['pending','cancelled'].includes(fresh.sourceStage))&&!fresh.conflicts?.length&&Number.isFinite(Date.parse(fresh.checkedAt))&&(!o.source_payload?.temuDirect?.attemptedAt||Date.parse(o.source_payload.temuDirect.attemptedAt)<=Date.parse(fresh.checkedAt))){
   for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error'],...(o.resolution_actions||[]).map(j=>[j,'error'])]){
