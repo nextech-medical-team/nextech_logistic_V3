@@ -1,3 +1,6 @@
+import {relayLabelObservation} from './relay-label-observation.mjs';
+import {readShopifyRelay,relayComparisonAddress} from './shopify-relay-source.mjs';
+import {shopifyDeliveryMode} from './shopify-delivery.mjs';
 import {shopifyCancellationReason} from './shopify-cancellation-policy.mjs';
 import {platformReceiptDisposition} from './platform-receipt-version.mjs';
 import {authorizedFreshTemu} from './temu-authorized-reimport.mjs';
@@ -43,6 +46,14 @@ export async function applyMarketplaceReceipt(db,r,options={}){
  const fresh=authorizedFreshTemu(r,options);
  const window=(await db.query("SELECT value FROM settings WHERE key='marketplace_automatic'")).rows[0]?.value;if(!window?.enabled)return {skipped:true,reason:'disabled'};
  if(!fresh&&!withinReceptionStart(r.channel,r.payload,window))return {skipped:true,reason:'outside-start-date'};
+ if(r.channel==='shopify'&&shopifyDeliveryMode(r.payload)==='relay'&&!readShopifyRelay(r.payload)){
+  const {shopifyCollector,loadShopifyConfig}=await import('./marketplace-collection.mjs');
+  const reader=options.shopifyReader||shopifyCollector(await loadShopifyConfig(process.env.DATA_DIR||'/var/lib/nextech-live'));
+  if(reader.shop&&reader.shop!==r.shop)throw Error('Shopify · Boutique relais différente');
+  const payload=await reader.order(String(r.payload.id||''));
+  if(String(payload.id)!==String(r.payload.id)||payload.name!==r.payload.name||!readShopifyRelay(payload))throw Error('Shopify · Choix relais non vérifiable');
+  r={...r,payload};
+ }
  let o;try{if(r.payload.visibilityError)throw Error(r.payload.visibilityError);
  o=r.channel==='shopify'?{...normalizeShopifyOrders([r.payload])[0],channel:'shopify',cancelled:!!shopifyCancellationReason(r.payload),fulfilled:['fulfilled','partial','partially_fulfilled'].includes(r.payload.fulfillment_status),version:r.payload.updated_at||r.payload.created_at}:normalizeTemuReceipt(r.payload,r.shop);
  if(o.version&&!Number.isFinite(Date.parse(o.version)))throw Error('Date de modification marketplace invalide');
@@ -56,16 +67,30 @@ export async function applyMarketplaceReceipt(db,r,options={}){
   if(fresh&&existing)throw Error('Ancienne fiche V3 encore présente : reprise interrompue');
   if(existing){const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
    if(existing.source_payload?.visibilityHold){
-    const source={...o.source_payload,sourceShop:r.shop,visibilityHold:false,visibilityRecoveredAt:new Date().toISOString()};
+    const source={...o.source_payload,...(existing.source_payload?.externalLabel?{externalLabel:existing.source_payload.externalLabel}:{}),sourceShop:r.shop,visibilityHold:false,visibilityRecoveredAt:new Date().toISOString()};
     await tx.query('UPDATE orders SET recipient=$2,address=$3,source_date=$4,source_payload=$5,issue=$6 WHERE id=$1',[existing.id,o.recipient,JSON.stringify(o.address),o.source_date,JSON.stringify(source),'Données récupérées · Préparation à vérifier']);
     for(const l of o.lines)await tx.query('INSERT INTO lines(id,order_id,source_line,source_sku,quantity,source_payload) VALUES($1,$2,$3,$4,$5,$6)',[l.id,existing.id,l.source_line,l.source_sku,l.quantity,JSON.stringify(l.source_payload)]);
     await recoverCompleteTemuImport(tx,existing,o,r);
     return {existing:true,recovered:true};
    }
    const prior=(await tx.query('SELECT source_line,source_sku,quantity FROM lines WHERE order_id=$1 ORDER BY source_line',[existing.id])).rows;
-   const changed=marketplaceChanged(existing,prior,o);
+    const changed=marketplaceChanged(existing,prior,o);
+    if(o.source_payload.shopifyRelay){
+     const old=existing.source_payload?.shopifyRelay,relay=o.source_payload.shopifyRelay;
+     if(!changed){relay.frozenOrderAddress=structuredClone(existing.address);relay.frozenClientAddress=structuredClone(relayComparisonAddress(existing,relay));}
+     else if(old?.frozenOrderAddress&&old?.frozenClientAddress){relay.frozenOrderAddress=structuredClone(old.frozenOrderAddress);relay.frozenClientAddress=structuredClone(old.frozenClientAddress);}
+    }
    // Save observation independently from operational preparation fields.
-   await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[existing.id,JSON.stringify({platformStatusObservation:{channel:r.channel,payload:r.payload,observedAt:new Date().toISOString(),version:o.version,indicative:true}})]);
+   await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[existing.id,JSON.stringify({platformStatusObservation:{channel:r.channel,payload:r.payload,observedAt:new Date().toISOString(),version:o.version,indicative:true},...(o.source_payload.shopifyRelay?{shopifyRelay:o.source_payload.shopifyRelay,shopifyDeliveryMode:o.source_payload.shopifyDeliveryMode}:{})})]);
+   const relay=o.source_payload?.shopifyRelay;
+   if(!changed&&relay?.selectedId&&!existing.archived&&existing.label_status!=='cancelled'&&!existing.suspension?.active&&!existing.suspension?.erplainCancellation){
+    const job=(await tx.query('SELECT status,environment,carrier FROM carrier_jobs WHERE order_id=$1 FOR SHARE',[existing.id])).rows[0];
+    if(job?.status==='ready'&&job.environment==='production'){
+     const documents=(await tx.query('SELECT document_index,pdf FROM carrier_documents WHERE order_id=$1 ORDER BY document_index FOR SHARE',[existing.id])).rows;
+     const observation=relayLabelObservation(existing,relay,job,documents);
+     if(observation)await tx.query('UPDATE orders SET issue=$2,label_status=$3,source_payload=source_payload||$4::jsonb WHERE id=$1',[existing.id,observation.issue,observation.labelStatus,JSON.stringify({relayDestinationHold:observation.record})]);
+    }
+   }
    if(changed){await tx.query("UPDATE orders SET resolution_pending_resume=true,label_status='blocked',issue=$2,source_payload=source_payload||$3::jsonb WHERE id=$1",[existing.id,'Commande modifiée dans '+r.channel+' · Vérifier la préparation',JSON.stringify({marketplacePendingCorrection:r.payload,sourceShop:r.shop})]);}
    await tx.query('INSERT INTO marketplace_order_links(channel,shop,reference,order_id,version) VALUES($1,$2,$3,$4,$5) ON CONFLICT(channel,shop,reference) DO UPDATE SET version=excluded.version',[r.channel,r.shop,o.reference,existing.id,o.version]);return {existing:true,review:changed};
   }
