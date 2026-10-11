@@ -206,6 +206,32 @@ test('complete initial recovery queues existing preparation only within authoriz
   }finally{await db.close();}
  }
 });
+
+test('stable partial read retains financial hold and replaces source error only',async()=>{
+ const db=await fixture();try{
+ const error="TEMU refuse l’opération : 3000032 access_token don't have this api access, please ask for seller to authorize this api in seller center first.and share the new access_token with you.";
+ const old=error+' ; TEMU refuse l’opération : 180020006 The current order status cannot be viewed.';
+ await db.query("UPDATE orders SET issue=$1,source_payload=$2::jsonb WHERE id='A'",[old,JSON.stringify({mallId:'M',visibilityHold:true})]);
+ const observed=await readTemuSource(apiFor(payload(),{'bg.order.amount.query':Error(error)}),reference);
+ const worker=temuCatchupWorker(db,async()=>[{channel:'temu',shop:'M',refreshSource:async()=>observed}],{withLock:fn=>fn()});await worker.run();
+ const after=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.match(after.issue,/Autorisation API des montants/);assert.ok(!after.issue.includes('180020006'));assert.equal(after.source_payload.visibilityHold,true);assert.equal(after.source_payload.platformStatusObservation.payload.detail.parentOrderMap.parentOrderStatus,2);assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);
+ }finally{await db.close();}
+});
+test('partial proof rejects stale, unstable and foreign source, preserves independent issues',async()=>{
+ const {partialTemuReadProof,pureTemuSourceReadError}=await import('../src/temu-catchup-policy.mjs');
+ const observed=await readTemuSource(apiFor(payload(),{'bg.order.amount.query':Error('TEMU 3000032')}),reference),o={reference,source_payload:{}};
+ assert.ok(partialTemuReadProof(o,observed));assert.equal(partialTemuReadProof({...o,reference:'OTHER'},observed),null);assert.equal(partialTemuReadProof(o,{...observed,coverage:{...observed.coverage,consistency:false}}),null);assert.equal(partialTemuReadProof({...o,source_payload:{temuOrderDetail:{parentOrderMap:{updateTime:observed.sourceVersion+1}}}},observed),null);assert.equal(pureTemuSourceReadError('Stock insuffisant ; TEMU refuse l’opération : 180020006 The current order status cannot be viewed.'),false);
+});
+test('older unattempted orders precede repeated initial holds',async()=>{
+ const db=await fixture();try{
+ await db.query("UPDATE orders SET source_payload=$1::jsonb WHERE id='A'",[JSON.stringify({mallId:'M',visibilityHold:true})]);await db.query('INSERT INTO orders(id,reference,issue,source_payload) VALUES($1,$1,$2,$3::jsonb)',['B','Stock',JSON.stringify({mallId:'M'})]);
+ const worker=temuCatchupWorker(db,async()=>[{channel:'temu',shop:'M',refreshSource:async()=>{throw Error('read failed');}}],{withLock:fn=>fn()});assert.equal((await worker.run()).orderId,'A');await db.exec("UPDATE temu_source_catchup SET next_at=now()-interval '1 minute'");assert.equal((await worker.run()).orderId,'B');
+ }finally{await db.close();}
+});
+
+test('every new blocker registers immediately without waiting for discovery',async()=>{
+ const db=await fixture();try{await initializeTemuCatchup(db);await db.query('INSERT INTO orders(id,reference) VALUES($1,$1)',['new']);assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,0);await db.query("INSERT INTO erp_live_jobs(order_id,status,error) VALUES('new','review','Stock')");assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,1);await db.query("UPDATE orders SET issue='Poids' WHERE id='new'");assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,1);}finally{await db.close();}
+});
 test('periodic source refresh preserves a frozen address on masking and detects disclosed address or money changes',async()=>{
  const db=await fixture();try{
  const address={name:'TEST',street:'1 rue Test',postal:'75001',city:'Paris',country:'FR'};

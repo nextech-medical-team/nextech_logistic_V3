@@ -1,13 +1,31 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {withShipmentLock} from './shipment-lock.mjs';
-import {temuCatchupCadence,temuCatchupDelay,temuSourceError} from './temu-catchup-policy.mjs';
+import {temuCatchupCadence,temuCatchupDelay,temuSourceError,partialTemuReadProof,pureTemuSourceReadError} from './temu-catchup-policy.mjs';
 import {reconcileTemuCatchup,observeTemuSourceStage} from './temu-catchup-reconcile.mjs';
 const fingerprint=o=>createHash('sha256').update(JSON.stringify([o.reference,o.source_reference,o.source_payload,o.address,o.recipient,o.erp_live,o.suspension,o.partial_mode,o.archived,o.issue,o.label_status,o.erp_status,o.tracking_status,o.resolution_pending_resume])).digest('hex');
 export async function initializeTemuCatchup(db){await db.exec(`CREATE TABLE IF NOT EXISTS temu_source_catchup(
  order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,next_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  failures INTEGER NOT NULL DEFAULT 0,first_failure_at TIMESTAMPTZ,last_attempt_at TIMESTAMPTZ,last_success_at TIMESTAMPTZ,
  lease_token TEXT,lease_until TIMESTAMPTZ,observation JSONB,error JSONB,review JSONB,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
- CREATE INDEX IF NOT EXISTS temu_source_catchup_due ON temu_source_catchup(next_at);`);}
+ CREATE INDEX IF NOT EXISTS temu_source_catchup_due ON temu_source_catchup(next_at);
+ CREATE OR REPLACE FUNCTION temu_catchup_register_changed() RETURNS trigger LANGUAGE plpgsql AS $register$
+ DECLARE target_id text; row_data jsonb:=to_jsonb(NEW);
+ BEGIN
+  IF TG_TABLE_NAME='orders' THEN target_id:=row_data->>'id';
+  ELSIF TG_TABLE_NAME='temu_label_jobs' THEN SELECT id INTO target_id FROM orders WHERE channel='temu' AND reference=row_data->>'reference';
+  ELSE target_id:=row_data->>'order_id'; END IF;
+  IF target_id IS NULL OR EXISTS(SELECT 1 FROM temu_source_catchup WHERE order_id=target_id) THEN RETURN NEW; END IF;
+  INSERT INTO temu_source_catchup(order_id) SELECT o.id FROM orders o WHERE o.id=target_id AND (${temuBlockedSql}) ON CONFLICT DO NOTHING;
+  RETURN NEW;
+ END $register$;
+ DO $triggers$ DECLARE table_name text; BEGIN
+  FOREACH table_name IN ARRAY ARRAY['orders','order_recheck_monitor','erp_live_jobs','carrier_jobs','temu_label_jobs','resolution_jobs'] LOOP
+   IF NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='temu_catchup_register_'||table_name AND tgrelid=to_regclass(table_name)) THEN
+    EXECUTE format('CREATE TRIGGER %I AFTER INSERT OR UPDATE ON %I FOR EACH ROW EXECUTE FUNCTION temu_catchup_register_changed()','temu_catchup_register_'||table_name,table_name);
+   END IF;
+  END LOOP;
+ END $triggers$;
+ INSERT INTO temu_source_catchup(order_id) SELECT o.id FROM orders o WHERE ${temuBlockedSql} ON CONFLICT DO NOTHING;`);}
 export const temuBlockedSql=`o.channel='temu' AND NOT o.archived AND o.duplicate_of IS NULL AND (
  coalesce(o.issue,'')<>'' OR o.resolution_pending_resume OR o.label_status='blocked' OR o.erp_status IN ('blocked','live_review')
  OR o.source_payload ? 'temuReceiptObservation' OR o.source_payload->'sourceCoverage'->>'complete'='false' OR o.source_payload->>'visibilityHold'='true' OR o.source_payload ? 'marketplacePendingCorrection'
@@ -26,7 +44,7 @@ export function temuCatchupWorker(db,loadSources,{shouldStop=()=>false,now=()=>D
    if(!settings.marketplace_automatic?.enabled||settings.marketplace_automatic.channels?.temu===false||settings.marketplace_automatic.temuCatchup?.enabled===false||settings.background_tasks?.['marketplace-temu']===false||settings.background_tasks?.['marketplace-collection']===false)return {skipped:true,reason:'disabled'};
    if(!initialized){await initializeTemuCatchup(db);initialized=true;}
    if(lastScan===null||now()-lastScan>=temuCatchupCadence.scan){await db.query(`INSERT INTO temu_source_catchup(order_id) SELECT o.id FROM orders o WHERE ${temuBlockedSql} ON CONFLICT DO NOTHING`);lastScan=now();}
-   const token=randomUUID();claim=(await db.query(`WITH due AS(SELECT q.order_id FROM temu_source_catchup q JOIN orders o ON o.id=q.order_id WHERE q.next_at<=now() AND (q.lease_until IS NULL OR q.lease_until<=now()) AND (${temuBlockedSql}) ORDER BY CASE WHEN o.source_payload ? 'temuReceiptObservation' OR o.source_payload->>'visibilityHold'='true' THEN 0 ELSE 1 END,q.next_at,q.order_id FOR UPDATE OF q SKIP LOCKED LIMIT 1),claimed AS(UPDATE temu_source_catchup q SET lease_token=$1,lease_until=now()+interval '5 minutes',last_attempt_at=now() FROM due WHERE q.order_id=due.order_id RETURNING q.*) SELECT c.*,to_jsonb(o) AS "order" FROM claimed c JOIN orders o ON o.id=c.order_id`,[token])).rows[0];
+   const token=randomUUID();claim=(await db.query(`WITH due AS(SELECT q.order_id FROM temu_source_catchup q JOIN orders o ON o.id=q.order_id WHERE q.next_at<=now() AND (q.lease_until IS NULL OR q.lease_until<=now()) AND (${temuBlockedSql}) ORDER BY q.last_attempt_at NULLS FIRST,CASE WHEN o.source_payload ? 'temuReceiptObservation' OR o.source_payload->>'visibilityHold'='true' THEN 0 ELSE 1 END,q.next_at,q.order_id FOR UPDATE OF q SKIP LOCKED LIMIT 1),claimed AS(UPDATE temu_source_catchup q SET lease_token=$1,lease_until=now()+interval '5 minutes',last_attempt_at=now() FROM due WHERE q.order_id=due.order_id RETURNING q.*) SELECT c.*,to_jsonb(o) AS "order" FROM claimed c JOIN orders o ON o.id=c.order_id`,[token])).rows[0];
    if(!claim)return {idle:true};
    const order=claim.order,mall=String(order.source_payload?.sourceShop||order.source_payload?.mallId||'');
    if(!sources.length||now()-sourcesAt>300000){sources=(await loadSources()).filter(s=>s.channel==='temu');sourcesAt=now();}
@@ -39,6 +57,11 @@ export function temuCatchupWorker(db,loadSources,{shouldStop=()=>false,now=()=>D
     const lease=(await tx.query('SELECT * FROM temu_source_catchup WHERE order_id=$1 AND lease_token=$2 AND lease_until>now() FOR UPDATE',[order.id,token])).rows[0];if(!lease)return {skipped:true,reason:'lease-lost'};
     const fresh=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[order.id])).rows[0];if(!fresh||fingerprint(fresh)!==fingerprint(order))throw Object.assign(Error('TEMU · Commande locale modifiée pendant la lecture'),{code:'TEMU_LOCAL_CHANGED',field:'local'});
     const review=observation.coreComplete?await reconcile(tx,fresh,observation):observation.requiredComplete?await observeTemuSourceStage(tx,fresh,observation):null;
+    if(!observation.coreComplete&&!observation.requiredComplete){
+     const partial=partialTemuReadProof(fresh,observation);
+     if(partial){const source={...fresh.source_payload,temuCatchupPartial:partial,platformStatusObservation:{channel:'temu',payload:{detail:observation.payload.detail,country:observation.payload.country},observedAt:observation.checkedAt,indicative:true}};const issue=pureTemuSourceReadError(fresh.issue)||fresh.source_payload?.temuCatchupPartial?.currentReason&&fresh.issue===fresh.source_payload.temuCatchupPartial.currentReason?partial.currentReason:fresh.issue;
+      await tx.query('UPDATE orders SET source_payload=$2::jsonb,issue=$3 WHERE id=$1',[fresh.id,JSON.stringify(source),issue]);}
+    }
     const expectedStage=observation.requiredComplete&&!observation.coreComplete;
     const failures=observation.complete||expectedStage?0:claim.failures+1,delay=expectedStage?(observation.sourceStage==='pending'?120000:3600000):failures?temuCatchupDelay(failures,Math.max(0,...observation.errors.map(e=>e.retryAfterMs||0))):temuCatchupCadence.normal;
     await tx.query(`UPDATE temu_source_catchup SET observation=$3::jsonb,review=$4::jsonb,error=$5::jsonb,failures=$6,first_failure_at=CASE WHEN $8 THEN coalesce(first_failure_at,now()) WHEN $6=0 THEN null ELSE coalesce(first_failure_at,now()) END,last_success_at=CASE WHEN $9 THEN now() ELSE last_success_at END,next_at=now()+($7::double precision*interval '1 millisecond'),lease_token=null,lease_until=null,updated_at=now() WHERE order_id=$1 AND lease_token=$2`,[order.id,token,JSON.stringify(observation),JSON.stringify(review),JSON.stringify(observation.errors),failures,delay,expectedStage&&observation.sourceStage==='pending',observation.complete]);

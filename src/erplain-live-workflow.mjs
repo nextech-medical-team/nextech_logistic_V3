@@ -1,3 +1,4 @@
+import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
 import {ensureMissingProduct,reconcileCreationAttempt,sourceProductName,readCreationSku,createBlockedMissingProducts,productCreationBlock} from './missing-product-creation.mjs';
 import {bindProduct} from './product-bindings.mjs';
@@ -81,6 +82,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
   try{
    if(!bcOnlyOrderId&&process.env.ERPLAIN_LIVE_WRITES==='1'&&process.env.MIGRATION_PREPARATION!=='1'){
     const {recheckOrders}=await import('./problem-resolution.mjs');
+    await prepareIncompleteTemuCatalogue(db,api,{bind:v=>bindProduct(db,v)});
     await createBlockedMissingProducts(db,api,{blocked:mutationBlock,bind:v=>bindProduct(db,v),recheck:ids=>recheckOrders(db,ids)});
    }
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.

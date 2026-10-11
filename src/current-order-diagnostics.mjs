@@ -1,7 +1,7 @@
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {withoutSharedParcelReason,withoutSharedParcelReasonSql} from './shared-parcel-diagnostic.mjs';
-import {obsoleteTemuVisibilityError} from './temu-catchup-policy.mjs';
+import {obsoleteTemuVisibilityError,pureTemuSourceReadError} from './temu-catchup-policy.mjs';
 // Current diagnostic projection only. Never changes jobs or business data.
 export const oldFinanceErrors=['TEMU · Remises client et TVA à rapprocher','TEMU · Totaux client source incohérents','TEMU · Prix client et TVA source incohérents'];
 export const verifiedFinanceSql="(channel='temu' AND erp_live->'bc'->>'id' IS NOT NULL AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'total')='number' AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'sourceTotal')='number' AND erp_live->'pricing'->>'status'='verified' AND erp_live->'pricing'->>'error' IS NULL AND erp_live->'pricing'->'confirmed'->>'authority'='erplain' AND erp_live->'pricing'->'commercialBasis'->>'field'='estimatedRevenue' AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue' IS NOT NULL AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue'=source_payload->'temuAmounts'->'data'->'parentOrderMap'->'estimatedRevenue')";
@@ -23,6 +23,12 @@ export function currentReasonEmptySql(raw){
 }
 export function projectCurrentDiagnostics(o){
  if(o.archived||o.label_status==='cancelled'||o.tracking_status==='cancelled'){for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o,'resolution_error']])if(target)target[key]=null;return o;}
+ const partial=o.source_payload?.temuCatchupPartial;
+ if(o.channel==='temu'&&partial?.currentReason&&Number.isFinite(Date.parse(partial.checkedAt))&&partial.coverage?.detail&&partial.coverage?.version&&partial.coverage?.consistency&&(!o.source_payload?.temuDirect?.attemptedAt||Date.parse(o.source_payload.temuDirect.attemptedAt)<=Date.parse(partial.checkedAt))){
+  if(pureTemuSourceReadError(o.issue))o.issue=partial.currentReason;
+  const job=o.erp_live_job;
+  if(job&&Number.isFinite(Date.parse(job.updated_at))&&Date.parse(job.updated_at)<=Date.parse(partial.checkedAt)&&(pureTemuSourceReadError(job.error)||job.error==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'))job.error=partial.currentReason;
+ }
  const deferred=o.source_payload?.platformChangeReconciliation;
  if(deferred?.kind==='temu_address_masking'&&deferred.verified===true&&deferred.deferredBilling===true&&!o.source_payload?.marketplacePendingCorrection&&o.invoice_status==='paid'&&o.issue===deferred.deferredReason&&(!deferred.deferredLabelRead||o.temu_job)){o.issue=o.temu_job?.error?'TEMU · '+o.temu_job.error:null;}
  const stock=o.erp_live?.stockIncidentRecheck,stamp=Date.parse(stock?.checkedAt),stockFresh=Number.isFinite(stamp)&&stamp<=Date.now()&&Date.now()-stamp<=15*60000;
