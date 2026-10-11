@@ -21,6 +21,11 @@ export function currentReasonEmptySql(raw){
  const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
  const expression=`coalesce(CASE WHEN ${verifiedFinanceSql} AND ((${raw}) IN (${old}) OR (issue IN (${old}) AND ${generic} AND (${platformChangeVerifiedSql} OR ${recovered}))) THEN NOT coalesce((erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false)),false) WHEN coalesce(${generic},false) THEN CASE WHEN ${platformChangeVerifiedSql} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE source_payload->'marketplacePendingCorrection' IS NULL END WHEN ${recovered} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE false END ELSE false END ELSE (${raw}) IS NULL OR (${raw})='' END,false)`;return `(SELECT ${expression} FROM (SELECT (${stripped}) AS raw_reason OFFSET 0) current_reason)`;
 }
+export function paidDeferredBillingDiagnosis(o){
+ const d=o.source_payload?.platformChangeReconciliation;
+ const matches=typeof o.issue==='string'&&(o.issue===d?.deferredReason||typeof d?.deferredReason==='string'&&o.issue===d.deferredReason.replace(/ ; TEMU · Quota partagé : lecture différée$/,''));
+ return d?.kind==='temu_address_masking'&&d.verified===true&&d.deferredBilling===true&&o.invoice_status==='paid'&&matches&&(!d.deferredLabelRead||!!o.temu_job);
+}
 export function projectCurrentDiagnostics(o){
  if(o.archived||o.label_status==='cancelled'||o.tracking_status==='cancelled'){for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o,'resolution_error']])if(target)target[key]=null;return o;}
  const partial=o.source_payload?.temuCatchupPartial;
@@ -32,8 +37,8 @@ export function projectCurrentDiagnostics(o){
  const deferred=o.source_payload?.platformChangeReconciliation;
  // A successful quota read may have retired only the known quota suffix from
  // the card. Match that exact historical suffix without retiring other errors.
- const deferredBillingMatches=typeof o.issue==='string'&&(o.issue===deferred?.deferredReason||typeof deferred?.deferredReason==='string'&&o.issue===deferred.deferredReason.replace(/ ; TEMU · Quota partagé : lecture différée$/,''));
- if(deferred?.kind==='temu_address_masking'&&deferred.verified===true&&deferred.deferredBilling===true&&o.invoice_status==='paid'&&deferredBillingMatches&&(!deferred.deferredLabelRead||o.temu_job)){
+
+ if(paidDeferredBillingDiagnosis(o)){
   const sourceReason=o.source_payload?.marketplacePendingCorrection?currentPlatformModificationReason(o,'Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise'):null;
   o.issue=[sourceReason,o.temu_job?.error?'TEMU · '+o.temu_job.error:null].filter(Boolean).join(' ; ')||null;
  }

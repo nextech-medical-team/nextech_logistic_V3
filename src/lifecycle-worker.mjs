@@ -1,3 +1,4 @@
+import {reconcilePaidBillingDiagnosis} from './paid-billing-diagnosis.mjs';
 import {shopifyCancellationWorker} from './shopify-cancellation-worker.mjs';
 import {readyWeightAllowed,validateReadyPreparation} from './ready-preparation.mjs';
 import {aggregateParcels} from './status-policy.mjs';
@@ -71,7 +72,7 @@ export function lifecycleWorker(db,directory,{gateway=erplainLifecycleGateway(er
     await db.query('UPDATE document_lifecycle SET result=$2,error=null,checked_at=now(),requested=false,preparation_revision=$3 WHERE bl_id=$1',[row.bl_id,JSON.stringify(result),row.current_revision]);
     if(row.partial_id)await db.query("UPDATE partial_deliveries SET bl=bl||$2::jsonb WHERE id=$1",[row.partial_id,JSON.stringify({status:result.bl.status})]);
     else await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bl,status}',to_jsonb($2::text)) WHERE id=$1",[o.id,result.bl.status]);
-    if(result.billing==='paid'&&!row.partial_id)await db.query("UPDATE orders SET invoice_status='paid' WHERE id=$1",[o.id]);
+    if(result.billing==='paid'&&!row.partial_id){await db.query("UPDATE orders SET invoice_status='paid' WHERE id=$1",[o.id]);if(o.source_payload?.platformChangeReconciliation?.deferredBilling===true)await reconcilePaidBillingDiagnosis(db,o.id,result);}
    }catch(e){await db.query('UPDATE document_lifecycle SET error=$2,checked_at=now(),requested=false,preparation_revision=$3 WHERE bl_id=$1',[row.bl_id,e.message,row.current_revision]);}
   }finally{running=false;}},
   get running(){return running;}
