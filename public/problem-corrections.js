@@ -84,6 +84,7 @@ const resolutionViews={
 
 
  preparation:{title:'Validation stock / BL à actualiser',view:'preparation'},
+ 'historical-preparation':{title:'Reprise historique · BL manquant',view:'historical'},
 
 
 
@@ -1084,11 +1085,11 @@ function renderResolution(ctx,problem){
 
 
 
- }else if(spec.view==='stock'||spec.view==='bc'){
+ }else if(spec.view==='stock'||spec.view==='bc'||spec.view==='historical'){
 
 
 
-  scope.textContent=spec.view==='stock'?'Disponibilité lue dans Erplain LIVE. Une rupture se traite par un produit équivalent, un approvisionnement ou une livraison partielle.':'Comparer la commande au BC et à ses BL. Une livraison partielle ne doit pas être comparée à la totalité du BC.';
+  scope.textContent=spec.view==='historical'?'Rapprocher le BC, le débit de stock déjà effectué et le mapping courant, puis créer le BL manquant. L’étiquette et le suivi existants sont conservés. Le statut de la plateforme reste indicatif.':spec.view==='stock'?'Disponibilité lue dans Erplain LIVE. Une rupture se traite par un produit équivalent, un approvisionnement ou une livraison partielle.':'Comparer la commande au BC et à ses BL. Une livraison partielle ne doit pas être comparée à la totalité du BC.';
 
 
 
@@ -1104,7 +1105,7 @@ function renderResolution(ctx,problem){
 
 
 
-  if(spec.view==='stock')button('Recontrôler le stock et reprendre le BL',async()=>saved(await task('resume-erp')));
+  if(spec.view==='stock'||spec.view==='historical')button(spec.view==='historical'?'Reprendre le BL — étiquette conservée':'Recontrôler le stock et reprendre le BL',async()=>saved(await task('resume-erp')));
 
 
 
