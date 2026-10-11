@@ -14,12 +14,12 @@ for(const [name,viewport] of [['desktop',{width:1366,height:900}],['mobile',{wid
  await expect(toggle).toHaveAttribute('aria-expanded','false');
  const heights=await boxes.evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().height));expect(Math.abs(heights[0]-heights[1])).toBeLessThan(1);expect(heights[1]).toBeLessThan(180);
  await expect(second.locator('.processing-reason')).toHaveText('Motif : '+longReason);
- await page.screenshot({path:'proofs/compact-messages-'+name+'.png'});
+ await second.screenshot({path:'proofs/compact-messages-'+name+'.png'});
  await toggle.focus();await page.keyboard.press('Enter');await expect(toggle).toHaveAttribute('aria-expanded','true');
  expect(await second.locator('.processing-content').evaluate(n=>n.clientHeight>=n.scrollHeight)).toBe(true);
  const before=reads;await expect.poll(()=>reads).toBeGreaterThan(before);await expect(toggle).toHaveAttribute('aria-expanded','true');
  await expect(first.locator('.processing-details-toggle')).toHaveAttribute('aria-expanded','false');
- await page.screenshot({path:'proofs/compact-messages-'+name+'-expanded.png'});
+ await second.screenshot({path:'proofs/compact-messages-'+name+'-expanded.png'});
  await toggle.click();await expect(toggle).toHaveAttribute('aria-expanded','false');
  const after=await second.evaluate(n=>n.getBoundingClientRect().height);expect(Math.abs(after-heights[1])).toBeLessThan(1);
 });
