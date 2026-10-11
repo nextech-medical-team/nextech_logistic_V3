@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {reconcilePreparationFromReads} from '../src/preparation-read-reconciliation.mjs';
 import {shipmentFingerprint} from '../src/label-stock-gate.mjs';
+import {readErplainDocuments} from '../src/erplain-document-read.mjs';
 
 async function fixture(){
  const db=new PGlite();
@@ -30,6 +31,13 @@ test('fresh BC/BL/stock proof closes only local stale markers and is idempotent'
   const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];assert.equal(o.resolution_pending_resume,false);assert.equal(o.simulation,false);assert.equal(o.label_status,'production_ready');assert.match(o.erp_live.mappingPreparationFingerprint,/^[a-f0-9]{64}$/);assert.equal(o.erp_live.bl.id,'2');assert.equal(o.erp_live.periodicReconciliation.labelsPreserved,true);
   assert.equal((await reconcilePreparationFromReads(db,api,'o',options)).updated,false);assert.equal((await db.query('SELECT count(*)::int n FROM audit')).rows[0].n,1);
  }finally{await db.close();}
+});
+test('real document reader supplies recorded BC tax type to reconciliation without marketplace data',async()=>{
+ const f=await fixture();try{
+  const api={request:async query=>{assert.match(query,/^query V3DocumentRead/);assert.match(query,/\bstatus tax_type total\b/);return {Order:structuredClone(f.bc)};}};
+  await f.db.query("UPDATE orders SET erp_live=erp_live-'pricing'");
+  const result=await reconcilePreparationFromReads(f.db,api,'o',{...f.options,readDocuments:readErplainDocuments});assert.equal(result.updated,true);assert.equal(result.providerMutations,0);
+ }finally{await f.db.close();}
 });
 for(const kind of ['quantity','address','active-correction','label-provenance','source-change','suspension','preview','missing-label','concurrent-change','provider-write'])test('reconciliation preserves the hold for '+kind,async()=>{
  const f=await fixture(),{db,api,options}=f;try{
