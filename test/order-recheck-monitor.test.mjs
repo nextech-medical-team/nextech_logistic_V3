@@ -54,9 +54,9 @@ async function confirmedRead(db,id,concordant=true){
 
 async function fixture(){
  const db=new PGlite();db.withLocks=async(keys,fn)=>fn();db.transaction=fn=>fn(db);
- await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,label_status text,erp_status text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
- CREATE TABLE erp_live_jobs(order_id text,status text,error text,state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text); CREATE TABLE partial_deliveries(order_id text,status text);
- CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,created_at timestamptz DEFAULT now());
+ await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,transport_choice text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,label_status text,erp_status text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
+ CREATE TABLE erp_live_jobs(order_id text,status text,error text,updated_at timestamptz DEFAULT now(),state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text); CREATE TABLE partial_deliveries(order_id text,status text);
+ CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,updated_at timestamptz DEFAULT now(),created_at timestamptz DEFAULT now());
  CREATE TABLE temu_label_jobs(reference text,status text,error text,packages jsonb);
  CREATE TABLE correction_jobs(order_id text,status text,result jsonb,error text);
  CREATE TABLE lines(id text,order_id text,source_sku text,target_sku text,quantity numeric,target_quantity numeric,source_payload jsonb DEFAULT '{}');CREATE TABLE mappings(channel text,source_sku text,target_sku text,source_qty numeric,target_qty numeric);
@@ -182,5 +182,26 @@ test('mapping changed after document refresh cannot enqueue an automatic resume'
  await db.query(`UPDATE orders SET issue='Reprise de preparation',resolution_pending_resume=true,erp_live='{"phase":"bc_created","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
  const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:true,status:'active',variant:{sku:'X'}}),cacheProduct:async()=>{},readDocuments:async(_db,_api,id)=>{const proof=await confirmedRead(db,id);await db.query('UPDATE lines SET quantity=quantity+1 WHERE order_id=$1',[id]);return proof;}});
  await m.runLocal();await m.runExternal();assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);
+ }finally{await db.close();}
+});
+
+
+test('a ready TEMU quote awaiting human purchase is not a technical block, and independent failures survive',async()=>{
+ const db=await fixture();
+ try{
+  await initializeOrderRecheckMonitor(db);
+  await db.query("UPDATE orders SET issue=null,erp_live=$2::jsonb WHERE id=$1",['a',JSON.stringify({phase:'bl_ready',bc:{id:'BC'},bl:{id:'BL'}})]);
+  await db.query("INSERT INTO erp_live_jobs(order_id,status) VALUES('a','complete')");
+  await db.query("INSERT INTO temu_label_jobs(reference,status) VALUES('A','ready')");
+  const worker=orderRecheckMonitor(db,{}, {canResume:()=>false});await worker.runLocal();
+  const state=(await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state;
+  assert.equal(state.blocked,false);assert.equal(state.followUp,true);assert.match(state.result,/Achat TEMU/);assert.match(state.nextStep,/TEMU/);
+  const base={channel:'temu',awaiting_purchase:true,label_status:'blocked',erp_status:'live_created',erp_live:{phase:'bl_ready'}};
+  assert.equal(monitoringObservation(base).blocked,false);
+  assert.equal(monitoringObservation({...base,issue:'Stock insuffisant'}).result,'Stock insuffisant');
+  assert.equal(monitoringObservation({...base,erp_live_job:{error:'BC incomplet'}}).result,'BC incomplet');
+  assert.equal(monitoringObservation({...base,suspension:{active:true}}).blocked,true);
+  await db.query("UPDATE temu_label_jobs SET error='Achat incertain',status='review'");await db.query("UPDATE order_recheck_monitor SET next_check=now()");await worker.runLocal();
+  assert.equal((await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state.nextStep==='Confirmer l’achat dans le parcours TEMU',false);
  }finally{await db.close();}
 });
