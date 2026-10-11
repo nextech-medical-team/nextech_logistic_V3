@@ -109,10 +109,12 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    let taxCodes;
    const valid=[];
    for(const o of working){try{
+ const lines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE order_id=$1',[o.id,o.channel])).rows;
+ o.selectedSourceLines=lines;
  if(o.source_payload?.erplainImported){await refreshManualOrder(db,api,o);if(o.source_payload.account!=='live'||!o.erp_live?.bc?.id||!o.erp_live.importedItems?.length)throw Error('Actualiser la commande Erplain avant préparation');o.items=o.erp_live.importedItems;valid.push(o);continue;}
  if(o.erp_live?.equivalentItems){if(!o.erp_live.bc?.id)throw new Error('BC absent pour les équivalents');o.items=o.erp_live.equivalentItems;valid.push(o);continue;}
 
- const lines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE order_id=$1',[o.id,o.channel])).rows;
+
 
  await ensureTemuBcPricing(db,o,lines,refreshTemuPricing);
  const currencyCode=sourceCurrency(o);const currency=currencies.rows.find(c=>c.label.toUpperCase()===currencyCode&&c.liveId);if(!currency)throw new Error('Devise non disponible dans Erplain LIVE : '+currencyCode);o.currency={id:String(currency.liveId),label:currency.label};
