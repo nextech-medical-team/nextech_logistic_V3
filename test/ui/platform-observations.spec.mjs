@@ -1,0 +1,21 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+const at='2026-10-10T12:00:00Z';
+const base={archived:false,simulation:false,recipient:'Synthetic recipient',address:{country:'FR',city:'Paris',postal:'75001'},source_date:at,line_count:1,item_quantity:1,sku_lines:[{sku:'TEST-SKU',quantity:1}],label_status:'production_ready',tracking_status:'shipped',carrier:'gls',weight_kg:1,source_payload:{},erp_live:{bc:{id:'TEST-BC',label:'BC TEST',status:'active'},bl:{id:'TEST-BL',label:'BL TEST',status:'ready_to_ship'}},erplain_tracking_bls:[{id:'TEST-BL',label:'BL TEST',status:'ready_to_ship'}]};
+const rows=[{...base,id:'test-shopify',reference:'TEST-SHOPIFY',channel:'shopify',platform_status:{channel:'shopify',status:'fulfilled',observedAt:at,indicative:true},logistics_observation:{status:'not_shipped',parcels:[{tracking:'T1',carrier:'gls',checkedAt:at,stale:false}]}},{...base,id:'test-temu',reference:'TEST-TEMU',channel:'temu',carrier:'temu',platform_status:{channel:'temu',status:'3',observedAt:at,indicative:true},logistics_observation:{status:'delivered',parcels:[{tracking:'T2',carrier:'temu',checkedAt:'2026-10-09T12:00:00Z',stale:true}]}},{...base,id:'test-amazon',reference:'TEST-AMAZON',channel:'amazon',platform_status:{channel:'amazon',status:'Shipped',observedAt:at,indicative:true},logistics_observation:{status:'unknown',parcels:[]},partial_mode:true,erplain_tracking_bls:[{label:'BL PARTIAL 1',status:'shipped'},{label:'BL PARTIAL 2',status:'ready_to_ship'}]}];
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('three independent observations '+name,async({page})=>{
+ await page.setViewportSize(viewport);const writes=[],errors=[];
+ page.on('request',r=>{if(r.method()!=='GET'&&!['/api/partial/visible','/api/orders/processing'].includes(new URL(r.url()).pathname))writes.push(r.url());});page.on('pageerror',e=>errors.push(e.message));
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows,total:3,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/movement-watch',r=>r.fulfill({json:{rows:[],watchdog:{lastSuccessAt:new Date().toISOString()}}}));
+ await page.goto('/');await expect(page.locator('#order-rows tr')).toHaveCount(3);
+ const shop=page.locator('#order-rows tr').filter({hasText:'TEST-SHOPIFY'}),temu=page.locator('#order-rows tr').filter({hasText:'TEST-TEMU'}),amazon=page.locator('#order-rows tr').filter({hasText:'TEST-AMAZON'});
+ await expect(shop.locator('[data-platform-status]')).toContainText('Exp\u00e9di\u00e9e');await expect(shop.locator('[data-erplain-tracking]')).toContainText('Pr\u00eat \u00e0 livrer');
+ await expect(shop.locator('[data-erplain-tracking]').locator('xpath=preceding-sibling::td[1]')).toContainText('Non exp\u00e9di\u00e9e');
+ await expect(temu.locator('[data-erplain-tracking]').locator('xpath=preceding-sibling::td[1]')).toContainText('Livr\u00e9e');await expect(temu).toContainText('lecture ancienne');
+ await expect(amazon.locator('[data-erplain-tracking]')).toContainText('BL PARTIAL 1');await expect(amazon.locator('[data-erplain-tracking]')).toContainText('BL PARTIAL 2');await expect(amazon.locator('[data-platform-status]')).toContainText('Shipped');
+ const observed=await page.evaluate(()=>({width:innerWidth,height:innerHeight,columns:[...document.querySelectorAll('#view-orders th')].filter(e=>/Suivi logistique|Statut BL Erplain|Statut plateforme/.test(e.innerText)).map(e=>({text:e.innerText,width:e.getBoundingClientRect().width})),rows:document.querySelectorAll('#order-rows tr').length}));
+ expect(observed.width).toBe(viewport.width);expect(observed.columns).toHaveLength(3);for(const c of observed.columns)expect(c.width).toBeGreaterThan(70);
+ await page.locator('#order-rows [data-platform-status]').first().scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/platform-observations-'+name+'.png',fullPage:true});
+ expect(writes).toEqual([]);expect(errors).toEqual([]);fs.writeFileSync('proofs/platform-observations-'+name+'.json',JSON.stringify({...observed,status:'PASS',errors,writes}));
+});

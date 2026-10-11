@@ -4,7 +4,7 @@ import {cancellationBlock} from './erp-transient-policy.mjs';
 export async function recoverCompleteTemuImport(tx,existing,order,receipt){
  if(receipt.channel!=='temu')return false;
  const s=existing.erp_live||{};
- if(existing.archived||existing.partial_mode||cancellationBlock(existing)||s.phase||s.customer?.id||s.bc?.id||s.bl?.id||s.stockDocument?.id||s.stockCreationAttemptedAt||order.cancelled||order.fulfilled||!order.lines?.length)return false;
+ if(existing.archived||existing.partial_mode||cancellationBlock(existing)||s.phase||s.customer?.id||s.bc?.id||s.bl?.id||s.stockDocument?.id||s.stockCreationAttemptedAt||!order.lines?.length)return false;
  if((await tx.query(`SELECT 1 FROM resolution_jobs WHERE order_id=$1 UNION ALL SELECT 1 FROM correction_jobs WHERE order_id=$1 UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1`,[existing.id])).rows.length)return false;
  const job=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[existing.id])).rows[0];
  if(job&&job.status!=='review'&&job.status!=='pending')return false;

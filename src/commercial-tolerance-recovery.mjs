@@ -10,7 +10,7 @@ export function monetaryReviewError(message){
 export function commercialResumeEligible(o){
  return monetaryReviewError(o.error)&&o.archived===false&&!String(o.reference||'').startsWith('DEMO-')
  && !Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection')
- && String(o.source_payload?.cancelled)!=='true'&&!String(o.source_payload?.cancelled_at||'')
+
  && !/commande annulée/i.test(o.issue||'')&&!o.partial_mode
  && !['cancelled','shipped','delivered','in_transit'].includes(o.tracking_status)
  && o.label_status!=='cancelled'&&o.erp_live?.bc?.id
