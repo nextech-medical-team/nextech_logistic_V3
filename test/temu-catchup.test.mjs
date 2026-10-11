@@ -186,23 +186,23 @@ test('known partial receipt schedules safe catch-up without replacing current bu
 
 
 test('complete initial recovery queues existing preparation only within authorized reception window',async()=>{
- for(const scenario of ['allowed','paused','before-start','independent-issue','uncertain-purchase','correction-history']){
-  const db=await fixture();try{
+ for(const scenario of ['allowed','masked-initial','paused','before-start','independent-issue','uncertain-purchase','correction-history']){
+  const allowed=scenario==='allowed'||scenario==='masked-initial',db=await fixture();try{
    const p=payload();p.detail.parentOrderMap.parentOrderTime=Math.floor(Date.now()/1000)-60;p.detail.parentOrderMap.updateTime=p.detail.parentOrderMap.parentOrderTime+1;
    const source={mallId:'M',sourceShop:'M',visibilityHold:true};if(scenario==='uncertain-purchase')source.temuDirect={attemptedAt:new Date().toISOString()};
-   await db.query("UPDATE orders SET issue=$1,source_payload=$2::jsonb,resolution_pending_resume=true WHERE id='A'",[scenario==='independent-issue'?'Stock insuffisant':'TEMU refuse l’opération : 180020006 The current order status cannot be viewed.',JSON.stringify(source)]);
+   await db.query("UPDATE orders SET issue=$1,source_payload=$2::jsonb,resolution_pending_resume=true WHERE id='A'",[scenario==='masked-initial'?'Adresse masquée : adresse initiale complète requise avant préparation':scenario==='independent-issue'?'Stock insuffisant':'TEMU refuse l’opération : 180020006 The current order status cannot be viewed.',JSON.stringify(source)]);
    await db.query("INSERT INTO settings VALUES('automatic_live',$1::jsonb)",[JSON.stringify({enabled:scenario!=='paused'})]);
    await db.query("UPDATE settings SET value=$1::jsonb WHERE key='marketplace_automatic'",[JSON.stringify({enabled:true,channels:{temu:true},since:new Date(Date.now()+(scenario==='before-start'?0:-86400000)).toISOString()})]);
    if(scenario==='correction-history')await db.exec("INSERT INTO correction_jobs VALUES('A','complete')");
    const observation=await readTemuSource(apiFor(p),reference),order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];
-   const result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.equal(result.initialRecovered,scenario==='allowed',scenario);
-   assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,scenario==='allowed'?1:0,scenario);
+   const result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.equal(result.initialRecovered,allowed,scenario);
+   assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,allowed?1:0,scenario);
    assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);assert.equal((await db.query('SELECT * FROM temu_label_jobs')).rows.length,0);
    const after=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.equal(after.source_payload.visibilityHold,false);
    if(scenario==='independent-issue')assert.equal(after.issue,'Stock insuffisant');
    if(scenario==='paused'){assert.equal(after.source_payload.temuInitialPreparationPending,true);await db.exec("UPDATE settings SET value='{\"enabled\":true}' WHERE key='automatic_live'");const resumed=await db.transaction(tx=>reconcileTemuCatchup(tx,after,observation));assert.equal(resumed.initialRecovered,true);assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,1);assert.equal((await db.query("SELECT source_payload FROM orders WHERE id='A'")).rows[0].source_payload.temuInitialPreparationPending,undefined);}
    if(scenario==='uncertain-purchase')assert.deepEqual(after.source_payload.temuDirect,source.temuDirect);
-   if(scenario==='allowed'){assert.equal(after.resolution_pending_resume,false);assert.equal(after.source_payload.temuLabelPurchaseConfirmationRequired,true);await db.transaction(tx=>reconcileTemuCatchup(tx,after,observation));assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,1);}
+   if(allowed){assert.equal(after.resolution_pending_resume,false);assert.equal(after.source_payload.temuLabelPurchaseConfirmationRequired,true);await db.transaction(tx=>reconcileTemuCatchup(tx,after,observation));assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,1);}
   }finally{await db.close();}
  }
 });
@@ -231,4 +231,17 @@ test('older unattempted orders precede repeated initial holds',async()=>{
 
 test('every new blocker registers immediately without waiting for discovery',async()=>{
  const db=await fixture();try{await initializeTemuCatchup(db);await db.query('INSERT INTO orders(id,reference) VALUES($1,$1)',['new']);assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,0);await db.query("INSERT INTO erp_live_jobs(order_id,status,error) VALUES('new','review','Stock')");assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,1);await db.query("UPDATE orders SET issue='Poids' WHERE id='new'");assert.equal((await db.query("SELECT * FROM temu_source_catchup WHERE order_id='new'")).rows.length,1);}finally{await db.close();}
+});
+test('periodic source refresh preserves a frozen address on masking and detects disclosed address or money changes',async()=>{
+ const db=await fixture();try{
+ const address={name:'TEST',street:'1 rue Test',postal:'75001',city:'Paris',country:'FR'};
+ await db.query('UPDATE orders SET address=$1,erp_live=$2 WHERE id=$3',[JSON.stringify(address),JSON.stringify({bc:{id:'BC'}}),'A']);
+ await db.exec("INSERT INTO lines(id,order_id,source_line,source_sku,quantity) VALUES('LINE','A','069-1234','SKU',1);INSERT INTO carrier_documents VALUES('A',decode('25504446','hex'));");
+ const p=payload();for(const k of ['receiptName','addressLine1','regionName1','regionName3'])p.shipping[k]='******';
+ let observation=await readTemuSource(apiFor(p),reference);assert.equal(observation.coreComplete,true);assert.equal(observation.payload.country,'FR');
+ let order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];const docs=(await db.query('SELECT * FROM carrier_documents')).rows;
+ let result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.deepEqual(result.conflicts,[]);order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.deepEqual(order.address,address);assert.deepEqual((await db.query('SELECT * FROM carrier_documents')).rows,docs);
+ p.shipping.postCode='10000';observation=await readTemuSource(apiFor(p),reference);result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.ok(result.conflicts.includes('adresse'));assert.deepEqual((await db.query("SELECT address FROM orders WHERE id='A'")).rows[0].address,address);
+ await db.exec("UPDATE orders SET address='{}' WHERE id='A'");order=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];await assert.rejects(db.transaction(tx=>reconcileTemuCatchup(tx,order,observation)),/Adresse initiale complète/);
+ }finally{await db.close();}
 });

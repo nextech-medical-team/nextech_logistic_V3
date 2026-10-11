@@ -1,3 +1,4 @@
+import {maskedTemuAddressFields,usableFrozenAddress} from './temu-address-observation.mjs';
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {obsoleteTemuVisibilityError,pureTemuSourceReadError} from './temu-catchup-policy.mjs';
@@ -18,20 +19,21 @@ export async function reconcileTemuCatchup(tx,order,observation){
  OR EXISTS(SELECT 1 FROM correction_jobs WHERE order_id=$1 AND status IN ('applying','checking')) AS busy`,[order.id,order.reference])).rows[0];
  if(!context||context.busy)throw Object.assign(Error('TEMU · Traitement local en cours'),{code:'TEMU_LOCAL_BUSY',field:'local'});
  const protectedData=Number(fresh.detail.parentOrderMap.parentOrderStatus)===3||context.prepared||order.archived||order.partial_mode||order.suspension?.active||order.erp_live?.bc?.id||order.erp_live?.bl?.id||order.erp_live?.stockDocument?.id||order.erp_live?.stockCreationAttemptedAt||lines.some(l=>l.target_sku!=null||l.target_quantity!=null)||['shipped','in_transit','delivered'].includes(order.tracking_status);
+ const masked=maskedTemuAddressFields(fresh.shipping);if(masked.length&&!usableFrozenAddress(order.address))throw Object.assign(Error('TEMU · Adresse initiale complète requise : coordonnées source masquées'),{code:'TEMU_INCOMPLETE',field:'shipping'});
  const s=fresh.shipping,address={name:s.receiptName,street:[s.addressLine1,s.addressLine2,s.addressLine3].filter(Boolean).join(', '),postal:s.postCode,city:s.regionName3,country:fresh.country,phone:s.mobile||'',email:s.mail||''};
  const active=fresh.detail.orderList.filter(l=>Number(l.quantity)>0),sameLines=isDeepStrictEqual(ordered(lines),ordered(active));
- const sameAddress=['name','street','postal','city','country'].every(k=>String(order.address?.[k]||'')===String(address[k]||''));
+ const sameAddress=['name','street','postal','city','country'].every(k=>masked.includes(k)||String(order.address?.[k]||'')===String(address[k]||''));
  const oldAmounts=source.temuAmounts?.data||source.temuOrderDetail?.v3Amounts?.data;
  const sameAmounts=!oldAmounts||isDeepStrictEqual(oldAmounts,fresh.amounts);
- const conflicts=[];if(protectedData&&!sameLines)conflicts.push('articles/quantités');if(protectedData&&!sameAddress)conflicts.push('adresse');if(protectedData&&!sameAmounts)conflicts.push('montants');
+ const conflicts=[];if(protectedData&&!sameLines)conflicts.push('articles/quantités');if((protectedData||usableFrozenAddress(order.address))&&!sameAddress)conflicts.push('adresse');if(protectedData&&!sameAmounts)conflicts.push('montants');
  // Status/cancellation facts are indicative; never apply a business cancellation here.
  source.platformStatusObservation={channel:'temu',payload:{detail:fresh.detail,shipping:fresh.shipping,country:fresh.country},observedAt:observation.checkedAt,indicative:true};
  source.temuCatchup={checkedAt:observation.checkedAt,coverage:observation.coverage,complete:observation.complete,coreComplete:true,conflicts,errors:observation.errors,shipments:fresh.shipments||[],packages:fresh.packages||[],externalWrites:0};
  let nextAddress=order.address,recipient=order.recipient,issue=order.issue;
  const initialIncomplete=!protectedData&&((source.visibilityHold===true&&!lines.length)||source.temuInitialPreparationPending===true);
- const initialSourceOnly=initialIncomplete&&(!issue||pureTemuSourceReadError(issue)||priorPartial?.currentReason&&issue===priorPartial.currentReason||issue==='Données TEMU récupérées · Préparation à vérifier'||issue==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'||issue==='TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée');
+ const initialSourceOnly=initialIncomplete&&(!issue||obsoleteTemuVisibilityError(issue)||pureTemuSourceReadError(issue)||priorPartial?.currentReason&&issue===priorPartial.currentReason||issue==='Données TEMU récupérées · Préparation à vérifier'||issue==='Adresse masquée : adresse initiale complète requise avant préparation'||issue==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'||issue==='TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée');
  if(!conflicts.length){
-  if(!protectedData){nextAddress={...order.address,...address};recipient=address.name;
+  if(!protectedData){if(!usableFrozenAddress(order.address)){nextAddress={...order.address,...address};recipient=address.name;}
    if(!sameLines){const keep=new Set(active.map(l=>l.orderSn));for(const l of lines)if(!keep.has(l.source_line))await tx.query('DELETE FROM lines WHERE id=$1 AND order_id=$2',[l.id,order.id]);
     for(const l of active){const old=lines.find(x=>x.source_line===l.orderSn),sku=ordered([l])[0].sku,raw={...(old?.source_payload||{}),goodsName:l.goodsName,skuId:l.skuId,productList:l.productList,marketplaceQuantity:Number(l.quantity),temuOrderSn:l.orderSn,mallId:source.mallId||source.sourceShop};
      if(old)await tx.query('UPDATE lines SET source_sku=$3,quantity=$4,source_payload=$5::jsonb WHERE id=$1 AND order_id=$2',[old.id,order.id,sku,l.quantity,JSON.stringify(raw)]);

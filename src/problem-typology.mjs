@@ -1,6 +1,7 @@
 // Shared contract: labels come from the same compactProblems implementation as the UI.
 export const WITHOUT_DIAGNOSTIC='Filtre problÃ¨mes sans diagnostic dÃ©taillÃ©';
 export function orderProblemLabels(order, compactProblems, inProblemFilter=false){
+ if(order.archived||order.label_status==='cancelled'||order.tracking_status==='cancelled')return [];
  const labels=[...new Set(compactProblems(order).map(d=>d.label).filter(Boolean))];
  if(!labels.length&&inProblemFilter)labels.push(WITHOUT_DIAGNOSTIC);
  return labels;

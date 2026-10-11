@@ -1,3 +1,4 @@
+import {isMaskedAddressValue} from './temu-address-observation.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {temuSourceError} from './temu-catchup-policy.mjs';
 const countryNames={France:'FR',Belgium:'BE',Croatia:'HR','Czech Republic':'CZ',Czechia:'CZ',Denmark:'DK',Greece:'GR',Hungary:'HU',Ireland:'IE',Italy:'IT',Latvia:'LV',Netherlands:'NL',Poland:'PL',Portugal:'PT',Slovenia:'SI',Spain:'ES',Sweden:'SE',Austria:'AT',Germany:'DE',Finland:'FI',Luxembourg:'LU',Malta:'MT',Estonia:'EE',Lithuania:'LT',Slovakia:'SK',Romania:'RO',Bulgaria:'BG',Cyprus:'CY','United Kingdom':'GB',Switzerland:'CH',Norway:'NO',Iceland:'IS'};
@@ -11,7 +12,7 @@ export function validateTemuSource(payload,reference,{requireShipping=true}={}){
  const ids=new Set();for(const l of rows){if(typeof l.orderSn!=='string'||!l.orderSn||ids.has(l.orderSn)||!Number.isSafeInteger(Number(l.quantity))||Number(l.quantity)<0)invalid('detail','Lignes ou quantités invalides');ids.add(l.orderSn);const skus=new Set((l.productList||[]).map(p=>text(p.extCode)).filter(Boolean));if(skus.size!==1)invalid('detail','Référence vendeur absente ou ambiguë');}
  const created=Number(parent.parentOrderTime);if(!Number.isSafeInteger(created)||created<=0)invalid('detail','Date source absente');
  const sourceCountry=text(parent.regionName1).toLowerCase(),shippingCountry=text(shipping?.regionName1).toLowerCase();
- if(!sourceCountry||!countries.has(sourceCountry)||requireShipping&&sourceCountry!==shippingCountry)invalid('shipping','Pays source absent, inconnu ou discordant');
+ if(!sourceCountry||!countries.has(sourceCountry)||requireShipping&&!isMaskedAddressValue(shipping?.regionName1)&&sourceCountry!==shippingCountry)invalid('shipping','Pays source absent, inconnu ou discordant');
  if(requireShipping&&(!text(shipping?.receiptName)||!text(shipping?.addressLine1)||!text(shipping?.postCode)||!text(shipping?.regionName3)))invalid('shipping','Coordonnées de livraison incomplètes');
  if(amounts?.parentOrderMap?.parentOrderSn!==reference||!Array.isArray(amounts.orderList))invalid('amounts','Identité ou montants absents');
  const money=amounts.parentOrderMap.estimatedRevenue;if(!money||!/^[A-Z]{3}$/.test(money.currency||'')||!/^\d+$/.test(String(money.amount))||!Number.isSafeInteger(Number(money.amount)))invalid('amounts','Règlement vendeur absent ou invalide');
@@ -47,7 +48,7 @@ export async function readTemuSource(api,reference,{shouldStop=()=>false,onProgr
  const [rawShipping,amounts]=await Promise.all([read('shipping','bg.order.decryptshippinginfo.get',{parentOrderSn:reference}),read('amounts','bg.order.amount.query',{parentOrderSn:reference})]);
  result.payload.shipping=rawShipping?.result||rawShipping;result.payload.amounts=amounts;
  const observedCountry=text(detail?.parentOrderMap?.regionName1).toLowerCase(),deliveryCountry=text(result.payload.shipping?.regionName1).toLowerCase();
- if(detail?.parentOrderMap?.parentOrderSn===reference&&countries.has(observedCountry)&&(!result.payload.shipping||deliveryCountry===observedCountry))result.payload.country=countries.get(observedCountry);
+ if(detail?.parentOrderMap?.parentOrderSn===reference&&countries.has(observedCountry)&&(!result.payload.shipping||isMaskedAddressValue(result.payload.shipping.regionName1)||deliveryCountry===observedCountry))result.payload.country=countries.get(observedCountry);
  if(detail?.parentOrderMap?.parentOrderSn===reference&&Array.isArray(detail.orderList)&&detail.orderList.length){
   const shipments=[];for(const line of detail.orderList){const r=await read('shipments','bg.logistics.shipment.v2.get',{parentOrderSn:reference,orderSn:line.orderSn});if(r){if(!Array.isArray(r.shipmentInfoDTO)){result.errors.push({code:'TEMU_INCOMPLETE',field:'shipments',message:'TEMU · Réponse expéditions incomplète'});continue;}shipments.push(...r.shipmentInfoDTO);}}
   const parcels=shipments.flatMap(s=>[s,...(s.subPackageShipmentInfoList||[])]);
