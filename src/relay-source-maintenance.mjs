@@ -25,6 +25,7 @@ export async function runRelaySourceMaintenance({db,collect,nearestProof=async()
  const orders=(await db.query("SELECT * FROM orders WHERE NOT archived AND channel='shopify' AND label_status <> 'cancelled' ORDER BY id")).rows.filter(o=>o.source_payload?.shopifyDeliveryMode==='relay'||diagnostic.test(o.delivery_mode||o.carrier_service||'')||o.source_payload?.shipping_lines?.some(l=>diagnostic.test(l.title||l.code||'')));
  for(const order of orders){
   let row={orderId:order.id,reference:order.reference};
+  if(order.suspension?.active||order.suspension?.erplainCancellation){row.status='EXCLUDED';row.reason='Suspension humaine conservée';report.rows.push(row);continue;}
   try{
    const sourceRead=await collect(order),normalizedIncoming=normalizeShopifyOrders([sourceRead.payload])[0];
    const base=platformHoldDatabaseAdapter({sourceRead,normalizedIncoming,pauseProbe});
@@ -47,7 +48,7 @@ export async function runRelaySourceMaintenance({db,collect,nearestProof=async()
   await save(report);
  }
  const current=await pauseProbe();if(current?.paused!==true||current.epoch!==lease.epoch)throw Error('Arrêt des écrivains perdu pendant la maintenance');
- report.finishedAt=new Date().toISOString();report.status=report.rows.every(r=>r.status==='PASS'||!apply&&r.status==='PLANNED')?'PASS':'BLOCKED';await save(report);return report;
+ report.finishedAt=new Date().toISOString();report.status=report.rows.every(r=>r.status==='PASS'||r.status==='EXCLUDED'||!apply&&r.status==='PLANNED')?'PASS':'BLOCKED';await save(report);return report;
 }
 export async function rollbackRelaySourceMaintenance({db,pauseProbe,report}){
  if(report?.apply!==true||!Array.isArray(report.rows))throw Error('Rapport de maintenance appliquée requis');
