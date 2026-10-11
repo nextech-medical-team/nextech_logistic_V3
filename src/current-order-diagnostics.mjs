@@ -1,5 +1,6 @@
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {withoutSharedParcelReason,withoutSharedParcelReasonSql} from './shared-parcel-diagnostic.mjs';
+import {obsoleteTemuVisibilityError} from './temu-catchup-policy.mjs';
 // Current diagnostic projection only. Never changes jobs or business data.
 export const oldFinanceErrors=['TEMU · Remises client et TVA à rapprocher','TEMU · Totaux client source incohérents','TEMU · Prix client et TVA source incohérents'];
 export const verifiedFinanceSql="(channel='temu' AND erp_live->'bc'->>'id' IS NOT NULL AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'total')='number' AND jsonb_typeof(erp_live->'pricing'->'confirmed'->'sourceTotal')='number' AND erp_live->'pricing'->>'status'='verified' AND erp_live->'pricing'->>'error' IS NULL AND erp_live->'pricing'->'confirmed'->>'authority'='erplain' AND erp_live->'pricing'->'commercialBasis'->>'field'='estimatedRevenue' AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue' IS NOT NULL AND erp_live->'pricing'->'commercialBasis'->'sourceEstimatedRevenue'=source_payload->'temuAmounts'->'data'->'parentOrderMap'->'estimatedRevenue')";
@@ -9,6 +10,13 @@ export function projectCurrentDiagnostics(o){
  const stock=o.erp_live?.stockIncidentRecheck,stamp=Date.parse(stock?.checkedAt),stockFresh=Number.isFinite(stamp)&&stamp<=Date.now()&&Date.now()-stamp<=15*60000;
  if(stock&&((stock.preparationRequired&&o.issue===stock.currentIssue)||(stock.status!=='resolved'&&o.issue===stock.currentError))){for(const [target,key] of [[o.erp_live_job,'error'],[o,'resolution_error']])if(target&&stockIncidentOnly(target[key])&&(target===o.erp_live_job?target[key]===stock.erpError:(stock.status==='resolved'?stock.retiredErrors:stock.observedErrors)?.includes(target[key])))target[key]=stock.status==='resolved'?(stockFresh?null:'Stock : vérification à reprendre — dernier contrôle expiré'):stock.currentError;}
 
+ const fresh=o.source_payload?.temuCatchup;
+ if(o.channel==='temu'&&(fresh?.complete===true&&fresh.coreComplete===true||fresh?.requiredComplete===true&&['pending','cancelled'].includes(fresh.sourceStage))&&!fresh.conflicts?.length&&Number.isFinite(Date.parse(fresh.checkedAt))&&(!o.source_payload?.temuDirect?.attemptedAt||Date.parse(o.source_payload.temuDirect.attemptedAt)<=Date.parse(fresh.checkedAt))){
+  for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error'],...(o.resolution_actions||[]).map(j=>[j,'error'])]){
+   const dated=key==='resolution_error'?o.resolution_error_updated_at:target?.updated_at;
+   if(target&&obsoleteTemuVisibilityError(target[key])&&(key==='issue'&&!dated||Number.isFinite(Date.parse(dated))&&Date.parse(dated)<=Date.parse(fresh.checkedAt)))target[key]=(fresh.requiredComplete&&!fresh.coreComplete?fresh.currentReason:fresh.stageReason)||null;
+  }
+ }
  for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error']])if(target)target[key]=withoutSharedParcelReason(target[key]);
  const p=o.erp_live?.pricing,s=o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue;
  const proof=o.channel==='temu'&&o.erp_live?.bc?.id&&Number.isFinite(p?.confirmed?.total)&&Number.isFinite(p?.confirmed?.sourceTotal)&&p?.status==='verified'&&!p.error&&p.confirmed?.authority==='erplain'&&p.commercialBasis?.field==='estimatedRevenue'&&s&&p.commercialBasis.sourceEstimatedRevenue&&p.commercialBasis.sourceEstimatedRevenue.amount===s.amount&&p.commercialBasis.sourceEstimatedRevenue.currency===s.currency;

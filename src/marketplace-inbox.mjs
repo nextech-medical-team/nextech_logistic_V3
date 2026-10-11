@@ -39,7 +39,7 @@ export function normalizeTemuReceipt(payload,shop){
  if(!p?.parentOrderSn||!/^PO-/.test(p.parentOrderSn)||!Array.isArray(items)||!items.length||! /^[A-Z]{2}$/.test(country||''))throw Error('TEMU · Identité, pays ou articles incomplets');
  const seen=new Set();const lines=items.map(l=>{const skus=[...new Set((l.productList||[]).map(p=>String(p.extCode||'').trim()).filter(Boolean))];if(skus.length!==1)throw Error('TEMU · Référence vendeur absente ou multiple : '+String(l.skuId||l.orderSn));const quantity=Number(l.quantity);if(!l.orderSn||seen.has(l.orderSn)||!Number.isFinite(quantity)||quantity<=0)throw Error('TEMU · Quantité ou ligne non vérifiable');seen.add(l.orderSn);return {id:randomUUID(),source_line:String(l.orderSn),source_sku:skus[0],quantity,source_payload:{goodsName:l.goodsName,skuId:l.skuId,productList:l.productList,marketplaceQuantity:quantity,temuOrderSn:String(l.orderSn),mallId:shop}};});
  const date=new Date(Number(p.parentOrderTime)*1000);if(!Number.isFinite(date.getTime()))throw Error('TEMU · Date de commande absente');
- return {id:randomUUID(),channel:'temu',reference:p.parentOrderSn,recipient:shipping?.receiptName||'',address:{name:shipping?.receiptName||'',street:[shipping?.addressLine1,shipping?.addressLine2,shipping?.addressLine3].filter(Boolean).join(', '),postal:shipping?.postCode||'',city:shipping?.regionName3||'',country,phone:shipping?.mobile||'',email:shipping?.mail||''},source_date:date.toISOString(),source_payload:{origin:'temu_direct_receipt',mallId:shop,temuOrderDetail:detail,temuShippingInfo:shipping||{},sourceShop:shop},cancelled:Number(p.parentOrderStatus)===3,version:Number(p.updateTime)?new Date(Number(p.updateTime)*1000).toISOString():null,lines};
+ return {id:randomUUID(),channel:'temu',reference:p.parentOrderSn,recipient:shipping?.receiptName||'',address:{name:shipping?.receiptName||'',street:[shipping?.addressLine1,shipping?.addressLine2,shipping?.addressLine3].filter(Boolean).join(', '),postal:shipping?.postCode||'',city:shipping?.regionName3||'',country,phone:shipping?.mobile||'',email:shipping?.mail||''},source_date:date.toISOString(),source_payload:{origin:'temu_direct_receipt',mallId:shop,temuOrderDetail:detail,temuShippingInfo:shipping||{},sourceShop:shop,...(payload.sourceCoverage?{sourceCoverage:payload.sourceCoverage,logisticsObservation:payload.logisticsObservation}:{}),...(detail.v3Amounts?.data?{temuAmounts:{at:new Date().toISOString(),data:detail.v3Amounts.data},temuAmountsError:null}:{})},cancelled:Number(p.parentOrderStatus)===3,version:Number(p.updateTime)?new Date(Number(p.updateTime)*1000).toISOString():null,lines};
 }
 
 export async function applyMarketplaceReceipt(db,r,options={}){
@@ -58,6 +58,22 @@ export async function applyMarketplaceReceipt(db,r,options={}){
  o=r.channel==='shopify'?{...normalizeShopifyOrders([r.payload])[0],channel:'shopify',cancelled:!!shopifyCancellationReason(r.payload),fulfilled:['fulfilled','partial','partially_fulfilled'].includes(r.payload.fulfillment_status),version:r.payload.updated_at||r.payload.created_at}:normalizeTemuReceipt(r.payload,r.shop);
  if(o.version&&!Number.isFinite(Date.parse(o.version)))throw Error('Date de modification marketplace invalide');
  }catch(e){if(fresh)throw e;o=incompleteOrder(r.channel,r.payload,r.shop,String(e.message).slice(0,500));}
+ // Existing TEMU orders use the guarded catch-up writer. A partial receipt is
+ // an observation, never an instruction to reset labels or business holds.
+ if(r.channel==='temu'&&r.payload.sourceCoverage&&!fresh){
+  const routed=await withShipmentLock(()=>db.transaction(async tx=>{
+   const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,o.reference])).rows[0];
+   if(!existing)return null;
+   if(existing.archived||existing.duplicate_of)return {skipped:true,reason:'inactive-existing-order'};
+   const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;
+   if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
+   await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[existing.id,JSON.stringify({temuReceiptObservation:{receivedAt:new Date().toISOString(),coverage:r.payload.sourceCoverage,payload:r.payload}})]);
+   await tx.query('INSERT INTO temu_source_catchup(order_id) VALUES($1) ON CONFLICT(order_id) DO UPDATE SET next_at=least(temu_source_catchup.next_at,now())',[existing.id]);
+   await tx.query('UPDATE order_recheck_monitor SET next_check=now(),requested=requested+1 WHERE order_id=$1',[existing.id]);
+   return {existing:true,sourceCatchupQueued:true};
+  }));
+  if(routed)return routed;
+ }
  if(o.visibilityHold)return withShipmentLock(()=>db.transaction(async tx=>({retained:true,id:await retainVisibleOrder(tx,o,o.source_payload.visibilityReason)})));
  return withShipmentLock(()=>db.transaction(async tx=>{
   const link=(await tx.query('SELECT * FROM marketplace_order_links WHERE channel=$1 AND shop=$2 AND reference=$3 FOR UPDATE',[r.channel,r.shop,o.reference])).rows[0];
