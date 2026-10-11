@@ -13,6 +13,10 @@ function fixture(entry){
  const state={order:clone(entry.order),lines:clone(entry.lines),jobs:clone(entry.jobs).map(j=>({...j,result:{kept:'original'}})),documents:[{pdf:'unchanged',tracking:'unchanged',annotation:'unchanged'}],erp:clone(entry.erp),busy:false};
  const writes=[];
  const db={state,writes,async query(sql,args=[]){
+  if(sql.startsWith('SELECT source_sku,target_sku,quantity,target_quantity FROM lines'))return {rows:clone(state.lines).map(l=>({source_sku:l.source_sku,target_sku:l.target_sku,quantity:l.quantity,target_quantity:l.target_quantity}))};
+  if(sql.startsWith('UPDATE orders SET issue=CASE WHEN $3')){writes.push(sql);if(args[2])state.order.issue=args[3];state.order.erp_live.stockIncidentRecheck=JSON.parse(args[1]);return {rows:[]}};
+  if(sql.startsWith('SELECT id,action,status,error,result,created_at,updated_at FROM resolution_jobs'))return {rows:clone(state.jobs.filter(j=>j.status===(sql.includes("status='complete'")?'complete':'review')))};
+  if(sql.startsWith('SELECT status,error FROM erp_live_jobs'))return {rows:state.erp?[clone(state.erp)]:[]};
   if(sql.startsWith('SELECT id FROM orders'))return {rows:[{id:state.order.id}]};
   if(sql.startsWith('SELECT * FROM partial_deliveries'))return {rows:[]};
   if(sql.startsWith('UPDATE orders SET erp_live=jsonb_set(jsonb_set')){writes.push(sql);state.order.erp_live={...state.order.erp_live,bc:JSON.parse(args[1]),partialSource:JSON.parse(args[2]),documentSource:JSON.parse(args[3])};return {rows:[]}};
