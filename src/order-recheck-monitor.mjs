@@ -50,7 +50,13 @@ export async function initializeOrderRecheckMonitor(db,{afterPublication=false}=
  RETURN NEW; END; $$ LANGUAGE plpgsql;
  DROP TRIGGER IF EXISTS v3_recheck_order ON orders;
  CREATE TRIGGER v3_recheck_order AFTER INSERT OR UPDATE OF source_payload,issue,erp_live,resolution_pending_resume,suspension ON orders FOR EACH ROW EXECUTE FUNCTION v3_request_order_recheck();
- INSERT INTO order_recheck_monitor(order_id) SELECT id FROM orders ON CONFLICT DO NOTHING;`);
+ INSERT INTO order_recheck_monitor(order_id) SELECT id FROM orders ON CONFLICT DO NOTHING;
+ CREATE OR REPLACE FUNCTION v3_recheck_temu_label() RETURNS trigger AS $$ BEGIN
+ INSERT INTO order_recheck_monitor(order_id) SELECT id FROM orders WHERE channel='temu' AND reference=NEW.reference
+ ON CONFLICT(order_id) DO UPDATE SET next_check=now(),requested=order_recheck_monitor.requested+1;
+ RETURN NEW; END; $$ LANGUAGE plpgsql;
+ DROP TRIGGER IF EXISTS v3_recheck_temu_label ON temu_label_jobs;
+ CREATE TRIGGER v3_recheck_temu_label AFTER INSERT OR UPDATE OF status,result,error,packages ON temu_label_jobs FOR EACH ROW EXECUTE FUNCTION v3_recheck_temu_label();`);
  for(const table of ['resolution_jobs','correction_jobs'])await db.exec(`DROP TRIGGER IF EXISTS v3_recheck_correction ON ${table};CREATE TRIGGER v3_recheck_correction AFTER INSERT OR UPDATE OF status,result,error ON ${table} FOR EACH ROW EXECUTE FUNCTION v3_request_order_recheck();`);
  await db.exec(`DROP TRIGGER IF EXISTS v3_recheck_line ON lines;CREATE TRIGGER v3_recheck_line AFTER INSERT OR UPDATE OF quantity,source_sku,target_sku,target_quantity,source_payload ON lines FOR EACH ROW EXECUTE FUNCTION v3_request_order_recheck();
  CREATE OR REPLACE FUNCTION v3_recheck_mapping() RETURNS trigger AS $$ BEGIN

@@ -81,6 +81,27 @@ test('real PostgreSQL triggers enqueue immediate checks; periodic checks persist
  }finally{await db.close();}
 });
 
+test('TEMU label completion immediately invalidates the prior waiting observation without a provider call',async()=>{
+ const db=await fixture();try{
+  await db.query("UPDATE orders SET issue=null,label_status='ready',erp_live='{\"bc\":{\"id\":\"BC\"},\"bl\":{\"id\":\"BL\"}}' WHERE id='a'");
+  const monitor=orderRecheckMonitor(db,{}, {readProduct:()=>assert.fail('no provider read'),readDocuments:()=>assert.fail('no provider read')});
+  await monitor.runLocal();
+  const result={source:'temu_direct',observedAt:new Date().toISOString(),packageInfoResultList:[{packageSn:'PK-1',shippingLabelStatus:0}]};
+  await db.query("INSERT INTO temu_label_jobs(reference,status,error,packages,result) VALUES('A','pending','TEMU · PDF en attente chez TEMU','[\"PK-1\"]',$1)",[JSON.stringify(result)]);
+  assert.equal((await db.query("SELECT requested>checked due FROM order_recheck_monitor WHERE order_id='a'")).rows[0].due,true);
+  await monitor.runLocal();
+  const waiting=(await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state;
+  assert.equal(waiting.blocked,false);assert.equal(waiting.holdCode,'temu_pdf_processing');
+  const businessBefore=(await db.query("SELECT to_jsonb(o) value FROM orders o WHERE id='a'")).rows[0].value;
+  await db.query("UPDATE temu_label_jobs SET status='complete',error=null WHERE reference='A'");
+  assert.equal((await db.query("SELECT requested>checked due FROM order_recheck_monitor WHERE order_id='a'")).rows[0].due,true);
+  await monitor.runLocal();
+  const complete=(await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state;
+  assert.equal(complete.blocked,false);assert.equal(complete.alert,false);assert.equal(complete.result,'Aucun blocage constaté');
+  assert.deepEqual((await db.query("SELECT to_jsonb(o) value FROM orders o WHERE id='a'")).rows[0].value,businessBefore);
+ }finally{await db.close();}
+});
+
 test('read-only corrections and unavailable products never authorize automatic continuation',async()=>{
  for(const kind of ['read-only','missing-product','legacy-cache']){
   const db=await fixture();try{
