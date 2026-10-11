@@ -1,0 +1,522 @@
+{
+  "source": {
+    "finishedAt": "2026-10-11T09:40:21.788Z",
+    "orders": [
+      {
+        "id": "fixture-1",
+        "reference": "fixture-1",
+        "channel": "temu",
+        "erp_status": "live_review",
+        "erp_live": {
+          "phase": "bc_created",
+          "bc": {
+            "id": 1
+          }
+        }
+      },
+      {
+        "id": "fixture-2",
+        "reference": "fixture-2",
+        "channel": "temu",
+        "erp_status": "live_review",
+        "erp_live": {
+          "phase": "bc_created",
+          "bc": {
+            "id": 2
+          }
+        }
+      },
+      {
+        "id": "fixture-3",
+        "reference": "fixture-3",
+        "channel": "temu",
+        "erp_status": "live_review",
+        "erp_live": {
+          "phase": "bc_created",
+          "bc": {
+            "id": 3
+          }
+        }
+      },
+      {
+        "id": "fixture-4",
+        "reference": "fixture-4",
+        "channel": "temu",
+        "erp_status": "live_review",
+        "erp_live": {
+          "phase": "bc_created",
+          "bc": {
+            "id": 4
+          }
+        }
+      },
+      {
+        "id": "fixture-5",
+        "reference": "fixture-5",
+        "channel": "shopify",
+        "erp_status": "live_review",
+        "erp_live": {
+          "phase": "starting"
+        }
+      },
+      {
+        "id": "fixture-6",
+        "reference": "fixture-6",
+        "channel": "temu",
+        "erp_status": "live_review",
+        "erp_live": {
+          "phase": "bc_created",
+          "bc": {
+            "id": 6
+          }
+        }
+      },
+      {
+        "id": "fixture-7",
+        "reference": "fixture-7",
+        "channel": "temu",
+        "erp_status": "live_review",
+        "erp_live": {
+          "phase": "starting"
+        }
+      },
+      {
+        "id": "fixture-8",
+        "reference": "fixture-8",
+        "channel": "temu",
+        "erp_status": "live_review",
+        "erp_live": {
+          "phase": "bc_created",
+          "bc": {
+            "id": 8
+          }
+        }
+      }
+    ],
+    "documents": [
+      {
+        "orderId": "fixture-1",
+        "readAt": "2026-10-11T09:37:30.862Z",
+        "bc": {
+          "id": 1,
+          "external_reference": "fixture-1",
+          "status": "active",
+          "update_stock": false,
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          },
+          "line_items": [
+            {
+              "quantity": 6,
+              "available": 0,
+              "on_hand": 0,
+              "reserved_quantity": 0,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 1,
+                "sku": "CASE1-SKU1",
+                "track_inventory": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "orderId": "fixture-2",
+        "readAt": "2026-10-11T09:37:56.727Z",
+        "bc": {
+          "id": 2,
+          "external_reference": "fixture-2",
+          "status": "active",
+          "update_stock": false,
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          },
+          "line_items": [
+            {
+              "quantity": 10,
+              "available": 0,
+              "on_hand": 0,
+              "reserved_quantity": 0,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 1,
+                "sku": "CASE2-SKU1",
+                "track_inventory": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "orderId": "fixture-3",
+        "readAt": "2026-10-11T09:37:41.990Z",
+        "bc": {
+          "id": 3,
+          "external_reference": "fixture-3",
+          "status": "active",
+          "update_stock": false,
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          },
+          "line_items": [
+            {
+              "quantity": 50,
+              "available": 0,
+              "on_hand": 0,
+              "reserved_quantity": 0,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 1,
+                "sku": "CASE3-SKU1",
+                "track_inventory": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "orderId": "fixture-4",
+        "readAt": "2026-10-11T09:38:02.905Z",
+        "bc": {
+          "id": 4,
+          "external_reference": "fixture-4",
+          "status": "active",
+          "update_stock": false,
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          },
+          "line_items": [
+            {
+              "quantity": 35,
+              "available": 70,
+              "on_hand": 70,
+              "reserved_quantity": 0,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 1,
+                "sku": "CASE4-SKU1",
+                "track_inventory": true
+              }
+            },
+            {
+              "quantity": 14,
+              "available": 84,
+              "on_hand": 84,
+              "reserved_quantity": 0,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 2,
+                "sku": "CASE4-SKU2",
+                "track_inventory": true
+              }
+            },
+            {
+              "quantity": 15,
+              "available": 0,
+              "on_hand": 0,
+              "reserved_quantity": 0,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 3,
+                "sku": "CASE4-SKU3",
+                "track_inventory": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "orderId": "fixture-6",
+        "readAt": "2026-10-11T09:38:09.203Z",
+        "bc": {
+          "id": 6,
+          "external_reference": "fixture-6",
+          "status": "active",
+          "update_stock": false,
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          },
+          "line_items": [
+            {
+              "quantity": 12,
+              "available": 0,
+              "on_hand": 0,
+              "reserved_quantity": 0,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 1,
+                "sku": "CASE6-SKU1",
+                "track_inventory": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "orderId": "fixture-8",
+        "readAt": "2026-10-11T09:37:19.464Z",
+        "bc": {
+          "id": 8,
+          "external_reference": "fixture-8",
+          "status": "active",
+          "update_stock": false,
+          "shipping_orders": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          },
+          "line_items": [
+            {
+              "quantity": 25,
+              "available": 0,
+              "on_hand": 0,
+              "reserved_quantity": 0,
+              "location": {
+                "id": 100934
+              },
+              "variant": {
+                "id": 1,
+                "sku": "CASE8-SKU1",
+                "track_inventory": true
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "products": [
+      {
+        "sku": "CASE5-SKU1",
+        "readAt": "2026-10-11T09:39:49.767Z",
+        "status": "active",
+        "lookupProof": {
+          "responseComplete": true
+        },
+        "variant": {
+          "id": 5,
+          "sku": "CASE5-SKU1",
+          "active": true,
+          "product": {
+            "active": true
+          },
+          "track_inventory": true,
+          "stock_levels": {
+            "data": [
+              {
+                "location": {
+                  "id": 100934
+                },
+                "available": 0,
+                "on_hand": 0
+              }
+            ],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      },
+      {
+        "sku": "CASE7-SKU1",
+        "readAt": "2026-10-11T09:40:10.589Z",
+        "status": "active",
+        "lookupProof": {
+          "responseComplete": true
+        },
+        "variant": {
+          "id": 7,
+          "sku": "CASE7-SKU1",
+          "active": true,
+          "product": {
+            "active": true
+          },
+          "track_inventory": true,
+          "stock_levels": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      },
+      {
+        "sku": "CASE7-SKU2",
+        "readAt": "2026-10-11T09:40:15.391Z",
+        "status": "active",
+        "lookupProof": {
+          "responseComplete": true
+        },
+        "variant": {
+          "id": 7,
+          "sku": "CASE7-SKU2",
+          "active": true,
+          "product": {
+            "active": true
+          },
+          "track_inventory": true,
+          "stock_levels": {
+            "data": [],
+            "paginatorInfo": {
+              "hasMorePages": false
+            }
+          }
+        }
+      }
+    ]
+  },
+  "diagnosis": {
+    "cases": [
+      {
+        "orderId": "fixture-1",
+        "lines": [
+          {
+            "sku": "CASE1-SKU1",
+            "sourceSku": "CASE1-SKU1",
+            "quantity": 6,
+            "mappingPresent": true
+          }
+        ]
+      },
+      {
+        "orderId": "fixture-2",
+        "lines": [
+          {
+            "sku": "CASE2-SKU1",
+            "sourceSku": "CASE2-SKU1",
+            "quantity": 10,
+            "mappingPresent": true
+          }
+        ]
+      },
+      {
+        "orderId": "fixture-3",
+        "lines": [
+          {
+            "sku": "CASE3-SKU1",
+            "sourceSku": "CASE3-SKU1",
+            "quantity": 50,
+            "mappingPresent": true
+          }
+        ]
+      },
+      {
+        "orderId": "fixture-4",
+        "lines": [
+          {
+            "sku": "CASE4-SKU1",
+            "sourceSku": "CASE4-SKU1",
+            "quantity": 35,
+            "mappingPresent": true
+          },
+          {
+            "sku": "CASE4-SKU2",
+            "sourceSku": "CASE4-SKU2",
+            "quantity": 14,
+            "mappingPresent": true
+          },
+          {
+            "sku": "CASE4-SKU3",
+            "sourceSku": "CASE4-SKU3",
+            "quantity": 15,
+            "mappingPresent": true
+          }
+        ]
+      },
+      {
+        "orderId": "fixture-5",
+        "lines": [
+          {
+            "sku": "CASE5-SKU1",
+            "sourceSku": "CASE5-SKU1",
+            "quantity": 300,
+            "mappingPresent": true
+          }
+        ]
+      },
+      {
+        "orderId": "fixture-6",
+        "lines": [
+          {
+            "sku": "CASE6-SKU1",
+            "sourceSku": "CASE6-SKU1",
+            "quantity": 12,
+            "mappingPresent": true
+          }
+        ]
+      },
+      {
+        "orderId": "fixture-7",
+        "lines": [
+          {
+            "sku": "CASE7-SKU1",
+            "sourceSku": "CASE7-SKU1",
+            "quantity": 1,
+            "mappingPresent": true
+          },
+          {
+            "sku": "CASE7-SKU2",
+            "sourceSku": "CASE7-SKU2",
+            "quantity": 1,
+            "mappingPresent": true
+          }
+        ]
+      },
+      {
+        "orderId": "fixture-8",
+        "lines": [
+          {
+            "sku": "CASE8-SKU1",
+            "sourceSku": "CASE8-SKU1",
+            "quantity": 25,
+            "mappingPresent": true
+          }
+        ]
+      }
+    ]
+  },
+  "recovery": {
+    "rows": [
+      {
+        "id": "fixture-5",
+        "found": null,
+        "readAt": "2026-10-11T09:43:56.270Z"
+      },
+      {
+        "id": "fixture-7",
+        "found": null,
+        "readAt": "2026-10-11T09:44:00.838Z"
+      }
+    ]
+  }
+}
