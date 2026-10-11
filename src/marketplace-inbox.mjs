@@ -56,7 +56,7 @@ export async function applyMarketplaceReceipt(db,r,options={}){
   if(fresh&&existing)throw Error('Ancienne fiche V3 encore présente : reprise interrompue');
   if(existing){const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
    if(existing.source_payload?.visibilityHold){
-    const source={...o.source_payload,sourceShop:r.shop,visibilityHold:false,visibilityRecoveredAt:new Date().toISOString()};
+    const source={...o.source_payload,...(existing.source_payload?.externalLabel?{externalLabel:existing.source_payload.externalLabel}:{}),sourceShop:r.shop,visibilityHold:false,visibilityRecoveredAt:new Date().toISOString()};
     await tx.query('UPDATE orders SET recipient=$2,address=$3,source_date=$4,source_payload=$5,issue=$6 WHERE id=$1',[existing.id,o.recipient,JSON.stringify(o.address),o.source_date,JSON.stringify(source),'Données récupérées · Préparation à vérifier']);
     for(const l of o.lines)await tx.query('INSERT INTO lines(id,order_id,source_line,source_sku,quantity,source_payload) VALUES($1,$2,$3,$4,$5,$6)',[l.id,existing.id,l.source_line,l.source_sku,l.quantity,JSON.stringify(l.source_payload)]);
     await recoverCompleteTemuImport(tx,existing,o,r);

@@ -27,6 +27,7 @@ export function simulatedPdf(reference,tracking){
 }
 
 export async function prepareLabel(db,o){
+  if(o.channel==='temu'&&o.source_payload?.externalLabel?.active)return;
 
   const issue=addressIssue(o.address);if(issue)throw new Error(issue);
 

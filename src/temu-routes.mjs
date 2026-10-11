@@ -1,3 +1,4 @@
+import {registerExternalLabel} from './temu-external-label.mjs';
 import {labelAttachment} from './label-attachment.mjs';
 import {relayConfig} from './temu-read-relay.mjs';
 import {localTemuRows} from './temu-local.mjs';
@@ -18,6 +19,8 @@ export async function temuRoutes({p,req,res,url,db,service,local,sync,user,json,
 
  if(p==='/api/temu/pdf'&&req.method==='GET'){const reference=url.searchParams.get('reference'),packageSn=url.searchParams.get('package');const d=(await db.query('SELECT pdf FROM temu_label_documents WHERE reference=$1 AND package=$2',[reference,packageSn])).rows[0];if(!d){json(res,404,{error:'PDF indisponible'});return true;}const pdf=await currentTemuPdf(db,d.pdf,reference,packageSn);res.setHeader('Content-Type','application/pdf');res.setHeader('Cache-Control','no-store');await labelAttachment(db,res,'reference',reference,packageSn);res.end(pdf);return true;}
 
+ if(p==='/api/temu/external-label'&&req.method==='POST'){permitted(user,['admin','manager','operator']);const result=await registerExternalLabel(db,await body(req),user);if(sync)await sync.enqueue([result.reference],{force:true}).catch(()=>{});json(res,200,result);return true;}
+ if(p==='/api/temu/external-label/pdf'&&req.method==='GET'){const row=(await db.query('SELECT pdf FROM temu_external_label_documents WHERE order_id=$1',[url.searchParams.get('id')])).rows[0];if(!row){json(res,404,{error:'PDF externe absent'});return true;}res.setHeader('Content-Type','application/pdf');res.setHeader('Cache-Control','no-store');res.end(row.pdf);return true;}
  if(!service)throw new Error('Accès privés TEMU non configurés');
 
  if(p==='/api/temu/orders'&&req.method==='GET'){json(res,200,await local.list());return true;}
@@ -34,4 +37,3 @@ export async function temuRoutes({p,req,res,url,db,service,local,sync,user,json,
  throw new Error('Action TEMU inconnue');
 
 }
-
