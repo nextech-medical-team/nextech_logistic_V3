@@ -14,6 +14,7 @@ import {confirmDeliveryReady} from './bl-ready.mjs';
 import {historicalPreparationProof} from './historical-stock-proof.mjs';
 import {currentMappingLine,currentMappingFingerprint,mappingSelectionFingerprint} from './current-mapping-line.mjs';
 import {alignMappedBc} from './mapping-bc-alignment.mjs';
+import {readPreservedHistoricalBc} from './historical-bc-pricing.mjs';
 import {normalizeHistoricalDraft} from './historical-bl-draft.mjs';
 import {resumeTemuFinancialReviews} from './financial-review-recovery.mjs';
 import {resumeAcceptedCommercialReviews} from './commercial-tolerance-recovery.mjs';
@@ -206,8 +207,9 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    // Retrying an API failure reuses the same BC; it never creates another one.
    for(const o of working.filter(o=>o.pricing)){
     try{
-     const actual=await publishIncrementalBc(api,o.erp_live.bc.id,{datedAt:orderDate(o.source_date),verify:bc=>verifyBcPricing(bc,o.pricing),lock:fn=>withShipmentLock(fn,['erplain-bc-numbering'])});
-     const confirmed=verifyBcPricing(actual,o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
+     const historical=await readPreservedHistoricalBc(api,o,o.channel==='temu'?temuSellerTotals(o):null);
+     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{datedAt:orderDate(o.source_date),verify:bc=>verifyBcPricing(bc,o.pricing),lock:fn=>withShipmentLock(fn,['erplain-bc-numbering'])});
+     const confirmed=historical?.confirmed||verifyBcPricing(actual,o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
      o.erp_live.pricing={...o.erp_live.pricing,status:'verified',error:null,confirmed,verifiedAt:new Date().toISOString()};await save(o);
     }catch(e){o.failed=true;o.erp_live.pricing={...o.erp_live.pricing,status:'blocked',error:e.message};await save(o);await fail(o,e);}
    }
