@@ -99,7 +99,7 @@ export async function applyMarketplaceReceipt(db,r,options={}){
      else if(old?.frozenOrderAddress&&old?.frozenClientAddress){relay.frozenOrderAddress=structuredClone(old.frozenOrderAddress);relay.frozenClientAddress=structuredClone(old.frozenClientAddress);}
     }
    // Save observation independently from operational preparation fields.
-   await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[existing.id,JSON.stringify({platformStatusObservation:{channel:r.channel,payload:r.payload,observedAt:new Date().toISOString(),version:o.version,indicative:true,preparationUnchanged:!changed},...(o.source_payload.shopifyRelay?{shopifyRelay:o.source_payload.shopifyRelay,shopifyDeliveryMode:o.source_payload.shopifyDeliveryMode}:{})})]);
+   await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[existing.id,JSON.stringify({platformStatusObservation:{channel:r.channel,payload:r.payload,observedAt:new Date().toISOString(),version:o.version?new Date(o.version).toISOString():null,indicative:true,preparationUnchanged:!changed},...(o.source_payload.shopifyRelay?{shopifyRelay:o.source_payload.shopifyRelay,shopifyDeliveryMode:o.source_payload.shopifyDeliveryMode}:{})})]);
    const relay=o.source_payload?.shopifyRelay;
    if(!changed&&relay?.selectedId&&!existing.archived&&existing.label_status!=='cancelled'&&!existing.suspension?.active&&!existing.suspension?.erplainCancellation){
     const job=(await tx.query('SELECT status,environment,carrier FROM carrier_jobs WHERE order_id=$1 FOR SHARE',[existing.id])).rows[0];
