@@ -15,7 +15,7 @@ const historicalReason='Reprise historique \u00e0 v\u00e9rifier : BL non cr\u00e
 export function completedHistoricalPreparation(o,e,now=Date.now()){
  const p=o.erp_live,pricing=p?.pricing;
  const completedResume=(o.resolution_actions||[]).find(j=>['resume-erp','resume','replace-equivalent'].includes(j.action)&&j.status==='complete'&&!j.error&&!j.result?.partialRemainder);
- const successfulResume=o.issue==null&&!!completedResume;
+ const successfulResume=!!completedResume&&(o.issue==null||oldFinanceErrors.includes(o.issue)||o.issue===historicalReason);
  if(o.label_status!=='blocked'||(!successfulResume&&!oldFinanceErrors.includes(o.issue)&&o.issue!==historicalReason))return false;
  if(o.archived||o.simulation||o.partial_mode||(o.resolution_pending_resume&&!successfulResume)||suspensionBlock(o)||o.source_payload?.marketplacePendingCorrection||o.source_payload?.visibilityHold||o.source_payload?.erplainValidationHold)return false;
  if(successfulResume){
@@ -28,7 +28,7 @@ export function completedHistoricalPreparation(o,e,now=Date.now()){
  if(!p.stockDocument?.id){const stock=p.historicalStockProof;if(stock.stockOnBc!==true||String(stock.bcId)!==String(p.bc.id)||!Array.isArray(stock.quantities)||!Array.isArray(stock.logIds))return false;}
  if(!/^[a-f0-9]{64}$/.test(p.mappingPreparationFingerprint||'')||!/^[a-f0-9]{64}$/.test(p.labelPreparationFingerprint||''))return false;
  for(const value of [p.verifiedAt,p.stockCheckedAt]){const t=Date.parse(value);if(!Number.isFinite(t)||t>now||now-t>86400000)return false;}
- if((successfulResume||oldFinanceErrors.includes(o.issue))&&projectCurrentDiagnostics(structuredClone(o)).issue!==null)return false;
+ if(successfulResume||oldFinanceErrors.includes(o.issue)){const issue=projectCurrentDiagnostics(structuredClone(o)).issue;if(issue!==null&&!(successfulResume&&o.issue===historicalReason&&issue===historicalReason))return false;}
  return true;
 }
 export async function reconcileHistoricalPreparation(db,orderId,{fingerprint=shipmentFingerprint,mappingFingerprint=currentMappingFingerprint}={}){
@@ -43,7 +43,7 @@ export async function reconcileHistoricalPreparation(db,orderId,{fingerprint=shi
   if(o.channel==='temu'){
    const j=(await tx.query('SELECT status,error,packages FROM temu_label_jobs WHERE reference=$1 FOR SHARE',[o.reference])).rows[0];
    const docs=(await tx.query('SELECT package,octet_length(pdf) bytes FROM temu_label_documents WHERE reference=$1 FOR SHARE',[o.reference])).rows;
-   complete=j?.status==='ready'&&j.error===null&&Array.isArray(j.packages)&&j.packages.length>0&&j.packages.every(p=>docs.some(d=>d.package===p&&Number(d.bytes)>0));
+   complete=j?.status==='complete'&&j.error===null&&Array.isArray(j.packages)&&j.packages.length>0&&j.packages.every(p=>docs.some(d=>d.package===p&&Number(d.bytes)>0));
   }else{
    const j=(await tx.query('SELECT status,error,environment,tracking FROM carrier_jobs WHERE order_id=$1 FOR SHARE',[orderId])).rows[0];
    const docs=(await tx.query('SELECT document_index,octet_length(pdf) bytes FROM carrier_documents WHERE order_id=$1 FOR SHARE',[orderId])).rows;
