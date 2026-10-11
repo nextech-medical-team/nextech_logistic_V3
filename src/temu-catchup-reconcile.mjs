@@ -2,6 +2,8 @@ import {maskedTemuAddressFields,usableFrozenAddress} from './temu-address-observ
 import {randomUUID} from 'node:crypto';
 import {isDeepStrictEqual} from 'node:util';
 import {obsoleteTemuVisibilityError,pureTemuSourceReadError} from './temu-catchup-policy.mjs';
+import {sourceFingerprint} from './marketplace-comparison.mjs';
+const sourceRows=rows=>rows.map(l=>{const skus=[...new Set((l.productList||[]).map(p=>p.extCode).filter(Boolean))];return {source_line:l.orderSn,source_sku:skus.length===1?skus[0]:null,quantity:l.quantity};});
 const ordered=rows=>rows.map(l=>({id:String(l.source_line||l.orderSn),sku:l.source_sku||[...new Set((l.productList||[]).map(p=>p.extCode).filter(Boolean))][0],quantity:Number(l.quantity)})).sort((a,b)=>a.id.localeCompare(b.id));
 export async function reconcileTemuCatchup(tx,order,observation){
  if(observation.reference!==(order.source_reference||order.reference)||!observation.coreComplete)throw Error('TEMU · Rapprochement source incomplet');
@@ -18,10 +20,15 @@ export async function reconcileTemuCatchup(tx,order,observation){
  OR EXISTS(SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting'))
  OR EXISTS(SELECT 1 FROM correction_jobs WHERE order_id=$1 AND status IN ('applying','checking')) AS busy`,[order.id,order.reference])).rows[0];
  if(!context||context.busy)throw Object.assign(Error('TEMU · Traitement local en cours'),{code:'TEMU_LOCAL_BUSY',field:'local'});
- const protectedData=Number(fresh.detail.parentOrderMap.parentOrderStatus)===3||context.prepared||order.archived||order.partial_mode||order.suspension?.active||order.erp_live?.bc?.id||order.erp_live?.bl?.id||order.erp_live?.stockDocument?.id||order.erp_live?.stockCreationAttemptedAt||lines.some(l=>l.target_sku!=null||l.target_quantity!=null)||['shipped','in_transit','delivered'].includes(order.tracking_status);
+ const originals=order.erp_live?.equivalentOriginalLines;
+ const protectedData=originals!==undefined||Number(fresh.detail.parentOrderMap.parentOrderStatus)===3||context.prepared||order.archived||order.partial_mode||order.suspension?.active||order.erp_live?.bc?.id||order.erp_live?.bl?.id||order.erp_live?.stockDocument?.id||order.erp_live?.stockCreationAttemptedAt||lines.some(l=>l.target_sku!=null||l.target_quantity!=null)||['shipped','in_transit','delivered'].includes(order.tracking_status);
  const masked=maskedTemuAddressFields(fresh.shipping);if(masked.length&&!usableFrozenAddress(order.address))throw Object.assign(Error('TEMU · Adresse initiale complète requise : coordonnées source masquées'),{code:'TEMU_INCOMPLETE',field:'shipping'});
  const s=fresh.shipping,address={name:s.receiptName,street:[s.addressLine1,s.addressLine2,s.addressLine3].filter(Boolean).join(', '),postal:s.postCode,city:s.regionName3,country:fresh.country,phone:s.mobile||'',email:s.mail||''};
- const active=fresh.detail.orderList.filter(l=>Number(l.quantity)>0),sameLines=isDeepStrictEqual(ordered(lines),ordered(active));
+ // Compare the customer's source units to the preserved source snapshot.
+ // The replacement and its Erplain quantities remain operational data.
+ const active=fresh.detail.orderList.filter(l=>Number(l.quantity)>0);
+ const baseline=sourceFingerprint(originals===undefined?lines:originals),incoming=sourceFingerprint(sourceRows(active));
+ const sameLines=baseline!==null&&incoming!==null&&baseline===incoming;
  const sameAddress=['name','street','postal','city','country'].every(k=>masked.includes(k)||String(order.address?.[k]||'')===String(address[k]||''));
  const oldAmounts=source.temuAmounts?.data||source.temuOrderDetail?.v3Amounts?.data;
  const sameAmounts=!oldAmounts||isDeepStrictEqual(oldAmounts,fresh.amounts);
@@ -33,6 +40,12 @@ export async function reconcileTemuCatchup(tx,order,observation){
  const initialIncomplete=!protectedData&&((source.visibilityHold===true&&!lines.length)||source.temuInitialPreparationPending===true);
  const initialSourceOnly=initialIncomplete&&(!issue||obsoleteTemuVisibilityError(issue)||pureTemuSourceReadError(issue)||priorPartial?.currentReason&&issue===priorPartial.currentReason||issue==='Données TEMU récupérées · Préparation à vérifier'||issue==='Adresse masquée : adresse initiale complète requise avant préparation'||issue==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'||issue==='TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée');
  if(!conflicts.length){
+  const pending=source.marketplacePendingCorrection;
+  const falseEquivalentConflict=originals!==undefined&&observation.complete&&sameLines&&sameAddress&&sameAmounts
+   &&Array.isArray(pending?.sourceCatchupConflicts)&&pending.sourceCatchupConflicts.length===1&&pending.sourceCatchupConflicts[0]==='articles/quantités'
+   &&Array.isArray(pending.detail?.orderList)&&sourceFingerprint(sourceRows(pending.detail.orderList.filter(l=>Number(l.quantity)>0)))===baseline
+   &&issue==='TEMU · Données source différentes : articles/quantités · Rapprochement à vérifier';
+  if(falseEquivalentConflict){delete source.marketplacePendingCorrection;issue=null;source.temuEquivalentSourceReconciliation={checkedAt:observation.checkedAt,baseline:'equivalentOriginalLines',externalWrites:0};}
   if(!protectedData){if(!usableFrozenAddress(order.address)){nextAddress={...order.address,...address};recipient=address.name;}
    if(!sameLines){const keep=new Set(active.map(l=>l.orderSn));for(const l of lines)if(!keep.has(l.source_line))await tx.query('DELETE FROM lines WHERE id=$1 AND order_id=$2',[l.id,order.id]);
     for(const l of active){const old=lines.find(x=>x.source_line===l.orderSn),sku=ordered([l])[0].sku,raw={...(old?.source_payload||{}),goodsName:l.goodsName,skuId:l.skuId,productList:l.productList,marketplaceQuantity:Number(l.quantity),temuOrderSn:l.orderSn,mallId:source.mallId||source.sourceShop};
