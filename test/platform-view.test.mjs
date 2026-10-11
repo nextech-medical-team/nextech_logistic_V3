@@ -1,3 +1,4 @@
+import './temu-status-labels.test.mjs';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {platformIndicativeView} from '../src/platform-indicative-view.mjs';
 import {logisticsObservation,attachLogisticsObservations} from '../src/logistics-observation-view.mjs';
