@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {pathToFileURL} from 'node:url';import path from 'node:path';
 const dir=process.env.TEST_SKU_DIR?pathToFileURL(path.resolve(process.env.TEST_SKU_DIR)+path.sep):new URL('../src/',import.meta.url);
-const {createBlockedMissingProducts,readCreationSku,targetSku,backfillSelection}=await import(new URL('missing-product-creation.mjs',dir));
+const {createBlockedMissingProducts,readCreationSku,targetSku,backfillSelection,catalogueCreationProtection}=await import(new URL('missing-product-creation.mjs',dir));
 function fixture({catalog=null,missing=true,linked,mutationFailure,change,protectedOrder=false,ratio=1}={}){
  const initial={id:'o',channel:'temu',archived:false,resolution_pending_resume:false,source_payload:{},erp_live:{},issue:null,creation_job_error:'BC · SKU Erplain LIVE introuvable : R',labels:{pdf:'unchanged',tracking:'same'}};
  const line={id:'l',source_sku:'MEEME06_R',target_sku:'R',mapped_sku:'R',source_qty:1,target_qty:ratio,quantity:1,source_payload:{goodsName:'Produit source'}};
@@ -11,6 +11,7 @@ function fixture({catalog=null,missing=true,linked,mutationFailure,change,protec
   calls.push({sql,args});
   if(sql.startsWith('SELECT DISTINCT o.*'))return {rows:[structuredClone(initial)]};
   if(sql.startsWith('SELECT l.*')){guardLineReads++;return {rows:[{...line,...(change&&guardLineReads>1?change:{})}]};}
+  if(sql.startsWith('SELECT action,status,error,result'))return {rows:initial.pricingResolution?[initial.pricingResolution]:[]};
   if(sql.startsWith('SELECT message'))return {rows:catalog?[{message:catalog}]:[]};
   if(sql.startsWith('SELECT live_variant_id'))return {rows:linked?[{live_variant_id:linked}]:[]};
   if(sql.startsWith('SELECT * FROM orders')){freshCount++;return {rows:[{...initial,...(protectedOrder?{archived:true}:{})}]};}
@@ -52,3 +53,9 @@ test('historical converted-name blocker is selected and retired only after creat
 test('legacy catalogue Product not found is processed',async()=>{const f=fixture({catalog:'Produit introuvable dans Erplain'});f.initial.creation_job_error=null;f.job.error=null;await f.run();assert.equal(f.mutations,1);});
 
 test('backfill selects the current permanent mapping rather than an old cached target',()=>{const o={channel:'temu'},l={target_sku:'OLD',mapped_sku:'CURRENT',source_payload:{}};assert.equal(targetSku(o,l),'CURRENT');assert.equal(targetSku(o,{...l,source_payload:{mappingScope:'order'}}),'OLD');assert.match(backfillSelection,/mappingScope/);assert.match(backfillSelection,/coalesce\(m.target_sku,l.target_sku/);});
+
+function pricingHold(f){f.initial.reference='PO-test';f.initial.resolution_pending_resume=true;f.initial.source_payload.temuManualPricing={source:'manual_user',jobId:'pricing-job',data:{parentOrderMap:{parentOrderSn:'PO-test'}}};f.initial.pricingResolution={action:'manual-temu-pricing',status:'review',error:'R : SKU Erplain introuvable',result:{manualPricing:true,erpOnly:true}};}
+test('saved pricing blocked on missing converted SKU creates catalogue without releasing hold',async()=>{const f=fixture({ratio:5});pricingHold(f);const before=structuredClone(f.initial);await f.run();assert.equal(f.mutations,1);assert.equal(f.bound.length,1);assert.deepEqual(f.initial,before);assert.equal(f.job.status,'review');assert.equal(f.calls.some(c=>c.sql?.startsWith('UPDATE orders SET resolution_pending_resume')),false);assert.deepEqual(Object.keys(f.calls.find(c=>c.q?.startsWith('mutation')).args.input).sort(),['active','label','variants']);});
+for(const edit of [o=>o.source_payload.temuManualPricing.source='automatic',o=>o.source_payload.temuManualPricing.data.parentOrderMap.parentOrderSn='OTHER',o=>o.pricingResolution.error='Erreur indépendante',o=>o.pricingResolution.status='complete',o=>o.pricingResolution.result.erpOnly=false,o=>o.pricingResolution=null])test('unproven pricing hold stays protected '+edit.toString(),async()=>{const f=fixture();pricingHold(f);edit(f.initial);await f.run();assert.equal(f.mutations,0);assert.equal(f.bound.length,0);assert.equal(f.initial.resolution_pending_resume,true);});
+for(const extra of [{tracking_status:'cancelled'},{label_status:'cancelled'},{archived:true},{partial_mode:true},{source_payload:{visibilityHold:true}},{source_payload:{marketplacePendingCorrection:{}}},{source_payload:{selectedReimport:{mode:'hold'}}},{source_payload:{erplainValidationHold:true}}])test('pricing catalogue exception preserves other protection '+JSON.stringify(extra),async()=>{const f=fixture();pricingHold(f);Object.assign(f.initial,{...extra,source_payload:{...f.initial.source_payload,...extra.source_payload}});await f.run();assert.equal(f.mutations,0);assert.equal(f.bound.length,0);});
+test('human suspension and cancellation remain enforced by preparation callback',async()=>{const f=fixture();pricingHold(f);for(const suspension of [{active:true},{erplainCancellation:{status:'review'}}]){const o={...f.initial,suspension};assert.ok(await catalogueCreationProtection(f.db,o,'R',x=>x.suspension?.active||x.suspension?.erplainCancellation||x.resolution_pending_resume));}assert.equal(f.initial.resolution_pending_resume,true);});

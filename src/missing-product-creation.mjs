@@ -78,6 +78,19 @@ export function productCreationBlock(o,{resolution=false}={}){
  const p=o?.source_payload||{},e=o?.erp_live||{},t=p.temuOrderDetail?.parentOrderMap||{};
  return !o||o.archived||o.partial_mode||p.erplainImported||p.marketplacePendingCorrection||p.visibilityHold||p.selectedReimport?.mode==='hold'||(p.erplainValidationHold&&p.erplainValidation!=='approved')||(!resolution&&o.resolution_pending_resume)||['cancelled','shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status)||o.label_status==='cancelled'||['cancelled','closed','completed'].includes(e.bc?.status)||['cancelled','closed','completed','shipped','delivered'].includes(e.bl?.status)||['creating_bc','creating_stock','publishing_bl','creating_bl'].includes(e.phase);
 }
+// A saved pricing resolution may stop on a missing SKU. Catalogue creation is
+// independent of preparation; the persisted hold is never cleared here.
+export async function catalogueCreationProtection(db,o,sku,blocked){
+ const manual=o?.source_payload?.temuManualPricing;
+ let catalogueOnly=false;
+ if(o?.resolution_pending_resume&&o.channel==='temu'&&manual?.source==='manual_user'&&typeof manual.jobId==='string'&&manual.data?.parentOrderMap?.parentOrderSn===o.reference){
+  const rows=(await db.query("SELECT action,status,error,result FROM resolution_jobs WHERE order_id=$1 AND id=$2 AND NOT EXISTS(SELECT 1 FROM resolution_jobs newer WHERE newer.order_id=$1 AND newer.id<>$2 AND newer.created_at>=(SELECT created_at FROM resolution_jobs WHERE id=$2) AND newer.action<>'refresh')",[o.id,manual.jobId])).rows;
+  const j=rows[0];
+  catalogueOnly=rows.length===1&&j.action==='manual-temu-pricing'&&j.status==='review'&&j.result?.manualPricing===true&&j.result?.erpOnly===true&&[sku+' : SKU Erplain introuvable','BC · SKU Erplain LIVE introuvable : '+sku].includes(j.error);
+ }
+ const guarded=catalogueOnly?{...o,resolution_pending_resume:false}:o;
+ return blocked(guarded)||productCreationBlock(guarded);
+}
 // A rotating review ledger prevents one incomplete historical order from starving
 // all later orders. This ledger never changes business holds or job statuses.
 export const backfillTable=`CREATE TABLE IF NOT EXISTS erplain_product_creation_reviews(order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,line_id TEXT NOT NULL,sku TEXT NOT NULL,status TEXT NOT NULL,error TEXT,updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),PRIMARY KEY(order_id,line_id,sku))`;
@@ -110,7 +123,7 @@ export async function createBlockedMissingProducts(db,api,{blocked,bind}){
    if(!missingCatalogueMessage(diagnostic)&&!historicalMissing(o.creation_job_error,sku)&&!historicalMissing(o.issue,sku))continue;
    let status='review',error=null,variantId=null;
    try{
-    const protection=blocked(o)||productCreationBlock(o);
+    const protection=await catalogueCreationProtection(db,o,sku,blocked);
     const linked=(await db.query('SELECT live_variant_id FROM erplain_product_bindings WHERE sku=$1',[sku])).rows[0];
     await api.verify();
     const read=async key=>{
@@ -128,7 +141,7 @@ export async function createBlockedMissingProducts(db,api,{blocked,bind}){
     }else{
     const result=await ensureMissingProduct(db,api,{sku,label:sourceProductName(line),read,guard:async()=>{
      const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];
-     if(blocked(fresh)||productCreationBlock(fresh))throw Error('Commande protégée : création suspendue');
+     if(await catalogueCreationProtection(db,fresh,sku,blocked))throw Error('Commande protégée : création suspendue');
      const current=(await db.query(lineSelection,[o.id,o.channel])).rows.find(l=>l.id===line.id);
      if(!current||lineIdentity(fresh,current)!==lineIdentity(o,line))throw Error('Correspondance ou ligne modifiée : création suspendue');
      const busy=(await db.query("SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status IN ('pending','creating','awaiting_pdf','ready')",[o.id])).rows.length;
@@ -137,7 +150,7 @@ export async function createBlockedMissingProducts(db,api,{blocked,bind}){
     // Recheck protections after a possibly long supplier call and before cache binding.
     const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];
     const current=(await db.query(lineSelection,[o.id,o.channel])).rows.find(l=>l.id===line.id);
-    if(blocked(fresh)||productCreationBlock(fresh)||!current||lineIdentity(fresh,current)!==lineIdentity(o,line))throw Error('Commande ou correspondance modifiée : liaison suspendue');
+    if(await catalogueCreationProtection(db,fresh,sku,blocked)||!current||lineIdentity(fresh,current)!==lineIdentity(o,line))throw Error('Commande ou correspondance modifiée : liaison suspendue');
     const busy=(await db.query("SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status IN ('pending','creating','awaiting_pdf','ready')",[o.id])).rows.length;
     if(busy)throw Error('Traitement en cours : liaison suspendue');
     const binding=await bind(result.variant);
