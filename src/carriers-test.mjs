@@ -1,4 +1,6 @@
-import {readShopifyRelay,assertFreshShopifyRelay,chooseNearestParcelShop} from './shopify-relay-source.mjs';
+import {relayCommercialFingerprint} from './relay-source-reconciliation.mjs';
+import {shopifyDeliveryMode} from './shopify-delivery.mjs';
+import {readShopifyRelay,assertFreshShopifyRelay,chooseNearestParcelShop,relayComparisonAddress,sameRelayAddress} from './shopify-relay-source.mjs';
 import {shopifyCollector,loadShopifyConfig} from './marketplace-collection.mjs';
 import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {isImportedErplain,resolveImportedLabelOrder} from './erplain-label-required.mjs';
@@ -45,7 +47,7 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
     const j=await request(GOFO+uri,{method,headers:{token:t,date,sign,'route-country':'FR','Content-Type':'application/json;charset=utf-8'},body:raw},!!body);
     if(!(Number(j.code)===200&&(j.status===undefined||Number(j.status)===1))&&!(Number(j.code)===200305000&&(j.data?.cOrderNo||j.data?.waybillNo))){const e=new Error('GOFO '+String(j.code)+' : '+String(j.messageEn||j.message||j.msg||j.code).slice(0,350));e.rejected=true;e.zoneRejected=/this postal code is not currently in service|this postal code service is not available|unsupported area|postal code not exist in system postal code database/i.test(e.message);throw e;}return j;
   }
-  return {
+  const clients={
     async resolveParcelShop(o){
 
       let searchAddress=o.address;
@@ -53,7 +55,13 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
        const reader=shopifyReader||shopifyCollector(await loadShopifyConfig(process.env.DATA_DIR||'/var/lib/nextech-live'));
        const raw=await reader.order(String(o.source_payload?.id||''));
        if(raw.name!==o.reference||String(raw.id)!==String(o.source_payload?.id))throw Error('GLS · Identité Shopify différente');
-       const relay=readShopifyRelay(raw);if(!relay)throw Error('GLS · Métadonnées relais Shopify non reçues');
+       const relay=readShopifyRelay(raw,{mode:o.source_payload?.shopifyDeliveryMode||shopifyDeliveryMode(raw)});if(!relay)throw Error('GLS · Métadonnées relais Shopify non reçues');
+       const baseline=relayCommercialFingerprint(o.source_payload);
+       if(!baseline||baseline!==relayCommercialFingerprint(raw))throw Error('GLS · Produits, prix, taxes ou livraison Shopify à rapprocher avant création');
+       const frozen=relayComparisonAddress(o,relay);
+       if(!sameRelayAddress(frozen,relay.clientAddress))throw Error('GLS · Adresse client modifiée : validation de l’équipe requise');
+       relay.frozenOrderAddress=structuredClone(o.address);relay.frozenClientAddress=structuredClone(frozen);
+       relay.commercialVerified=true;relay.commercialBaselineFingerprint=baseline;
        o.source_payload={...o.source_payload,shopifyRelay:relay};searchAddress=relay.clientAddress;
        if(relay.selectedId){const a=relay.destinationAddress;return {parcelShopId:relay.selectedId,selection:'customer_selected',resolvedAt:new Date().toISOString(),environment:'production',sourceVersion:relay.sourceVersion,address:{Name1:raw.shipping_address?.address2||'',Street:a.street,ZIPCode:a.postal,City:a.city,CountryCode:a.country}};}
       }
@@ -66,11 +74,20 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
     async authenticate(carrier){if(!['gls','gofo'].includes(carrier))throw new Error('Transporteur inconnu');await token(carrier);return {carrier,authenticated:true,environment:production?'production':'test'};},
     async gls(o,{onParcel}={}){
       assertDirectCarrierAllowed(o,'gls');
+      if(production&&o.channel==='shopify'){
+       const mode=o.source_payload?.shopifyDeliveryMode||shopifyDeliveryMode(o.source_payload||{});
+       if(mode==='unknown')throw Error('Shopify · Mode de livraison à identifier avant création');
+       if(mode==='relay'&&o.carrier!=='gls_shop')o={...o,carrier:'gls_shop'};
+      }
       if(production&&o.channel==='shopify'&&o.carrier==='gls_shop'){
-       const relay=assertFreshShopifyRelay(o),id=existingParcelShop(o.source_payload);
+       let relay;try{relay=assertFreshShopifyRelay(o);}catch{}
+       const shop=o.source_payload?.glsParcelShop,age=Date.now()-Date.parse(shop?.resolvedAt);
+       const needsResolve=!relay||relay.commercialVerified!==true||relay.commercialBaselineFingerprint!==relayCommercialFingerprint(o.source_payload)||(relay.selectedId?o.source_payload?.glsParcelShopId!==relay.selectedId:shop?.selection!=='nearest_gls'||shop.environment!=='production'||!Number.isFinite(shop.distance)||!Number.isFinite(age)||age<0||age>60000);
+       if(needsResolve){let current;try{current=await clients.resolveParcelShop(o);}catch(e){throw Error('GLS · Choix relais Shopify à relire avant création : '+e.message);}o.source_payload={...o.source_payload,glsParcelShopId:current.parcelShopId,glsParcelShop:current};}
+       relay=assertFreshShopifyRelay(o);const id=existingParcelShop(o.source_payload);
        if(relay.selectedId&&id!==relay.selectedId)throw Error('GLS · Relais différent du choix client');
        if(!relay.selectedId&&(o.source_payload?.glsParcelShop?.selection!=='nearest_gls'||!Number.isFinite(o.source_payload.glsParcelShop.distance)))throw Error('GLS · Relais le plus proche non vérifié');
-       o={...o,address:relay.clientAddress};
+       o={...o,address:{...o.address,...relay.clientAddress}};
       }
       if(isImportedErplain(o))o=await resolveImportedLabelOrder(o,erplainApi);
       else if(o.channel==='tender')o=await resolveTenderLabelOrder(o,erplainApi);
@@ -91,6 +108,7 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
     },
     async gofoCreate(o){
       assertDirectCarrierAllowed(o,'gofo');
+      if(production&&o.channel==='shopify'&&(o.source_payload?.shopifyDeliveryMode||shopifyDeliveryMode(o.source_payload||{}))!=='direct')throw Error('Shopify · Livraison relais ou mode inconnu : GOFO domicile interdit');
       if(isImportedErplain(o)){
        o=await resolveImportedLabelOrder(o,erplainApi);
        const client=String(o.erplain_label_customer.label),recipient=String(o.address.name),reference=String(o.external_reference),bl=String(o.label_bl);
@@ -107,6 +125,7 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
     async gofoLabel(ref){return (await gofo('/open-api/v2/order/getOrderLabelUrlV2?orderNo='+encodeURIComponent(ref))).data?.base64code;},
     async gofoTracking(ref){return (await gofo('/open-api/v2/order/track/'+encodeURIComponent(ref))).data;}
   };
+  return clients;
 }
 
 

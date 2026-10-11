@@ -10,6 +10,7 @@ function commercial(v){
   lines:v.line_items.map(l=>{if(!l.id||!l.sku||!Array.isArray(l.discount_allocations))throw Error('Ligne commerciale source incomplète');return [String(l.id),l.sku,money(l.quantity),money(l.price),taxes(l.tax_lines),l.discount_allocations.map(d=>money(d.amount)).sort()];}).sort(),
   shipping:v.shipping_lines.map(l=>[l.title,l.code,money(l.discounted_price??l.price),taxes(l.tax_lines)]).sort()});
 }
+export function relayCommercialFingerprint(payload){try{return commercial(payload);}catch{return null;}}
 // Technical reconciliation only. No customer-address edit, provider mutation,
 // job creation or replay of a label is part of this plan.
 export function planRelaySourceReconciliation(e,{now=Date.now()}={}){
@@ -29,6 +30,7 @@ export function planRelaySourceReconciliation(e,{now=Date.now()}={}){
  const frozen=relayComparisonAddress(o),accepted=normalizeRelayAddress(o.source_payload.shipping_address||{});
  const storedRelayAddress=sameRelayAddress(o.address,accepted)&&relay.destinationAddress&&sameRelayAddress(accepted,relay.destinationAddress);
  if(!sameRelayAddress(frozen,relay.clientAddress)&&!storedRelayAddress)return stop('client_address_changed','Adresse client modifiée : validation de l’équipe requise');
+ relay.frozenOrderAddress=structuredClone(o.address);relay.frozenClientAddress=structuredClone(relay.clientAddress);
  const source_payload={...o.source_payload,shopifyRelay:relay,shopifyDeliveryMode:'relay',relaySourceReconciliation:{at:s.checkedAt,sourceVersion:s.payload.updated_at,customerAddressPreserved:true,labelsPreserved:true}};
  const hasLabel=e.labels?.length>0;
  const labelIds=(e.labels||[]).map(l=>l.parcelShopId);

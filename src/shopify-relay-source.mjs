@@ -7,21 +7,24 @@ export function normalizeRelayAddress(a={}){
  street:[a.address1,a.address2].filter(Boolean).join(', '),postal:a.zip||'',city:a.city||'',
  country:a.country_code||a.countryCodeV2||'',phone:a.phone||''};
 }
-export function readShopifyRelay(source){
- if(shopifyDeliveryMode(source)!=='relay')return null;
+export function readShopifyRelay(source,{mode=shopifyDeliveryMode(source)}={}){
+ if(mode!=='relay')return null;
  if(!has(source,'glsRelayId')||!has(source,'glsRelayMetadata'))return null;
  if(!/^\d+$/.test(String(source.id))||!source.name||!Number.isFinite(Date.parse(source.updated_at))||Date.parse(source.updated_at)>Date.now())throw Error('GLS · Identité ou version Shopify non vérifiable');
  let metadata={};if(source.glsRelayMetadata?.value){try{metadata=JSON.parse(source.glsRelayMetadata.value);}catch{throw Error('GLS · Métadonnées relais Shopify illisibles');}}
  if(!metadata||typeof metadata!=='object'||Array.isArray(metadata))throw Error('GLS · Métadonnées relais Shopify invalides');
+ if(has(metadata,'isPreselected')&&typeof metadata.isPreselected!=='boolean')throw Error('GLS · Présélection relais Shopify non vérifiable');
  const declaredId=optionalId(metadata.selectedRelais),selectedId=metadata.isPreselected===true?null:declaredId,defaultId=optionalId(metadata.defaultRelais),sourceId=optionalId(source.glsRelayId?.value);
  if(declaredId&&sourceId&&declaredId!==sourceId)throw Error('GLS · Sélection relais Shopify contradictoire');
  const original=metadata.originalShippingAddress;
  if(original!==undefined&&original!==null&&(typeof original!=='object'||Array.isArray(original)))throw Error('GLS · Adresse client d’origine invalide');
  if(declaredId&&!original)throw Error('GLS · Adresse client d’origine non reçue pour le relais choisi');
+ const clientAddress=normalizeRelayAddress(original||source.shipping_address||{});
+ if(['name','street','postal','city','country'].some(k=>typeof clientAddress[k]!=='string'||!clientAddress[k].trim())||!/^[A-Z]{2}$/.test(clientAddress.country))throw Error('GLS · Adresse client d’origine incomplète');
  return {source:'shopify_gls_france',sourceId:String(source.id),reference:String(source.name),sourceVersion:source.updated_at,
   observedAt:new Date().toISOString(),metadataComplete:true,selectedId,defaultId,sourceIdFallback:sourceId,
   selection:selectedId?'customer_selected':'nearest_required',
-  originalShippingAddress:original||null,clientAddress:normalizeRelayAddress(original||source.shipping_address||{}),
+  originalShippingAddress:original||null,clientAddress,
   destinationAddress:selectedId?normalizeRelayAddress(source.shipping_address||{}):null};
 }
 export function assertFreshShopifyRelay(order,{now=Date.now(),maxAge=60000}={}){
@@ -42,7 +45,8 @@ export function relayComparisonAddress(order,incomingRelay){
  if(!r&&incomingRelay?.metadataComplete===true&&incomingRelay.reference===order.reference&&incomingRelay.sourceId===String(order.source_payload?.id)&&incomingRelay.destinationAddress&&sameRelayAddress(order.address,normalizeRelayAddress(order.source_payload.shipping_address||{}))&&sameRelayAddress(order.address,incomingRelay.destinationAddress))return incomingRelay.clientAddress;
  if(order.channel!=='shopify'||r?.metadataComplete!==true||r.reference!==order.reference||r.sourceId!==String(order.source_payload.id))return order.address;
  const current=addressKey(order.address);
- if([r.clientAddress,r.destinationAddress,normalizeRelayAddress(order.source_payload.shipping_address||{})].filter(Boolean).some(a=>addressKey(a)===current))return r.clientAddress;
+ if(r.frozenOrderAddress&&r.frozenClientAddress)return sameRelayAddress(order.address,r.frozenOrderAddress)?r.frozenClientAddress:order.address;
+ if([r.clientAddress,r.destinationAddress].filter(Boolean).some(a=>addressKey(a)===current))return r.clientAddress;
  return order.address; // An explicit local address edit is never hidden.
 }
 export function sameRelayAddress(a,b){return addressKey(a)===addressKey(b);}

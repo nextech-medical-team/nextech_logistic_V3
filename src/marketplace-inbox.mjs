@@ -1,4 +1,5 @@
-import {readShopifyRelay} from './shopify-relay-source.mjs';
+import {relayLabelObservation} from './relay-label-observation.mjs';
+import {readShopifyRelay,relayComparisonAddress} from './shopify-relay-source.mjs';
 import {shopifyDeliveryMode} from './shopify-delivery.mjs';
 import {shopifyCancellationReason} from './shopify-cancellation-policy.mjs';
 import {platformReceiptDisposition} from './platform-receipt-version.mjs';
@@ -73,9 +74,23 @@ export async function applyMarketplaceReceipt(db,r,options={}){
     return {existing:true,recovered:true};
    }
    const prior=(await tx.query('SELECT source_line,source_sku,quantity FROM lines WHERE order_id=$1 ORDER BY source_line',[existing.id])).rows;
-   const changed=marketplaceChanged(existing,prior,o);
+    const changed=marketplaceChanged(existing,prior,o);
+    if(o.source_payload.shopifyRelay){
+     const old=existing.source_payload?.shopifyRelay,relay=o.source_payload.shopifyRelay;
+     if(!changed){relay.frozenOrderAddress=structuredClone(existing.address);relay.frozenClientAddress=structuredClone(relayComparisonAddress(existing,relay));}
+     else if(old?.frozenOrderAddress&&old?.frozenClientAddress){relay.frozenOrderAddress=structuredClone(old.frozenOrderAddress);relay.frozenClientAddress=structuredClone(old.frozenClientAddress);}
+    }
    // Save observation independently from operational preparation fields.
    await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[existing.id,JSON.stringify({platformStatusObservation:{channel:r.channel,payload:r.payload,observedAt:new Date().toISOString(),version:o.version,indicative:true},...(o.source_payload.shopifyRelay?{shopifyRelay:o.source_payload.shopifyRelay,shopifyDeliveryMode:o.source_payload.shopifyDeliveryMode}:{})})]);
+   const relay=o.source_payload?.shopifyRelay;
+   if(!changed&&relay?.selectedId&&!existing.archived&&existing.label_status!=='cancelled'&&!existing.suspension?.active&&!existing.suspension?.erplainCancellation){
+    const job=(await tx.query('SELECT status,environment,carrier FROM carrier_jobs WHERE order_id=$1 FOR SHARE',[existing.id])).rows[0];
+    if(job?.status==='ready'&&job.environment==='production'){
+     const documents=(await tx.query('SELECT document_index,pdf FROM carrier_documents WHERE order_id=$1 ORDER BY document_index FOR SHARE',[existing.id])).rows;
+     const observation=relayLabelObservation(existing,relay,job,documents);
+     if(observation)await tx.query('UPDATE orders SET issue=$2,label_status=$3,source_payload=source_payload||$4::jsonb WHERE id=$1',[existing.id,observation.issue,observation.labelStatus,JSON.stringify({relayDestinationHold:observation.record})]);
+    }
+   }
    if(changed){await tx.query("UPDATE orders SET resolution_pending_resume=true,label_status='blocked',issue=$2,source_payload=source_payload||$3::jsonb WHERE id=$1",[existing.id,'Commande modifiée dans '+r.channel+' · Vérifier la préparation',JSON.stringify({marketplacePendingCorrection:r.payload,sourceShop:r.shop})]);}
    await tx.query('INSERT INTO marketplace_order_links(channel,shop,reference,order_id,version) VALUES($1,$2,$3,$4,$5) ON CONFLICT(channel,shop,reference) DO UPDATE SET version=excluded.version',[r.channel,r.shop,o.reference,existing.id,o.version]);return {existing:true,review:changed};
   }
