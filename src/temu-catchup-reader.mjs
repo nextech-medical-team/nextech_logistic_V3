@@ -46,6 +46,8 @@ export async function readTemuSource(api,reference,{shouldStop=()=>false,onProgr
  // Retain independent successes when one endpoint refuses this order.
  const [rawShipping,amounts]=await Promise.all([read('shipping','bg.order.decryptshippinginfo.get',{parentOrderSn:reference}),read('amounts','bg.order.amount.query',{parentOrderSn:reference})]);
  result.payload.shipping=rawShipping?.result||rawShipping;result.payload.amounts=amounts;
+ const observedCountry=text(detail?.parentOrderMap?.regionName1).toLowerCase(),deliveryCountry=text(result.payload.shipping?.regionName1).toLowerCase();
+ if(detail?.parentOrderMap?.parentOrderSn===reference&&countries.has(observedCountry)&&(!result.payload.shipping||deliveryCountry===observedCountry))result.payload.country=countries.get(observedCountry);
  if(detail?.parentOrderMap?.parentOrderSn===reference&&Array.isArray(detail.orderList)&&detail.orderList.length){
   const shipments=[];for(const line of detail.orderList){const r=await read('shipments','bg.logistics.shipment.v2.get',{parentOrderSn:reference,orderSn:line.orderSn});if(r){if(!Array.isArray(r.shipmentInfoDTO)){result.errors.push({code:'TEMU_INCOMPLETE',field:'shipments',message:'TEMU · Réponse expéditions incomplète'});continue;}shipments.push(...r.shipmentInfoDTO);}}
   const parcels=shipments.flatMap(s=>[s,...(s.subPackageShipmentInfoList||[])]);

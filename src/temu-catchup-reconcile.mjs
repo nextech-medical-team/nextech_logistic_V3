@@ -5,7 +5,7 @@ const ordered=rows=>rows.map(l=>({id:String(l.source_line||l.orderSn),sku:l.sour
 export async function reconcileTemuCatchup(tx,order,observation){
  if(observation.reference!==(order.source_reference||order.reference)||!observation.coreComplete)throw Error('TEMU · Rapprochement source incomplet');
  const source=structuredClone(order.source_payload||{}),fresh=observation.payload;
- const previousVersion=Number(source.temuOrderDetail?.parentOrderMap?.updateTime);
+ const previousVersion=Math.max(Number(source.temuOrderDetail?.parentOrderMap?.updateTime)||0,Number(source.temuReceiptObservation?.payload?.detail?.parentOrderMap?.updateTime)||0);
  if(Number.isFinite(previousVersion)&&previousVersion>0&&Number(observation.sourceVersion)<previousVersion)throw Object.assign(Error('TEMU · Réponse source antérieure à la version enregistrée'),{code:'TEMU_STALE_SOURCE',field:'version'});
  const lines=(await tx.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line FOR UPDATE',[order.id])).rows;
  const context=(await tx.query(`SELECT
@@ -39,8 +39,11 @@ export async function reconcileTemuCatchup(tx,order,observation){
   }
   source.temuOrderDetail={...fresh.detail,v3Amounts:{data:fresh.amounts}};source.temuShippingInfo=fresh.shipping;source.sourceCountry=fresh.country;
   source.temuAmounts={at:observation.checkedAt,data:fresh.amounts};source.temuAmountsError=null;
-  source.temuDirect={source:'temu_direct',state:'verified',status:Number(fresh.detail.parentOrderMap.parentOrderStatus),verifiedAt:observation.checkedAt};
-  if(initialIncomplete){source.visibilityHold=false;source.visibilityRecoveredAt=observation.checkedAt;delete source.visibilityReason;delete source.visibilityReadError;issue='Données TEMU récupérées · Préparation à vérifier';}
+  if(observation.complete){delete source.temuReceiptObservation;delete source.visibilityReadError;if(source.marketplacePendingCorrection?.visibilityHold===true)delete source.marketplacePendingCorrection;}
+  source.temuSourceRead={state:'verified',status:Number(fresh.detail.parentOrderMap.parentOrderStatus),verifiedAt:observation.checkedAt,sourceVersion:observation.sourceVersion};
+  if(!source.temuDirect)source.temuDirect={source:'temu_direct',state:'verified',status:Number(fresh.detail.parentOrderMap.parentOrderStatus),verifiedAt:observation.checkedAt};
+  source.sourceCoverage={complete:observation.complete,coreComplete:true,sourceStage:observation.sourceStage,fields:observation.coverage,errors:observation.errors};
+  if(source.visibilityHold===true&&observation.complete){source.visibilityHold=false;source.visibilityRecoveredAt=observation.checkedAt;delete source.visibilityReason;delete source.visibilityReadError;if(initialIncomplete)issue='Données TEMU récupérées · Préparation à vérifier';}
   if(obsoleteTemuVisibilityError(issue))issue=null;
   if(source.marketplacePendingCorrection?.visibilityError&&obsoleteTemuVisibilityError(source.marketplacePendingCorrection.visibilityError)&&sameLines&&sameAddress)delete source.marketplacePendingCorrection;
  }else{
@@ -58,14 +61,20 @@ export async function reconcileTemuCatchup(tx,order,observation){
 export async function observeTemuSourceStage(tx,order,observation){
  if(!observation.requiredComplete||!['pending','cancelled'].includes(observation.sourceStage)||observation.reference!==(order.source_reference||order.reference))throw Error('TEMU · État source non vérifiable');
  const source=structuredClone(order.source_payload||{}),fresh=observation.payload;
- const previousVersion=Number(source.temuOrderDetail?.parentOrderMap?.updateTime);
+ const previousVersion=Math.max(Number(source.temuOrderDetail?.parentOrderMap?.updateTime)||0,Number(source.temuReceiptObservation?.payload?.detail?.parentOrderMap?.updateTime)||0);
  if(Number.isFinite(previousVersion)&&previousVersion>0&&Number(observation.sourceVersion)<previousVersion)throw Object.assign(Error('TEMU · État source antérieur à la version enregistrée'),{code:'TEMU_STALE_SOURCE',field:'version'});
  source.platformStatusObservation={channel:'temu',payload:{detail:fresh.detail,country:fresh.country},observedAt:observation.checkedAt,indicative:true};
- const stageReason=observation.sourceStage==='cancelled'?'TEMU confirme un état source annulé · Rapprochement des documents existants à vérifier':'TEMU · Commande en attente : coordonnées non encore consultables · Lecture automatique planifiée';
- source.temuCatchup={checkedAt:observation.checkedAt,coverage:observation.coverage,complete:false,coreComplete:false,requiredComplete:true,sourceStage:observation.sourceStage,stageReason,expectedUnavailable:observation.expectedUnavailable,conflicts:[],errors:observation.errors,shipments:fresh.shipments||[],packages:fresh.packages||[],externalWrites:0};
- const issue=!order.issue||obsoleteTemuVisibilityError(order.issue)?stageReason:order.issue;
+ source.sourceCoverage={complete:observation.complete,coreComplete:observation.coreComplete,requiredComplete:true,sourceStage:observation.sourceStage,fields:observation.coverage,errors:observation.errors};
+ delete source.temuReceiptObservation;
+ const previousCatchup=source.temuCatchup;
+ const stageReason=observation.sourceStage==='cancelled'?'TEMU · État source annulé (observation indicative)':'TEMU · Commande en attente (observation indicative)';
+ const missingAddress=['name','street','postal','city','country'].some(k=>!String(order.address?.[k]||'').trim());
+ const localLines=Number((await tx.query('SELECT count(*) AS n FROM lines WHERE order_id=$1 AND quantity>0',[order.id])).rows[0].n);
+ const currentReason=missingAddress?'TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée':!localLines?'TEMU · Articles locaux absents · Rapprochement des données à vérifier':null;
+ source.temuCatchup={checkedAt:observation.checkedAt,coverage:observation.coverage,complete:false,coreComplete:false,requiredComplete:true,sourceStage:observation.sourceStage,stageReason,currentReason,expectedUnavailable:observation.expectedUnavailable,conflicts:[],errors:observation.errors,shipments:fresh.shipments||[],packages:fresh.packages||[],externalWrites:0};
+ const issue=!order.issue||obsoleteTemuVisibilityError(order.issue)||previousCatchup?.currentReason&&order.issue===previousCatchup.currentReason?currentReason:order.issue;
  await tx.query('UPDATE orders SET source_payload=$2::jsonb,issue=$3 WHERE id=$1',[order.id,JSON.stringify(source),issue]);
  await tx.query('UPDATE order_recheck_monitor SET next_check=now(),requested=requested+1 WHERE order_id=$1',[order.id]);
  await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:temu-catchup','temu.source.stage-observed',$1::jsonb)",[JSON.stringify({orderId:order.id,sourceStage:observation.sourceStage,externalWrites:0,documentsPreserved:true})]);
- return {sourceStage:observation.sourceStage,stageReason,conflicts:[]};
+ return {sourceStage:observation.sourceStage,stageReason,currentReason,conflicts:[]};
 }

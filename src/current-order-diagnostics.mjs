@@ -8,9 +8,9 @@ export function currentReasonSql(raw){raw=withoutSharedParcelReasonSql(raw);retu
 export function projectCurrentDiagnostics(o){
  const fresh=o.source_payload?.temuCatchup;
  if(o.channel==='temu'&&(fresh?.complete===true&&fresh.coreComplete===true||fresh?.requiredComplete===true&&['pending','cancelled'].includes(fresh.sourceStage))&&!fresh.conflicts?.length&&Number.isFinite(Date.parse(fresh.checkedAt))&&(!o.source_payload?.temuDirect?.attemptedAt||Date.parse(o.source_payload.temuDirect.attemptedAt)<=Date.parse(fresh.checkedAt))){
-  for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error'],[o.temu_job,'error'],...(o.resolution_actions||[]).map(j=>[j,'error'])]){
+  for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error'],...(o.resolution_actions||[]).map(j=>[j,'error'])]){
    const dated=key==='resolution_error'?o.resolution_error_updated_at:target?.updated_at;
-   if(target&&obsoleteTemuVisibilityError(target[key])&&(key==='issue'&&!dated||Number.isFinite(Date.parse(dated))&&Date.parse(dated)<=Date.parse(fresh.checkedAt)))target[key]=fresh.stageReason||null;
+   if(target&&obsoleteTemuVisibilityError(target[key])&&(key==='issue'&&!dated||Number.isFinite(Date.parse(dated))&&Date.parse(dated)<=Date.parse(fresh.checkedAt)))target[key]=(fresh.requiredComplete&&!fresh.coreComplete?fresh.currentReason:fresh.stageReason)||null;
   }
  }
  for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error']])if(target)target[key]=withoutSharedParcelReason(target[key]);

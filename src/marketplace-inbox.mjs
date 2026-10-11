@@ -58,6 +58,22 @@ export async function applyMarketplaceReceipt(db,r,options={}){
  o=r.channel==='shopify'?{...normalizeShopifyOrders([r.payload])[0],channel:'shopify',cancelled:!!shopifyCancellationReason(r.payload),fulfilled:['fulfilled','partial','partially_fulfilled'].includes(r.payload.fulfillment_status),version:r.payload.updated_at||r.payload.created_at}:normalizeTemuReceipt(r.payload,r.shop);
  if(o.version&&!Number.isFinite(Date.parse(o.version)))throw Error('Date de modification marketplace invalide');
  }catch(e){if(fresh)throw e;o=incompleteOrder(r.channel,r.payload,r.shop,String(e.message).slice(0,500));}
+ // Existing TEMU orders use the guarded catch-up writer. A partial receipt is
+ // an observation, never an instruction to reset labels or business holds.
+ if(r.channel==='temu'&&r.payload.sourceCoverage&&!fresh){
+  const routed=await withShipmentLock(()=>db.transaction(async tx=>{
+   const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,o.reference])).rows[0];
+   if(!existing)return null;
+   if(existing.archived||existing.duplicate_of)return {skipped:true,reason:'inactive-existing-order'};
+   const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;
+   if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
+   await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[existing.id,JSON.stringify({temuReceiptObservation:{receivedAt:new Date().toISOString(),coverage:r.payload.sourceCoverage,payload:r.payload}})]);
+   await tx.query('INSERT INTO temu_source_catchup(order_id) VALUES($1) ON CONFLICT(order_id) DO UPDATE SET next_at=least(temu_source_catchup.next_at,now())',[existing.id]);
+   await tx.query('UPDATE order_recheck_monitor SET next_check=now(),requested=requested+1 WHERE order_id=$1',[existing.id]);
+   return {existing:true,sourceCatchupQueued:true};
+  }));
+  if(routed)return routed;
+ }
  if(o.visibilityHold)return withShipmentLock(()=>db.transaction(async tx=>({retained:true,id:await retainVisibleOrder(tx,o,o.source_payload.visibilityReason)})));
  return withShipmentLock(()=>db.transaction(async tx=>{
   const link=(await tx.query('SELECT * FROM marketplace_order_links WHERE channel=$1 AND shop=$2 AND reference=$3 FOR UPDATE',[r.channel,r.shop,o.reference])).rows[0];

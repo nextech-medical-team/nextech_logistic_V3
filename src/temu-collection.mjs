@@ -11,13 +11,13 @@ export function temuCollector(api,{mallId,country}){
    if(shouldStop())throw Error('Arrêt demandé');const ref=entry.parentOrderMap?.parentOrderSn;if(!ref||seen.has(ref))throw Error('TEMU · Référence absente ou dupliquée');seen.add(ref);
    const created=Number(entry.parentOrderMap?.parentOrderTime)*1000;if(Number.isFinite(created)&&created>0&&created<Date.parse(createdSince))continue;
    const observation=await readTemuSource(api,ref,{shouldStop});
-   const payload={detail:observation.payload.detail||entry,shipping:observation.payload.shipping||{},country:observation.payload.country||country,
+   const payload={detail:observation.payload.detail||entry,shipping:observation.payload.shipping||{},country:observation.payload.country||'',
     sourceCoverage:{complete:observation.complete,coreComplete:observation.coreComplete,requiredComplete:observation.requiredComplete,sourceStage:observation.sourceStage,expectedUnavailable:observation.expectedUnavailable,fields:observation.coverage,errors:observation.errors},
     logisticsObservation:{shipments:observation.payload.shipments||[],packages:observation.payload.packages||[]}};
    if(payload.detail.parentOrderMap?.parentOrderSn!==ref)throw Error('TEMU · Identité du détail incohérente');
    payload.detail={...payload.detail,parentOrderMap:{...payload.detail.parentOrderMap,updateTime:payload.detail.parentOrderMap.updateTime??entry.parentOrderMap.updateTime}};
    if(observation.payload.amounts)payload.detail.v3Amounts={data:observation.payload.amounts};
-   if(!observation.coreComplete)payload.visibilityError=observation.requiredComplete?(observation.sourceStage==='cancelled'?'TEMU confirme un état source annulé · Rapprochement à vérifier':'TEMU · Commande en attente : coordonnées non encore consultables · Lecture automatique planifiée'):observation.errors.map(e=>e.message).join(' ; ').slice(0,500);
+   if(!observation.coreComplete)payload.visibilityError=observation.requiredComplete?'TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée':observation.errors.map(e=>e.message).join(' ; ').slice(0,500);
    for(const error of observation.errors)warnings.push({reference:ref,code:String(error.code),message:error.field+' · '+error.message});
    items.push({deliveryId:(observation.coreComplete?'poll:':'incomplete:')+ref+':'+createHash('sha256').update(JSON.stringify(payload)).digest('hex'),payload});
   }

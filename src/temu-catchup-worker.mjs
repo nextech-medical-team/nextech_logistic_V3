@@ -10,7 +10,7 @@ export async function initializeTemuCatchup(db){await db.exec(`CREATE TABLE IF N
  CREATE INDEX IF NOT EXISTS temu_source_catchup_due ON temu_source_catchup(next_at);`);}
 export const temuBlockedSql=`o.channel='temu' AND NOT o.archived AND o.duplicate_of IS NULL AND (
  coalesce(o.issue,'')<>'' OR o.resolution_pending_resume OR o.label_status='blocked' OR o.erp_status IN ('blocked','live_review')
- OR o.source_payload->'sourceCoverage'->>'complete'='false' OR o.source_payload->>'visibilityHold'='true' OR o.source_payload ? 'marketplacePendingCorrection'
+ OR o.source_payload ? 'temuReceiptObservation' OR o.source_payload->'sourceCoverage'->>'complete'='false' OR o.source_payload->>'visibilityHold'='true' OR o.source_payload ? 'marketplacePendingCorrection'
  OR o.source_payload->'temuDirect'->>'state'='error' OR o.source_payload->'temuAmountsError' IS NOT NULL AND o.source_payload->'temuAmountsError'<>'null'::jsonb
  OR EXISTS(SELECT 1 FROM order_recheck_monitor m WHERE m.order_id=o.id AND m.state->>'blocked'='true')
  OR EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND (e.status IN ('review','failed') OR e.error IS NOT NULL))
@@ -26,7 +26,7 @@ export function temuCatchupWorker(db,loadSources,{shouldStop=()=>false,now=()=>D
    if(!settings.marketplace_automatic?.enabled||settings.marketplace_automatic.channels?.temu===false||settings.marketplace_automatic.temuCatchup?.enabled===false||settings.background_tasks?.['marketplace-temu']===false||settings.background_tasks?.['marketplace-collection']===false)return {skipped:true,reason:'disabled'};
    if(!initialized){await initializeTemuCatchup(db);initialized=true;}
    if(lastScan===null||now()-lastScan>=temuCatchupCadence.scan){await db.query(`INSERT INTO temu_source_catchup(order_id) SELECT o.id FROM orders o WHERE ${temuBlockedSql} ON CONFLICT DO NOTHING`);lastScan=now();}
-   const token=randomUUID();claim=(await db.query(`WITH due AS(SELECT q.order_id FROM temu_source_catchup q JOIN orders o ON o.id=q.order_id WHERE q.next_at<=now() AND (q.lease_until IS NULL OR q.lease_until<=now()) AND (${temuBlockedSql}) ORDER BY q.next_at,q.order_id FOR UPDATE OF q SKIP LOCKED LIMIT 1),claimed AS(UPDATE temu_source_catchup q SET lease_token=$1,lease_until=now()+interval '5 minutes',last_attempt_at=now() FROM due WHERE q.order_id=due.order_id RETURNING q.*) SELECT c.*,to_jsonb(o) AS "order" FROM claimed c JOIN orders o ON o.id=c.order_id`,[token])).rows[0];
+   const token=randomUUID();claim=(await db.query(`WITH due AS(SELECT q.order_id FROM temu_source_catchup q JOIN orders o ON o.id=q.order_id WHERE q.next_at<=now() AND (q.lease_until IS NULL OR q.lease_until<=now()) AND (${temuBlockedSql}) ORDER BY CASE WHEN o.source_payload ? 'temuReceiptObservation' OR o.source_payload->>'visibilityHold'='true' THEN 0 ELSE 1 END,q.next_at,q.order_id FOR UPDATE OF q SKIP LOCKED LIMIT 1),claimed AS(UPDATE temu_source_catchup q SET lease_token=$1,lease_until=now()+interval '5 minutes',last_attempt_at=now() FROM due WHERE q.order_id=due.order_id RETURNING q.*) SELECT c.*,to_jsonb(o) AS "order" FROM claimed c JOIN orders o ON o.id=c.order_id`,[token])).rows[0];
    if(!claim)return {idle:true};
    const order=claim.order,mall=String(order.source_payload?.sourceShop||order.source_payload?.mallId||'');
    if(!sources.length||now()-sourcesAt>300000){sources=(await loadSources()).filter(s=>s.channel==='temu');sourcesAt=now();}

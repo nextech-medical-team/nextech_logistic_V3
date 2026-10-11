@@ -29,7 +29,7 @@ test('collector retains failed fields, uses destination country and stable recei
 async function fixture(){
  const e=new PGlite();await e.waitReady;const db={query:(s,a)=>e.query(s,a),exec:s=>e.exec(s),transaction:fn=>e.transaction(t=>fn({query:(s,a)=>t.query(s,a)})),close:()=>e.close()};
  await db.exec(`CREATE TABLE settings(key text PRIMARY KEY,value jsonb);INSERT INTO settings VALUES('marketplace_automatic','{"enabled":true,"channels":{"temu":true}}'),('background_tasks','{}');
- CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,source_reference text,recipient text DEFAULT 'TEST',address jsonb DEFAULT '{}',source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',suspension jsonb DEFAULT '{}',issue text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,duplicate_of text,resolution_pending_resume boolean DEFAULT false,label_status text DEFAULT 'pending',erp_status text DEFAULT 'pending',tracking_status text DEFAULT 'not_shipped');
+ CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,source_reference text,received_at timestamptz DEFAULT now(),recipient text DEFAULT 'TEST',address jsonb DEFAULT '{}',source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',suspension jsonb DEFAULT '{}',issue text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,duplicate_of text,resolution_pending_resume boolean DEFAULT false,label_status text DEFAULT 'pending',erp_status text DEFAULT 'pending',tracking_status text DEFAULT 'not_shipped');
  CREATE TABLE lines(id text PRIMARY KEY,order_id text,source_line text,source_sku text,quantity numeric,target_sku text,target_quantity numeric,source_payload jsonb DEFAULT '{}');
  CREATE TABLE carrier_documents(order_id text,pdf bytea);CREATE TABLE carrier_jobs(order_id text,status text,error text);CREATE TABLE temu_label_jobs(reference text,packages jsonb DEFAULT '[]',attempt_id text,error text,status text);
  CREATE TABLE erp_live_jobs(order_id text,status text,error text);CREATE TABLE resolution_jobs(order_id text,status text,error text);CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE extra_parcels(order_id text);
@@ -102,7 +102,7 @@ test('quota deferral and relay retry are bounded; a purchase is never retried',a
 test('a newer source error and an independent issue survive old successful proof',async()=>{
  const {projectCurrentDiagnostics}=await import('../src/current-order-diagnostics.mjs');
  const error='TEMU refuse l’opération : 180020006 The current order status cannot be viewed.';
- const proof={checkedAt:'2026-10-11T10:00:00Z',complete:false,coreComplete:false,requiredComplete:true,sourceStage:'pending',stageReason:'Coordonnées en attente',conflicts:[]};
+ const proof={checkedAt:'2026-10-11T10:00:00Z',complete:false,coreComplete:false,requiredComplete:true,sourceStage:'pending',stageReason:'En attente (indicatif)',currentReason:'Coordonnées en attente',conflicts:[]};
  const a={channel:'temu',issue:error,source_payload:{temuCatchup:proof}};assert.equal(projectCurrentDiagnostics(a).issue,'Coordonnées en attente');
  const b={channel:'temu',issue:error,source_payload:{temuCatchup:proof,temuDirect:{attemptedAt:'2026-10-11T11:00:00Z'}}};assert.equal(projectCurrentDiagnostics(b).issue,error);
  const c={channel:'temu',issue:'Stock insuffisant',source_payload:{temuCatchup:proof}};assert.equal(projectCurrentDiagnostics(c).issue,'Stock insuffisant');
@@ -140,4 +140,46 @@ test('only dated older source refusals are superseded in job projections',async(
  const proof={checkedAt:'2026-10-11T10:00:00Z',complete:true,coreComplete:true,conflicts:[]};
  const o={channel:'temu',source_payload:{temuCatchup:proof},erp_live_job:{error,updated_at:'2026-10-11T09:00:00Z'},temu_job:{error,updated_at:'2026-10-11T11:00:00Z'},resolution_error:error,resolution_actions:[{error,updated_at:'2026-10-11T09:00:00Z'},{error,updated_at:'2026-10-11T11:00:00Z'},{error}]};
  const projected=projectCurrentDiagnostics(o);assert.equal(projected.erp_live_job.error,null);assert.equal(projected.temu_job.error,error);assert.equal(projected.resolution_error,error);assert.equal(projected.resolution_actions[0].error,null);assert.equal(projected.resolution_actions[1].error,error);assert.equal(projected.resolution_actions[2].error,error);
+});
+
+test('fresh source read preserves uncertain purchase metadata and clears only source incompleteness',async()=>{
+ const db=await fixture();try{
+  const direct={source:'external_temu',state:'uncertain',requestId:'existing-attempt',attemptedAt:'2026-10-11T09:00:00Z',error:'Résultat achat à rapprocher'};
+  await db.query("UPDATE orders SET address=$1::jsonb,source_payload=source_payload||$2::jsonb WHERE id='A'",[JSON.stringify({name:'TEST',street:'1 rue Test',postal:'75001',city:'Paris',country:'FR'}),JSON.stringify({temuDirect:direct,visibilityHold:true,sourceCoverage:{complete:false}})]);
+  await db.exec("INSERT INTO carrier_documents VALUES('A',decode('25504446','hex'));INSERT INTO lines(id,order_id,source_line,source_sku,quantity) VALUES('CURRENT','A','069-1234','SKU',1)");
+  const observation=await readTemuSource(apiFor(),reference),order=(await db.query('SELECT * FROM orders')).rows[0];
+  const documents=(await db.query('SELECT * FROM carrier_documents')).rows,lines=(await db.query('SELECT * FROM lines')).rows;
+  const result=await db.transaction(tx=>reconcileTemuCatchup(tx,order,observation));assert.deepEqual(result.conflicts,[]);
+  const after=(await db.query('SELECT * FROM orders')).rows[0];assert.deepEqual(after.source_payload.temuDirect,direct);assert.equal(after.source_payload.temuSourceRead.state,'verified');assert.equal(after.source_payload.sourceCoverage.complete,true);assert.equal(after.source_payload.visibilityHold,false);
+  assert.deepEqual((await db.query('SELECT * FROM carrier_documents')).rows,documents);assert.deepEqual((await db.query('SELECT * FROM lines')).rows,lines);
+  const error='TEMU refuse l’opération : 180020006 The current order status cannot be viewed.';
+  const {projectCurrentDiagnostics}=await import('../src/current-order-diagnostics.mjs');const projected=projectCurrentDiagnostics({channel:'temu',source_payload:after.source_payload,temu_job:{error,updated_at:'2026-10-11T08:00:00Z'}});assert.equal(projected.temu_job.error,error);
+ }finally{await db.close();}
+});
+
+test('terminal platform declaration never becomes a new blocker when local required data exist',async()=>{
+ const {observeTemuSourceStage}=await import('../src/temu-catchup-reconcile.mjs');const db=await fixture();try{
+  const p=payload();p.detail.parentOrderMap.parentOrderStatus=3;
+  const observation=await readTemuSource(apiFor(p,{'bg.order.decryptshippinginfo.get':Object.assign(Error('refus'),{code:'180020006'})}),reference);
+  const error='TEMU refuse l’opération : 180020006 The current order status cannot be viewed.';
+  await db.query("UPDATE orders SET issue=$1,address=$2::jsonb WHERE id='A'",[error,JSON.stringify({name:'TEST',street:'1 rue Test',postal:'75001',city:'Paris',country:'FR'})]);
+  await db.exec("INSERT INTO lines(id,order_id,source_line,source_sku,quantity) VALUES('L','A','069-1234','SKU',1)");
+  const order=(await db.query('SELECT * FROM orders')).rows[0];await db.transaction(tx=>observeTemuSourceStage(tx,order,observation));
+  const after=(await db.query('SELECT * FROM orders')).rows[0];assert.equal(after.issue,null);assert.equal(after.source_payload.temuCatchup.currentReason,null);assert.match(after.source_payload.temuCatchup.stageReason,/indicative/);assert.deepEqual(after.address,order.address);assert.equal(after.label_status,order.label_status);
+ }finally{await db.close();}
+});
+test('initial partial read keeps proven destination and never substitutes mall country',async()=>{
+ const p=payload(),collector=temuCollector(apiFor(p,{'bg.order.amount.query':Error('finance')}),{mallId:'M',country:'BE'});
+ const result=await collector.page({since:'2023-01-01',until:'2026-01-01'});assert.equal(result.items[0].payload.country,'FR');assert.equal(result.items[0].payload.sourceCoverage.complete,false);
+});
+
+test('known partial receipt schedules safe catch-up without replacing current business state',async()=>{
+ const {applyMarketplaceReceipt}=await import('../src/marketplace-inbox.mjs');const db=await fixture();try{
+  await initializeTemuCatchup(db);await db.exec("UPDATE settings SET value=value||'{\"since\":\"2023-01-01\"}' WHERE key='marketplace_automatic'");
+  const before=(await db.query('SELECT * FROM orders')).rows[0],p=payload();
+  const r={channel:'temu',shop:'M',payload:{detail:p.detail,shipping:{},country:'FR',visibilityError:'Coordonnées indisponibles',sourceCoverage:{complete:false,coreComplete:false,errors:[{field:'shipping',code:'180020006'}]}}};
+  const result=await applyMarketplaceReceipt(db,r);assert.equal(result.sourceCatchupQueued,true);
+  const after=(await db.query('SELECT * FROM orders')).rows[0];for(const key of ['issue','address','label_status','erp_status','resolution_pending_resume'])assert.deepEqual(after[key],before[key]);
+  assert.ok(after.source_payload.temuReceiptObservation);assert.equal((await db.query('SELECT count(*)::int n FROM temu_source_catchup')).rows[0].n,1);assert.equal((await db.query('SELECT count(*)::int n FROM erp_live_jobs')).rows[0].n,0);
+ }finally{await db.close();}
 });
