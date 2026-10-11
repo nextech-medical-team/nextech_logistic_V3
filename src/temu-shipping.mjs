@@ -68,7 +68,6 @@ export function temuShipping(db,api){
   for(const p of result.packageInfoResultList||[]){p.carrier=p.shippingCompanyName||p.carrier;p.amount=p.estimatedAmount??p.amount;p.currency=p.estimatedCurrencyCode||p.currency;p.costEstimated=p.estimatedAmount!==undefined;}
   const details=result.packageInfoResultList||[];for(const p of details){if(!packages.includes(p.packageSn)||!p.orderSendInfoList?.length||!p.orderSendInfoList.some(l=>l.parentOrderSn===reference))throw new Error('Identité du colis non vérifiable');}
   if(new Set(details.map(p=>p.packageSn)).size!==packages.length||details.length!==packages.length)throw new Error('Résultat TEMU incomplet : récupération à relancer');
-  await db.query("UPDATE temu_label_jobs SET result=$2,status='pending',error=null,updated_at=now() WHERE reference=$1",[reference,JSON.stringify(result)]);
   const ready=details.filter(p=>Number(p.shippingLabelStatus)===1).map(p=>p.packageSn);
   const saved=verifiedBefore?(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1',[reference])).rows.map(r=>r.package):[];
   const missing=ready.filter(p=>!saved.includes(p));let documentWarnings=[];
@@ -80,7 +79,7 @@ export function temuShipping(db,api){
   const unavailable=count<packages.length&&documentWarnings.length>0;
   const status=refused?'shipment_error':count===packages.length?'complete':unavailable?'document_unavailable':'pending';
   const error=refused?('TEMU · Étiquette refusée : '+String(refused.failReasonText||'motif non communiqué').slice(0,250)):unavailable?(documentWarnings.some(w=>/picked up.*cannot be printed/i.test(w))?'TEMU · PDF non réimprimable : colis déjà collecté':'TEMU · PDF indisponible : '+documentWarnings.join(' ; ').slice(0,300)):status==='pending'?'TEMU · PDF en attente chez TEMU':null;
-  await db.query('UPDATE temu_label_jobs SET status=$2,error=$3,result=result||$4::jsonb,updated_at=now() WHERE reference=$1',[reference,status,error,JSON.stringify({documentWarnings})]);return job(reference);
+  await db.query('UPDATE temu_label_jobs SET status=$2,error=$3,result=$4::jsonb,updated_at=now() WHERE reference=$1',[reference,status,error,JSON.stringify({...result,documentWarnings})]);return job(reference);
  });}
  return {list:()=>api.read('bg.order.list.v2.get',{pageNumber:1,pageSize:20,sortby:'createTime'}),history:async()=>(await db.query('SELECT *, (SELECT count(*)::int FROM temu_label_documents d WHERE d.reference=j.reference) documents FROM temu_label_jobs j ORDER BY updated_at DESC LIMIT 100')).rows,
   prepare:(reference,channelId,fresh={})=>locked(reference,async()=>{if(hasExternalLabel((await db.query("SELECT channel,source_payload FROM orders WHERE reference=$1 AND channel='temu'",[reference])).rows[0]))throw Error('Étiquette externe enregistrée : aucun nouvel achat TEMU');const old=await job(reference);if(old?.attempt_id||old?.packages?.length)throw new Error('Une tentative ou expédition existe : récupérer son résultat');const plan=await quote(reference,channelId,fresh);await db.query(`INSERT INTO temu_label_jobs(reference,status,plan) VALUES($1,'ready',$2) ON CONFLICT(reference) DO UPDATE SET status='ready',plan=excluded.plan,error=null,updated_at=now()`,[reference,JSON.stringify(plan)]);return plan;}),
