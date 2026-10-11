@@ -200,6 +200,7 @@ test('complete initial recovery queues existing preparation only within authoriz
    assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);assert.equal((await db.query('SELECT * FROM temu_label_jobs')).rows.length,0);
    const after=(await db.query("SELECT * FROM orders WHERE id='A'")).rows[0];assert.equal(after.source_payload.visibilityHold,false);
    if(scenario==='independent-issue')assert.equal(after.issue,'Stock insuffisant');
+   if(scenario==='paused'){assert.equal(after.source_payload.temuInitialPreparationPending,true);await db.exec("UPDATE settings SET value='{\"enabled\":true}' WHERE key='automatic_live'");const resumed=await db.transaction(tx=>reconcileTemuCatchup(tx,after,observation));assert.equal(resumed.initialRecovered,true);assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,1);assert.equal((await db.query("SELECT source_payload FROM orders WHERE id='A'")).rows[0].source_payload.temuInitialPreparationPending,undefined);}
    if(scenario==='uncertain-purchase')assert.deepEqual(after.source_payload.temuDirect,source.temuDirect);
    if(scenario==='allowed'){assert.equal(after.resolution_pending_resume,false);assert.equal(after.source_payload.temuLabelPurchaseConfirmationRequired,true);await db.transaction(tx=>reconcileTemuCatchup(tx,after,observation));assert.equal((await db.query('SELECT * FROM erp_live_jobs')).rows.length,1);}
   }finally{await db.close();}
