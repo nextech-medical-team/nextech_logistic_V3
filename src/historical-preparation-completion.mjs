@@ -25,6 +25,7 @@ export function completedHistoricalPreparation(o,e,now=Date.now()){
  }
  if(e?.status!=='complete'||e.error!==null||p?.phase!=='bl_ready'||p.bc?.status!=='active'||!p.bc?.id||!p.bl?.id||!['ready_to_ship','shipped','delivered','completed'].includes(p.bl.status))return false;
  if(pricing?.status!=='verified'||pricing.error||pricing.confirmed?.authority!=='erplain'||!Number.isFinite(pricing.confirmed.total)||!Number.isFinite(pricing.confirmed.sourceTotal)||(!p.historicalStockProof&&!p.stockDocument?.id))return false;
+ if(o.channel==='temu'){const source=o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue,basis=pricing.commercialBasis;if(basis?.field!=='estimatedRevenue'||!source||basis.sourceEstimatedRevenue?.amount!==source.amount||basis.sourceEstimatedRevenue?.currency!==source.currency)return false;}
  if(!p.stockDocument?.id){const stock=p.historicalStockProof;if(stock.stockOnBc!==true||String(stock.bcId)!==String(p.bc.id)||!Array.isArray(stock.quantities)||!Array.isArray(stock.logIds))return false;}
  if(!/^[a-f0-9]{64}$/.test(p.mappingPreparationFingerprint||'')||!/^[a-f0-9]{64}$/.test(p.labelPreparationFingerprint||''))return false;
  for(const value of [p.verifiedAt,p.stockCheckedAt]){const t=Date.parse(value);if(!Number.isFinite(t)||t>now||now-t>86400000)return false;}

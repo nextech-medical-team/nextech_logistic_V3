@@ -32,6 +32,7 @@ test('successful resume cannot retire an unfinished intervention or an older pro
  const ready={...order(),issue:null,resolution_pending_resume:true,resolution_actions:[resume]};assert.equal(completedHistoricalPreparation(ready,erp),true);
  for(const actions of [[],[{...resume,result:{partialRemainder:true}}],[{...resume,created_at:new Date(Date.now()+1000).toISOString()}],[{action:'address',status:'review',error:'Current address mismatch'},resume],[{action:'equivalent-preview',status:'complete',result:{replacementSku:'NEW'}},resume],[{action:'weight',status:'pending'},resume]])assert.equal(completedHistoricalPreparation({...ready,resolution_actions:actions},erp),false);
  assert.equal(completedHistoricalPreparation({...ready,erp_live:{...ready.erp_live,stockCheckedAt:new Date(Date.now()-120000).toISOString()}},erp),false);
+ const changed=structuredClone(ready);changed.source_payload.temuAmounts.data.parentOrderMap.estimatedRevenue.amount=21;assert.equal(completedHistoricalPreparation(changed,erp),false);
 });
 
 test('TEMU closure keeps the remaining flag for missing PDF coverage and any active older action',async()=>{
