@@ -72,3 +72,13 @@ test('cancelled and archived orders never contribute stale errors or fallback la
  assert.equal(selectProblemOrders(inactive,[WITHOUT_DIAGNOSTIC],classify,inactive.map(o=>o.id)).total,0);
  const query=orderQuery(new URLSearchParams({status:'__problems'}));assert.match(query.where,/label_status IS DISTINCT FROM 'cancelled'/);assert.match(query.where,/tracking_status IS DISTINCT FROM 'cancelled'/);
 });
+
+// Human display rule: documents are preserved; no business state is completed here.
+test('BC, BL and existing label retire blocking badges across every channel',()=>{
+ const classify=currentProblemClassifier();
+ for(const channel of ['temu','shopify','amazon','tender','samples'])for(const partial of [false,true])for(const temu of [false,true]){
+  const o={channel,erp_live:{bc:{id:1},bl:partial?null:{id:2}},erplain_tracking_bls:partial?[{id:3}]:[],document_count:temu?0:1,temu_documents:temu?[{package:'p'}]:[],issue:'Stock insuffisant',label_status:'blocked',erp_status:'live_review',erp_live_job:{status:'review',error:'HTTP 500'},carrier_job:{status:'failed',error:'HTTP 500'},resolution_error:'Intervention interrompue'};
+  const before=JSON.stringify(o);assert.equal(classify(o).length,0);assert.equal(JSON.stringify(o),before);
+  for(const missing of ['bc','bl','label']){const n=structuredClone(o);if(missing==='bc')n.erp_live.bc=null;if(missing==='bl'){n.erp_live.bl=null;n.erplain_tracking_bls=[];}if(missing==='label'){n.document_count=0;n.temu_documents=[];}assert.ok(classify(n).length>0);}
+ }
+});
