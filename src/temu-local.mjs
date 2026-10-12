@@ -8,19 +8,24 @@ import {observeTemuCancellation} from './temu-cancellation-observation.mjs';
 import {readOrderAmounts} from './temu-margin-data.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 import {temuCollector} from './temu-collection.mjs';
-import {readFile,writeFile} from 'node:fs/promises';
+import {writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {aggregateParcels} from './status-policy.mjs';
 import {temuApi} from './temu-api.mjs';
 import {temuShipping,inspectTemu,readTemuShipments} from './temu-shipping.mjs';
 import {loadShopVault} from './temu-shop-vault.mjs';
+import {connectTemuShops,loadTemuShopConfig} from './temu-shop-clients.mjs';
 export function buyerCancellationPending(detail){const flags=[...(detail?.parentOrderMap?.parentOrderLabel||[]),...(detail?.orderList||[]).flatMap(l=>l.orderLabel||[])];return flags.some(f=>f==='pending_buyer_cancellation'||f?.name==='pending_buyer_cancellation'&&[1,'1',true].includes(f.value));}
 export function directError(e){return String(e?.message||e).includes('NOT_IN_IP_WHITE_LIST')?'TEMU · IP non autorisée (5000003 — NOT_IN_IP_WHITE_LIST)':String(e?.message||e).slice(0,450);}
 export async function localTemuRows(db){return (await db.query(`SELECT o.id,o.reference,o.recipient,o.address->>'country' country,o.tracking_status,o.erp_live,o.source_payload->'temuDirect' direct,e.status erp_job_status,e.error erp_error,j.status,j.error,j.result,j.plan,j.packages,(SELECT coalesce(json_agg(json_build_object('source_sku',l.source_sku,'target_sku',coalesce(nullif(l.target_sku,''),m.target_sku)) ORDER BY l.source_line),'[]'::json) FROM lines l LEFT JOIN mappings m ON m.channel='temu' AND m.source_sku=l.source_sku WHERE l.order_id=o.id) sku_lines,(SELECT json_agg(package ORDER BY package) FROM temu_label_documents d WHERE d.reference=o.reference AND j.result->>'source'='temu_direct' AND j.packages ? d.package) documents FROM orders o LEFT JOIN temu_label_jobs j ON j.reference=o.reference LEFT JOIN erp_live_jobs e ON e.order_id=o.id WHERE o.channel='temu' AND NOT o.archived ORDER BY o.source_date DESC,o.reference`)).rows;}
-export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loadShopVault,configLoader=async()=>JSON.parse((await readFile(path.join(directory,'temu-production.json'),'utf8')).replace(/^\uFEFF/,''))}={}){
+export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loadShopVault,configLoader=()=>loadTemuShopConfig(directory)}={}){
  let running=false,clients=new Map(),services=new Map(),allShopsConnected=false,countryByMall=new Map(),connectedAt=0,connectionErrors=new Map(),connections=new Map();
  async function connect(country){const key=country||'ALL';if(connections.has(key))return connections.get(key);const pending=connectShops(country);connections.set(key,pending);try{return await pending;}finally{connections.delete(key);}}
- async function connectShops(country){const config=await configLoader();const root=apiFactory(config);const info=await root.read('bg.open.accesstoken.info.get',{});if(!info.mallId)throw Error('TEMU · Identité de la boutique absente');const verified=country?new Map(clients):new Map();verified.set(String(info.mallId),root);for(const m of info.associatedMallTokenList||[])if(m.mallId&&m.accessToken)verified.set(String(m.mallId),apiFactory({...config,TEMU_ACCESS_TOKEN:m.accessToken}));for(const m of await shopLoader(directory)){if(country&&String(m.country).toUpperCase()!==String(country).toUpperCase())continue;if(m.appKey!==config.TEMU_APP_KEY||!/^epl\w+$/.test(m.accessToken||''))continue;const api=apiFactory({...config,TEMU_ACCESS_TOKEN:m.accessToken});try{const identity=await api.read('bg.open.accesstoken.info.get',{});if(!identity.mallId)throw Error('TEMU · Identité de la boutique '+m.country+' absente');verified.set(String(identity.mallId),api);connectionErrors.delete(String(m.country).toUpperCase());if(/^[A-Z]{2}$/.test(m.country||''))countryByMall.set(String(identity.mallId),m.country);}catch(e){if(e.code==='TEMU_STOPPING')throw e;connectionErrors.set(String(m.country).toUpperCase(),e);}}clients=verified;if(!country){allShopsConnected=true;connectedAt=Date.now();services.clear();}}
+ async function connectShops(country){
+  const connected=await connectTemuShops(directory,{apiFactory,shopLoader,configLoader,country,clients,countryByMall,connectionErrors});
+  clients=connected.clients;
+  if(!country){allShopsConnected=true;connectedAt=Date.now();services.clear();}
+ }
  async function context(reference){const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(!o)throw Error('Commande TEMU absente de V3');const mall=String(o.source_payload.mallId||'');if(!clients.has(mall))await connect(o.address?.country);const api=clients.get(mall);if(!api){const error=connectionErrors.get(String(o.address?.country||'').toUpperCase());if(error)throw error;throw Error('TEMU · Autorisation manquante pour la boutique '+mall);}if(!services.has(mall))services.set(mall,temuShipping(db,api));return {o,api,service:services.get(mall)};}
  const locked=(ref,fn)=>withShipmentLock(fn,['temu-order:'+ref]);
  async function fail(o,e){

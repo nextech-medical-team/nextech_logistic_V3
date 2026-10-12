@@ -1,0 +1,22 @@
+import {test,expect} from '@playwright/test';
+import {readFile} from 'node:fs/promises';
+const script=await readFile(new URL('../../scripts/temu-local-table.js',import.meta.url),'utf8');
+for(const width of [1366,390])test('Excel real label confirmation and recovery '+width,async({page})=>{
+ await page.setViewportSize({width,height:900});
+ await page.route('**/label-fixture',r=>r.fulfill({contentType:'text/html',body:'<html><body><table><thead><tr><th></th><th data-column="label">Étiquette</th></tr></thead><tbody id="order-rows"><tr><td><input data-id="o"></td><td></td></tr></tbody></table></body></html>'}));
+ let bought=0,recovered=0;
+ await page.route('**/api/local-temu/shops',r=>r.fulfill({json:{shops:[{mall:'M',country:'FR',purchaseEnabled:true}]}}));
+ await page.route('**/api/local-temu/prepare',r=>r.fulfill({json:{margin:width===1366?{status:'positive',profit:1,margin:.05,purchase:12,supplierShipping:2,shipping:5,credit:2}:{status:'incomplete',profit:null,issues:['Référentiel privé absent']},id:'plan',amount:2.5,currency:'EUR',selected:1,offers:[{channelId:1,shipCompanyName:'GLS'}],request:{shipLaterLimitTime:'120',sendRequestList:[{pickupStartTime:1800000000}]}}}));
+ await page.route('**/api/local-temu/buy',async r=>{bought++;expect(r.request().postDataJSON()).toEqual({reference:'PO-069-123',planId:'plan',amount:2.5,confirmPurchase:true});await r.fulfill({json:{status:'complete'}});});
+ await page.route('**/api/local-temu/recover',async r=>{recovered++;await r.fulfill({json:{status:'complete'}});});
+ await page.goto('/label-fixture');
+ await page.evaluate(()=>{window.partialVisibleOrders=new Map([['o',{id:'o',reference:'PO-069-123',erp_test:{complete:true,version:2}}]]);window.orders=async()=>{};});
+ await page.addScriptTag({content:script});
+ await page.getByRole('button',{name:'Acheter l’étiquette TEMU',exact:true}).click();
+ await page.getByRole('button',{name:'Afficher le tarif',exact:true}).click();
+ await expect(page.locator('dialog')).toContainText('GLS · 2.5 EUR');expect(bought).toBe(0);await expect(page.locator('dialog')).toContainText(width===1366?'Résultat HT :':'Marge indisponible : Référentiel privé absent');
+ await page.getByRole('button',{name:'Confirmer l’achat réel · 2.5 EUR',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Récupérer le PDF TEMU',exact:true})).toBeEnabled();expect(bought).toBe(1);
+ await page.getByRole('button',{name:'Récupérer le PDF TEMU',exact:true}).click();await expect(page.locator('dialog')).toContainText('Récupération : complete');expect(recovered).toBe(1);expect(bought).toBe(1);
+ await page.getByRole('button',{name:'Fermer',exact:true}).click();await expect(page.locator('dialog')).toHaveCount(0);
+});

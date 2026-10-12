@@ -1,0 +1,29 @@
+<!doctype html><html lang="fr"><meta charset="utf-8"><title>Comparer les statuts — lecture seule</title><style>body{font:16px system-ui;max-width:1100px;margin:40px auto;padding:20px;color:#143d49;background:#f4f8f7}textarea{width:100%;box-sizing:border-box}button{padding:12px;margin:15px 0;cursor:pointer}article{background:white;padding:20px;margin:15px 0;border:1px solid #ccdada}td,th{text-align:left;padding:10px;border-bottom:1px solid #ddd}table{width:100%}</style>
+<a href="/?view=orders">← Commandes locales</a><h1>Comparer les statuts Erplain PROD</h1><p><strong>Lecture seule — société 100174.</strong> Aucun document Erplain ni statut Nextech n’est modifié.</p><p>Collez de 1 à 5 références externes de commande (une par ligne), puis lancez la lecture.</p><textarea id="refs" rows="5" placeholder="Référence externe de commande" aria-label="Références de commande"></textarea><button id="read">Lire et comparer</button><p>Cette comparaison lit les BC et BL Erplain. Elle ne consulte pas les suivis transporteurs. Les documents Erplain TEST ne servent pas de référence aux statuts PROD.</p><p id="message" role="status"></p><section id="results"></section>
+<hr><h2>Comparer avec le suivi transporteur</h2><p>Lecture des API uniquement. Aucune modification ne sera appliquée dans Erplain.</p>
+<label>Commande <input id="track-ref" placeholder="Référence externe de commande"></label>
+<label>BL Erplain <input id="track-bl" placeholder="Numéro du BL Erplain"></label>
+<label>Source du suivi <select id="track-carrier"><option value="temu">TEMU</option><option value="gls">GLS</option><option value="gofo">GOFO</option></select></label>
+<p>Pour TEMU, les colis sont recherchés automatiquement. Pour GLS ou GOFO, indiquez tous les numéros de suivi du BL, un par ligne. Leur rattachement est fourni par vous.</p>
+<textarea id="track-numbers" rows="3" aria-label="Numéros de suivi" placeholder="GLS / GOFO : numéros des colis du BL"></textarea>
+<button id="track-read">Comparer transporteur et Erplain</button><p id="track-message" role="status"></p><section id="track-results"></section>
+<script>
+const button=document.getElementById('read'),results=document.getElementById('results'),message=document.getElementById('message');
+const el=(tag,text)=>{const n=document.createElement(tag);n.textContent=text;return n};
+button.onclick=async()=>{button.disabled=true;results.replaceChildren();message.textContent='Lecture en cours…';try{
+ const references=document.getElementById('refs').value.split(/\n/).map(s=>s.trim()).filter(Boolean);
+ const r=await fetch('/api/local-status-preview',{method:'POST',headers:{'content-type':'application/json','x-local-test':'1'},body:JSON.stringify({references})});const data=await r.json();if(!r.ok)throw Error(data.error);
+ message.textContent='Lecture terminée : '+data.company.label+' — '+new Date(data.readAt).toLocaleString('fr-FR');
+ for(const row of data.rows){const card=el('article','');card.append(el('h2',row.reference),el('p',row.notice));const table=el('table',''),head=el('tr','');for(const h of ['Document','Statut Erplain PROD','Statut PROD enregistré localement'])head.append(el('th',h));table.append(head);
+ for(const bc of row.documents){for(const [kind,doc] of [['BC',bc],...(bc.shipping_orders?.data||[]).map(bl=>['BL',bl])]){const tr=el('tr',''),saved=row.local?.[kind.toLowerCase()];for(const t of [kind+' '+doc.label,doc.status,saved&&String(saved.id)===String(doc.id)?saved.status:'Non disponible'])tr.append(el('td',t));table.append(tr);}if(!bc.shipping_orders?.data?.length)card.append(el('p',bc.label+' : aucun BL associé.'));}card.append(table);results.append(card);}
+ }catch(e){message.textContent=e.message;}finally{button.disabled=false;}};
+
+const trackButton=document.getElementById('track-read'),trackMessage=document.getElementById('track-message'),trackResults=document.getElementById('track-results');
+const statusName=s=>({delivered:'Livré',shipped:'Expédié',in_transit:'En transit',not_shipped:'Non expédié',pending:'En attente',ready_to_ship:'Prêt à expédier',cancelled:'Annulé',exception:'Incident',unknown:'Inconnu'}[s]||s);
+trackButton.onclick=async()=>{trackButton.disabled=true;trackResults.replaceChildren();trackMessage.textContent='Lecture des API en cours…';try{
+const input={reference:document.getElementById('track-ref').value.trim(),bl:document.getElementById('track-bl').value.trim(),carrier:document.getElementById('track-carrier').value,tracking:document.getElementById('track-numbers').value.split(/\n/).map(s=>s.trim()).filter(Boolean)};
+const response=await fetch('/api/local-tracking-preview',{method:'POST',headers:{'content-type':'application/json','x-local-test':'1'},body:JSON.stringify(input)});const r=await response.json();if(!response.ok)throw Error(r.error);
+trackMessage.textContent='Lecture terminée — aucune modification appliquée.';const card=el('article','');card.append(el('h3',r.reference+' / '+r.bl),el('p','Source : '+r.carrier.toUpperCase()+' · lu le '+new Date(r.readAt).toLocaleString('fr-FR')),el('p','Suivi : '+statusName(r.carrierStatus)+' · Erplain : '+statusName(r.erplainStatus)),el('p',r.proposed?'Proposition : passer le BL à « '+statusName(r.proposed)+' ».':r.carrierStatus===r.erplainStatus?'Statuts concordants : aucune modification nécessaire.':'Aucune modification proposée : état non éligible ou preuves insuffisantes.'),el('p','Colis : '+r.tracking.join(', ')));if(r.manualTracking)card.append(el('p','Comparaison basée sur les numéros saisis. Vérifiez qu’ils couvrent tous les colis de ce BL.'));
+const history=el('details','');history.append(el('summary','Événements reçus de l’API'));for(const e of r.events)history.append(el('p',new Date(e.at).toLocaleString('fr-FR')+' · '+e.tracking+' · '+e.label+' ('+e.code+')'));card.append(history);trackResults.append(card);
+}catch(e){trackMessage.textContent=e.message;}finally{trackButton.disabled=false;}};
+</script></html>

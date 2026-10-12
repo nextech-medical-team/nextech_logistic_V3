@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createMarginsService} from '../src/margins-service.mjs';
+import {excelMargins} from '../scripts/temu-excel-margins.mjs';
+const snapshot={countries:{FR:{n:'France',c:'EUR',fx:1,k:2.99,t:30}},services:[],transportGrids:{},amazon:[],temu:[{sku_temu:'SKU',sku_erplain:'ERP',sku_id:'123',mapping:2,purchase_unit_ht:3,supplier_transport_unit_ht:.5,weight_kg:.25,vat:.2}],context:{suppliers:[],margins:[],tariffs:[],fees:{},gls:[],gofo:[]},numSource:'function num(v){return Number(v);}',interpSource:'',transportSource:'function transport(){return {price:5,name:"fixture"};}',version:'test-only'};
+function fixture(){
+ const order={id:'o',reference:'PO-1-2',channel:'temu',carrier:'temu',address:{country:'FR'},source_payload:{origin:'temu_excel'}};
+ const line={id:'l',order_id:'o',source_line:'line',source_sku:'SKU',quantity:2,target_sku:'ERP',target_quantity:4,source_payload:{skuId:'123',excel:{'Prix de base total':'20 EUR','Total du prix de base après réduction':'18 EUR',"Total de l'expédition (hors taxes)":'2 EUR',"Taxe d'expédition":'.40 EUR','Taxe sur les produits':'3.60 EUR','Total du prix de vente après réductions (hors taxes)':'18 EUR','quantité annulée':'0','statut de la commande':'Non expédié'}}};
+ const job={reference:order.reference,plan:{amount:6,currency:'EUR'}};
+ const db={async query(sql){if(sql.includes('FROM temu_label_jobs'))return {rows:[job]};if(sql.includes('FROM orders'))return {rows:[order]};if(sql.includes('FROM lines'))return {rows:[line]};throw Error(sql);}};
+ const options={loadData:async()=>({orders:[order],lines:[line]}),snapshotLoader:async()=>structuredClone(snapshot)};
+ return {order,line,job,db,options};
+}
+test('existing calculator uses Excel seller revenue, contribution once, catalogue mapping and actual TEMU quote',async()=>{
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ const service=await createMarginsService(f.db,f.options),result=(await service.get({fresh:true})).rows[0];
+ assert.deepEqual(result.issues,[]);assert.equal(result.status,'positive');
+ assert.equal(result.revenue,18);assert.equal(result.purchase,12);assert.equal(result.supplierShipping,2);assert.equal(result.shipping,5);assert.equal(result.credit,2);assert.equal(result.profit,1);assert.match(result.shippingSource,/Devis TEMU/);
+ f.job.plan.amount=12;const updated=(await service.get({fresh:true})).rows[0];assert.equal(updated.profit,-4);assert.equal(updated.status,'negative');
+ f.job.result={packageInfoResultList:[{packageSn:'PK-1',estimatedAmount:3,estimatedCurrencyCode:'EUR',orderSendInfoList:[{parentOrderSn:f.order.reference}]}]};const paid=(await service.get({fresh:true})).rows[0];assert.equal(paid.shipping,2.5);assert.match(paid.shippingSource,/Coût étiquette/);
+});
+test('missing prices, unknown SKUs and mismatched prepared quantities never give a complete margin',async()=>{
+ for(const change of [f=>{delete f.line.source_payload.excel['Prix de base total'];delete f.line.source_payload.excel['Total du prix de base après réduction'];},f=>f.line.target_sku='OTHER',f=>f.line.target_quantity=20,f=>{f.line.source_sku='unknown';f.line.source_payload.skuId='unknown';}]){
+  const f=fixture();change(f);const service=await createMarginsService(f.db,f.options);const row=(await service.get({fresh:true})).rows[0];assert.equal(row.status,'incomplete');assert.ok(row.issues.length);
+ }
+});
+test('Excel adapter projects BC quantities and reports absent private costs explicitly',async()=>{
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ const documents={state:async()=>({pricing:{items:[{variant:{id:'v'},description:'ERP',quantity:4}]}})};
+ const service=excelMargins({db:f.db,documents,snapshotLoader:f.options.snapshotLoader});assert.equal((await service.get({reference:f.order.reference})).rows[0].profit,1);
+ const missing=excelMargins({db:f.db,documents,snapshotLoader:async()=>{throw Object.assign(Error('missing'),{code:'ENOENT'});}});
+ const result=await missing.get({reference:f.order.reference});assert.equal(result.rows[0].profit,null);assert.match(result.rows[0].issues[0],/Référentiel privé/);
+});
+test('identical seller amounts from API and Excel give the same margin through the existing calculator',async()=>{
+ const excel=fixture(),api=fixture(),m=amount=>({amount,currency:'EUR'});
+ excel.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ api.order.source_payload={temuAmounts:{data:{parentOrderMap:{parentOrderSn:api.order.reference,estimatedRevenue:m(2400),basePriceTotal:m(1800),shippingAmountTotal:m(200),taxTotal:m(400)},orderList:[{orderSn:'line',quantity:2,basePrice:m(1800),unitBasePrice:m(900),productTaxAmount:m(360),shipAmountTotalTaxIncl:m(240),shipTaxAmount:m(40),productTaxRate:20000000,shipTaxRate:20000000}]}}};
+ api.line.source_payload={skuId:'123'};
+ const a=(await (await createMarginsService(excel.db,excel.options)).get({fresh:true})).rows[0];
+ const b=(await (await createMarginsService(api.db,api.options)).get({fresh:true})).rows[0];
+ assert.deepEqual(b.issues,[]);
+ for(const key of ['status','profit','revenue','purchase','supplierShipping','shipping','credit','totalCosts','margin','markup'])assert.equal(a[key],b[key],key);
+});

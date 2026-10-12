@@ -36,13 +36,13 @@ export function offerParcel(offer,base,info,now=Date.now()){
  if(slots.length||(offer.infoNeeded||[]).length){const valid=slots.filter(s=>Number.isSafeInteger(s.pickupStartTime)&&Number.isSafeInteger(s.pickupEndTime)&&s.pickupStartTime*1000>now&&s.pickupEndTime>s.pickupStartTime&&s.pickupEndTime*1000<=info.deadline).sort((a,b)=>a.pickupStartTime-b.pickupStartTime);if(!valid.length)throw new Error('Créneau d’enlèvement valide absent');pickup=valid.at(-1);}
  return {amount,currency:offer.estimatedCurrencyCode,parcel:{...base,orderSendInfoList:info.lines,shipCompanyId:offer.shipCompanyId,channelId:offer.channelId,...(offer.signServiceId?{signServiceId:offer.signServiceId}:{}),...pickup,autoConfirmAfterPickup:true}};
 }
-export function temuShipping(db,api){
+export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={}){
  const active=new Set();let warehouseCache=null,warehouseAt=0;
  async function locked(reference,fn){if(!/^PO-\d+(?:-\d+)+$/.test(reference))throw new Error('Référence TEMU invalide');if(active.has(reference))throw new Error('Cette commande est déjà en traitement');active.add(reference);try{return await fn();}finally{active.delete(reference);}}
  const job=async reference=>(await db.query('SELECT * FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
  async function quote(reference,channelId,fresh={}){
-  const localOrders=(await db.query('SELECT suspension,weight_kg FROM orders WHERE reference=$1',[reference])).rows;for(const order of localOrders){const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);}
-  const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=Number.isFinite(knownWeight)&&knownWeight>0.25?String(Math.ceil(knownWeight*1000)/1000):'0.25';
+  const localOrders=(await db.query('SELECT suspension,weight_kg FROM orders WHERE reference=$1',[reference])).rows;if(quoteOrderPolicy)await quoteOrderPolicy(reference);else for(const order of localOrders){const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);}
+  const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=fixedWeight??(Number.isFinite(knownWeight)&&knownWeight>0.25?String(Math.ceil(knownWeight*1000)/1000):'0.25');
   const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),info=inspectTemu(detail,reference);
   const existing=fresh.shipments||await readTemuShipments(api,reference,detail);
   if(info.packages.length||(existing.shipmentInfoDTO||[]).length)throw new Error('Une expédition existe déjà dans TEMU : utiliser Récupérer les étiquettes');
