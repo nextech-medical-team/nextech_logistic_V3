@@ -9,6 +9,13 @@ const signature=lines=>JSON.stringify([...lines.reduce((m,l)=>{
  m.set(l.sku,(m.get(l.sku)||0)+q);return m;
 },new Map())].sort());
 const sameRequest=(a,b)=>a&&a.scope===b.scope&&a.sku===b.sku&&a.replacementSku===b.replacementSku&&Number(a.replaceQuantity)===Number(b.replaceQuantity)&&Number(a.replacementQuantity)===Number(b.replacementQuantity);
+const localWriteRefusal='Le résultat de le remplacement du produit → du produit choisi reste à vérifier. ERPLAIN LIVE : écriture non autorisée ou identité non vérifiée La préparation reste suspendue. Relisez le BC et les BL avant toute reprise ; ne répétez pas l’enregistrement.';
+const commercialSnapshot=value=>Array.isArray(value)?value.map(commercialSnapshot):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).filter(k=>!['available','on_hand','reserved_quantity','stock_levels'].includes(k)).sort().map(k=>[k,commercialSnapshot(value[k])])):value;
+export function locallyRejectedSubstitutionUnchanged(failed,attempt,o,b,bc){
+ // This exact error is raised by the local account gate before any fetch.
+ // Network errors and received provider responses never enter this exception.
+ return failed.status==='review'&&failed.error===localWriteRefusal&&attempt.phase==='mutation_started'&&attempt.permanent===null&&sameRequest(failed.payload,b)&&b.scope==='order'&&!o.partial_mode&&bc.update_stock===false&&bc.shipping_orders?.paginatorInfo?.hasMorePages===false&&bc.shipping_orders.data.length===0&&JSON.stringify(commercialSnapshot(attempt.plan.commercialBefore))===JSON.stringify(commercialSnapshot(bc));
+}
 const taxes=l=>Array.isArray(l.tax_codes)&&l.tax_codes.every(t=>t.id!=null)?JSON.stringify(l.tax_codes.map(t=>String(t.id)).sort()):null;
 export function recordedSubstitutionPlan(bc,b,failed,preview,order={},historicalStock=null){
  if(failed?.status!=='review'||failed.payload?.confirmEquivalent!==true||!sameRequest(failed.payload,b)||preview?.status!=='complete'||!sameRequest(preview.payload,b)||preview.result?.previewFingerprint!==failed.payload.previewFingerprint)return null;
@@ -87,6 +94,7 @@ export async function findRecordedSubstitution(db,o,b,bc,api){
  const failed=(await db.query("SELECT id,payload,status,error,created_at FROM resolution_jobs WHERE order_id=$1 AND action='replace-equivalent' AND (request_id<>$2 OR payload ? 'substitutionAttempt') AND (payload ? 'substitutionAttempt' OR status='complete' OR error='Frais de livraison modifiés : rapprochement requis' OR error LIKE 'Remplacement historique à rapprocher : %' OR error LIKE 'Remplacement partiel à rapprocher : %') ORDER BY created_at DESC LIMIT 1",[o.id,b.requestId||''])).rows[0];
  const attempt=readSubstitutionAttempt(failed,o);
  if(attempt){
+  if(locallyRejectedSubstitutionUnchanged(failed,attempt,o,b,bc))return null;
   const nextLine=!sameRequest(failed.payload,b);
   const blockedNext=()=>{throw Error('Rapprocher d’abord le remplacement interrompu enregistré sur ce BC, avant de choisir un autre produit.');};
   if(failed.status!=='review')return blockedNext();

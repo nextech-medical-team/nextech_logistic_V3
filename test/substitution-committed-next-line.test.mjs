@@ -37,3 +37,21 @@ for(const [name,change] of [
  ['incomplete BC',f=>f.bc.shipping_orders.paginatorInfo.hasMorePages=true],
  ['invalid recorded proof',f=>f.failed.payload.substitutionAttempt.planHash='0'.repeat(64)]
 ])test('next line stays blocked: '+name,async()=>{const f=fixture();change(f);await assert.rejects(findRecordedSubstitution(f.db,f.order,f.next,f.bc));});
+
+function rejectedFixture(){const f=fixture();f.bc=structuredClone(f.failed.payload.substitutionAttempt.plan.commercialBefore);f.failed.payload.substitutionAttempt.phase='mutation_started';f.failed.error='Le résultat de le remplacement du produit → du produit choisi reste à vérifier. ERPLAIN LIVE : écriture non autorisée ou identité non vérifiée La préparation reste suspendue. Relisez le BC et les BL avant toute reprise ; ne répétez pas l’enregistrement.';f.next={...f.failed.payload,requestId:'fresh'};return f;}
+test('a proven local refusal before fetch and unchanged full BC permits a fresh preview',async()=>{const f=rejectedFixture();assert.equal(await findRecordedSubstitution(f.db,f.order,f.next,f.bc),null);assert.equal(f.queries.length,1);assert.equal(f.failed.payload.substitutionAttempt.phase,'mutation_started');});
+for(const [name,change] of [
+ ['network uncertainty',f=>f.failed.error='Résultat incertain : HTTP 504'],
+ ['changed quantity',f=>f.bc.line_items[0].quantity=2],
+ ['changed price',f=>f.bc.line_items[0].price=11],
+ ['changed tax',f=>f.bc.line_items[0].tax_amount=3],
+ ['changed total',f=>f.bc.total=31],
+ ['changed currency',f=>f.bc.currency.label='USD'],
+ ['different replacement',f=>f.next.replacementSku='Z'],
+ ['other line',f=>f.next.sku='B'],
+ ['new BL',f=>f.bc.shipping_orders.data.push({id:'bl'})],
+ ['incomplete read',f=>f.bc.shipping_orders.paginatorInfo.hasMorePages=true],
+ ['permanent scope',f=>f.next.scope='permanent'],
+ ['partial order',f=>f.order.partial_mode=true],
+ ['invalid journal',f=>f.failed.payload.substitutionAttempt.planHash='bad']
+])test('local refusal remains blocked: '+name,async()=>{const f=rejectedFixture();change(f);await assert.rejects(findRecordedSubstitution(f.db,f.order,f.next,f.bc));});
