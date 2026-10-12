@@ -1,3 +1,4 @@
+import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
 import {labelAttachment} from './label-attachment.mjs';
 import {saveMapping} from './mapping-store.mjs';
 import {currentParcelPdf} from './parcel-pdf.mjs';
@@ -47,7 +48,7 @@ export async function workspaceApi({p,url,req,res,db,user,body,json,permitted,au
   if(!row){json(res,404,{error:'PDF indisponible'});return true;}res.setHeader('Content-Type','application/pdf');await labelAttachment(db,res,'order',decodeURIComponent(doc[1]),Number(doc[2])+1);res.end(await currentParcelPdf(db,row.pdf,decodeURIComponent(doc[1]),Number(doc[2])));return true;
  }
  if(p==='/api/order-detail'&&req.method==='GET'){
-  const id=url.searchParams.get('id');const order=(await db.query('SELECT * FROM orders WHERE id=$1',[id])).rows[0];if(!order)throw new Error('Commande introuvable');
+  const id=url.searchParams.get('id');const order=(await db.query('SELECT orders.*, '+completeOrderDocumentsSql+' AS complete_order_documents FROM orders WHERE id=$1',[id])).rows[0];if(!order)throw new Error('Commande introuvable');
   const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line',[id])).rows;
   const jobs=(await db.query('SELECT kind,status,attempts,error,available_at FROM jobs WHERE order_id=$1',[id])).rows;
   const carrierJob=(await db.query('SELECT status,environment,tracking FROM carrier_jobs WHERE order_id=$1',[id])).rows[0];json(res,200,{order,lines,jobs,carrierJob});return true;
