@@ -1,3 +1,4 @@
+import {preserveLabelStageDecision} from './local-label-stage-decision.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {resolveReplacementLines} from './resolution-quantities.mjs';
 import {importedLabelDiagnosticReconciler} from './imported-label-diagnostic.mjs';
@@ -150,7 +151,7 @@ export async function recheckOrders(db,ids){
  for(const id of [...new Set(ids)]){
   const o=(await db.query(`SELECT o.* FROM orders o WHERE o.id=$1 AND ${mutablePreparation}`,[id])).rows[0];
   if(!o){results.push({id,protected:true});continue;}
-  try{await db.transaction(async tx=>{await tx.query('UPDATE orders SET resolution_pending_resume=true WHERE id=$1',[id]);await prepareLabel(tx,o);await tx.query("UPDATE jobs SET status='complete',error=null WHERE order_id=$1 AND kind='label'",[id]);await retireVerifiedLookupError(tx,id);});results.push({id,prepared:true});}
+  try{await db.transaction(async tx=>{await tx.query('UPDATE orders SET resolution_pending_resume=true WHERE id=$1',[id]);await prepareLabel(tx,o);await tx.query("UPDATE jobs SET status='complete',error=null WHERE order_id=$1 AND kind='label'",[id]);await retireVerifiedLookupError(tx,id);await preserveLabelStageDecision(tx,id);});results.push({id,prepared:true});}
   catch(e){await db.query("UPDATE orders SET label_status='blocked',issue=$2 WHERE id=$1",[id,e.message]);await db.query("UPDATE jobs SET status='blocked',error=$2 WHERE order_id=$1 AND kind='label'",[id,e.message]);results.push({id,problem:e.message});}
  }
  return results;

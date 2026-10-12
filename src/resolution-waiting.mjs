@@ -1,3 +1,4 @@
+import {preserveLabelStageDecision} from './local-label-stage-decision.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {advanceEquivalentLabel} from './equivalent-auto-label.mjs';
 import {regenerateProductionLabels} from './label-regeneration.mjs';
@@ -55,9 +56,11 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
       if(erp?.status!=='complete')return;
 
-      if(!o.erp_live?.bl?.id||o.erp_live.bl.status!=='ready_to_ship'||!o.erp_live?.verifiedAt||!o.erp_live?.stockCheckedAt)throw Error('Validation stock/BL absente : contrôler les documents Erplain avant étiquette.');
+      const locallyDismissed=await preserveLabelStageDecision(db,o.id);
 
-      await db.query("UPDATE orders SET resolution_pending_resume=true WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status='ready')",[o.id]);
+      if(!locallyDismissed&&(!o.erp_live?.bl?.id||o.erp_live.bl.status!=='ready_to_ship'||!o.erp_live?.verifiedAt||!o.erp_live?.stockCheckedAt))throw Error('Validation stock/BL absente : contrôler les documents Erplain avant étiquette.');
+
+      if(!locallyDismissed)await db.query("UPDATE orders SET resolution_pending_resume=true WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status='ready')",[o.id]);
 
       const message=j.result?.manualPricing?'Prix enregistrés et BL Erplain LIVE vérifié. L’achat de l’étiquette reste manuel.':(j.action==='replace-equivalent'||j.result?.equivalent)?'Remplacement enregistré et BL Erplain LIVE vérifié. Les étiquettes existantes sont conservées à l’identique. Tout nouvel achat reste manuel.':'BL Erplain LIVE vérifié. Les étiquettes existantes sont conservées à l’identique. Tout nouvel achat reste manuel.';
 
