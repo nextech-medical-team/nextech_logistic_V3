@@ -1,3 +1,4 @@
+import {obsoletePendingRequest} from './queue-replacements.mjs';
 import fs from 'node:fs/promises';import path from 'node:path';import{spawnSync}from'node:child_process';
 export async function mirrorQueue(root,docs){
  const configPath=path.join(root,'.local-acces-v3','cicd-bridge.json');let config;
@@ -12,6 +13,7 @@ export async function mirrorQueue(root,docs){
  const rows=[];
  for(const doc of docs){
   if(doc.serverManaged)continue;
+  if(obsoletePendingRequest(doc,replacementIds))continue;
   let requires=doc.requiresReplacement===true;
   for(const report of doc.reports||[]){try{if(JSON.parse(await fs.readFile(path.resolve(root,report.path),'utf8')).requiresReplacement)requires=true;}catch{}}
   if(!['ready','deploying','blocked'].includes(doc.status)&&!(doc.status==='failed'&&requires&&!replacementIds.has(doc.id)))continue;
