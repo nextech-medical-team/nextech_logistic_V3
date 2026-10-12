@@ -37,6 +37,8 @@ export function temuBcPricingLoader(db,directory){
 }
 export async function ensureTemuBcPricing(db,order,lines,refresh){
  if(order.channel!=='temu'||temuPricingComplete(order,lines))return false;
+ // A manual correction must never trigger an API update or overwrite its inputs.
+ if(order.source_payload?.temuManualPricing)throw Error(temuPricingIssue(order,lines));
  if(order.source_payload?.visibilityHold||!lines.length)throw Error(temuPricingIssue(order,lines));
  try{await refresh(order.reference);}catch(e){throw Error(temuFixedVat(order)!==null?'TEMU · Prix et frais de livraison indisponibles · TVA 25 % automatique'+(String(e.message).includes('3000032')?' · Accès aux montants refusé (3000032)':' · Échec de lecture des montants'):'TEMU · Récupération prix et TVA par API impossible : '+String(e.message).slice(0,350));}
  const latest=(await db.query('SELECT source_payload FROM orders WHERE id=$1',[order.id])).rows[0];

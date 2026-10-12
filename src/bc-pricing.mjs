@@ -13,7 +13,7 @@ export function amount(v,field){
 }
 const cents=n=>Math.round((n+Number.EPSILON)*100);
 const optional=(v,f)=>present(v)?amount(v,f):0;
-export const sourceCurrency=o=>String((o.channel==='temu'?o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue?.currency:null)||o.source_payload?.currency||o.source_payload?.devise||'EUR').toUpperCase();
+export const sourceCurrency=o=>String((o.channel==='temu'?(o.source_payload?.temuManualPricing?.data?.parentOrderMap?.basePriceTotal?.currency||o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue?.currency):null)||o.source_payload?.currency||o.source_payload?.devise||'EUR').toUpperCase();
 function taxCode(rate,codes){
  if(rate===0)return [];
  const hits=codes.filter(c=>c.active!==false&&Array.isArray(c.tax_rates)&&c.tax_rates.length===1&&Math.abs(Number(c.tax_rates[0].rate)-rate)<0.00001);

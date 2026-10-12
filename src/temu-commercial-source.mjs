@@ -1,10 +1,12 @@
 import {temuCountryAmounts} from './temu-country-vat.mjs';
 import {acceptedMonetaryDifference,monetaryPolicy} from './monetary-policy.mjs';
 import {temuActiveAmounts} from './temu-active-amounts.mjs';
+import {manualSellerAmounts} from './temu-manual-commercial-source.mjs';
 export const temuSellerPolicy='temu-estimatedRevenue-only-20261007';
-// Seller revenue is the sole commercial total. Customer retail/payment fields
-// never enter this projection. API source records remain immutable.
+// API seller revenue is authoritative when no manual seller entry exists.
+// Customer retail/payment fields never enter this projection. Raw records stay immutable.
 export function temuCommercialSource(order,fallback){
+ if(order.source_payload?.temuManualPricing)return manualSellerAmounts(order,fallback||temuCountryAmounts(order));
  const api=order.source_payload?.temuAmounts?.data,revenue=api?.parentOrderMap?.estimatedRevenue;
  if(api?.parentOrderMap?.parentOrderSn!==order.reference || !/^[A-Z]{3}$/.test(revenue?.currency||'')
  || revenue?.amount==null || String(revenue.amount).trim()==='' || !Number.isSafeInteger(Number(revenue.amount)) || Number(revenue.amount)<0)

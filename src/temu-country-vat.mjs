@@ -1,6 +1,7 @@
 import {temuActiveAmounts} from './temu-active-amounts.mjs';
 // Business rule approved 2026-10-06: TEMU sales to HR/SE use 25%.
-// Source financial data stay immutable. Never substitute catalogue prices.
+// Source financial data stay immutable. Persisted seller entries take precedence
+// under the human decision of 2026-10-12; never substitute catalogue prices.
 export function temuFixedVat(order){
  if(order?.channel!=='temu')return null;
  const country=String(order.address?.country||order.source_payload?.country||'').trim().toUpperCase();
@@ -11,7 +12,7 @@ export function validateManualVat(value){
  if(!/^\d+(?:\.\d{1,2})?$/.test(text)||Number(text)>100)throw Error('TVA : saisir un taux entre 0 et 100 % (deux décimales maximum)');
  return Number(text);
 }
-export function temuCountryAmounts(order,raw=order.source_payload?.temuAmounts?.data,options={}){
+export function temuCountryAmounts(order,raw=order.source_payload?.temuManualPricing?.data||order.source_payload?.temuAmounts?.data,options={}){
  if(!raw)throw Error('TEMU · Revenu vendeur estimé (estimatedRevenue) absent de l’API');
  raw=temuActiveAmounts(order,raw);
  if(temuFixedVat(order)===null)return raw;
