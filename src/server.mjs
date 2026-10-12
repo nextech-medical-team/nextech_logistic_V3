@@ -94,6 +94,7 @@ import {createUser,login,authenticate,tokenHash} from './auth.mjs';
 import {ROLES} from './domain.mjs';
 
 import {importMapping,importOrders,previewOrders} from './imports.mjs';
+import {temuExcelImportRoutes} from './temu-excel-import.mjs';
 
 import {createDemo,runJobs,refreshTracking} from './workflow.mjs';
 
@@ -222,7 +223,7 @@ const failures=new Map();
 
 const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(data));};
 
-async function body(req){if(req.parsedBody!==undefined)return req.parsedBody;let size=0;const parts=[];for await(const part of req){size+=part.length;if(size>17*1024*1024)throw new Error('Requête trop volumineuse');parts.push(part);}return req.parsedBody=JSON.parse(Buffer.concat(parts).toString()||'{}');}
+async function body(req){if(req.parsedBody!==undefined)return req.parsedBody;let size=0;const limit=['/api/import/temu/preview','/api/import/temu/confirm'].includes(req.url?.split('?')[0])?20:17;const parts=[];for await(const part of req){size+=part.length;if(size>limit*1024*1024)throw new Error('Requête trop volumineuse');parts.push(part);}return req.parsedBody=JSON.parse(Buffer.concat(parts).toString()||'{}');}
 
 function permitted(user,roles){if(!roles.includes(user.role)){const e=new Error('Droits insuffisants');e.status=403;throw e;}}
 
@@ -255,7 +256,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -537,6 +538,8 @@ const server=http.createServer(async(req,res)=>{
       const total=Number((await db.query('SELECT count(*) AS n FROM mappings '+where,[pattern])).rows[0].n);json(res,200,{rows,total,page,pages:Math.max(1,Math.ceil(total/100))});return;
 
     }
+
+    if(await temuExcelImportRoutes({p,req,res,user,body,json,permitted,db}))return;
 
     if(p==='/api/orders/processing'&&req.method==='POST'){const b=await body(req);const rows=await processingRows(db,b.ids);const monitors=new Map((await db.query('SELECT order_id,state FROM order_recheck_monitor WHERE order_id=ANY($1::text[])',[b.ids])).rows.map(m=>[m.order_id,m.state]));for(const row of rows)row.monitoring=monitors.get(row.id)||null;json(res,200,{rows,at:new Date().toISOString()});return;}
     if(p==='/api/orders/priority'&&req.method==='POST'){const b=await body(req);json(res,200,await setOrderPriority(db,b,user));return;}

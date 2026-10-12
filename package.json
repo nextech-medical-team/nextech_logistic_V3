@@ -13,7 +13,9 @@
     "tracking:watch": "node scripts/sync-tracking.mjs --apply --watch",
     "test:tracking": "node --test test/tracking-sync*.test.mjs",
     "test": "node scripts/run-tests.mjs",
-    "check": "node scripts/check-syntax.mjs"
+    "check": "node scripts/check-syntax.mjs",
+    "test:temu-import": "node --test test/temu-excel-import.test.mjs",
+    "test:temu-local": "node scripts/temu-excel-sandbox.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",

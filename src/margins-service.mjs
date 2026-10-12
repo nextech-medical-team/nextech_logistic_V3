@@ -6,18 +6,19 @@ import vm from 'node:vm';import {readFile} from 'node:fs/promises';
 const canonical=s=>String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const amazonFields=['amazon-order-id','order-item-id','sku','product-name','quantity','purchase-date','ship-country','sales-channel','currency','order-status','fulfillment-channel','item-price','item-tax','shipping-price','shipping-tax','gift-wrap-price','gift-wrap-tax','item-promotion-discount','ship-promotion-discount'];
 const temuFields=['Order ID',"N° de l'article de la commande",'contribution SKU','N° SKU','nom du produit',"date d'achat","pays d'expédition",'quantité achetée','quantité annulée','quantité expédiée','statut de la commande','Total du prix de base après réduction','Prix de base total','Prix de vente (hors taxes)','Total du prix de vente après réductions (hors taxes)',"Total de l'expédition (hors taxes)",'Taxe sur les produits',"Taxe d'expédition",'Remboursement des produits','Réduction de la part du vendeur','Réduction de la part de Temu'];
-export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAmazonImportsFbm=false,readAsset=readFile}={}){
+export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAmazonImportsFbm=false,readAsset=readFile,loadData=null,snapshotLoader=null}={}){
  const confirmedFbm=new Set(confirmedAmazonIds);
  let snapshot,sources;
  try{
-  snapshot=JSON.parse(await readAsset(new URL('./margin-published-snapshot.json',import.meta.url),'utf8'));
+  snapshot=snapshotLoader?await snapshotLoader():JSON.parse(await readAsset(new URL('./margin-published-snapshot.json',import.meta.url),'utf8'));
   sources=JSON.parse(await readAsset(new URL('./margin-published-sources.json',import.meta.url),'utf8'));
  }catch(e){
   if(e.code!=='ENOENT')throw e;
   const reason='Calcul des marges indisponible : référentiel privé manquant';
   console.warn(reason);
   return {async get(){
-   const orders=(await db.query('SELECT id,reference,channel FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
+   const supplied=loadData?await loadData():null;
+    const orders=supplied?.orders||(await db.query('SELECT id,reference,channel FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
    return {available:false,reason,source:{url:null,version:'indisponible',capturedAt:null},calculatedAt:new Date().toISOString(),rows:orders.map(o=>({...o,status:'incomplete',profit:null,markup:null,margin:null,issues:[reason],lines:[]}))};
   }};
  }
@@ -31,8 +32,9 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
  const adapters={amazon:context.marginEngine.adapters('amazon'),temu:context.marginEngine.adapters('temu')};
  let cache=null,last=0,inflight=null;
  async function calculate(){
- const orders=(await db.query('SELECT id,reference,channel,carrier,address,source_payload,source_date FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
- const lines=(await db.query('SELECT l.id,l.order_id,l.source_line,l.source_sku,l.quantity,l.target_sku,l.target_quantity,l.source_payload FROM lines l JOIN orders o ON o.id=l.order_id WHERE o.archived=false')).rows;
+ const supplied=loadData?await loadData():null;
+ const orders=supplied?.orders||(await db.query('SELECT id,reference,channel,carrier,address,source_payload,source_date FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
+ const lines=supplied?.lines||(await db.query('SELECT l.id,l.order_id,l.source_line,l.source_sku,l.quantity,l.target_sku,l.target_quantity,l.source_payload FROM lines l JOIN orders o ON o.id=l.order_id WHERE o.archived=false')).rows;
  const grouped=new Map();for(const l of lines){if(!grouped.has(l.order_id))grouped.set(l.order_id,[]);grouped.get(l.order_id).push(l);}
  const labelJobs=new Map((await db.query('SELECT reference,plan,result FROM temu_label_jobs')).rows.map(j=>[j.reference,j]));
  const output=[];
@@ -41,9 +43,9 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
   const fields=o.channel==='amazon'?amazonFields:temuFields;
   const amountIssues=[];
   const equivalentOrder=o.channel==='temu'&&sourceLines.length>0&&sourceLines.every(l=>['erplain_live_equivalent','erplain_live_bc'].includes(l.source_payload?.origin));
-  const raw=sourceLines.map(l=>{const source={...o.source_payload,...l.source_payload},lookup=new Map(Object.entries(source).map(([k,v])=>[canonical(k),v]));const r=Object.fromEntries(fields.map(k=>[k,lookup.get(canonical(k))??'']));r.sourceRow=l.id;if(o.channel==='amazon'){r['amazon-order-id']=o.reference;r['order-item-id']=l.id;r.sku=l.source_sku;r.quantity=Number(l.quantity);r['ship-country']=o.address?.country||r['ship-country'];}else{r['Order ID']=o.reference;r["N° de l'article de la commande"]=l.id;r['contribution SKU']=l.source_sku;r['quantité achetée']=Number(l.quantity);r["pays d'expédition"]=o.address?.country||r["pays d'expédition"];r['N° SKU']=r['N° SKU']||source.skuId||'';r['nom du produit']=r['nom du produit']||source.goodsName||'';
+  const raw=sourceLines.map(l=>{const source={...(o.source_payload?.origin==='temu_excel'?l.source_payload?.excel:{}),...o.source_payload,...l.source_payload},lookup=new Map(Object.entries(source).map(([k,v])=>[canonical(k),v]));const r=Object.fromEntries(fields.map(k=>[k,lookup.get(canonical(k))??'']));r.sourceRow=l.id;if(o.channel==='amazon'){r['amazon-order-id']=o.reference;r['order-item-id']=l.id;r.sku=l.source_sku;r.quantity=Number(l.quantity);r['ship-country']=o.address?.country||r['ship-country'];}else{r['Order ID']=o.reference;r["N° de l'article de la commande"]=l.id;r['contribution SKU']=l.source_sku;r['quantité achetée']=Number(l.quantity);r["pays d'expédition"]=o.address?.country||r["pays d'expédition"];r['N° SKU']=r['N° SKU']||source.skuId||'';r['nom du produit']=r['nom du produit']||source.goodsName||'';
    const amounts=o.source_payload?.temuAmounts;
-   if(!equivalentOrder){try{Object.assign(r,amountFields(temuCommercialSource(o,temuCountryAmounts(o)),o.reference,l));}catch(e){amountIssues.push(e.message);}}
+   if(!equivalentOrder&&o.source_payload?.origin!=='temu_excel'){try{Object.assign(r,amountFields(temuCommercialSource(o,temuCountryAmounts(o)),o.reference,l));}catch(e){amountIssues.push(e.message);}}
    const hasReportPrice=['Total du prix de base après réduction','Prix de base total'].some(k=>String(r[k]).trim()!=='');
    const unit=source.puht,quantity=Number(l.quantity),currency=String(source.currency||'').toUpperCase();
    if(!hasReportPrice&&unit!==null&&unit!==undefined&&String(unit).trim()!==''&&Number.isFinite(Number(unit))&&Number(unit)>=0&&quantity>0&&/^[A-Z]{3}$/.test(currency))r['Prix de base total']=(Number(unit)*quantity)+' '+currency;
@@ -81,11 +83,18 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
    if(!Number.isFinite(price)||price<0)return fail('Tarif '+name+' indisponible pour '+weight+' kg');
    transportSource=name+' retenu dans V3 ('+carrier+') · poids calculateur '+weight+' kg · tarif publié '+price.toLocaleString('fr-FR',{maximumFractionDigits:5})+' € HT';
    return price;
-  },find(l){const found=adapters[o.channel].find(l);const v3=sourceLines.find(x=>x.id===l.id);if(found.cost&&v3?.target_quantity!=null&&Math.abs(Number(v3.target_quantity)/Number(v3.quantity)-found.cost.mapping)>1e-9)return {error:'Mapping V3 différent du calculateur publié'};return found;}};
+  },find(l){const found=adapters[o.channel].find(l);const v3=sourceLines.find(x=>x.id===l.id);
+   if(o.source_payload?.origin==='temu_excel'&&v3?.target_sku){
+    const byId=snapshot.temu.filter(r=>String(r.sku_id||'')===String(l.skuId||'')&&l.skuId);
+    const matches=byId.length?byId:snapshot.temu.filter(r=>String(r.sku_temu)===String(l.sku));
+    if(matches.length!==1||String(matches[0].sku_erplain||matches[0].sku_temu)!==String(v3.target_sku))return {error:'SKU préparé dans le BC différent du calculateur publié'};
+   }
+   if(found.cost&&v3?.target_quantity!=null&&Math.abs(Number(v3.target_quantity)/Number(v3.quantity)-found.cost.mapping)>1e-9)return {error:'Mapping V3 différent du calculateur publié'};return found;}};
   let result;try{result=context.marginEngine.analyze(raw,o.channel,checkedAdapter,{},{}).orders[0];}catch(e){result={complete:false,issues:['Diagnostic du calculateur indisponible : '+e.message],lines:[]};}
   const r=result||{complete:false,issues:['Aucune ligne à calculer'],lines:[]};
   if(equivalentOrder){try{applyEquivalentReceipts(r,equivalentReceipts(temuCommercialSource(o,temuCountryAmounts(o)),o.source_payload?.temuOrderDetail,o.reference));}catch(e){amountIssues.push(e.message);r.complete=false;}}
   if(transportSource)r.shippingSource=transportSource;
+  if(o.source_payload?.origin==='temu_excel')r.warnings=[...(r.warnings||[]),'Ventes et contribution issues du rapport Excel TEMU ; coûts du calculateur publié.'];
   if(o.channel==='temu'&&sourceLines.some(l=>l.source_payload?.puht!=null))r.warnings=[...(r.warnings||[]),'Ventes API : prix unitaire HT importé × quantité de la ligne, dans la devise d’origine.'];
   if(o.channel==='temu'&&String(o.carrier).toLowerCase()==='temu'&&transportSource?.startsWith('Estimation'))r.warnings=[...(r.warnings||[]),'Marge estimée selon le calculateur publié ; le coût de l’étiquette TEMU reste à rapprocher.'];
   if(confirmedFallback)r.warnings=[...(r.warnings||[]),'Expédition FBM confirmée par l’utilisateur pour cette commande.'];

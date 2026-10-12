@@ -21,3 +21,7 @@ src/temu-reading-reports.json
 
 # Private server authorization scope; never commit order references.
 temu-authorized-reimport-scope.json
+
+# Local TEMU exports contain customer data.
+/order_export-*.xlsx
+/.~lock.*#
