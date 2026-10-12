@@ -5,7 +5,7 @@ test('queue CLI rejects an unready change without creating a request',async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'v3-queue-test-'));
  try{
   const queueDir=path.join(dir,'coordination-deploiement');await fs.mkdir(queueDir);
-  for(const file of ['queue.mjs','publication-readiness.mjs','queue-paths.mjs','queue-bridge.mjs'])await fs.copyFile(new URL(file,import.meta.url),path.join(queueDir,file));
+  for(const file of ['queue.mjs','publication-readiness.mjs','queue-paths.mjs','queue-bridge.mjs','queue-replacements.mjs'])await fs.copyFile(new URL(file,import.meta.url),path.join(queueDir,file));
   await fs.writeFile(path.join(dir,'candidate.js'),'test');
   await fs.writeFile(path.join(dir,'manifest.json'),JSON.stringify({section:2,summary:'isolated test',ready:false,files:[{serverPath:'src/test.js',baselineSha256:'NEW',preparedPath:'candidate.js'}],tests:{},restartRequired:false}));
   const result=spawnSync(process.execPath,[path.join(queueDir,'queue.mjs'),'enqueue','manifest.json'],{cwd:dir,encoding:'utf8'});
@@ -24,3 +24,4 @@ test('proofs are bound to the commit and file bytes',async()=>{
  await validatePublicationReadiness(dir,m);m.verification.commit='b'.repeat(40);await assert.rejects(validatePublicationReadiness(dir,m),/autre commit/);m.verification.commit=m.git.commit;await fs.writeFile(path.join(dir,'proof.txt'),'changed');await assert.rejects(validatePublicationReadiness(dir,m),/preuve modifiée/);
  }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
+
