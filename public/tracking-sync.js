@@ -5,6 +5,7 @@
  anchor.after(launch,historyButton);
  const panel=document.createElement('dialog');panel.className='tracking-sync-dialog';panel.setAttribute('aria-labelledby','tracking-sync-title');
  panel.innerHTML=`<div class="tracking-sync-heading"><h2 id="tracking-sync-title">Suivis GLS, GOFO et TEMU</h2><button type="button" data-close aria-label="Fermer le suivi">Fermer</button></div>
+ <p>Test limité à 5 commandes maximum. Cochez les commandes à vérifier dans le tableau.</p>
  <p data-mode></p><p data-scope></p><p data-progress role="status" aria-live="polite"></p><p data-error role="alert" hidden></p>
  <form data-search-form><label>Rechercher une commande, un BL ou un suivi <input name="search" type="search" maxlength="200"></label><button>Rechercher</button><button type="button" data-again>Synchroniser à nouveau</button><button type="button" data-export title="Exporter toutes les pages de la recherche affichée">Télécharger Excel</button></form>
  <div class="tracking-sync-scroll"><table><thead><tr><th>Commande / BL</th><th>Transporteur / suivi</th><th>Statut transporteur</th><th>Statut Erplain</th><th>Dernière lecture / résultat</th><th>Historique</th></tr></thead><tbody data-rows></tbody></table></div>
@@ -25,12 +26,12 @@
  async function refresh(){
   if(loading)return;loading=true;const requestVersion=version;
   try{
-   const data=await api('/api/tracking-sync?'+new URLSearchParams({page,search}));
+   const data=await api('/api/tracking-sync?'+new URLSearchParams({page,search,...(runId?{run:runId}:{})}));
    if(!panel.open||requestVersion!==version)return;
    options=data;page=data.page;buttons();
    find('[data-mode]').textContent=data.reason;
    const active=data.runs.find(r=>['queued','running'].includes(r.status));
-   const job=active||data.runs.find(r=>r.id===runId)||data.runs[0];
+   const job=runId?data.runs.find(r=>r.id===runId):active||data.runs[0];
    if(job){const states={queued:'En attente',running:'En cours',complete:'Terminée',failed:'Échec',interrupted:'Interrompue'};
     find('[data-progress]').textContent=`${states[job.status]||job.status} · ${job.processed} / ${job.total} livraisons contrôlées · ${job.mode==='apply'?'V3 et Erplain':'V3 uniquement'} · ${date(job.created_at)}${job.counts?.error?' · '+job.counts.error+' erreur(s)':''}${job.error?' · '+job.error:''}`;
    }else find('[data-progress]').textContent=data.total?'Résultats enregistrés par le traitement automatique.':'Aucune synchronisation lancée depuis cet écran.';
@@ -44,16 +45,24 @@
  }
  async function synchronize(){
   if(busy||!canLaunch())return;busy=true;buttons();clearError();
+  clearTimeout(timer);version++;runId=null;
+  find('[data-progress]').textContent='';find('[data-scope]').textContent='';
+  find('[data-rows]').innerHTML='';find('[data-page]').textContent='';find('[data-history]').hidden=true;
   try{
+   // Snapshot before the first request: filters can clear selection while it is pending.
+   const ids=typeof selected!=='undefined'?[...selected]:[];
+   if(typeof selectedDeliveries!=='undefined'&&selectedDeliveries.size)throw Error('Cochez les commandes principales pour synchroniser leurs suivis, puis décochez les lignes de livraison partielle.');
+   if(!ids.length)throw Error('Cochez au moins une commande dans le tableau avant de synchroniser. Aucune synchronisation lancée.');
+   if(ids.length>5)throw Error('Test limité à 5 commandes maximum. Réduisez votre sélection. Aucune synchronisation lancée.');
+   find('[data-scope]').textContent=`${ids.length} commande(s) sélectionnée(s).`;
    // Read capabilities immediately before queuing; POST never silently changes mode.
    const data=await api('/api/tracking-sync');options=data;
-   const ids=typeof selected!=='undefined'&&selected.size?[...selected]:null;
-   find('[data-scope]').textContent=ids?`${ids.length} commande(s) sélectionnée(s). Les résultats ci-dessous incluent aussi les lectures précédentes.`:'Toutes les commandes actives disposant d’un suivi de production. Les filtres du tableau ne limitent pas cette opération.';
+   if(data.runs.some(r=>['queued','running'].includes(r.status)))throw Error('Une synchronisation est déjà en cours. Aucune demande lancée pour votre sélection. Consultez « Historique des suivis ».');
    const response=await api('/api/tracking-sync',{ids,mode:data.canApply?'apply':'preview'});
-   runId=response.run?.id||null;
-   if(response.existing)find('[data-scope]').textContent='Une synchronisation est déjà en cours. Affichage de son avancement ; aucune seconde demande lancée.';
+   if(response.existing)throw Error('Une synchronisation vient de démarrer ailleurs. Aucune demande lancée pour votre sélection. Consultez « Historique des suivis ».');
+   runId=response.run.id;page=1;search='';find('[data-search-form]').elements.search.value='';
    await refresh();
-  }catch(e){fail(e);}finally{busy=false;buttons();schedule();}
+  }catch(e){fail(e);}finally{busy=false;buttons();}
  }
  async function showHistory(key,reference,more=false){
   if(!more){historyKey=key;historyCursor=null;find('[data-history]').hidden=false;find('[data-history]').innerHTML='<h3></h3><div data-changes></div><div data-events></div><button type="button" data-more hidden>Changements plus anciens</button>';find('[data-history] h3').textContent='Historique · '+reference;}
@@ -66,12 +75,12 @@
   historyCursor=data.next;find('[data-more]').hidden=!data.next;find('[data-more]').onclick=()=>showHistory(key,reference,true).catch(fail);
  }
  function open(){if(!panel.open){version++;panel.showModal();}clearError();}
- launch.onclick=()=>{open();synchronize();};historyButton.onclick=()=>{open();refresh().catch(fail);};
+ launch.onclick=()=>{open();synchronize();};historyButton.onclick=()=>{runId=null;page=1;find('[data-scope]').textContent='Historique de toutes les synchronisations.';open();refresh().catch(fail);};
  find('[data-again]').onclick=synchronize;find('[data-close]').onclick=()=>panel.close();
  find('[data-export]').onclick=async()=>{
   const button=find('[data-export]');if(button.disabled)return;button.disabled=true;button.textContent='Préparation Excel…';clearError();
   try{
-   const response=await fetch('/api/tracking-sync/export.xlsx?'+new URLSearchParams({search}));
+   const response=await fetch('/api/tracking-sync/export.xlsx?'+new URLSearchParams({search,...(runId?{run:runId}:{})}));
    if(!response.ok){let message='Téléchargement Excel impossible';try{message=(await response.json()).error||message;}catch{}throw Error(message);}
    if(!response.headers.get('content-type')?.includes('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))throw Error('Réponse Excel invalide. Reconnectez-vous puis réessayez.');
    const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');
