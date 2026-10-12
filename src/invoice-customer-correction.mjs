@@ -8,6 +8,6 @@ export async function ensureConsumerCustomer(api,invoice,{orderId}={}){
  if(c.customer_type!=='company'||!orderId||c.customer_number!=='V3:'+orderId||c.tax_number||c.company_registration_number||c.siret)throw Error('Erplain · Type du client particulier à rapprocher : fiche partagée ou identifiants professionnels');
  // Only correct a customer owned by this V3 order. An ambiguous response is
  // never replayed here; a later run first reads the current customer again.
- const r=await api.request('mutation B2CCustomerType($id:ID!,$input:CustomerInput!){UpdateCustomer(id:$id,input:$input){id customer_type}}',{id:customerId,input:{customer_type:'individual'}});
- if(String(r.UpdateCustomer?.id)!==customerId||r.UpdateCustomer?.customer_type!=='individual')throw Error('Erplain · Type particulier non confirmé : relire la fiche avant reprise');
+ const r=await api.request('mutation B2CCustomerType($id:ID!,$customer_type:customerType!){ConvertCustomerType(id:$id,customer_type:$customer_type){id customer_type}}',{id:customerId,customer_type:'individual'});
+ if(String(r.ConvertCustomerType?.id)!==customerId||r.ConvertCustomerType?.customer_type!=='individual')throw Error('Erplain · Type particulier non confirmé : relire la fiche avant reprise');
 }
