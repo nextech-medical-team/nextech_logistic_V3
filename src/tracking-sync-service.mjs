@@ -6,6 +6,11 @@ import {synchronizeTracking} from './tracking-sync.mjs';
 import {aggregateParcels} from './status-policy.mjs';
 import {loadTrackingExport,trackingWorkbook} from './tracking-sync-export.mjs';
 
+function selectedTrackingOrders(ids){
+ if(!Array.isArray(ids)||!ids.length||ids.length>5||ids.some(id=>typeof id!=='string'||!id.trim()||id.length>100))throw Error('Sélection de commandes invalide : cochez de 1 à 5 commandes maximum pour ce test.');
+ return [...new Set(ids)];
+}
+
 export function trackingSyncService(db,directory,{env=process.env,shouldStop=()=>false,clients=()=>trackingSyncClients(directory)}={}){
  let running=false;
  const store=trackingSyncStore(db);
@@ -17,12 +22,12 @@ export function trackingSyncService(db,directory,{env=process.env,shouldStop=()=
  }
  async function enqueue(input,user){
   if(!input||!['preview','apply'].includes(input.mode))throw Error('Mode de synchronisation invalide');
-  if(input.ids!==null&&input.ids!==undefined&&(!Array.isArray(input.ids)||!input.ids.length||input.ids.length>10000||input.ids.some(id=>typeof id!=='string'||!id||id.length>100)))throw Error('Sélection de commandes invalide');
+  const ids=selectedTrackingOrders(input.ids);
   const options=await capabilities();
   if(!options.workerAvailable)throw Error('Le service de synchronisation est arrêté ou indisponible. Contactez un administrateur.');
   if(input.mode==='apply'&&!options.canApply)throw Error('La mise à jour Erplain n’est pas activée. Relancez une actualisation V3 uniquement.');
   const id=randomUUID();
-  const inserted=await db.query(`INSERT INTO tracking_sync_runs(id,requested_by,mode,order_ids) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *`,[id,user.email,input.mode,input.ids?JSON.stringify([...new Set(input.ids)]):null]);
+  const inserted=await db.query(`INSERT INTO tracking_sync_runs(id,requested_by,mode,order_ids) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *`,[id,user.email,input.mode,JSON.stringify(ids)]);
   if(inserted.rows.length)return {run:inserted.rows[0],existing:false};
   return {run:(await db.query("SELECT * FROM tracking_sync_runs WHERE status IN ('queued','running') ORDER BY created_at LIMIT 1")).rows[0],existing:true};
  }
@@ -33,8 +38,8 @@ export function trackingSyncService(db,directory,{env=process.env,shouldStop=()=
    job=(await db.query(`UPDATE tracking_sync_runs SET status='running',started_at=now() WHERE status='queued' AND id=(SELECT id FROM tracking_sync_runs WHERE status='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`)).rows[0];
    if(!job)return;
    if(job.mode==='apply'&&!(await capabilities()).canApply)throw Error('Configuration Erplain modifiée : synchronisation interrompue');
-   const wanted=job.order_ids?new Set(job.order_ids):null;
-   const targets=(await loadTrackingTargets(db)).filter(t=>!wanted||wanted.has(t.orderId));
+   const wanted=new Set(selectedTrackingOrders(job.order_ids));
+   const targets=(await loadTrackingTargets(db)).filter(t=>wanted.has(t.orderId));
    await db.query('UPDATE tracking_sync_runs SET total=$2 WHERE id=$1',[job.id,targets.length]);
    const report=await synchronizeTracking({targets,...clients(),store,apply:job.mode==='apply',shouldStop,onRow:async(row,target)=>{
     if(row.events?.length&&!target.issue){
