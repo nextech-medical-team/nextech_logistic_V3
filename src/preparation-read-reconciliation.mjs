@@ -47,7 +47,9 @@ export async function reconcilePreparationFromReads(db,api,id,{readDocuments=rea
  const mapping=await currentMappingFingerprint(db,o),before=digest(o);
  const lines=(await db.query('SELECT l.*,m.target_sku mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[id,o.channel])).rows;
  const bc=await readDocuments(provider,o.erp_live.bc.id),bl=bc.shipping_orders?.data?.find(b=>String(b.id)===String(o.erp_live.bl.id));
- if(bc.status!=='active'||bc.external_reference!==o.reference||!bl||!['ready_to_ship','shipped','delivered','completed'].includes(bl.status))throw Error('Préparation · Identité ou état du BC/BL existant différent');
+ // Erplain may retain "in preparation" while V3 has verified the existing
+ // label and stock. Preserve that supplier status and validate the proof below.
+ if(bc.status!=='active'||bc.external_reference!==o.reference||!bl||!['in_preparation','ready_to_ship','shipped','delivered','completed'].includes(bl.status))throw Error('Préparation · Identité ou état du BC/BL existant différent');
  assertPreparationAddress(o,bc,bl);
  if(skuTotals(lines.map(l=>currentMappingLine(l,o.channel)))!==skuTotals(bc.line_items)||skuTotals(bc.line_items)!==skuTotals(bl.line_items)||deliveryTotals(bc.line_items)!==deliveryTotals(bl.line_items))throw Error('Préparation · Mapping actuel, produits, lieux ou quantités BC/BL différents');
  const source=o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.erp_live.pricing;

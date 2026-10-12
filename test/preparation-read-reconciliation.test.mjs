@@ -49,3 +49,38 @@ for(const kind of ['quantity','currency','address','tax-code','active-correction
   assert.notEqual(r?.updated,true);assert.equal((await db.query('SELECT resolution_pending_resume held FROM orders')).rows[0].held,true);assert.equal((await db.query('SELECT count(*)::int n FROM audit')).rows[0].n,0);
  }finally{await db.close();}
 });
+
+test('Erplain in preparation permits verified local readiness without changing supplier status',async()=>{
+ const f=await fixture();try{
+  f.bl.status='in_preparation';
+  const result=await reconcilePreparationFromReads(f.db,f.api,'o',f.options);
+  assert.equal(result.updated,true);assert.equal(result.providerMutations,0);
+  const o=(await f.db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
+  assert.equal(o.label_status,'production_ready');assert.equal(o.erp_live.phase,'bl_ready');
+  assert.equal(o.erp_live.bl.status,'in_preparation');assert.equal(o.resolution_pending_resume,false);
+ }finally{await f.db.close();}
+});
+
+test('cancelled BL remains protected even with label and stock proof',async()=>{
+ const f=await fixture();try{
+  f.bl.status='cancelled';
+  await assert.rejects(()=>reconcilePreparationFromReads(f.db,f.api,'o',f.options),/Identité ou état/);
+  assert.equal((await f.db.query('SELECT resolution_pending_resume held FROM orders')).rows[0].held,true);
+  assert.equal((await f.db.query('SELECT count(*)::int n FROM audit')).rows[0].n,0);
+ }finally{await f.db.close();}
+});
+
+test('one-piece order override takes precedence over a global 64-piece mapping with existing documents',async()=>{
+ const f=await fixture();try{
+  f.bl.status='in_preparation';f.line.quantity=1;
+  await f.db.query("UPDATE lines SET quantity=1,target_quantity=1,source_payload='{\"mappingScope\":\"order\"}'");
+  await f.db.query("INSERT INTO mappings VALUES('shopify','X','X',1,64)");
+  await f.db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{pricing,items,0,quantity}','1')");
+  const before=(await f.db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
+  await f.db.query("UPDATE orders SET erp_live=erp_live||$1::jsonb",[JSON.stringify({labelPreparationFingerprint:await shipmentFingerprint(f.db,before)})]);
+  const result=await reconcilePreparationFromReads(f.db,f.api,'o',f.options);
+  assert.equal(result.updated,true);assert.equal(result.providerMutations,0);
+  assert.equal((await f.db.query('SELECT target_qty FROM mappings')).rows[0].target_qty,64);
+  const o=(await f.db.query('SELECT erp_live FROM orders')).rows[0];assert.equal(o.erp_live.bl.line_items[0].quantity,1);
+ }finally{await f.db.close();}
+});
