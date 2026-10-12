@@ -29,7 +29,7 @@ test('label recovery in paused mode preserves command data and existing PDF',asy
  try{const local=temuLocalService(adapter,'.',{apiFactory:()=>api,shopLoader:async()=>[],configLoader:async()=>({})});const r=await local.recover('PO-1-2');assert.equal(r.status,'complete');assert.equal(r.orderApiPaused,true);
  assert.deepEqual((await db.query('SELECT * FROM orders')).rows,before);assert.deepEqual((await db.query('SELECT * FROM lines')).rows,lines);assert.deepEqual((await db.query('SELECT * FROM temu_label_documents')).rows,pdf);
  assert.ok(!queries.some(sql=>/UPDATE orders|UPDATE lines|DELETE|INSERT INTO orders/i.test(sql)));
- await db.query("UPDATE temu_label_jobs SET packages='[]' WHERE reference='PO-1-2'");const fresh=await local.recover('PO-1-2');assert.equal(fresh.status,'complete');assert.deepEqual((await db.query('SELECT * FROM orders')).rows,before);assert.deepEqual((await db.query('SELECT * FROM lines')).rows,lines);assert.deepEqual((await db.query('SELECT * FROM temu_label_documents')).rows,pdf);
+ await db.query("UPDATE temu_label_jobs SET packages='[]',result='{}' WHERE reference='PO-1-2'");const fresh=await local.recover('PO-1-2');assert.equal(fresh.status,'complete');assert.deepEqual((await db.query('SELECT * FROM orders')).rows,before);assert.deepEqual((await db.query('SELECT * FROM lines')).rows,lines);assert.deepEqual((await db.query('SELECT * FROM temu_label_documents')).rows,pdf);
  assert.deepEqual(await local.collectors(),[]);await assert.rejects(local.amounts('PO-1-2'),{code:'TEMU_ORDER_API_PAUSED'});
  }finally{configureTemuOrderApiPolicy(null);await db.close();}
 });

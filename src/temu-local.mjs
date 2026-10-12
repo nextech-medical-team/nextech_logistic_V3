@@ -44,13 +44,13 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
   const {o,api,service}=await context(reference);
   const known=(await db.query('SELECT packages,attempt_id FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
   if(hasExternalLabel(o))return {reference,status:'external',documents:true,orderApiPaused:true};
-  if(known?.packages?.length){const j=await service.recover(reference,{packages:known.packages});return {reference,status:j.status,documents:true,error:j.error||null,orderApiPaused:true};}
+  if(known?.packages?.length){const j=await service.recover(reference,{packages:known.packages,preserveExistingDocuments:true});return {reference,status:j.status,documents:true,error:j.error||null,orderApiPaused:true};}
   // Read only the provider line/package identifiers required to locate labels.
   // Never copy this response into orders/lines/customer/amount fields.
   const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference},{purpose:'label'});
   const shipments=await readTemuShipments(api,reference,detail);
   const packages=[...new Set([...(detail.orderList||[]).flatMap(l=>(l.packageSnInfo||[]).map(p=>p.packageSn)),...shipments.shipmentInfoDTO.flatMap(s=>[s,...(s.subPackageShipmentInfoList||[])]).map(s=>{if(s.parentOrderSn&&s.parentOrderSn!==reference)throw Error('TEMU · Colis d’une autre commande');return s.packageSn;})].filter(Boolean))];
-  if(packages.length){const j=await service.recover(reference,{packages});return {reference,status:j.status,documents:true,error:j.error||null,orderApiPaused:true};}
+  if(packages.length){const j=await service.recover(reference,{packages,preserveExistingDocuments:true});return {reference,status:j.status,documents:true,error:j.error||null,orderApiPaused:true};}
   if(known?.attempt_id)throw Error('TEMU · Achat existant sans colis confirmé : vérifier avant tout nouvel achat');
   if(forceQuote&&!shipments.shipmentInfoDTO.length){const plan=await service.prepare(reference,channel,{detail,shipments});return {reference,status:'ready',plan,orderApiPaused:true};}
   return {reference,status:shipments.shipmentInfoDTO.length?'external':'pending',orderApiPaused:true};

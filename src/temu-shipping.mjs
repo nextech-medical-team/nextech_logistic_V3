@@ -69,7 +69,7 @@ export function temuShipping(db,api){
   const details=result.packageInfoResultList||[];for(const p of details){if(!packages.includes(p.packageSn)||!p.orderSendInfoList?.length||!p.orderSendInfoList.some(l=>l.parentOrderSn===reference))throw new Error('Identité du colis non vérifiable');}
   if(new Set(details.map(p=>p.packageSn)).size!==packages.length||details.length!==packages.length)throw new Error('Résultat TEMU incomplet : récupération à relancer');
   const ready=details.filter(p=>Number(p.shippingLabelStatus)===1).map(p=>p.packageSn);
-  const saved=verifiedBefore?(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1',[reference])).rows.map(r=>r.package):[];
+  const saved=verifiedBefore||fresh.preserveExistingDocuments===true?(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1',[reference])).rows.map(r=>r.package):[];
   const missing=ready.filter(p=>!saved.includes(p));let documentWarnings=[];
   if(missing.length){const docs=await api.read('bg.logistics.shipment.document.get',{documentType:'SHIPPING_LABEL_PDF',packageSnList:missing});documentWarnings=(Array.isArray(docs.warningMessage)?docs.warningMessage:docs.warningMessage?[docs.warningMessage]:[]).map(w=>String(w).slice(0,500));
    for(const d of docs.shippingLabelUrlList||[]){if(!missing.includes(d.packageSn)||d.documentType!=='SHIPPING_LABEL_PDF')throw Error('TEMU · Document associé à un autre colis');const pdf=await api.pdf(d.url);await db.query('INSERT INTO temu_label_documents VALUES($1,$2,$3) ON CONFLICT(reference,package) DO UPDATE SET pdf=excluded.pdf',[reference,d.packageSn,pdf]);}
