@@ -1,3 +1,4 @@
+import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {resolveReplacementLines} from './resolution-quantities.mjs';
 import {importedLabelDiagnosticReconciler} from './imported-label-diagnostic.mjs';
@@ -157,7 +158,7 @@ export async function recheckOrders(db,ids){
 }
 async function affectedSku(db,sku){return (await db.query(`SELECT DISTINCT o.id FROM orders o JOIN lines l ON l.order_id=o.id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku WHERE coalesce(l.target_sku,m.target_sku,l.source_sku)=$1 AND ${mutablePreparation}`,[sku])).rows.map(o=>o.id);}
 async function context(db,directory,id){
- const order=(await db.query('SELECT * FROM orders WHERE id=$1',[id])).rows[0];if(!order)throw Error('Commande introuvable');
+ const order=(await db.query('SELECT orders.*, '+completeOrderDocumentsSql+' AS complete_order_documents FROM orders WHERE id=$1',[id])).rows[0];if(!order)throw Error('Commande introuvable');
  if(order.partial_mode)order.partial_allocation=(await db.query(`SELECT ${partialAllocationSql} allocation FROM orders WHERE id=$1`,[id])).rows[0]?.allocation||[];
  const lines=(await db.query(`SELECT l.*,m.target_sku mapped_sku,m.source_qty,m.target_qty,m.notes,coalesce((l.source_payload->>'erplainCorrectedWeightKg')::numeric,p.weight_kg) weight_kg,c.message,b.live_variant_id FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku LEFT JOIN products p ON p.sku=coalesce(l.target_sku,m.target_sku,l.source_sku) LEFT JOIN catalog_results c ON c.sku=coalesce(l.target_sku,m.target_sku,l.source_sku) LEFT JOIN erplain_product_bindings b ON b.sku=coalesce(l.target_sku,m.target_sku,l.source_sku) WHERE l.order_id=$1 ORDER BY source_line`,[id,order.channel])).rows;
  const job=(await db.query('SELECT status,error,environment,reference,tracking,stock_override FROM carrier_jobs WHERE order_id=$1',[id])).rows[0],erpJob=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[id])).rows[0];

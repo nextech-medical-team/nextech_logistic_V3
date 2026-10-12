@@ -16,6 +16,8 @@
   for(const ref of body.querySelectorAll('[data-detail]')){
    const r=latest.get(ref.dataset.detail),cell=ref.closest('tr').cells[index];if(!cell)continue;
    let box=cell.querySelector('.order-processing'),button=ref.parentElement.querySelector('.processing-priority');
+   // Completed documents suppress current blockers without modifying processing jobs.
+   if(ref.closest('tr').dataset.completeOrderDocuments==='true'){box?.remove();button?.remove();continue;}
    if(!r?.stage&&!r?.previewPending&&!r?.priority&&!r?.canPrioritize&&!r?.monitoring?.blocked&&!r?.monitoring?.followUp){box?.remove();button?.remove();continue;}
    cell.style.setProperty('width','240px','important');body.closest('table').querySelectorAll('thead th')[index].style.setProperty('width','240px','important');
    if(!box){box=document.createElement('div');box.className='order-processing';box.style.minWidth='220px';box.style.fontSize='12px';box.style.lineHeight='1.4';
