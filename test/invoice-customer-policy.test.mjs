@@ -21,3 +21,8 @@ test('consumer finalization confirms invoice identity and status',async()=>{
  await assert.rejects(gateway.finalizeInvoice({id:42,customer:{id:77}},{channel:'temu'}),/Finalisation facture non confirmée/);
  }
 });
+
+const humanDecision={orderId:'o',authority:'human',customerType:'individual',confirmedAt:'2026-10-12T11:32:00Z'};
+test('human-confirmed consumer overrides only the same Amazon business marker',()=>{const context={channel:'amazon',orderId:'o',sourcePayload:{isbusinessorder:'true',invoiceCustomerClassification:humanDecision}};assert.equal(consumerInvoice(context),true);for(const patch of [{orderId:'other'},{orderId:undefined},{channel:'temu'}])assert.equal(consumerInvoice({...context,...patch}),false);});
+for(const patch of [{authority:'import'},{customerType:'company'},{confirmedAt:'invalid'},{orderId:'other'}])test('unconfirmed classification does not override business '+JSON.stringify(patch),()=>{assert.equal(consumerInvoice({channel:'amazon',orderId:'o',sourcePayload:{isbusinessorder:'true',invoiceCustomerClassification:{...humanDecision,...patch}}}),false);});
+for(const professional of [{b2b:true},{isB2B:true},{company:'Company'},{billingAddress:{company:'Company'}},{customer_type:'company'}])test('human Amazon marker decision preserves other professional evidence '+JSON.stringify(professional),()=>{assert.equal(consumerInvoice({channel:'amazon',orderId:'o',sourcePayload:{...professional,isbusinessorder:'true',invoiceCustomerClassification:humanDecision}}),false);});
