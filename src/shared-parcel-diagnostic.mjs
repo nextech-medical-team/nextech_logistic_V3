@@ -1,3 +1,4 @@
+import {withoutPreparationObservation} from './movement-watch-diagnostic.mjs';
 // A common tracking number is allowed. Only the obsolete diagnostic is removed.
 // No job, label, document, status or business data is changed here.
 export const sharedParcelReason="Colis partagé entre plusieurs commandes";
@@ -16,6 +17,6 @@ export function withoutSharedParcelReasonSql(raw){
 }
 export function projectSharedParcelContext(ctx){
  if(!ctx||typeof ctx!=='object')return ctx;
- for(const [target,key] of [[ctx.order,'issue'],[ctx.order,'resolution_error'],[ctx.erpJob,'error'],[ctx.job,'error'],[ctx.temuJob,'error']])if(target&&Object.hasOwn(target,key))target[key]=withoutSharedParcelReason(target[key]);
+ for(const [target,key] of [[ctx.order,'issue'],[ctx.order,'resolution_error'],[ctx.erpJob,'error'],[ctx.job,'error'],[ctx.temuJob,'error']])if(target&&Object.hasOwn(target,key))target[key]=ctx.order?.channel==='temu'?withoutPreparationObservation(withoutSharedParcelReason(target[key])):withoutSharedParcelReason(target[key]);
  return ctx;
 }

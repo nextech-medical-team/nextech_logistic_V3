@@ -1,3 +1,4 @@
+import {preparationObservation} from './movement-watch-diagnostic.mjs';
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -36,7 +37,7 @@ export async function observeMovement(api,order){
  parcels.push({packageSn:p.packageSn,tracking:String(p.trackingNumber),carrier:String(p.shippingCompanyName||''),labelStatus:Number(p.shippingLabelStatus),preparationOnly,states,events});
  }
  const proof={sourceStatus:d.status,complete:true,parcels,originalTrackingGuardPasses:parcels.every(p=>p.preparationOnly),universalNoMovementCertificate:false};
- if(proof.originalTrackingGuardPasses)return {...result,reasonCode:'preparation_only_observed',detail:'Suivi TEMU relu : seuls des événements de préparation sont observés. Reprise historique et autres contrôles à valider. Suspension conservée.',proof};
+ if(proof.originalTrackingGuardPasses)return {...result,reasonCode:'preparation_only_observed',detail:preparationObservation,proof};
  const physical=parcels.some(p=>p.states.some(s=>['shipped','delivered'].includes(s)));
  return {...result,reasonCode:physical?'physical_progress':'tracking_review',detail:physical?'Colis TEMU pris en charge ou livré : suivi uniquement, aucune nouvelle préparation déduite.':'Suivi du colis non vérifiable (TEMU) : événement inconnu, contradictoire ou incident à rapprocher.',proof};
 }

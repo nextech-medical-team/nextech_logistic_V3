@@ -1,3 +1,4 @@
+import {withoutPreparationObservation,withoutPreparationObservationSql,currentMovementDetail} from './movement-watch-diagnostic.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {observeMovement,observationFingerprint,transportClients} from './movement-watch-observation.mjs';
 export const CHECK_MS=900000,WATCHDOG_MS=300000,LEASE_MS=600000;
@@ -23,10 +24,11 @@ export async function finishMovementObservation(db,job,result,{retryAfter=0}={})
  if(!current)return false;
  const changed=observationFingerprint(current)!==fingerprint;
  const prior=(await tx.query('SELECT * FROM movement_watch WHERE order_id=$1 AND lease_token=$2 AND lease_until>clock_timestamp() FOR UPDATE',[job.order.id,job.token])).rows[0];if(!prior)return false;
+ result={...result,detail:currentMovementDetail(result.reasonCode,result.detail)};
  const evidence=changed?{writeAllowed:false,resumeAllowed:false,reasonCode:'order_changed',detail:'Commande modifiée pendant la lecture : nouvelle vérification requise.'}:{...result};
  if(prior.evidence?.publicReason)evidence.publicReason=prior.evidence.publicReason;
  if(!changed&&result.reasonCode!=='read_interrupted'){const old=String(current.issue||'').includes('Absence de mouvement non vérifiable')?'Absence de mouvement non vérifiable':prior.evidence?.publicReason;
-  if(old&&String(current.issue||'').includes(old)){evidence.publicReason=result.detail;current.issue=String(current.issue).replaceAll(old,result.detail);await tx.query('UPDATE orders SET issue=$2 WHERE id=$1',[current.id,current.issue]);await tx.query('UPDATE erp_live_jobs SET error=replace(error,$2,$3) WHERE order_id=$1 AND error IS NOT NULL AND position($2 IN error)>0',[current.id,old,result.detail]);}
+  if(old&&String(current.issue||'').includes(old)){evidence.publicReason=result.reasonCode==='preparation_only_observed'?null:result.detail;current.issue=result.reasonCode==='preparation_only_observed'?withoutPreparationObservation(String(current.issue)):String(current.issue).replaceAll(old,result.detail);await tx.query('UPDATE orders SET issue=$2 WHERE id=$1',[current.id,current.issue]);if(result.reasonCode==='preparation_only_observed')await tx.query('UPDATE erp_live_jobs SET error='+withoutPreparationObservationSql('error')+' WHERE order_id=$1 AND error IS NOT NULL',[current.id]);else await tx.query('UPDATE erp_live_jobs SET error=replace(error,$2,$3) WHERE order_id=$1 AND error IS NOT NULL AND position($2 IN error)>0',[current.id,old,result.detail]);}
  }
  const delay=changed||result.reasonCode==='read_interrupted'?0:Math.max(CHECK_MS,Number.isFinite(retryAfter)?retryAfter*1000:0);
  return (await tx.query(`UPDATE movement_watch SET state=$3,reason_code=$4,detail=$5,evidence=$6::jsonb,source_fingerprint=$7,last_check_at=clock_timestamp(),next_check_at=clock_timestamp()+($8::double precision*interval '1 millisecond'),lease_token=NULL,lease_until=NULL,alerted_at=CASE WHEN $4='preparation_only_observed' THEN NULL ELSE alerted_at END,alert_key=CASE WHEN $4='preparation_only_observed' THEN NULL ELSE alert_key END,updated_at=clock_timestamp() WHERE order_id=$1 AND lease_token=$2 RETURNING order_id`,[job.order.id,job.token,changed?'waiting':'observed',evidence.reasonCode,evidence.detail,JSON.stringify(evidence),changed?null:observationFingerprint(current),delay])).rows.length===1;
@@ -34,6 +36,11 @@ export async function finishMovementObservation(db,job,result,{retryAfter=0}={})
 }
 export async function movementWatchdog(db){
  await seedMovementWatch(db);
+ // Requalify persisted diagnostic text without waiting for a remote quota.
+ // Preserve statuses, documents, stock, histories and all independent reasons.
+ await db.query('UPDATE orders SET issue='+withoutPreparationObservationSql('issue')+" WHERE channel='temu' AND issue IS DISTINCT FROM ("+withoutPreparationObservationSql('issue')+')');
+ await db.query('UPDATE erp_live_jobs SET error='+withoutPreparationObservationSql('error')+" WHERE order_id IN (SELECT id FROM orders WHERE channel='temu') AND error IS DISTINCT FROM ("+withoutPreparationObservationSql('error')+')');
+ await db.query("UPDATE movement_watch SET detail=$1,alerted_at=NULL,alert_key=NULL WHERE reason_code='preparation_only_observed' AND (detail<>$1 OR alerted_at IS NOT NULL OR alert_key IS NOT NULL)",[currentMovementDetail('preparation_only_observed')]);
  await db.query("UPDATE movement_watch SET state='waiting',lease_token=NULL,lease_until=NULL,next_check_at=least(next_check_at,clock_timestamp()),detail='Vérification interrompue : reprise en lecture seule programmée',updated_at=clock_timestamp() WHERE lease_until<=clock_timestamp()");
  // Alert keys are stable for an unchanged reason and source; no alert spam.
  const rows=(await db.query("SELECT order_id,reason_code,source_fingerprint,alert_key FROM movement_watch WHERE first_observed_at<=clock_timestamp()-interval '1 hour' AND reason_code<>'preparation_only_observed'")).rows;
@@ -53,7 +60,7 @@ export function movementWatchWorker(db,directory,{api,observe=observeMovement,sh
 }
 export async function movementWatchStatus(db){
  const stored=(await db.query(`SELECT w.order_id,o.reference,row_to_json(o) AS current_order,w.state,w.reason_code,w.detail,w.first_observed_at,w.last_check_at,w.next_check_at,w.alerted_at,w.source_fingerprint,w.evidence,((w.next_check_at<clock_timestamp()-interval '5 minutes') AND (w.lease_until IS NULL OR w.lease_until<=clock_timestamp())) AS overdue,(w.check_started_at<clock_timestamp()-interval '20 minutes' AND w.state='checking') AS stalled FROM movement_watch w JOIN orders o ON o.id=w.order_id ORDER BY w.next_check_at,w.order_id`)).rows;
- const rows=stored.map(({current_order,evidence,source_fingerprint,...row})=>source_fingerprint&&source_fingerprint!==observationFingerprint(current_order)?{...row,reason_code:'order_changed',detail:'Commande modifiée depuis la dernière lecture : preuve à actualiser.',proofCurrent:false}:{...row,proofCurrent:!!source_fingerprint});
+ const rows=stored.map(({current_order,evidence,source_fingerprint,...row})=>source_fingerprint&&source_fingerprint!==observationFingerprint(current_order)?{...row,reason_code:'order_changed',detail:'Commande modifiée depuis la dernière lecture : preuve à actualiser.',proofCurrent:false}:{...row,detail:currentMovementDetail(row.reason_code,row.detail),alerted_at:row.reason_code==='preparation_only_observed'?null:row.alerted_at,proofCurrent:!!source_fingerprint});
  const watchdog=(await db.query("SELECT value FROM settings WHERE key='movement_watchdog'")).rows[0]?.value||{};
  return {at:new Date().toISOString(),checkEveryMinutes:15,watchdogEveryMinutes:5,alertAfterMinutes:60,watchdog,rows};
 }

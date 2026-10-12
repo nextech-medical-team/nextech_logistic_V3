@@ -1,6 +1,7 @@
 import {hasCompleteOrderDocuments} from './complete-order-documents.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {projectFrozenSourceDiagnostics,sourceReviewReasonSql} from './marketplace-content-freeze.mjs';
+import {withoutPreparationObservation,withoutPreparationObservationSql} from './movement-watch-diagnostic.mjs';
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
 import {projectTemuQuantityDiagnosis} from './temu-fulfillment-quantities.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
@@ -25,7 +26,8 @@ function currentCarrierReasonSql(raw){
 // whose CASE otherwise expands the expensive source subquery repeatedly.
 function currentStrippedReasonSql(raw){
  const projected=currentCarrierReasonSql(withoutSharedParcelReasonSql('source_reason.raw_reason'));
- return `(SELECT ${projected} FROM (SELECT (${sourceReviewReasonSql(raw)}) AS raw_reason OFFSET 0) source_reason)`;
+ const source = `(SELECT ${projected} FROM (SELECT (${sourceReviewReasonSql(raw)}) AS raw_reason OFFSET 0) source_reason)`;
+ return `(SELECT CASE WHEN channel='temu' THEN ${withoutPreparationObservationSql('transport_projection.raw_reason')} ELSE transport_projection.raw_reason END FROM (SELECT (${source}) AS raw_reason OFFSET 0) transport_projection)`;
 }
 export function currentReasonSql(raw){
  const stripped=currentStrippedReasonSql(raw);raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
