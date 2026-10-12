@@ -15,6 +15,6 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  const ready=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-READY'});await expect(ready.locator('.compact-problem')).toHaveCount(0);
  const failed=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-PREPARATION'});await expect(failed).not.toContainText('Transporteur non déterminé');await expect(failed).toContainText('Validation stock / BL à actualiser');
  const unknown=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-UNKNOWN'});await expect(unknown).toContainText('Transporteur non déterminé');
- await failed.scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/current-carrier-'+name+'.png',fullPage:false});expect(writes).toEqual([]);expect(errors).toEqual([]);
+ await failed.locator('.compact-problem').first().scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/current-carrier-'+name+'.png',fullPage:false});expect(writes).toEqual([]);expect(errors).toEqual([]);
  fs.writeFileSync('proofs/current-carrier-'+name+'.json',JSON.stringify({status:'PASS',viewport,obsoleteMessageRemoved:true,preparationErrorPreserved:true,unknownCarrierPreserved:true,writes,errors,scope:'Synthetic data, full application UI; no production label or business mutation'}));
 });
