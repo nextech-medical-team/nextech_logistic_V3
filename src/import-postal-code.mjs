@@ -1,4 +1,4 @@
-export const postalHeaders=new Set(['shippostalcode','adressedelivraisoncodepostal']);
+export const postalHeaders=new Set(['shippostalcode','adressedelivraisoncodepostal','shippingzip','billingzip']);
 export function postalCellValue(cell){
  const v=cell.value;
  if(typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&/^0{2,12}$/.test(cell.numFmt||''))return String(v).padStart(cell.numFmt.length,'0');

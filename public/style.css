@@ -207,3 +207,7 @@ body{font-size:13px}main input,main select,main button,dialog input,dialog selec
 #view-orders #order-rows .processing-expanded .processing-content{height:auto;overflow:visible}
 #view-orders #order-rows .processing-details-toggle{display:block;width:100%;min-height:32px;margin-top:5px;padding:4px 6px;border:1px solid #b8cad8;border-radius:5px;background:#fff;color:#173b65;font:inherit;text-align:left;white-space:normal;cursor:pointer}
 #view-orders #order-rows .processing-details-toggle:focus-visible{outline:2px solid #173b65;outline-offset:2px}
+
+/* The Shopify import screen only shows its own import information. */
+main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
+#view-import-shopify #import-format-help{display:none!important}
