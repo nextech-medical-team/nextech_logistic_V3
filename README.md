@@ -11,7 +11,7 @@ L'export initial du serveur ne contenait pas les dossiers `scripts/` et `test/`.
 
 Après activation CI/CD, chaque push main est publié par l’exécuteur Section7 : tests, file commune, preuves et verrou serveur restent obligatoires.
 
-Les instantanés métier margin-published-snapshot.json et temu-reading-reports.json sont exclus. Le périmètre privé de réimport TEMU est vide dans cette copie : aucun réimport de ce lot ne peut être autorisé par cette copie. Le service de marges nécessite son fichier de configuration privé pour démarrer. Ces exclusions concernent seulement le dépôt public ; le serveur reste inchangé.
+Les instantanés métier margin-published-snapshot.json et temu-reading-reports.json sont exclus. Le périmètre privé de réimport TEMU est vide dans cette copie : aucun réimport de ce lot ne peut être autorisé par cette copie. Le serveur démarre sans le référentiel privé de marges ; les marges restent indisponibles jusqu’à sa restauration dans src/margin-published-snapshot.json, puis au redémarrage du serveur. Aucun montant de remplacement n’est calculé.
 Les identifiants privés du lot cancelled-import-reimport sont aussi retirés ; ce lot reste désactivé dans la copie publique.
 
 ## Reprise d'un remplacement après récupération TEMU

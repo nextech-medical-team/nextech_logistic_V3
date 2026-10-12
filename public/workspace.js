@@ -8,8 +8,31 @@ show=async function(view){
  }await originalShow(view);
 };
 function addView(id,html){const el=document.createElement('section');el.id='view-'+id;el.className='view';el.hidden=true;el.innerHTML=html;document.querySelector('main').append(el);}
+addView('import-shopify','');
+const sharedImportPanel=$('import-form').closest('.panel');
+const showBeforeImportScreens=show;
+show=async function(view){
+ if(view==='imports'||view==='import-shopify'){
+  const shopify=view==='import-shopify';
+  if(currentView!==view){clearImportPreview();$('import-file').value='';$('import-result').textContent='';}
+  $('view-'+view).prepend(sharedImportPanel);
+  $('import-kind').closest('label').hidden=shopify;
+  $('import-file').accept=shopify?'.xlsx,.csv':'.txt,.tsv,.csv,.xlsx';
+  sharedImportPanel.querySelector('h2').textContent=shopify?'Importer des commandes Shopify':'Importer un fichier';
+  $('shopify-import-help').hidden=!shopify;
+  $('import-form').dataset.channel=shopify?'shopify':'';
+  if(shopify){
+   currentView=view;
+   document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+view);
+   document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));
+   $('title').textContent='Import Shopify';
+   return;
+  }
+ }
+ await showBeforeImportScreens(view);
+};
 const nav=document.querySelector('nav');
-nav.innerHTML=`<small class="nav-label">COMMANDES</small><button data-view="orders">Toutes les commandes</button>${[['amazon','Amazon'],['shopify','Shopify'],['temu','TEMU'],['tender','Appels d’offres']].map(([c,t])=>`<button data-channel="${c}">${t}</button>`).join('')}<small class="nav-label">EXPÉDITIONS</small>${['gls','gofo','temu'].map(c=>`<button data-carrier="${c}">${c.toUpperCase()}</button>`).join('')}<small class="nav-label">PARAMÈTRES</small><button data-view="imports">Imports de fichiers</button><button data-view="mappings">Mapping SKU</button><button data-view="products">Poids produits</button><button data-view="connections">Transporteurs et connexions</button><button data-view="coverage">Sections et état d’avancement</button><button data-view="technical">Espace technique</button><button data-view="users">Équipe</button><button data-view="audit">Journal des actions</button>`;
+nav.innerHTML=`<small class="nav-label">COMMANDES</small><button data-view="orders">Toutes les commandes</button>${[['amazon','Amazon'],['shopify','Shopify'],['temu','TEMU'],['tender','Appels d’offres']].map(([c,t])=>`<button data-channel="${c}">${t}</button>`).join('')}<small class="nav-label">EXPÉDITIONS</small>${['gls','gofo','temu'].map(c=>`<button data-carrier="${c}">${c.toUpperCase()}</button>`).join('')}<small class="nav-label">PARAMÈTRES</small><button data-view="imports">Imports de fichiers</button><button data-view="import-shopify">Import Shopify · Excel</button><button data-view="mappings">Mapping SKU</button><button data-view="products">Poids produits</button><button data-view="connections">Transporteurs et connexions</button><button data-view="coverage">Sections et état d’avancement</button><button data-view="technical">Espace technique</button><button data-view="users">Équipe</button><button data-view="audit">Journal des actions</button>`;
 nav.querySelectorAll('[data-view]').forEach(el=>el.onclick=()=>{if(el.dataset.view==='orders')$('channel').value='';show(el.dataset.view);});
 nav.querySelectorAll('[data-channel]').forEach(el=>el.onclick=()=>{$('channel').value=el.dataset.channel;page=1;selected.clear();show('orders');});
 nav.querySelectorAll('[data-carrier]').forEach(el=>el.onclick=()=>{$('shipment-carrier').value=el.dataset.carrier;show('shipments');});

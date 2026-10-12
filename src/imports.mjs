@@ -3,6 +3,7 @@ import {cancelledImportSql,releaseCancelledImportReferences} from './cancelled-i
 import {tenderPhone} from './tender-label-fields.mjs';
 import {retainVisibleOrder} from './order-visibility.mjs';
 import ExcelJS from 'exceljs';
+import {parseShopifyRows,completeShopifyFileOrders} from './shopify-file-import.mjs';
 
 import { randomUUID,createHash } from 'node:crypto';
 
@@ -58,7 +59,7 @@ export function delimited(text,delimiter='\t'){
 
 }
 
-export async function readTable(buffer,filename,{exactNotes=false}={}){
+export async function readTable(buffer,filename,{exactNotes=false,shopifyRecords=false}={}){
 
   if(buffer.length>12*1024*1024)throw new Error('Fichier limité à 12 Mo');
 
@@ -95,6 +96,33 @@ export async function readTable(buffer,filename,{exactNotes=false}={}){
     rows=delimited(text,delimiter);
 
   }else throw new Error('Formats acceptés : TXT, TSV, CSV, XLSX');
+
+  if(shopifyRecords){
+    // Excel sometimes saves an entire CSV record in each cell of column A.
+    const packedHeader=rows[0]?.length===1?rows[0][0]:null;
+    const headerText=packedHeader||rows[0]?.join(',')||'';
+    const delimiter=headerText.includes('\t')?'\t':headerText.includes(';')?';':',';
+    if(packedHeader){
+      const candidates=delimited(packedHeader,delimiter);
+      if(candidates.length===1&&['name','lineitemsku','lineitemquantity'].every(h=>candidates[0].map(key).includes(h))){
+        rows=rows.map((row,i)=>{
+          if(row.length!==1)throw Error(`Export Shopify en colonne unique incohérent ligne ${i+1}`);
+          const cells=delimited(row[0],delimiter);
+          if(cells.length!==1)throw Error(`Plusieurs enregistrements Shopify dans la cellule ligne ${i+1}`);
+          return cells[0];
+        });
+      }
+    }
+    if(rows[0]?.length>1){
+      const width=rows[0].length;
+      rows=rows.map((row,i)=>{
+        if(i===0)return row;
+        if(row.length===1){const nested=delimited(row[0],delimiter);if(nested.length===1&&nested[0].length>1&&nested[0].length<=width)return nested[0];}
+        if(row.length>width||(row.length===1&&row[0].includes(delimiter)))throw Error(`Nombre de colonnes Shopify incorrect ligne ${i+1} : ${row.length} au lieu de ${width}`);
+        return row;
+      });
+    }
+  }
 
   if(rows.length<2)throw new Error('Fichier sans données');
 
@@ -140,7 +168,9 @@ export async function importMapping(db,buffer,filename){
 
 export async function parseOrders(buffer,filename,channel){
 
-  if(!['amazon','tender','samples'].includes(channel))throw new Error('Canal d’import invalide');
+  if(!['amazon','tender','samples','shopify'].includes(channel))throw new Error('Canal d’import invalide');
+
+  if(channel==='shopify')return parseShopifyRows(await readTable(buffer,filename,{shopifyRecords:true}));
 
   const rows=await readTable(buffer,filename,{exactNotes:channel==='tender'}),groups=new Map(),errors=[];
 
@@ -189,8 +219,9 @@ export async function parseOrders(buffer,filename,channel){
   return {rows:rows.length,valid,errors};
 }
 
-export async function previewOrders(db,buffer,filename,channel){
+export async function previewOrders(db,buffer,filename,channel,options={}){
   const parsed=await parseOrders(buffer,filename,channel);
+  if(channel==='shopify')await completeShopifyFileOrders(parsed,options.shopifyReader);
   const existing=(await db.query(`SELECT DISTINCT ON (coalesce(source_reference,reference)) coalesce(source_reference,reference) AS reference,recipient,label_status,erp_status,source_payload FROM orders WHERE NOT (${cancelledImportSql}) AND channel=$1 AND coalesce(source_reference,reference)=ANY($2::text[]) ORDER BY coalesce(source_reference,reference),received_at`,[channel,parsed.valid.map(o=>o.reference)])).rows;
   const byRef=new Map(existing.map(o=>[o.reference,o]));
   const orders=parsed.valid.map(o=>({reference:o.reference,recipient:o.recipient,lines:o.lines.length,quantity:o.lines.reduce((n,l)=>n+l.quantity,0),issue:o.visibilityReason||null,recoverable:!!byRef.get(o.reference)?.source_payload?.visibilityHold,duplicate:byRef.has(o.reference)&&!byRef.get(o.reference)?.source_payload?.visibilityHold,existing:byRef.get(o.reference)||null}));
@@ -202,6 +233,7 @@ export async function importOrders(db,buffer,filename,channel,selection,options=
   if(selection!==undefined&&(!Array.isArray(selection)||selection.some(r=>typeof r!=='string')))throw new Error('Sélection de commandes invalide');
   const chosen=selection===undefined?null:new Set(selection);
   const valid=parsed.valid.filter(o=>!chosen||chosen.has(o.reference));
+  if(channel==='shopify')await completeShopifyFileOrders({...parsed,valid},options.shopifyReader);
   const duplicates=options.duplicateSelection||[];
   if(!Array.isArray(duplicates)||duplicates.some(r=>typeof r!=='string'||!chosen?.has(r)))throw new Error('Sélection de doublons invalide');
   if(duplicates.length&&!/^[a-f0-9-]{36}$/i.test(options.requestId||''))throw new Error('Identifiant de validation requis');
