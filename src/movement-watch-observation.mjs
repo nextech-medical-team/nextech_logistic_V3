@@ -6,7 +6,7 @@ import {loadShopVault} from './temu-shop-vault.mjs';
 import {readTemuOrderDiagnostic} from './temu-order-diagnostic.mjs';
 import {carrierState} from './status-policy.mjs';
 const pre=new Set(['LAST-MILE MANIFEST','LABEL CREATED','SHIPMENT INFORMATION RECEIVED']);
-const allowed=new Set(['bg.open.accesstoken.info.get','bg.order.detail.v2.get','bg.logistics.shipment.v2.get','bg.logistics.shipment.result.get','temu.track.trackinginfo.get']);
+const allowed=new Set(['bg.open.accesstoken.info.get','bg.order.list.v2.get','bg.order.amount.query','bg.order.detail.v2.get','bg.logistics.shipment.v2.get','bg.logistics.shipment.result.get','temu.track.trackinginfo.get']);
 export function observationFingerprint(o){const p=o.source_payload||{};return createHash('sha256').update(JSON.stringify({id:o.id,reference:o.reference,mall:p.mallId,packages:p.selectedReimport?.preservedPackages,hold:p.selectedReimport,labels:o.label_status,tracking:o.tracking_status,suspension:o.suspension,archived:o.archived,pending:o.resolution_pending_resume,issue:o.issue})).digest('hex');}
 export function observationApi(api,{timeoutMs=600000,shouldStop=()=>false}={}){const deadline=Date.now()+timeoutMs;let expired=false;const stopped=()=>Object.assign(Error('Lecture interrompue pour arrêt propre'),{code:'STOPPED'});return Object.freeze({async read(type,data){if(!allowed.has(type))throw Error('Lecture du suivi uniquement : opération interdite');if(shouldStop())throw stopped();const remaining=deadline-Date.now();if(expired||remaining<=0)throw Error('Délai de lecture dépassé');let timer,poll;try{return await Promise.race([api.read(type,data),new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;reject(Error('Délai de lecture dépassé'));},remaining);poll=setInterval(()=>{if(shouldStop())reject(stopped());},1000);})]);}finally{clearTimeout(timer);clearInterval(poll);}}});}
 export function transportClients(directory,{factory=temuApi,shops=loadShopVault,shouldStop=()=>false,loadConfig=async()=>JSON.parse((await readFile(path.join(directory,'temu-production.json'),'utf8')).replace(/^\uFEFF/,''))}={}){
@@ -25,7 +25,7 @@ export function transportClients(directory,{factory=temuApi,shops=loadShopVault,
 export async function observeMovement(api,order){
  api=observationApi(api);const result={checkedAt:new Date().toISOString(),domain:'physical_parcel_tracking',writeAllowed:false,resumeAllowed:false,proof:null,reasonCode:null,detail:null};
  const known=order.source_payload?.selectedReimport?.preservedPackages||[];
- const d=await readTemuOrderDiagnostic(api,order.reference,{knownPackages:known});
+ const d=await readTemuOrderDiagnostic(api,order.reference,{knownPackages:known,order});
  if(d.status===3||d.cancellationRequested)return {...result,reasonCode:d.status===3?'order_cancelled':'cancellation_requested',detail:d.status===3?'Commande annulée sur TEMU : rapprochement du suivi nécessaire, reprise conservée à l’arrêt.':'Annulation demandée chez TEMU : reprise conservée à l’arrêt.'};
  if(d.errors.length||!d.packages.length)return {...result,reasonCode:'read_incomplete',detail:'Suivi du colis non vérifiable (TEMU) : '+(d.errors.map(e=>e.message).join(' · ')||'aucun colis identifié'),proof:{sourceStatus:d.status,complete:false}};
  const parcels=[];

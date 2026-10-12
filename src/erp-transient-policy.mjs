@@ -1,8 +1,10 @@
 import {suspensionBlock} from './order-suspension.mjs';
+import {temuFulfillmentBlock} from './temu-fulfillment-quantities.mjs';
 export function cancellationBlock(o){
  const suspended=suspensionBlock(o);if(suspended)return suspended;
  // Explicit V3 cancellation and carrier evidence remain operational.
  if(o.label_status==='cancelled'||o.tracking_status==='cancelled')return 'Commande annulée dans V3 : préparation suspendue';
+ const emptyTemu=temuFulfillmentBlock(o);if(emptyTemu)return emptyTemu;
  return null;
 }
 export function transientErpError(message){return /SQLSTATE\[40001\]|\bdeadlock\b|lock wait timeout|Erplain HTTP (429|502|503|504)\b|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError/i.test(message||'')}

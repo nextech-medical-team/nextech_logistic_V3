@@ -9,6 +9,13 @@ const signature=lines=>JSON.stringify([...lines.reduce((m,l)=>{
  m.set(l.sku,(m.get(l.sku)||0)+q);return m;
 },new Map())].sort());
 const sameRequest=(a,b)=>a&&a.scope===b.scope&&a.sku===b.sku&&a.replacementSku===b.replacementSku&&Number(a.replaceQuantity)===Number(b.replaceQuantity)&&Number(a.replacementQuantity)===Number(b.replacementQuantity);
+const localWriteRefusal='Le résultat de le remplacement du produit → du produit choisi reste à vérifier. ERPLAIN LIVE : écriture non autorisée ou identité non vérifiée La préparation reste suspendue. Relisez le BC et les BL avant toute reprise ; ne répétez pas l’enregistrement.';
+const commercialSnapshot=value=>Array.isArray(value)?value.map(commercialSnapshot):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).filter(k=>!['available','on_hand','reserved_quantity','stock_levels'].includes(k)).sort().map(k=>[k,commercialSnapshot(value[k])])):value;
+export function locallyRejectedSubstitutionUnchanged(failed,attempt,o,b,bc){
+ // This exact error is raised by the local account gate before any fetch.
+ // Network errors and received provider responses never enter this exception.
+ return failed.status==='review'&&failed.error===localWriteRefusal&&attempt.phase==='mutation_started'&&attempt.permanent===null&&sameRequest(failed.payload,b)&&b.scope==='order'&&!o.partial_mode&&bc.update_stock===false&&bc.shipping_orders?.paginatorInfo?.hasMorePages===false&&bc.shipping_orders.data.length===0&&JSON.stringify(commercialSnapshot(attempt.plan.commercialBefore))===JSON.stringify(commercialSnapshot(bc));
+}
 const taxes=l=>Array.isArray(l.tax_codes)&&l.tax_codes.every(t=>t.id!=null)?JSON.stringify(l.tax_codes.map(t=>String(t.id)).sort()):null;
 export function recordedSubstitutionPlan(bc,b,failed,preview,order={},historicalStock=null){
  if(failed?.status!=='review'||failed.payload?.confirmEquivalent!==true||!sameRequest(failed.payload,b)||preview?.status!=='complete'||!sameRequest(preview.payload,b)||preview.result?.previewFingerprint!==failed.payload.previewFingerprint)return null;
@@ -72,7 +79,7 @@ export function recordedSubstitutionPlan(bc,b,failed,preview,order={},historical
   // A routine refresh can replace pricing.verifiedAt after the failed attempt.
   // Retain a dated prior Erplain proof only when tied to the same source totals.
   if(review?.status==='accepted'&&review.confirmed?.sourceTotal!=null&&review.confirmed?.sourceTax!=null&&pricing?.total!=null&&pricing?.tax!=null&&cents(review.confirmed.sourceTotal)===cents(pricing.total)&&cents(review.confirmed.sourceTax)===cents(pricing.tax))proofs.push({confirmed:review.confirmed,checkedAt:review.checkedAt});
-  const proof=proofs.find(p=>{const c=p.confirmed,checked=Date.parse(p.checkedAt);return c&&c.total!=null&&c.tax!=null&&c.authority==='erplain'&&Number.isFinite(checked)&&Number.isFinite(attempted)&&checked<=attempted&&Number.isFinite(Number(c.total))&&Number.isFinite(Number(c.tax))&&cents(c.total)===cents(bc.total)&&cents(c.tax)===cents(taxTotal);});
+  const proof=proofs.find(p=>{const c=p.confirmed,checked=Date.parse(p.checkedAt);return c&&c.total!=null&&c.tax!=null&&['erplain','recorded_erplain_bc'].includes(c.authority)&&Number.isFinite(checked)&&Number.isFinite(attempted)&&checked<=attempted&&Number.isFinite(Number(c.total))&&Number.isFinite(Number(c.tax))&&cents(c.total)===cents(bc.total)&&cents(c.tax)===cents(taxTotal);});
   const c=proof?.confirmed;
   if(!c||pricing?.currency!==bc.currency.label||shipping.length!==1||!Number.isFinite(taxTotal))return blocked();
   if(plan.items.filter(i=>i.id).some(i=>String(i.id)!==String(shipping[0].id)))return blocked();
@@ -87,9 +94,15 @@ export async function findRecordedSubstitution(db,o,b,bc,api){
  const failed=(await db.query("SELECT id,payload,status,error,created_at FROM resolution_jobs WHERE order_id=$1 AND action='replace-equivalent' AND (request_id<>$2 OR payload ? 'substitutionAttempt') AND (payload ? 'substitutionAttempt' OR status='complete' OR error='Frais de livraison modifiés : rapprochement requis' OR error LIKE 'Remplacement historique à rapprocher : %' OR error LIKE 'Remplacement partiel à rapprocher : %') ORDER BY created_at DESC LIMIT 1",[o.id,b.requestId||''])).rows[0];
  const attempt=readSubstitutionAttempt(failed,o);
  if(attempt){
-  if(failed.status!=='review'||!sameRequest(failed.payload,b))throw Error('Rapprocher d’abord le remplacement interrompu enregistré sur ce BC, avant de choisir un autre produit.');
+  if(locallyRejectedSubstitutionUnchanged(failed,attempt,o,b,bc))return null;
+  const nextLine=!sameRequest(failed.payload,b);
+  const blockedNext=()=>{throw Error('Rapprocher d’abord le remplacement interrompu enregistré sur ce BC, avant de choisir un autre produit.');};
+  if(failed.status!=='review')return blockedNext();
+  // A stock refusal on another line is not an uncertain replacement. Prove
+  // both committed copies before allowing the ordinary preview of that line.
+  if(nextLine&&(attempt.phase!=='local_committed'||failed.payload.scope!=='order'||b.scope!=='order'||attempt.permanent!==null||o.partial_mode||b.sku===failed.payload.sku||b.sku===failed.payload.replacementSku||!String(failed.error||'').startsWith('BL bloqué — stock insuffisant : ')))return blockedNext();
   if(bc.shipping_orders?.paginatorInfo?.hasMorePages!==false||bc.line_items?.some(l=>Number(l.discount)||Number(l.discount_rule_amount)||Number(l.ecotax)||l.type==='normal'&&(l.variant?.active!==true||l.variant?.product?.active!==true)))throw Error('Remplacement interrompu : contenu du BC incomplet ou modifié, rapprochement requis.');
-  const request={...failed.payload,scope:'order'},body={...b,scope:'order'};
+  const request={...failed.payload,scope:'order'},body={...(nextLine?failed.payload:b),scope:'order'};
   const recovery=recordedSubstitutionPlan(bc,body,{...failed,payload:request,status:'review',error:'Frais de livraison modifiés : rapprochement requis'},{payload:request,status:'complete',result:attempt.plan},o);
   if(!recovery)throw Error('Remplacement interrompu : résultat Erplain non confirmé, aucune seconde écriture autorisée.');
   delete recovery.localCommitted;delete recovery.completionResult;
@@ -98,6 +111,7 @@ export async function findRecordedSubstitution(db,o,b,bc,api){
    if(o.erp_live?.equivalentAttemptId!==attempt.requestId||signature(rows.map(l=>({sku:l.target_sku||l.source_sku,quantity:l.target_quantity??l.quantity})))!==signature(recovery.expected)||!attempt.completionResult)throw Error('Synchronisation locale du remplacement à rapprocher.');
    recovery.localCommitted=true;recovery.completionResult=attempt.completionResult;
   }
+  if(nextLine)return null;
   return {...recovery,recordedPermanent:attempt.permanent,recordedMappingBefore:attempt.mappingBefore,attemptRecovery:true};
  }
  const historical=String(failed?.error||'').startsWith('Remplacement historique à rapprocher : ');

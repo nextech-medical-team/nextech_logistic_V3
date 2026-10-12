@@ -1,4 +1,8 @@
+import {temuOrderApiPaused,pausedTemuOrderApi} from './temu-order-api-policy.mjs';
+import {marketplaceContentFrozen,recordPostBcLifecycle} from './marketplace-content-freeze.mjs';
+import {readTemuLifecycle} from './temu-lifecycle-reader.mjs';
 import {isTemuReadDeferred,temuReadDeferral} from './temu-read-deferral.mjs';
+
 import {excludedTemuCarrier} from './temu-purchase-policy.mjs';
 import {hasExternalLabel,readExternalTemuTracking} from './temu-external-label.mjs';
 import {readTemuOrderDiagnostic} from './temu-order-diagnostic.mjs';
@@ -31,6 +35,8 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
  async function fail(o,e){
   if(e.code==='TEMU_STOPPING')throw e;
   if(isTemuReadDeferred(e)){const deferred=temuReadDeferral(e,{reference:o.reference});await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuReadDeferred:deferred})]);return deferred;}
+  if(marketplaceContentFrozen(o)){const error=directError(e);await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({platformLifecycleError:{at:new Date().toISOString(),message:error}})]);return {reference:o.reference,error,contentFrozen:true};}
+
   if(hasExternalLabel(o)){await db.query("UPDATE temu_label_jobs SET result=coalesce(result,'{}'::jsonb)||$2::jsonb WHERE reference=$1",[o.reference,JSON.stringify({trackingErrors:[{error:directError(e)}]})]);return {reference:o.reference,status:'external',error:null,trackingWarning:directError(e)};}
   const error=directError(e),shipmentIssue=['TEMU_SHIPMENT_FAILED','TEMU_SHIPMENT_PENDING'].includes(e.code);
   await db.query("UPDATE orders SET source_payload=(source_payload-'temuReadDeferred')||$2::jsonb WHERE id=$1",[o.id,JSON.stringify({temuDirect:{source:'temu_direct',state:shipmentIssue?'verified':'error',attemptedAt:new Date().toISOString(),error}})]);
@@ -38,21 +44,44 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
   return {reference:o.reference,error};
  }
  async function refreshAmounts(o,api,{force=false}={}){
+  if(await temuOrderApiPaused())throw pausedTemuOrderApi();
+  if(marketplaceContentFrozen(o))return {reference:o.reference,cached:true,contentFrozen:true};
   const old=o.source_payload?.temuAmounts;
   if(!force&&old?.data&&Number.isFinite(Date.parse(old.at))&&Date.now()-Date.parse(old.at)<1800000)return {reference:o.reference,cached:true};
-  try{const amounts=await readOrderAmounts(api,o.reference);await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuAmounts:amounts,temuAmountsError:null})]);return {reference:o.reference,updated:true};}
-  catch(e){if(isTemuReadDeferred(e))throw e;const error=directError(e);await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuAmountsError:{at:new Date().toISOString(),message:error}})]);return {reference:o.reference,error};}
+  try{const amounts=await readOrderAmounts(api,o.reference);if(await temuOrderApiPaused())throw pausedTemuOrderApi();await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuAmounts:amounts,temuAmountsError:null})]);return {reference:o.reference,updated:true};}
+  catch(e){if(isTemuReadDeferred(e)||e.code==='TEMU_ORDER_API_PAUSED')throw e;const error=directError(e);await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuAmountsError:{at:new Date().toISOString(),message:error}})]);return {reference:o.reference,error};}
  }
- async function refresh(reference,options={}){const result=await refreshRead(reference,options);if(!result.deferred)await db.query("UPDATE orders SET source_payload=source_payload-'temuReadDeferred' WHERE channel='temu' AND reference=$1 AND source_payload ? 'temuReadDeferred'",[reference]);return result;}
- async function refreshRead(reference,{forceQuote=false,channel}={}){
-  const held=(await db.query("SELECT source_payload,issue FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(held?.source_payload?.visibilityHold)return {reference,status:'api_error',error:held.issue};
-  let ctx;try{ctx=await context(reference);}catch(e){const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(!o)throw e;return fail(o,e);}const {o,api,service}=ctx;
+ async function refresh(reference,options={}){if(await temuOrderApiPaused())return refreshLabelsOnly(reference,options);const result=await refreshRead(reference,options);if(!result.deferred)await db.query("UPDATE orders SET source_payload=source_payload-'temuReadDeferred' WHERE channel='temu' AND reference=$1 AND source_payload ? 'temuReadDeferred'",[reference]);return result;}
+ async function refreshLabelsOnly(reference,{forceQuote=false,channel}={}){
+  const {o,api,service}=await context(reference);
+  const known=(await db.query('SELECT packages,attempt_id FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
+  if(hasExternalLabel(o))return {reference,status:'external',documents:true,orderApiPaused:true};
+  if(known?.packages?.length){const j=await service.recover(reference,{packages:known.packages,preserveExistingDocuments:true});return {reference,status:j.status,documents:true,error:j.error||null,orderApiPaused:true};}
+  // Read only the provider line/package identifiers required to locate labels.
+  // Never copy this response into orders/lines/customer/amount fields.
+  const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference},{purpose:'label'});
+  const shipments=await readTemuShipments(api,reference,detail);
+  const packages=[...new Set([...(detail.orderList||[]).flatMap(l=>(l.packageSnInfo||[]).map(p=>p.packageSn)),...shipments.shipmentInfoDTO.flatMap(s=>[s,...(s.subPackageShipmentInfoList||[])]).map(s=>{if(s.parentOrderSn&&s.parentOrderSn!==reference)throw Error('TEMU · Colis d’une autre commande');return s.packageSn;})].filter(Boolean))];
+  if(packages.length){const j=await service.recover(reference,{packages,preserveExistingDocuments:true});return {reference,status:j.status,documents:true,error:j.error||null,orderApiPaused:true};}
+  if(known?.attempt_id)throw Error('TEMU · Achat existant sans colis confirmé : vérifier avant tout nouvel achat');
+  if(forceQuote&&!shipments.shipmentInfoDTO.length){const plan=await service.prepare(reference,channel,{detail,shipments});return {reference,status:'ready',plan,orderApiPaused:true};}
+  return {reference,status:shipments.shipmentInfoDTO.length?'external':'pending',orderApiPaused:true};
+ }
+ async function refreshRead(reference,{forceQuote=false,recoverTransport=false,channel}={}){
+  const held=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(held?.source_payload?.visibilityHold&&!marketplaceContentFrozen(held))return {reference,status:'api_error',error:held.issue};
+
+  let ctx;try{ctx=await context(reference);}catch(e){if(await temuOrderApiPaused())throw e;const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(!o)throw e;return fail(o,e);}const {o,api,service}=ctx;
   try{
-   const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});
+   if(await temuOrderApiPaused())return refreshLabelsOnly(reference,{forceQuote,channel});
+   let lifecycle;
+   if(marketplaceContentFrozen(o)){const read=await readTemuLifecycle(api,o);await db.transaction(async tx=>{const fresh=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[o.id])).rows[0];await recordPostBcLifecycle(tx,fresh,read);});lifecycle=read;if(!forceQuote&&!recoverTransport)return {reference,contentFrozen:true,lifecycle:read,errors:read.errors};}
+   const detail=marketplaceContentFrozen(o)?structuredClone(o.source_payload?.temuOrderDetail):await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});
+   if(!detail)throw Error('TEMU · Données initiales enregistrées absentes : préparation locale à vérifier');
+   if(await temuOrderApiPaused())return refreshLabelsOnly(reference,{forceQuote,channel});
+   if(lifecycle)detail.parentOrderMap={...detail.parentOrderMap,parentOrderStatus:lifecycle.status};
    if(detail.parentOrderMap?.parentOrderSn!==reference||!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('TEMU · Identité ou articles de commande incohérents');
    const now=new Date().toISOString(),direct={source:'temu_direct',state:'verified',verifiedAt:now,status:Number(detail.parentOrderMap.parentOrderStatus)};
-   await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuDirect:direct,temuOrderDetail:detail})]);
-   await observeTemuCancellation(db,o,detail);
+   if(!marketplaceContentFrozen(o)){await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuDirect:direct,temuOrderDetail:detail})]);await observeTemuCancellation(db,o,detail);}
    await refreshAmounts(o,api);
    const shipments=await readTemuShipments(api,reference,detail);
    if(hasExternalLabel(o))return readExternalTemuTracking(db,o,api,shipments);
@@ -85,12 +114,13 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
    if(!forceQuote&&old?.status==='ready'&&!old.error&&old.plan?.expiresAt>Date.now()+60000&&old.plan.orderFingerprint===info.fingerprint&&!excludedTemuCarrier(old.plan.offers?.find(offer=>offer.channelId===old.plan.selected)))return {reference,status:'ready',plan:old.plan};
    try{const plan=await service.prepare(reference,channel,{detail,shipments});return {reference,status:'ready',plan};}
    catch(e){if(isTemuReadDeferred(e))return fail(o,e);const error=directError(e);await db.query("INSERT INTO temu_label_jobs(reference,status,error,result) VALUES($1,'to_buy',$2,$3) ON CONFLICT(reference) DO UPDATE SET status='to_buy',error=excluded.error,result=excluded.result,updated_at=now()",[reference,error,JSON.stringify({source:'temu_direct',observedAt:now})]);return {reference,status:'to_buy',error};}
-  }catch(e){return fail(o,e);}
+  }catch(e){if(await temuOrderApiPaused())throw e;return fail(o,e);}
  }
 
- return {async diagnose(reference){const {api}=await context(reference);const known=(await db.query('SELECT packages FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];return readTemuOrderDiagnostic(api,reference,{knownPackages:known?.packages||[]});},async amounts(reference,options){const {o,api}=await context(reference);return refreshAmounts(o,api,options);},get running(){return running;},async collectors(){if(!allShopsConnected||!clients.size||Date.now()-connectedAt>300000)await connect();const sources=[];for(const [mallId,api] of clients){const countries=(await db.query("SELECT DISTINCT address->>'country' country FROM orders WHERE channel='temu' AND source_payload->>'mallId'=$1 AND archived=false",[mallId])).rows.map(x=>x.country).filter(Boolean);const config=await configLoader();const country=config.TEMU_COUNTRIES?.[mallId]||countryByMall.get(mallId)||(countries.length===1?countries[0]:null);sources.push(temuCollector(api,{mallId,country}));}return sources;},async sync(){if(running)throw Error('Actualisation TEMU déjà en cours');running=true;const result={at:new Date().toISOString(),source:'temu_direct',updated:0,errors:[]};try{const rows=(await db.query("SELECT * FROM orders WHERE channel='temu' AND NOT archived")).rows;try{await connect();}catch(e){result.connectionError={code:e.code||'TEMU_CONNECTION_ERROR',message:directError(e),...(isTemuReadDeferred(e)?temuReadDeferral(e):{})};await writeFile(path.join(directory,'temu-direct-last-sync.json'),JSON.stringify(result));return result;}
-   for(const o of rows){try{await locked(o.reference,()=>refresh(o.reference));result.updated++;}catch(e){result.errors.push(await fail(o,e));}}await writeFile(path.join(directory,'temu-direct-last-sync.json'),JSON.stringify(result));return result;
-  }finally{running=false;}},async prepare(reference,channel){return locked(reference,async()=>{const r=await refresh(reference,{forceQuote:true,channel});if(r.deferred)throw Object.assign(Error(r.message),{code:r.code,retryAfter:String(r.retryAfterMs/1000)});if(!r.plan)throw Error(r.error||(r.documents?'TEMU · Étiquette déjà disponible : consultez le PDF':'TEMU · '+r.status));return r.plan;});},async buy(reference,id,amount,options={}){return locked(reference,async()=>{const {o,service}=await context(reference);if(hasExternalLabel(o))throw Error('Étiquette externe enregistrée : aucun nouvel achat TEMU');if(o.transport_choice)throw Error('Transporteur choisi manuellement : achat TEMU désactivé pour éviter une double étiquette');if(o.source_payload.temuReadDeferred)throw Object.assign(Error('Lecture TEMU en attente : achat non engagé'),{code:'source_budget_deferred',retryAfter:'1'});if(o.source_payload.temuDirect?.state!=='verified')throw Error('TEMU · Commande non vérifiée directement');const purchased=await service.buy(reference,id,amount,options);await reconcilePaidTemuStatuses(db).catch(e=>console.error("TEMU local status reconciliation deferred",e.message));return purchased;});},async recover(reference){return locked(reference,()=>refresh(reference));},async list(){await connect();const result=[];for(const [mallId,api] of clients)result.push({mallId,...await api.read('bg.order.list.v2.get',{pageNumber:1,pageSize:20,sortby:'createTime'})});return {shops:result};}};
+ return {async diagnose(reference){const {o,api}=await context(reference);if(marketplaceContentFrozen(o))return readTemuLifecycle(api,o);const known=(await db.query('SELECT packages FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];return readTemuOrderDiagnostic(api,reference,{knownPackages:known?.packages||[]});},async amounts(reference,options){const {o,api}=await context(reference);return refreshAmounts(o,api,options);},get running(){return running;},async collectors(){if(await temuOrderApiPaused())return [];if(!allShopsConnected||!clients.size||Date.now()-connectedAt>300000)await connect();const sources=[];for(const [mallId,api] of clients){const countries=(await db.query("SELECT DISTINCT address->>'country' country FROM orders WHERE channel='temu' AND source_payload->>'mallId'=$1 AND archived=false",[mallId])).rows.map(x=>x.country).filter(Boolean);const config=await configLoader();const country=config.TEMU_COUNTRIES?.[mallId]||countryByMall.get(mallId)||(countries.length===1?countries[0]:null);sources.push(temuCollector(api,{mallId,country}));}return sources;},async sync(){if(running)throw Error('Actualisation TEMU déjà en cours');running=true;const result={at:new Date().toISOString(),source:'temu_direct',updated:0,errors:[]};try{const rows=(await db.query("SELECT * FROM orders WHERE channel='temu' AND NOT archived")).rows;try{await connect();}catch(e){result.connectionError={code:e.code||'TEMU_CONNECTION_ERROR',message:directError(e),...(isTemuReadDeferred(e)?temuReadDeferral(e):{})};await writeFile(path.join(directory,'temu-direct-last-sync.json'),JSON.stringify(result));return result;}
+   for(const o of rows){try{await locked(o.reference,()=>refresh(o.reference));result.updated++;}catch(e){result.errors.push(await temuOrderApiPaused()?{reference:o.reference,error:directError(e)}:await fail(o,e));}}await writeFile(path.join(directory,'temu-direct-last-sync.json'),JSON.stringify(result));return result;
+  }finally{running=false;}},async prepare(reference,channel){return locked(reference,async()=>{const r=await refresh(reference,{forceQuote:true,channel});if(r.deferred)throw Object.assign(Error(r.message),{code:r.code,retryAfter:String(r.retryAfterMs/1000)});if(!r.plan)throw Error(r.error||(r.documents?'TEMU · Étiquette déjà disponible : consultez le PDF':'TEMU · '+r.status));return r.plan;});},async buy(reference,id,amount,options={}){return locked(reference,async()=>{const {o,service}=await context(reference);if(hasExternalLabel(o))throw Error('Étiquette externe enregistrée : aucun nouvel achat TEMU');if(o.transport_choice)throw Error('Transporteur choisi manuellement : achat TEMU désactivé pour éviter une double étiquette');if(o.source_payload.temuReadDeferred)throw Object.assign(Error('Lecture TEMU en attente : achat non engagé'),{code:'source_budget_deferred',retryAfter:'1'});if(!marketplaceContentFrozen(o)&&o.source_payload.temuDirect?.state!=='verified')throw Error('TEMU · Commande non vérifiée directement');const purchased=await service.buy(reference,id,amount,options);await reconcilePaidTemuStatuses(db).catch(e=>console.error("TEMU local status reconciliation deferred",e.message));return purchased;});},async recover(reference){return locked(reference,()=>refresh(reference,{recoverTransport:true}));},async list(){await connect();const result=[];for(const [mallId,api] of clients)result.push({mallId,...await api.read('bg.order.list.v2.get',{pageNumber:1,pageSize:20,sortby:'createTime'})});return {shops:result};}};
+
 }
 export function trackingState(packages,events,previous='not_shipped'){
  const expected=packages.map(p=>p.trackingNumber||'missing:'+p.packageSn);

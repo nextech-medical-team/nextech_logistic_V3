@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {marketplaceChanged} from './marketplace-comparison.mjs';
+import {marketplaceSnapshotChangeFields} from './marketplace-comparison.mjs';
 import {planPlatformShipmentHold} from './platform-shipment-hold-plan.mjs';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)??'undefined').digest('hex');
 const diagnostic=/^Commande (?:déjà expédiée dans (?:Shopify|Amazon)(?: · Vérifier les documents)?|(?:entièrement remboursée|annulée) dans Shopify(?: · BC et BL Erplain annulés)?)$/i;
@@ -15,7 +15,7 @@ export function planPlatformHoldReconciliation(evidence,{now=Date.now(),maxAgeMs
  let reason;
  const bc=order.erp_live?.bc,bl=order.erp_live?.bl;
  if(['cancelled','closed'].includes(bc?.status)||['cancelled','closed'].includes(bl?.status))reason=[['BC',bc],['BL',bl]].filter(([,d])=>['cancelled','closed'].includes(d?.status)).map(([name,d])=>name+' '+(d.status==='cancelled'?'annulé':'clos')+' dans Erplain').join(' · ')+' · reprise à vérifier';
- else if(marketplaceChanged(order,priorLines,normalizedIncoming))reason='Commande modifiée sur la plateforme · articles, quantités ou adresse à rapprocher';
+ else if(marketplaceSnapshotChangeFields(order,priorLines,normalizedIncoming).length)reason='Commande modifiée sur la plateforme · articles, quantités ou adresse à rapprocher';
  else if(otherErrors.length)reason='Préparation V3 à vérifier · '+otherErrors.map(String).join(' · ').slice(0,450);
  else return plan;
  const source_payload={...order.source_payload,platformStatusObservation:{payload:sourceRead.payload,version:sourceRead.payload.updated_at||null,observedAt:sourceRead.checkedAt,indicative:true},platformHoldReclassification:{checkedAt:sourceRead.checkedAt,previousReason:order.issue,reason,operationalStatePreserved:true}};

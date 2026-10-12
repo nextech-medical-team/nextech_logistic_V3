@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 import {readFile} from 'node:fs/promises';
 import {temuApi} from './temu-api.mjs';
 import {loadShopVault} from './temu-shop-vault.mjs';
@@ -6,6 +7,7 @@ const countries=new Map(Object.entries({France:'FR',Belgium:'BE',Croatia:'HR','C
 export function maskedTemuSourceReader({directory='/var/lib/nextech-live',config,apiFactory=temuApi,vaultLoader=loadShopVault,now=()=>Date.now(),shouldStop=()=>false}={}){
  const apis=new Map();let identity,rootApi,privateConfig;
  return async order=>{
+  if(marketplaceContentFrozen(order))throw Error('BC rempli · Relecture des articles et adresses TEMU désactivée');
   const reference=order.source_reference||order.reference,shop=String(order.source_payload?.sourceShop||order.source_payload?.mallId||'');
   if(order.channel!=='temu'||!/^PO-\d+-\d+$/.test(reference)||!/^\d+$/.test(shop))throw Error('TEMU · Identité de la commande non vérifiable');
   const read=async(api,type,args={})=>{if(shouldStop())throw Error('Arrêt demandé');return api.read(type,args);};

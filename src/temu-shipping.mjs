@@ -1,4 +1,8 @@
+import {temuOrderApiPaused} from './temu-order-api-policy.mjs';
+import {readTemuLifecycle} from './temu-lifecycle-reader.mjs';
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
+import {inspectTemuQuantities,cancelledTemuFulfillment} from './temu-fulfillment-quantities.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {excludedTemuCarrier} from './temu-purchase-policy.mjs';
 import {randomUUID,createHash} from 'node:crypto';
@@ -20,10 +24,11 @@ export function inspectTemu(detail,reference){
  // Platform risk/address/cancellation labels remain indicative; actual data and provider responses are checked below.
  if([p,...items].some(x=>String(x.orderPaymentType).toUpperCase()==='COD'))throw new Error('Paiement à la livraison incompatible');
  const packages=[...new Set(items.flatMap(i=>(i.packageSnInfo||[]).map(x=>x.packageSn)))];if(packages.some(x=>!/^PK-\d+$/.test(x)))throw new Error('Colis TEMU invalide');
- const lines=items.map(i=>({parentOrderSn:reference,orderSn:String(i.orderSn||''),quantity:Number(i.quantity)}));
- if(lines.some(l=>!l.orderSn||!Number.isInteger(l.quantity)||l.quantity<=0)||new Set(lines.map(l=>l.orderSn)).size!==lines.length)throw new Error('Articles ou quantités TEMU invalides');
- const pres=items.map(i=>names(i.orderLabel).includes('Y2_advance_sale'));if(pres.some(Boolean)&&!pres.every(Boolean))throw new Error('Précommandes et commandes ordinaires à séparer');
- return {lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,status:Number(p.parentOrderStatus),fingerprint:hash({reference,lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,payment:[p,...items].map(x=>x.orderPaymentType),deadline:p.expectShipLatestTime}),deadline:Number(p.expectShipLatestTime)*1000};
+ const {lines,cancelled,fullyCancelled}=inspectTemuQuantities(detail,reference);
+ if(fullyCancelled)throw Error(cancelledTemuFulfillment);
+ const remaining=items.filter(i=>lines.some(l=>l.orderSn===i.orderSn));
+ const pres=remaining.map(i=>names(i.orderLabel).includes('Y2_advance_sale'));if(pres.some(Boolean)&&!pres.every(Boolean))throw new Error('Précommandes et commandes ordinaires à séparer');
+ return {lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,status:Number(p.parentOrderStatus),fingerprint:hash({reference,lines,...(cancelled.length?{cancelled}:{}),packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,payment:[p,...items].map(x=>x.orderPaymentType),deadline:p.expectShipLatestTime}),deadline:Number(p.expectShipLatestTime)*1000};
 }
 export function offerParcel(offer,base,info,now=Date.now()){
  if(excludedTemuCarrier(offer))throw new Error('Cainiao exclu : choisir un autre transporteur TEMU');
@@ -41,9 +46,9 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
  async function locked(reference,fn){if(!/^PO-\d+(?:-\d+)+$/.test(reference))throw new Error('Référence TEMU invalide');if(active.has(reference))throw new Error('Cette commande est déjà en traitement');active.add(reference);try{return await fn();}finally{active.delete(reference);}}
  const job=async reference=>(await db.query('SELECT * FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
  async function quote(reference,channelId,fresh={}){
-  const localOrders=(await db.query('SELECT suspension,weight_kg FROM orders WHERE reference=$1',[reference])).rows;if(quoteOrderPolicy)await quoteOrderPolicy(reference);else for(const order of localOrders){const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);}
+  const localOrders=(await db.query('SELECT * FROM orders WHERE reference=$1',[reference])).rows;if(quoteOrderPolicy)await quoteOrderPolicy(reference);else for(const order of localOrders){const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);}
   const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=fixedWeight??(Number.isFinite(knownWeight)&&knownWeight>0.25?String(Math.ceil(knownWeight*1000)/1000):'0.25');
-  const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),info=inspectTemu(detail,reference);
+  const frozen=localOrders.find(marketplaceContentFrozen),orderApiPaused=await temuOrderApiPaused();if(frozen&&!orderApiPaused){const lifecycle=await readTemuLifecycle(api,frozen);if(lifecycle.cancelled)throw Error('TEMU · Commande annulée sur la plateforme');if(lifecycle.refundStatus==='full')throw Error('TEMU · Commande entièrement remboursée sur la plateforme');}const detail=(frozen&&!orderApiPaused?frozen.source_payload?.temuOrderDetail:fresh.detail)||(!(frozen&&!orderApiPaused)?await api.read('bg.order.detail.v2.get',{parentOrderSn:reference},{purpose:'label'}):null),info=inspectTemu(detail,reference);
   const existing=fresh.shipments||await readTemuShipments(api,reference,detail);
   if(info.packages.length||(existing.shipmentInfoDTO||[]).length)throw new Error('Une expédition existe déjà dans TEMU : utiliser Récupérer les étiquettes');
   if(!info.lines.length)throw new Error('Commande TEMU non entièrement à expédier');
@@ -59,9 +64,9 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   const plan={reference,offers,selected:chosen.channelId,amount:chosen.amount,currency:chosen.currency,request,orderFingerprint:info.fingerprint,expiresAt:Date.now()+600000};plan.id=hash({request,amount:plan.amount,currency:plan.currency,orderFingerprint:plan.orderFingerprint});return plan;
  }
  async function recover(reference,fresh={}){return locked(reference,async()=>{
-  if(hasExternalLabel((await db.query("SELECT channel,source_payload FROM orders WHERE reference=$1 AND channel='temu'",[reference])).rows[0]))return job(reference);
+  const local=(await db.query("SELECT * FROM orders WHERE reference=$1 AND channel='temu'",[reference])).rows[0];if(hasExternalLabel(local))return job(reference);
   let j=await job(reference),packages=fresh.packages||j?.packages||[];const verifiedBefore=j?.result?.source==='temu_direct';
-  if(!packages.length){const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});const raw=await readTemuShipments(api,reference,detail);const items=raw.shipmentInfoDTO;packages=[...new Set([...inspectTemu(detail,reference).packages,...items.flatMap(p=>[p,...(p.subPackageShipmentInfoList||[])]).map(p=>{if(p.parentOrderSn&&p.parentOrderSn!==reference)throw new Error('Colis d’une autre commande');return p.packageSn;}).filter(Boolean)])];}
+  if(!packages.length){const detail=marketplaceContentFrozen(local)?local.source_payload?.temuOrderDetail:await api.read('bg.order.detail.v2.get',{parentOrderSn:reference},{purpose:'label'});const raw=await readTemuShipments(api,reference,detail);const items=raw.shipmentInfoDTO;packages=[...new Set([...inspectTemu(detail,reference).packages,...items.flatMap(p=>[p,...(p.subPackageShipmentInfoList||[])]).map(p=>{if(p.parentOrderSn&&p.parentOrderSn!==reference)throw new Error('Colis d’une autre commande');return p.packageSn;}).filter(Boolean)])];}
   if(!packages.length)throw new Error('Aucun colis retrouvé : vérifier TEMU avant tout nouvel achat');if(packages.some(p=>!/^PK-\d+$/.test(p)))throw new Error('Identifiant de colis invalide');
   await db.query(`INSERT INTO temu_label_jobs(reference,status,packages) VALUES($1,'pending',$2) ON CONFLICT(reference) DO UPDATE SET packages=excluded.packages`,[reference,JSON.stringify(packages)]);
   const result=await api.read('bg.logistics.shipment.result.get',{packageSnList:packages});result.source='temu_direct';result.observedAt=new Date().toISOString();
@@ -69,7 +74,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   const details=result.packageInfoResultList||[];for(const p of details){if(!packages.includes(p.packageSn)||!p.orderSendInfoList?.length||!p.orderSendInfoList.some(l=>l.parentOrderSn===reference))throw new Error('Identité du colis non vérifiable');}
   if(new Set(details.map(p=>p.packageSn)).size!==packages.length||details.length!==packages.length)throw new Error('Résultat TEMU incomplet : récupération à relancer');
   const ready=details.filter(p=>Number(p.shippingLabelStatus)===1).map(p=>p.packageSn);
-  const saved=verifiedBefore?(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1',[reference])).rows.map(r=>r.package):[];
+  const saved=verifiedBefore||fresh.preserveExistingDocuments===true?(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1',[reference])).rows.map(r=>r.package):[];
   const missing=ready.filter(p=>!saved.includes(p));let documentWarnings=[];
   if(missing.length){const docs=await api.read('bg.logistics.shipment.document.get',{documentType:'SHIPPING_LABEL_PDF',packageSnList:missing});documentWarnings=(Array.isArray(docs.warningMessage)?docs.warningMessage:docs.warningMessage?[docs.warningMessage]:[]).map(w=>String(w).slice(0,500));
    for(const d of docs.shippingLabelUrlList||[]){if(!missing.includes(d.packageSn)||d.documentType!=='SHIPPING_LABEL_PDF')throw Error('TEMU · Document associé à un autre colis');const pdf=await api.pdf(d.url);await db.query('INSERT INTO temu_label_documents VALUES($1,$2,$3) ON CONFLICT(reference,package) DO UPDATE SET pdf=excluded.pdf',[reference,d.packageSn,pdf]);}

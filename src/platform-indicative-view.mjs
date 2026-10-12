@@ -1,5 +1,6 @@
 // Only the channel declaration is returned. It cannot supply physical tracking.
 export function platformIndicativeView(order){
+ const life=order.source_payload?.platformLifecycleObservation;if(life?.scope==='cancellation-refund-only')return {channel:order.channel,status:life.status==null?null:String(life.status),observedAt:life.checkedAt,indicative:true,cancelled:life.cancelled,financialStatus:life.refundStatus==='full'?'refunded':life.refundStatus==='partial'?'partially_refunded':null,refundStatus:life.refundStatus,error:order.source_payload?.platformLifecycleError?.message||null};
  const s=order.source_payload||{},ob=s.platformStatusObservation;
  const p=ob?.payload?.detail?{temuOrderDetail:ob.payload.detail}:ob?.payload||s.marketplacePendingCorrection||s;
  const candidate=s.shopifyCancellationSync?.proof;

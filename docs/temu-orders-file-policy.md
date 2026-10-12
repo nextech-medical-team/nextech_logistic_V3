@@ -1,0 +1,9 @@
+# TEMU : données de commande par fichier, étiquettes par API
+
+Décision humaine du 12 octobre 2026 : arrêter les imports et mises à jour API du contenu des commandes dans tous les pays TEMU ; maintenir la récupération des étiquettes. Les fichiers deviendront la source de l'adresse, du client, des SKU, des quantités et des données commerciales. Le format et le parcours de ces fichiers seront traités séparément.
+
+La suspension utilise `marketplace_automatic.channels.temu=false` dans les paramètres partagés. Le serveur configure une politique unique pour tous ses clients TEMU : liste, adresse déchiffrée, détails commerciaux et montants ne passent plus vers les lecteurs de données. Les réceptions TEMU sont ignorées avant stockage ou application ; les réceptions déjà en attente sont conservées, y compris lors d'une suspension après leur prise en charge. Les corrections de plateforme et les observations retardées de rattrapage ne remplacent plus la commande.
+
+Le parcours local de récupération reste actif (`temu-logistics`). Il récupère résultats et PDF à partir des colis connus. Si nécessaire, une lecture de détail limitée au parcours étiquette fournit les identifiants de lignes/colis ; cette réponse n'est pas copiée dans les commandes, lignes, clients, adresses ou montants. Aucun achat n'est déclenché par ce changement. Les restrictions et confirmations d'achat existantes restent applicables. Les étiquettes externes et les PDF déjà vérifiés sont préservés.
+
+Les commandes et documents existants ne sont pas supprimés. Une suspension de configuration ne force pas l'arrêt d'une écriture en cours. Publication et redémarrage restent exclusivement Section7 avec drain naturel, préservation et recette installée. Une réactivation technique du canal nécessite une nouvelle décision humaine explicite ; ne pas réactiver à partir d'une ancienne autorisation d'import ou d'actualisation.

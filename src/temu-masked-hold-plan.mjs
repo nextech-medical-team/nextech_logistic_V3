@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {normalizeTemuReceipt} from './marketplace-inbox.mjs';
-import {marketplaceChanged,sourceFingerprint} from './marketplace-comparison.mjs';
+import {marketplaceSnapshotChangeFields,sourceFingerprint} from './marketplace-comparison.mjs';
 import {maskedTemuAddressFields,usableFrozenAddress} from './temu-address-observation.mjs';
 import {platformLifecycleReadinessProblem} from './platform-shipment-hold-db.mjs';
 export const canonicalValue=x=>x instanceof Date?x.toISOString():Array.isArray(x)?x.map(canonicalValue):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonicalValue(x[k])])):x;
@@ -15,7 +15,7 @@ export function planMaskedTemuHold(e,{now=Date.now()}={}){
  if(String(s.shop)!==String(o.source_payload.sourceShop||o.source_payload.mallId)||s.payload?.detail?.parentOrderMap?.parentOrderSn!==o.reference||s.payload?.country!==o.address?.country||!s.first||!s.last||evidenceHash(s.first)!==evidenceHash(s.last)||evidenceHash(s.payload.detail)!==evidenceHash({...s.first,v3Amounts:s.payload.detail.v3Amounts}))return stop('source_identity','Identité ou détail source non stable');
  if(!usableFrozenAddress(o.address)||!maskedTemuAddressFields(s.payload.shipping).length)return stop('frozen_address','Adresse initiale complète et masquage actuel requis');
  let incoming,old;try{incoming=normalizeTemuReceipt(s.payload,s.shop);old=normalizeTemuReceipt(pending,s.shop);}catch(error){return stop('source_incomplete',error.message);}
- if(marketplaceChanged(o,e.priorLines,incoming)||marketplaceChanged(o,e.priorLines,old)||!sourceFingerprint(e.priorLines))return stop('real_change','Articles, quantités ou champs d’adresse divulgués réellement différents');
+ if(marketplaceSnapshotChangeFields(o,e.priorLines,incoming).length||marketplaceSnapshotChangeFields(o,e.priorLines,old).length||!sourceFingerprint(e.priorLines))return stop('real_change','Articles, quantités ou champs d’adresse divulgués réellement différents');
  const acceptedMoney=moneyData(o.source_payload?.temuAmounts?.data),currentMoney=moneyData(s.payload.detail.v3Amounts?.data);
  if(!acceptedMoney||acceptedMoney!==currentMoney)return stop('commercial_changed','Prix, taxes ou remises source différents ou incomplets');
  const p=o.erp_live;if(p?.bc?.status!=='active'||!p.bc.id||!p.bl?.id||!['ready_to_ship','shipped','delivered','completed'].includes(p.bl.status)||!['bl_ready','bl_created'].includes(p.phase)||p.pricing?.status!=='verified'||p.pricing.error)return stop('preparation','Préparation Erplain actuelle non vérifiée');

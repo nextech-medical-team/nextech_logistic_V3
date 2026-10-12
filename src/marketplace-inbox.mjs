@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen,lifecycleObservation,recordPostBcLifecycle} from './marketplace-content-freeze.mjs';
 import {maskedTemuAddressFields} from './temu-address-observation.mjs';
 import {relayLabelObservation} from './relay-label-observation.mjs';
 import {readShopifyRelay,relayComparisonAddress} from './shopify-relay-source.mjs';
@@ -27,6 +28,7 @@ export function validShopifyHmac(raw,header,secret){if(typeof header!=='string'|
 export async function receiveMarketplace(db,{channel,shop,deliveryId,payload}){
  if(!['shopify','temu'].includes(channel)||typeof shop!=='string'||!shop||shop.length>255||typeof deliveryId!=='string'||!deliveryId||deliveryId.length>300)throw Error('Identité de réception invalide');
  const window=(await db.query("SELECT value FROM settings WHERE key='marketplace_automatic'")).rows[0]?.value;if(!window?.enabled)return {skipped:true,reason:'disabled'};
+ if(channel==='temu'&&window.channels?.temu===false)return {skipped:true,reason:'temu-order-api-paused'};
  try{if(!withinReceptionStart(channel,payload,window))return {skipped:true,reason:'outside-start-date'};}catch(e){if(!String(e.message).startsWith('Date source absente'))throw e;} // Retain an undated receipt for review; do not create an order.
  const raw=JSON.stringify(payload);if(Buffer.byteLength(raw)>2*1024*1024)throw Error('Réception trop volumineuse');const signature=createHash('sha256').update(raw).digest('hex');
  const id=randomUUID();const r=await db.query('INSERT INTO marketplace_receipts(id,channel,shop,delivery_id,payload,signature) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(channel,shop,delivery_id) DO NOTHING RETURNING id',[id,channel,shop,deliveryId,raw,signature]);
@@ -46,6 +48,24 @@ export function normalizeTemuReceipt(payload,shop){
 export async function applyMarketplaceReceipt(db,r,options={}){
  const fresh=authorizedFreshTemu(r,options);
  const window=(await db.query("SELECT value FROM settings WHERE key='marketplace_automatic'")).rows[0]?.value;if(!window?.enabled)return {skipped:true,reason:'disabled'};
+ if(r.channel==='temu'&&window.channels?.temu===false)return {skipped:true,reason:'temu-order-api-paused'};
+ // Route before normalizing articles or attempting a relay/address reread.
+ if(!fresh){
+  const reference=r.channel==='temu'?(r.payload.lifecycle?.reference||r.payload.detail?.parentOrderMap?.parentOrderSn):r.payload.name;
+  if(reference){
+   const frozen=await withShipmentLock(()=>db.transaction(async tx=>{
+    const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,reference])).rows[0];
+    if(!marketplaceContentFrozen(existing))return null;
+    const shop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;
+    if(shop&&String(shop)!==r.shop)throw Error('Boutique source différente');
+    if(r.channel==='shopify'&&existing.source_payload?.id&&String(existing.source_payload.id)!==String(r.payload.id))throw Error('Shopify · Identifiant source différent');
+    const observation=r.payload.lifecycle||lifecycleObservation(r.channel,r.payload,{reference});
+    await recordPostBcLifecycle(tx,existing,observation);
+    return {existing:true,review:false,contentFrozen:true};
+   }));
+   if(frozen)return frozen;
+  }
+ }
  if(!fresh&&!withinReceptionStart(r.channel,r.payload,window))return {skipped:true,reason:'outside-start-date'};
  if(r.channel==='shopify'&&shopifyDeliveryMode(r.payload)==='relay'&&!readShopifyRelay(r.payload)){
   const {shopifyCollector,loadShopifyConfig}=await import('./marketplace-collection.mjs');
@@ -65,6 +85,7 @@ export async function applyMarketplaceReceipt(db,r,options={}){
   const routed=await withShipmentLock(()=>db.transaction(async tx=>{
    const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,o.reference])).rows[0];
    if(!existing)return null;
+   if(!fresh&&marketplaceContentFrozen(existing)){const shop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(shop&&String(shop)!==String(r.shop))throw Error('Boutique source différente');if(r.channel==='shopify'&&existing.source_payload?.id&&String(existing.source_payload.id)!==String(r.payload.id))throw Error('Shopify · Identifiant source différent');await recordPostBcLifecycle(tx,existing,r.payload.lifecycle||lifecycleObservation(r.channel,r.payload,{reference:existing.source_reference||existing.reference}));return {existing:true,review:false,contentFrozen:true};}
    if(existing.archived||existing.duplicate_of)return {skipped:true,reason:'inactive-existing-order'};
    const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;
    if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
@@ -75,11 +96,12 @@ export async function applyMarketplaceReceipt(db,r,options={}){
   }));
   if(routed)return routed;
  }
- if(o.visibilityHold)return withShipmentLock(()=>db.transaction(async tx=>{const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 FOR UPDATE',[r.channel,o.reference])).rows[0];if(existing&&(existing.archived||existing.label_status==='cancelled'))return {excluded:true,id:existing.id};return {retained:true,id:await retainVisibleOrder(tx,o,o.source_payload.visibilityReason)};}));
+ if(o.visibilityHold)return withShipmentLock(()=>db.transaction(async tx=>{const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 FOR UPDATE',[r.channel,o.reference])).rows[0];if(!fresh&&marketplaceContentFrozen(existing)){const shop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(shop&&String(shop)!==String(r.shop))throw Error('Boutique source différente');if(r.channel==='shopify'&&existing.source_payload?.id&&String(existing.source_payload.id)!==String(r.payload.id))throw Error('Shopify · Identifiant source différent');await recordPostBcLifecycle(tx,existing,r.payload.lifecycle||lifecycleObservation(r.channel,r.payload,{reference:existing.source_reference||existing.reference}));return {existing:true,review:false,contentFrozen:true};}if(existing&&(existing.archived||existing.label_status==='cancelled'))return {excluded:true,id:existing.id};return {retained:true,id:await retainVisibleOrder(tx,o,o.source_payload.visibilityReason)};}));
  return withShipmentLock(()=>db.transaction(async tx=>{
   const link=(await tx.query('SELECT * FROM marketplace_order_links WHERE channel=$1 AND shop=$2 AND reference=$3 FOR UPDATE',[r.channel,r.shop,o.reference])).rows[0];
   if(fresh&&link)throw Error('Ancien lien marketplace encore présent : reprise interrompue');
   const existing=(await tx.query('SELECT * FROM orders WHERE channel=$1 AND coalesce(source_reference,reference)=$2 ORDER BY received_at LIMIT 1 FOR UPDATE',[r.channel,o.reference])).rows[0];
+  if(!fresh&&marketplaceContentFrozen(existing)){const shop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(shop&&String(shop)!==String(r.shop))throw Error('Boutique source différente');if(r.channel==='shopify'&&existing.source_payload?.id&&String(existing.source_payload.id)!==String(r.payload.id))throw Error('Shopify · Identifiant source différent');await recordPostBcLifecycle(tx,existing,r.payload.lifecycle||lifecycleObservation(r.channel,r.payload,{reference:existing.source_reference||existing.reference}));return {existing:true,review:false,contentFrozen:true};}
   if(platformReceiptDisposition({observedVersion:link?.version,incomingVersion:o.version,pending:!!existing?.source_payload?.marketplacePendingCorrection})==='skip')return {unchanged:true};
   if(fresh&&existing)throw Error('Ancienne fiche V3 encore présente : reprise interrompue');
   if(existing){const sourceShop=existing.source_payload?.sourceShop||existing.source_payload?.mallId;if(sourceShop&&String(sourceShop)!==r.shop)throw Error('Référence utilisée dans une autre boutique : rapprochement nécessaire');
@@ -120,4 +142,4 @@ export async function applyMarketplaceReceipt(db,r,options={}){
  }));
 }
 
-export function marketplaceInbox(db){let running=false;return {get running(){return running;},async run(){if(running)return;running=true;try{for(let i=0;i<25;i++){const r=await db.transaction(async tx=>{const row=(await tx.query("SELECT * FROM marketplace_receipts WHERE status='pending' OR (status='review' AND updated_at<now()-interval '5 minutes') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1")).rows[0];if(!row)return null;await tx.query("UPDATE marketplace_receipts SET status='processing' WHERE id=$1",[row.id]);return row;});if(!r)break;try{await applyMarketplaceReceipt(db,r);await db.query("UPDATE marketplace_receipts SET status='complete',error=null,updated_at=now() WHERE id=$1",[r.id]);}catch(e){await db.query("UPDATE marketplace_receipts SET status='review',error=$2,updated_at=now() WHERE id=$1",[r.id,String(e.message).slice(0,500)]);}}}finally{running=false;}}};}
+export function marketplaceInbox(db){let running=false;return {get running(){return running;},async run(){if(running)return;running=true;try{for(let i=0;i<25;i++){const r=await db.transaction(async tx=>{const row=(await tx.query("SELECT * FROM marketplace_receipts WHERE (status='pending' OR (status='review' AND updated_at<now()-interval '5 minutes')) AND NOT (channel='temu' AND coalesce((SELECT value->'channels'->>'temu' FROM settings WHERE key='marketplace_automatic'),'true')='false') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1")).rows[0];if(!row)return null;await tx.query("UPDATE marketplace_receipts SET status='processing' WHERE id=$1",[row.id]);return row;});if(!r)break;try{const applied=await applyMarketplaceReceipt(db,r);if(applied?.reason==='temu-order-api-paused'){await db.query('UPDATE marketplace_receipts SET status=$2 WHERE id=$1',[r.id,r.status]);break;}await db.query("UPDATE marketplace_receipts SET status='complete',error=null,updated_at=now() WHERE id=$1",[r.id]);}catch(e){await db.query("UPDATE marketplace_receipts SET status='review',error=$2,updated_at=now() WHERE id=$1",[r.id,String(e.message).slice(0,500)]);}}}finally{running=false;}}};}

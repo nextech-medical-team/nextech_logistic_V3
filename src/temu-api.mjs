@@ -1,3 +1,4 @@
+import {assertTemuOrderApiRead} from './temu-order-api-policy.mjs';
 import {apiAcquireSlot,apiDefer} from './api-budget.mjs';
 import {temuReadWaitMs} from './temu-read-deferral.mjs';
 import {relayConfig,readThroughRelay} from './temu-read-relay.mjs';
@@ -7,12 +8,14 @@ const reads=new Set(['bg.open.accesstoken.info.get','bg.local.mall.info.get','bg
 export function temuApi(config,{fetchImpl=fetch,relay=relayConfig(),relayRead=readThroughRelay}={}){
  async function relayRequest(payload,purchase=false){try{return await relayRead(relay,payload);}catch(e){if(purchase||!String(e.message).includes('(SSH 255)'))throw e;await new Promise(resolve=>setTimeout(resolve,500));return relayRead(relay,payload);}}
  async function call(type,data={},purchase=false,options={},attempt=0){
+  await assertTemuOrderApiRead(type,options);
   const budgetKey='temu:'+String(config.TEMU_APP_KEY||'')+':'+createHash('sha256').update(String(config.TEMU_ACCESS_TOKEN||'')).digest('hex').slice(0,16);
 
   if(!(reads.has(type)||(purchase&&type==='bg.logistics.shipment.create')))throw new Error('Opération TEMU interdite');
   if(purchase&&relay&&relay.purchaseEnabled!==true)throw new Error('TEMU · Relais temporaire en lecture seule : aucun achat autorisé');
   for(const k of ['TEMU_APP_KEY','TEMU_APP_SECRET','TEMU_ACCESS_TOKEN'])if(!config[k])throw new Error(k+' absent de la configuration privée TEMU');
   await apiAcquireSlot(budgetKey,500,{maxWaitMs:purchase?Infinity:temuReadWaitMs,shouldStop:options.shouldStop,onProgress:options.onProgress,fair:true});
+  await assertTemuOrderApiRead(type,options);
   const payload={app_key:config.TEMU_APP_KEY,access_token:config.TEMU_ACCESS_TOKEN,data_type:'JSON',timestamp:String(Math.floor(Date.now()/1000)),type,...data};
   const assembled=Object.keys(payload).sort().map(k=>k+(typeof payload[k]==='object'?JSON.stringify(payload[k]):String(payload[k]))).join('');
   const sign=createHash('md5').update(config.TEMU_APP_SECRET+assembled+config.TEMU_APP_SECRET).digest('hex').toUpperCase();

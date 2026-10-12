@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {currentMappingFingerprint} from './current-mapping-line.mjs';
@@ -23,7 +24,7 @@ export async function continuePreparationFromFreshRead(db,orderId,{enabled=()=>t
   await tx.query('SELECT id FROM lines WHERE order_id=$1 FOR SHARE',[orderId]);
   await tx.query('SELECT source_sku FROM mappings WHERE channel=$2 AND source_sku IN (SELECT source_sku FROM lines WHERE order_id=$1) FOR SHARE',[orderId,o.channel]);
   const proof=o.erp_live.bcComparisonRefresh;
-  if(await currentMappingFingerprint(tx,o)!==proof.mappingFingerprint||!enabled()||!canResume())return {queued:false};
+  if((!usesRecordedBc(o)&&await currentMappingFingerprint(tx,o)!==proof.mappingFingerprint)||!enabled()||!canResume())return {queued:false};
   const requestId='fresh-bc-continuation-'+createHash('sha256').update(JSON.stringify([orderId,proof.bcId,proof.checkedAt,proof.mappingFingerprint])).digest('hex'),id=randomUUID();
   const result={erpOnly:true,existingLabelsPreserved:true,automaticRecheck:true,afterFreshComparison:true,checkedAt:proof.checkedAt,mappingFingerprint:proof.mappingFingerprint};
   const queued=await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,result) SELECT $1,$2,$3,'resume-erp',$4,$5 WHERE NOT EXISTS(SELECT 1 FROM resolution_jobs WHERE order_id=$2 AND status IN ('pending','queued','running','waiting','processing')) ON CONFLICT DO NOTHING RETURNING id",[id,orderId,requestId,JSON.stringify({id:orderId,requestId,action:'resume-erp',type:'stock',resumeAfter:true}),JSON.stringify(result)]);
@@ -53,7 +54,7 @@ export async function releaseCompletedContinuationForPurchase(db,orderId,{enable
   if(!label||!['ready','to_buy'].includes(label.status)||label.error||label.attempt_id||!Array.isArray(label.packages)||label.packages.length||(await tx.query('SELECT 1 FROM temu_label_documents WHERE reference=$1 LIMIT 1',[o.reference])).rows.length||(await tx.query('SELECT 1 FROM carrier_jobs WHERE order_id=$1 LIMIT 1',[orderId])).rows.length)return {updated:false};
   await tx.query('SELECT id FROM lines WHERE order_id=$1 FOR SHARE',[orderId]);
   await tx.query('SELECT source_sku FROM mappings WHERE channel=$2 AND source_sku IN (SELECT source_sku FROM lines WHERE order_id=$1) FOR SHARE',[orderId,o.channel]);
-  if(!o.erp_live.mappingPreparationFingerprint||await currentMappingFingerprint(tx,o)!==o.erp_live.mappingPreparationFingerprint)return {updated:false};
+  if(!o.erp_live.mappingPreparationFingerprint||(!usesRecordedBc(o)&&await currentMappingFingerprint(tx,o)!==o.erp_live.mappingPreparationFingerprint))return {updated:false};
   try{await assertLabelStockGate(tx,o);}catch{return {updated:false};}
   if(!enabled()||!canResume())return {updated:false};
   await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[orderId]);

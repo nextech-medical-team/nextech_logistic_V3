@@ -1,4 +1,5 @@
 import {temuSellerTotals} from './temu-commercial-source.mjs';
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {resumeFinancialInitialHolds} from './financial-initial-hold.mjs';
 import {cancellationBlock} from './erp-transient-policy.mjs';
 import {bcAllowedSql} from './bc-authorization.mjs';
@@ -66,6 +67,7 @@ export function resolvedMonetaryPreview(r,o){
  if(r.status!=='review'||r.action!=='equivalent-preview'||!/^BC · (Total Erplain|TVA Erplain)/.test(r.error||''))return false;
  const p=o.erp_live?.pricing,c=p?.confirmed;
  if(!c||p.status!=='verified'||!(Date.parse(p.verifiedAt)>Date.parse(r.updated_at)))return false;
+ if(usesRecordedBc(o))return ['erplain','recorded_erplain_bc'].includes(c.authority)&&Number.isFinite(c.total)&&Number.isFinite(c.tax);
  return acceptedMonetaryDifference(c.total,p.total,p)&&acceptedMonetaryDifference(c.tax,p.tax,p);
 }
 export async function reconcileMonetaryPreviews(db){

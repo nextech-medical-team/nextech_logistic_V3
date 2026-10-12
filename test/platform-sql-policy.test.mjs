@@ -15,6 +15,7 @@ test('BC selection ignores platform declarations and preserves human suspension'
  for(const channel of ['shopify','temu','amazon'])for(const status of [1,2,3,4,5]){
   await db.query('INSERT INTO orders VALUES($1,$2,$3,$4,$5,false,false,null)',[channel+status,'TEST',channel,JSON.stringify({}),JSON.stringify({cancelled:true,cancelled_at:'2026-10-10',financial_status:'refunded',temuOrderDetail:{parentOrderMap:{parentOrderStatus:status,parentOrderLabel:[{name:'pending_buyer_cancellation',value:1}]}}})]);
  }
+ await db.exec("ALTER TABLE orders ADD COLUMN erp_live jsonb DEFAULT '{}'");
  assert.equal((await db.query(`SELECT id FROM orders o WHERE ${bcAllowedSql}`)).rows.length,15);
  await db.exec("UPDATE orders SET suspension='{\"active\":true,\"note\":\"human\"}'::jsonb WHERE id='shopify1'");
  assert.equal((await db.query(`SELECT id FROM orders o WHERE ${bcAllowedSql}`)).rows.length,14);

@@ -1,3 +1,4 @@
+import {usesRecordedBc,retiredRecordedBcSourceReview} from './existing-bc-execution.mjs';
 import {closedStockReview,reopenedStockReview} from './stock-incident-recheck.mjs';
 import {currentMappingFingerprint} from './current-mapping-line.mjs';
 import {oldFinanceErrors,projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
@@ -9,7 +10,7 @@ export function currentResolutionState(actions=[]){
  actions=Array.isArray(actions)?actions:[];
  const preparation=new Set(['resume-erp','resume','replace-equivalent','reconcile-bc','compare-bc','manual-temu-pricing','equivalent-preview','refresh','create-product']);
  const completed=actions.findIndex(j=>['resume-erp','resume','replace-equivalent'].includes(j.action)&&j.status==='complete'&&!j.error&&!j.result?.partialRemainder);
- const reviews=actions.filter((j,i)=>j.status==='review'&&!closedStockReview(j)&&(reopenedStockReview(j)||!preparation.has(j.action)||completed<0||i<completed));
+ const reviews=actions.filter((j,i)=>j.status==='review'&&!closedStockReview(j)&&!retiredRecordedBcSourceReview(j)&&(reopenedStockReview(j)||!preparation.has(j.action)||completed<0||i<completed));
  const preview=actions.findIndex(currentReplacementPreview);return {reviews,pendingReplacement:preview>=0&&(completed<0||preview<completed)};
 }
 const historicalReason='Reprise historique \u00e0 v\u00e9rifier : BL non cr\u00e9\u00e9';
@@ -25,12 +26,12 @@ export function completedHistoricalPreparation(o,e,now=Date.now()){
   if([p?.verifiedAt,p?.stockCheckedAt].some(t=>!Number.isFinite(Date.parse(t))||Date.parse(t)<started))return false;
  }
  if(e?.status!=='complete'||e.error!==null||p?.phase!=='bl_ready'||p.bc?.status!=='active'||!p.bc?.id||!p.bl?.id||!['ready_to_ship','shipped','delivered','completed'].includes(p.bl.status))return false;
- if(pricing?.status!=='verified'||pricing.error||pricing.confirmed?.authority!=='erplain'||!Number.isFinite(pricing.confirmed.total)||!Number.isFinite(pricing.confirmed.sourceTotal)||(!p.historicalStockProof&&!p.stockDocument?.id))return false;
- if(o.channel==='temu'){const source=o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue,basis=pricing.commercialBasis;if(basis?.field!=='estimatedRevenue'||!source||basis.sourceEstimatedRevenue?.amount!==source.amount||basis.sourceEstimatedRevenue?.currency!==source.currency)return false;}
+ if(pricing?.status!=='verified'||pricing.error||!['erplain','recorded_erplain_bc'].includes(pricing.confirmed?.authority)||!Number.isFinite(pricing.confirmed.total)||(!usesRecordedBc(o)&&!Number.isFinite(pricing.confirmed.sourceTotal))||(!p.historicalStockProof&&!p.stockDocument?.id))return false;
+ if(o.channel==='temu'&&!usesRecordedBc(o)){const source=o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue,basis=pricing.commercialBasis;if(basis?.field!=='estimatedRevenue'||!source||basis.sourceEstimatedRevenue?.amount!==source.amount||basis.sourceEstimatedRevenue?.currency!==source.currency)return false;}
  if(!p.stockDocument?.id){const stock=p.historicalStockProof;if(stock.stockOnBc!==true||String(stock.bcId)!==String(p.bc.id)||!Array.isArray(stock.quantities)||!Array.isArray(stock.logIds))return false;}
  if(!/^[a-f0-9]{64}$/.test(p.mappingPreparationFingerprint||'')||!/^[a-f0-9]{64}$/.test(p.labelPreparationFingerprint||''))return false;
  for(const value of [p.verifiedAt,p.stockCheckedAt]){const t=Date.parse(value);if(!Number.isFinite(t)||t>now||now-t>86400000)return false;}
- if(successfulResume||oldFinanceErrors.includes(o.issue)){const issue=projectCurrentDiagnostics(structuredClone(o)).issue;if(issue!==null&&!(successfulResume&&o.issue===historicalReason&&issue===historicalReason))return false;}
+ if(!usesRecordedBc(o)&&(successfulResume||oldFinanceErrors.includes(o.issue))){const issue=projectCurrentDiagnostics(structuredClone(o)).issue;if(issue!==null&&!(successfulResume&&o.issue===historicalReason&&issue===historicalReason))return false;}
  return true;
 }
 export async function reconcileHistoricalPreparation(db,orderId,{fingerprint=shipmentFingerprint,mappingFingerprint=currentMappingFingerprint}={}){
@@ -40,7 +41,7 @@ export async function reconcileHistoricalPreparation(db,orderId,{fingerprint=shi
   if((await tx.query("SELECT id FROM resolution_jobs WHERE order_id=$1 AND status IN ('pending','running','waiting','processing','queued') LIMIT 1",[orderId])).rows.length)return {updated:false};
   const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[orderId])).rows[0];if(!completedHistoricalPreparation(o,e))return {updated:false};
   if(await fingerprint(tx,o)!==o.erp_live.labelPreparationFingerprint)return {updated:false};
-  if(await mappingFingerprint(tx,o)!==o.erp_live.mappingPreparationFingerprint)return {updated:false};
+  if(!usesRecordedBc(o)&&await mappingFingerprint(tx,o)!==o.erp_live.mappingPreparationFingerprint)return {updated:false};
   let complete=false;
   if(o.channel==='temu'){
    const j=(await tx.query('SELECT status,error,packages FROM temu_label_jobs WHERE reference=$1 FOR SHARE',[o.reference])).rows[0];

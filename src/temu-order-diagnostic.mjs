@@ -1,9 +1,12 @@
+import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
+import {readTemuLifecycle} from './temu-lifecycle-reader.mjs';
 // This diagnostic deliberately has no database, purchase or PDF capability.
 // Its caller must supply the API for the order's verified TEMU shop.
-export async function readTemuOrderDiagnostic(api,reference,{knownPackages=[]}={}){
+export async function readTemuOrderDiagnostic(api,reference,{knownPackages=[],order}={}){
  if(typeof reference!=='string'||!/^PO-\d+-\d+$/.test(reference))throw Error('Référence TEMU invalide');
  if(!Array.isArray(knownPackages)||knownPackages.some(p=>typeof p!=='string'||!/^PK-\d+$/.test(p)))throw Error('TEMU · Colis locaux non vérifiables');
- const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});
+ const frozen=marketplaceContentFrozen(order),lifecycle=frozen?await readTemuLifecycle(api,order):null;
+ const detail=frozen?{...order.source_payload?.temuOrderDetail,parentOrderMap:{...order.source_payload?.temuOrderDetail?.parentOrderMap,parentOrderStatus:lifecycle.status}}:await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});
  if(detail?.parentOrderMap?.parentOrderSn!==reference||!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('TEMU · Identité ou articles de commande incohérents');
  const status=Number(detail.parentOrderMap.parentOrderStatus);
 

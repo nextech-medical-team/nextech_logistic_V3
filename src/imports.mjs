@@ -1,3 +1,4 @@
+import {marketplaceContentFrozen,lifecycleObservation,recordPostBcLifecycle} from './marketplace-content-freeze.mjs';
 import {postalHeaders,postalCellValue,importPostalCode} from './import-postal-code.mjs';
 import {cancelledImportSql,releaseCancelledImportReferences} from './cancelled-import-reimport.mjs';
 import {tenderPhone} from './tender-label-fields.mjs';
@@ -248,9 +249,11 @@ export async function importOrders(db,buffer,filename,channel,selection,options=
       if(!inserted.rows.length){const prior=(await tx.query('SELECT signature,result FROM import_receipts WHERE id=$1',[options.requestId])).rows[0];if(prior.signature!==signature)throw new Error('Validation déjà utilisée pour une autre sélection');if(prior.result?.cancellation)throw new Error('Cet import a été annulé. Analysez de nouveau votre fichier avant de valider une nouvelle sélection.');replayed=prior.result;return;}
     }
     await releaseCancelledImportReferences(tx,channel,valid.map(o=>o.reference));
-    const existing=(await tx.query(`SELECT DISTINCT ON (coalesce(source_reference,reference)) id,source_payload,coalesce(source_reference,reference) AS reference FROM orders WHERE NOT (${cancelledImportSql}) AND channel=$1 AND coalesce(source_reference,reference)=ANY($2::text[]) ORDER BY coalesce(source_reference,reference),received_at`,[channel,valid.map(o=>o.reference)])).rows;
+    const existing=(await tx.query(`SELECT DISTINCT ON (coalesce(source_reference,reference)) id,channel,erp_live,source_payload,coalesce(source_reference,reference) AS reference FROM orders WHERE NOT (${cancelledImportSql}) AND channel=$1 AND coalesce(source_reference,reference)=ANY($2::text[]) ORDER BY coalesce(source_reference,reference),received_at`,[channel,valid.map(o=>o.reference)])).rows;
+    for(let i=0;i<existing.length;i++){const reference=existing[i].reference;existing[i]={...(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[existing[i].id])).rows[0],reference};}
     const byRef=new Map(existing.map(o=>[o.reference,o.id]));
-    for(const o of valid.filter(o=>!o.visibilityHold&&!duplicates.includes(o.reference))){const old=existing.find(e=>e.reference===o.reference&&e.source_payload?.visibilityHold);if(!old)continue;
+    for(const o of valid){const old=existing.find(e=>e.reference===o.reference);if(marketplaceContentFrozen(old)&&channel==='amazon')await recordPostBcLifecycle(tx,old,lifecycleObservation('amazon',o.source_payload,{reference:old.reference}));}
+    for(const o of valid.filter(o=>!o.visibilityHold&&!duplicates.includes(o.reference))){const old=existing.find(e=>e.reference===o.reference&&e.source_payload?.visibilityHold);if(!old||marketplaceContentFrozen(old))continue;
      await tx.query('UPDATE orders SET recipient=$2,address=$3,source_date=$4,source_payload=$5,issue=$6 WHERE id=$1',[old.id,o.recipient,JSON.stringify(o.address),o.source_date,JSON.stringify({...o.source_payload,visibilityHold:false}),'Données récupérées · Préparation à vérifier']);
      for(const l of o.lines)await tx.query('INSERT INTO lines(id,order_id,source_line,source_sku,quantity,source_payload) VALUES($1,$2,$3,$4,$5,$6)',[l.id,old.id,l.source_line,l.source_sku,l.quantity,JSON.stringify(l.source_payload)]);recovered++;
     }

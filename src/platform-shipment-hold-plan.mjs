@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {marketplaceChanged} from './marketplace-comparison.mjs';
+import {marketplaceSnapshotChangeFields} from './marketplace-comparison.mjs';
 const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
 const hash=v=>createHash('sha256').update(JSON.stringify(canonical(v))??'undefined').digest('hex');
 // Pure planning only: never updates a job, document, label or database.
@@ -24,7 +24,7 @@ export function planPlatformShipmentHold({order,priorLines,normalizedIncoming,so
   if(!Number.isFinite(version)||version>now||!Number.isFinite(pendingVersion)||version<pendingVersion)return defer('source_version','Version fournisseur absente, future ou antérieure à la correction reçue');
   if(String(source.id)!==String(order.source_payload.id)||normalizedIncoming.reference!==order.reference)return defer('source_identity','Identité source différente');
  }
- if(marketplaceChanged(order,priorLines,normalizedIncoming))return defer('commercial_change','Modification commerciale indépendante : rapprocher les champs et documents');
+ if(marketplaceSnapshotChangeFields(order,priorLines,normalizedIncoming).length)return defer('commercial_change','Modification commerciale indépendante : rapprocher les champs et documents');
  if(otherErrors.length)return defer('other_problems','Les autres diagnostics ne sont pas effacés');
  if(order.partial_mode&&(!partialAllocationProof||String(partialAllocationProof.bcId)!==String(order.erp_live?.bc?.id)||!/^[a-f0-9]{64}$/.test(partialAllocationProof.shippingSignature||'')))return defer('partial_unverified','Allocations et BL partiels non rapprochés');
  if(workflowJobs.some(j=>!j||j.status!=='complete')||erpJobs.some(j=>!j||!(j.status==='complete'||order.partial_mode&&partialAllocationProof&&j.status==='partial')||j.error))return defer('jobs_unverified','Jobs historiques non terminés ou en erreur : aucune remise en file');

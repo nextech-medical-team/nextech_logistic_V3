@@ -12,7 +12,7 @@ test('Private TEMU authorization is kept outside Git and independent of declared
 });
 test('Maintenance replaces historical platform cancellation reason, preserves cancelled Erplain documents and never creates jobs',async()=>{
  const at=new Date().toISOString(),payload={id:'1',name:'#TEST',created_at:at,updated_at:at,fulfillment_status:'fulfilled',financial_status:'refunded',cancelled_at:at,line_items:[{id:'2',sku:'SKU',quantity:1}],shipping_address:{name:'TEST',address1:'Street',zip:'10000',city:'City',country_code:'FR'}};
- const order={id:'order1',channel:'shopify',reference:'#TEST',source_payload:{...payload},issue:'Commande entièrement remboursée dans Shopify · BC et BL Erplain annulés',label_status:'cancelled',tracking_status:'cancelled',resolution_pending_resume:false,archived:false,erp_live:{bc:{id:'3',status:'cancelled'},bl:{id:'4',status:'cancelled'}}};
+ const order={id:'order1',channel:'shopify',reference:'#TEST',source_payload:{...payload},issue:'Commande entièrement remboursée dans Shopify · BC et BL Erplain annulés',label_status:'cancelled',tracking_status:'cancelled',resolution_pending_resume:false,archived:false,erp_live:{bc:{status:'cancelled'},bl:{id:'4',status:'cancelled'}}};
  const original=structuredClone(order),tables={orders:[order],lines:[],jobs:[],erp_live_jobs:[],carrier_jobs:[],carrier_documents:[],document_lifecycle:[],extra_parcels:[],partial_deliveries:[],resolution_jobs:[],correction_jobs:[]};let updates=0;
  const db={query:async(sql,args)=>{
   if(sql.startsWith('LOCK TABLE'))return {rows:[]};
@@ -26,7 +26,7 @@ test('Maintenance replaces historical platform cancellation reason, preserves ca
 
 function faultFixture(fault){
  const at=new Date().toISOString(),payload={id:'1',name:'#TEST',created_at:at,updated_at:at,fulfillment_status:'fulfilled',financial_status:'refunded',cancelled_at:at,line_items:[{id:'2',sku:'SKU',quantity:1}],shipping_address:{name:'TEST',address1:'Street',zip:'10000',city:'City',country_code:'FR'}};
- const order={id:'order1',channel:'shopify',reference:'#TEST',source_payload:{...payload},issue:'Commande entièrement remboursée dans Shopify · BC et BL Erplain annulés',label_status:'cancelled',tracking_status:'cancelled',resolution_pending_resume:false,archived:false,erp_live:{bc:{id:'3',status:'cancelled'},bl:{id:'4',status:'cancelled'}}};
+ const order={id:'order1',channel:'shopify',reference:'#TEST',source_payload:{...payload},issue:'Commande entièrement remboursée dans Shopify · BC et BL Erplain annulés',label_status:'cancelled',tracking_status:'cancelled',resolution_pending_resume:false,archived:false,erp_live:{bc:{status:'cancelled'},bl:{id:'4',status:'cancelled'}}};
  const original=structuredClone(order),tables=Object.fromEntries(['orders','lines','jobs','erp_live_jobs','carrier_jobs','carrier_documents','document_lifecycle','extra_parcels','partial_deliveries','partial_documents','resolution_jobs','correction_jobs','temu_label_jobs'].map(n=>[n,n==='orders'?[order]:[]]));let written=false;
  const db={query:async(sql,args)=>{
   if(sql.startsWith('LOCK TABLE'))return {rows:[]};
