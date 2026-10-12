@@ -82,3 +82,9 @@ test('BC, BL and existing label retire blocking badges across every channel',()=
   for(const missing of ['bc','bl','label']){const n=structuredClone(o);if(missing==='bc')n.erp_live.bc=null;if(missing==='bl'){n.erp_live.bl=null;n.erplain_tracking_bls=[];}if(missing==='label'){n.document_count=0;n.temu_documents=[];}assert.ok(classify(n).length>0);}
  }
 });
+
+test('complete documents do not receive the missing-diagnostic fallback in problem filters',()=>{
+ const o={id:'complete',erp_live:{bc:{id:1},bl:{id:2}},document_count:1,label_status:'blocked',issue:'Stock insuffisant'};
+ const r=selectProblemOrders([o],[WITHOUT_DIAGNOSTIC],currentProblemClassifier(),['complete']);
+ assert.equal(r.total,0);assert.equal(r.problemTypes.length,0);
+});
