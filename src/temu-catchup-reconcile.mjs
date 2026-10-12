@@ -17,6 +17,7 @@ export async function reconcileTemuCatchup(tx,order,observation){
  if(Number.isFinite(previousVersion)&&previousVersion>0&&Number(observation.sourceVersion)<previousVersion)throw Object.assign(Error('TEMU · Réponse source antérieure à la version enregistrée'),{code:'TEMU_STALE_SOURCE',field:'version'});
  const lines=(await tx.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line FOR UPDATE',[order.id])).rows;
  const context=(await tx.query(`SELECT
+ EXISTS(SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='review' AND error='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU') AS initial_import_review,
  EXISTS(SELECT 1 FROM carrier_documents WHERE order_id=$1) OR EXISTS(SELECT 1 FROM carrier_jobs WHERE order_id=$1)
  OR EXISTS(SELECT 1 FROM temu_label_jobs WHERE reference=$2 AND (attempt_id IS NOT NULL OR jsonb_array_length(packages)>0))
  OR EXISTS(SELECT 1 FROM partial_deliveries WHERE order_id=$1) OR EXISTS(SELECT 1 FROM extra_parcels WHERE order_id=$1) AS prepared,
@@ -41,7 +42,10 @@ export async function reconcileTemuCatchup(tx,order,observation){
  source.platformStatusObservation={channel:'temu',payload:{detail:fresh.detail,shipping:fresh.shipping,country:fresh.country},observedAt:observation.checkedAt,indicative:true};
  source.temuCatchup={checkedAt:observation.checkedAt,coverage:observation.coverage,complete:observation.complete,coreComplete:true,conflicts,errors:observation.errors,shipments:fresh.shipments||[],packages:fresh.packages||[],externalWrites:0};
  let nextAddress=order.address,recipient=order.recipient,issue=order.issue;
- const initialIncomplete=!protectedData&&((source.visibilityHold===true&&!lines.length)||source.temuInitialPreparationPending===true);
+ // An older read may have filled the source but failed to reconnect the
+ // existing initial-review job because the source refusal was compound.
+ const strandedInitialReview=context.initial_import_review&&source.visibilityRecoveredAt&&source.temuSourceRead?.state==='verified'&&source.temuCatchup?.coreComplete===true&&!source.temuCatchup?.conflicts?.length&&!order.erp_live?.phase&&!order.erp_live?.customer?.id;
+ const initialIncomplete=!protectedData&&((source.visibilityHold===true&&!lines.length)||source.temuInitialPreparationPending===true||strandedInitialReview);
  const initialSourceOnly=initialIncomplete&&(!issue||obsoleteTemuVisibilityError(issue)||pureTemuSourceReadError(issue)||priorPartial?.currentReason&&issue===priorPartial.currentReason||issue==='Données TEMU récupérées · Préparation à vérifier'||issue==='Adresse masquée : adresse initiale complète requise avant préparation'||issue==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'||issue==='TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée');
  if(!conflicts.length){
   const pending=source.marketplacePendingCorrection;

@@ -13,10 +13,16 @@ export function temuSourceError(error,field){
 }
 // Only a pure obsolete source refusal can be superseded by a complete fresh read.
 // Mixed messages and the historical job records remain intact.
-export function obsoleteTemuVisibilityError(message){return typeof message==='string'&&/^TEMU(?: refuse l.opération\s*:\s*|\s*·\s*)180020006\s+The current order status cannot be viewed\.?\s*$/i.test(message);}
+export function obsoleteTemuVisibilityError(message){
+ if(typeof message!=='string')return false;
+ const parts=message.split(/\s;\s/),refusal=part=>/^TEMU(?: refuse l.opération\s*:\s*|\s*·\s*)180020006\s+The current order status cannot be viewed\.?\s*$/i.test(part);
+ // A current, stable detail supersedes the earlier list absence as well.
+ // Any independent diagnostic in the same message still prevents replacement.
+ return parts.some(refusal)&&parts.every(part=>refusal(part)||part==='TEMU · Commande absente de la liste source');
+}
 
 export function pureTemuSourceReadError(message){
- return typeof message==='string'&&message.split(/\s;\s/).every(part=>obsoleteTemuVisibilityError(part)||/^TEMU refuse l.opération\s*:\s*3000032 access_token don't have this api access, please ask for seller to authorize this api in seller center first\.and share the new access_token with you\.\s*$/i.test(part));
+ return obsoleteTemuVisibilityError(message)||typeof message==='string'&&message.split(/\s;\s/).every(part=>obsoleteTemuVisibilityError(part)||/^TEMU refuse l.opération\s*:\s*3000032 access_token don't have this api access, please ask for seller to authorize this api in seller center first\.and share the new access_token with you\.\s*$/i.test(part));
 }
 export function partialTemuReadProof(order,observation){
  if(observation.reference!==(order.source_reference||order.reference)||!observation.coverage?.detail||!observation.coverage?.version||!observation.coverage?.consistency||!Number.isSafeInteger(observation.sourceVersion)||observation.sourceVersion<=0||observation.payload?.detail?.parentOrderMap?.parentOrderSn!==observation.reference||!observation.errors?.length||observation.errors.some(e=>!['shipping','amounts','shipments','packages'].includes(e.field)))return null;
