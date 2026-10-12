@@ -1,0 +1,32 @@
+import test from 'node:test';import assert from 'node:assert/strict';import{createHash}from'node:crypto';
+import{PGlite}from'@electric-sql/pglite';
+import{reconcileSharedParcelResume as reconcile,sharedParcelResumeReconciler as service}from'../src/shared-parcel-resume-reconcile.mjs';
+const hash=b=>createHash('sha256').update(b).digest('hex');
+async function fixture(){
+ const db=new PGlite();await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,reference text,channel text,issue text,label_status text,resolution_pending_resume boolean,erp_live jsonb,suspension jsonb,archived boolean,tracking_status text);CREATE TABLE erp_live_jobs(order_id text,status text,error text,updated_at timestamptz);CREATE TABLE resolution_jobs(id text,order_id text,action text,status text,error text,result jsonb,created_at timestamptz,updated_at timestamptz);CREATE TABLE temu_label_jobs(reference text,status text,error text,packages jsonb,result jsonb);CREATE TABLE temu_label_documents(reference text,package text,pdf bytea);CREATE TABLE label_sku_copies(id text,order_id text,document_key text,source_hash text,context_hash text,pdf bytea,created_at timestamptz);CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE extra_parcels(order_id text);CREATE TABLE carrier_jobs(order_id text,status text,error text);CREATE TABLE audit(user_email text,action text,detail text);`);
+ const at=new Date(Date.now()-1000).toISOString(),raw=Buffer.from('%PDF-shared-original'),orders=[];
+ for(const i of [1,2]){
+  const erp={phase:'bl_ready',bc:{id:i},bl:{id:i+10,readyConfirmedAt:at},historicalStockProof:{bcId:i,stockOnBc:true,logIds:[i+20]}};
+  await db.query("INSERT INTO orders VALUES($1,$2,'temu','Colis partagé entre plusieurs commandes','blocked',true,$3,'{}',false,'not_shipped')",['o'+i,'r'+i,JSON.stringify(erp)]);
+  await db.query("INSERT INTO erp_live_jobs VALUES($1,'complete',NULL,$2)",['o'+i,at]);
+  const result={resume:true,erpOnly:true,statusVerification:{source:'current-local-diagnostics',state:'needs_review',blockers:['Reprise de préparation à vérifier','Préparation bloquée à vérifier']}};
+  await db.query("INSERT INTO resolution_jobs VALUES($1,$2,'resume-erp','complete',NULL,$3,$4,$4)",['resume'+i,'o'+i,JSON.stringify(result),at]);
+  await db.query("INSERT INTO temu_label_jobs VALUES($1,'complete',NULL,'[\"PK-1\"]','{\"source\":\"temu_direct\"}')",['r'+i]);
+  await db.query('INSERT INTO temu_label_documents VALUES($1,\'PK-1\',$2)',['r'+i,raw]);
+  await db.query('INSERT INTO label_sku_copies VALUES($1,$2,$3,$4,\'context\',$5,$6)',['copy'+i,'o'+i,'preserved:temu:r'+i+':PK-1',hash(raw),Buffer.from('%PDF-printed-specific-'+i),at]);
+  orders.push({reference:'r'+i,bc:{id:i,status:'active',externalReference:'r'+i,updateStock:true},shippingConnectionComplete:true,bls:[{id:i+10,status:'ready_to_ship',externalReference:'r'+i,updateStock:true}],noAdditionalStockRemoval:true,ledgerComplete:true,savedEventsStillPresent:true,savedHistoricalEvents:[i+20]});
+ }
+ const evidence={orders,registry:{package:'PK-1',labelStatus:1,tracking:'tracking',failure:null,orderReferences:['r1','r2']}};
+ const adapter={query:(...a)=>db.query(...a),transaction:fn=>db.transaction(tx=>fn({query:(...a)=>tx.query(...a)}))};
+ const tables=['orders','erp_live_jobs','resolution_jobs','temu_label_jobs','temu_label_documents','label_sku_copies','audit'];
+ const snapshot=async()=>Object.fromEntries(await Promise.all(tables.map(async t=>[t,(await db.query('SELECT * FROM '+t+' ORDER BY 1')).rows])));
+ return{db,adapter,evidence,options:{readProof:async()=>evidence},snapshot};
+}
+test('PostgreSQL repairs both obsolete flags atomically, preserving individual printed PDFs and all job/document data; repeat no-op',async()=>{
+ const x=await fixture();try{const before=await x.snapshot();const result=await reconcile(x.adapter,'PK-1',x.options);assert.equal(result.updated,true,JSON.stringify(result));const after=await x.snapshot();for(const t of ['erp_live_jobs','resolution_jobs','temu_label_jobs','temu_label_documents','label_sku_copies'])assert.deepEqual(after[t],before[t]);for(let i=0;i<2;i++){assert.deepEqual(after.orders[i],{...before.orders[i],issue:null,label_status:'production_ready',resolution_pending_resume:false});}assert.equal(after.audit.length,1);assert.equal((await reconcile(x.adapter,'PK-1',x.options)).notApplicable,true);assert.deepEqual(await x.snapshot(),after);}finally{await x.db.close();}
+});
+test('PostgreSQL dry-run has no writes',async()=>{const x=await fixture();try{const before=await x.snapshot();assert.equal((await reconcile(x.adapter,'PK-1',{...x.options,dryRun:true})).eligible,true);assert.deepEqual(await x.snapshot(),before);}finally{await x.db.close();}});
+for(const[name,sql,args]of [['printed copy','UPDATE label_sku_copies SET pdf=$1 WHERE order_id=\'o1\'',[Buffer.from('%PDF-changed')]],['raw label','UPDATE temu_label_documents SET pdf=$1 WHERE reference=\'r1\'',[Buffer.from('%PDF-changed')]],['independent error',"UPDATE orders SET issue='New issue' WHERE id='o2'",[]],['group membership',"UPDATE temu_label_jobs SET packages='[]' WHERE reference='r2'",[]]])test('PostgreSQL rejects '+name+' changed during supplier read',async()=>{const x=await fixture();try{x.options.readProof=async()=>{await x.db.query(sql,args);return x.evidence;};assert.equal((await reconcile(x.adapter,'PK-1',x.options)).changedDuringRead,true);assert.equal((await x.snapshot()).audit.length,0);assert.equal((await x.snapshot()).orders[0].label_status,'blocked');}finally{await x.db.close();}});
+test('PostgreSQL audit failure rolls back BOTH flags',async()=>{const x=await fixture();try{const before=await x.snapshot();const adapter={query:x.adapter.query,transaction:fn=>x.db.transaction(tx=>fn({query:(q,a)=>{if(q.startsWith('INSERT INTO audit'))throw Error('audit failure');return tx.query(q,a);}}))};await assert.rejects(reconcile(adapter,'PK-1',x.options),/audit failure/);assert.deepEqual(await x.snapshot(),before);}finally{await x.db.close();}});
+
+test('service bounds reads to one group per minute, advances fairly, and respects disabled/overlapping runs',async()=>{let now=1,enabled=false;const calls=[];const s=service({query:async()=>({rows:[{package:'PK-1'},{package:'PK-2'}]})},{now:()=>now,enabled:()=>enabled,reconcile:async(_db,p)=>calls.push(p)});await s.run();assert.deepEqual(calls,[]);enabled=true;await Promise.all([s.run(),s.run()]);assert.deepEqual(calls,['PK-1']);now+=60001;await s.run();assert.deepEqual(calls,['PK-1','PK-2']);});
