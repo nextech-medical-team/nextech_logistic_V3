@@ -2,6 +2,8 @@
 
 Dans **Paramètres → Import Shopify · Excel**, choisir le fichier, analyser les commandes, puis valider la sélection. Cet écran est distinct des autres imports.
 
+Le menu et l’analyse sont accessibles aux administrateurs, managers et opérateurs avec ou sans `MIGRATION_PREPARATION=1`. Ce mode suspend seulement la validation des commandes ; il ne masque pas l’écran Shopify.
+
 Formats acceptés : `.xlsx` et `.csv` (export standard des commandes Shopify). Pour Excel, conserver les en-têtes de l’export et utiliser la première feuille, avec des valeurs sans formules.
 
 Colonnes obligatoires : `Name` (référence, par exemple `#1001`), `Id` (identifiant Shopify), `Lineitem sku`, `Lineitem quantity`. Une ligne par article ; les lignes suivantes d’une commande peuvent répéter `Name` ou le laisser vide.
