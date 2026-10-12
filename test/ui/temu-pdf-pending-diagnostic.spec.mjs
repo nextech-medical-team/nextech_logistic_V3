@@ -1,0 +1,22 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+import {monitoringObservation} from '../../src/order-recheck-monitor.mjs';
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('TEMU PDF waiting is visible without a false block '+name,async({page})=>{
+ const now=Date.now(),at=new Date(now).toISOString();
+ const row={id:'pdf-wait',reference:'TEST-PDF-WAIT',channel:'temu',archived:false,simulation:false,recipient:'Synthetic recipient',address:{country:'FR',city:'Paris',postal:'75001'},source_date:at,line_count:1,item_quantity:1,sku_lines:[{sku:'TEST-SKU',quantity:1}],label_status:'production_ready',tracking_status:'not_shipped',carrier:'temu',source_payload:{},erp_live:{bc:{id:'TEST-BC'},bl:{id:'TEST-BL',status:'ready_to_ship'}}};
+ const job={status:'pending',error:'TEMU · PDF en attente chez TEMU',packages:['PK-1'],result:{source:'temu_direct',observedAt:at,packageInfoResultList:[{packageSn:'PK-1',shippingLabelStatus:0}]}};
+ let monitor=monitoringObservation({...row,temu_job:job},{},now);
+ const writes=[],errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()!=='GET'&&!['/api/partial/visible','/api/orders/processing'].includes(new URL(r.url()).pathname))writes.push(r.url());});
+ await page.setViewportSize(viewport);
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:[row],total:1,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/orders/processing',r=>r.fulfill({json:{at,rows:[{id:row.id,monitoring:monitor}]}}));
+ await page.goto('/');const card=page.locator('#order-rows .order-processing');
+ await expect(card.locator('.processing-stage')).toHaveText('Contrôle de la commande');
+ await expect(card.locator('.monitoring-result')).toContainText('récupération automatique en cours');await expect(card.locator('.monitoring-alert')).toBeHidden();
+ await card.locator('.processing-details-toggle').click();await expect(card.locator('.monitoring-step')).toContainText('aucun nouvel achat');
+ await card.scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/temu-pdf-pending-'+name+'.png'});
+ monitor=monitoringObservation({...row,temu_job:{status:'shipment_error',error:'Poids refusé par TEMU'}},{},now);
+ await page.reload();await expect(card.locator('.processing-stage')).toHaveText('Contrôle des blocages');await expect(card.locator('.monitoring-result')).toContainText('Poids refusé');
+ expect(writes).toEqual([]);expect(errors).toEqual([]);
+ fs.writeFileSync('proofs/temu-pdf-pending-'+name+'.json',JSON.stringify({status:'PASS',viewport,waitingVisible:true,falseBlock:false,supplierRefusalVisible:true,writes,errors,scope:'Synthetic order; actual monitoringObservation; full UI'}));
+});

@@ -59,7 +59,7 @@ async function fixture(){
  await db.exec(`CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'temu',reference text,transport_choice text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,issue text,label_status text,erp_status text,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
  CREATE TABLE erp_live_jobs(order_id text,status text,error text,updated_at timestamptz DEFAULT now(),state_since timestamptz DEFAULT now());CREATE TABLE carrier_jobs(order_id text,status text,error text); CREATE TABLE partial_deliveries(order_id text,status text);
  CREATE TABLE resolution_jobs(id text,order_id text,request_id text UNIQUE,action text,status text DEFAULT 'queued',stage text,payload jsonb,result jsonb,error text,updated_at timestamptz DEFAULT now(),created_at timestamptz DEFAULT now());
- CREATE TABLE temu_label_jobs(reference text,status text,error text,packages jsonb);
+ CREATE TABLE temu_label_jobs(reference text,status text,error text,packages jsonb,result jsonb);
  CREATE TABLE correction_jobs(order_id text,status text,result jsonb,error text);
  CREATE TABLE lines(id text,order_id text,source_sku text,target_sku text,quantity numeric,target_quantity numeric,source_payload jsonb DEFAULT '{}');CREATE TABLE mappings(channel text,source_sku text,target_sku text,source_qty numeric,target_qty numeric);
  INSERT INTO orders(id,reference,issue) VALUES('a','A','SKU Erplain introuvable'),('b','B','Stock insuffisant');
@@ -96,6 +96,27 @@ test('real PostgreSQL triggers enqueue immediate checks; periodic checks persist
   await monitor.runLocal();assert.equal((await db.query("SELECT requested=checked ok FROM order_recheck_monitor WHERE order_id='a'")).rows[0].ok,true);
   // The same persistent deadlines survive a service instance restart.
   await orderRecheckMonitor(db,{}, {readProduct:()=>assert.fail('premature read'),readDocuments:()=>assert.fail('premature read')}).runExternal();
+ }finally{await db.close();}
+});
+
+test('TEMU label completion immediately invalidates the prior waiting observation without a provider call',async()=>{
+ const db=await fixture();try{
+  await db.query("UPDATE orders SET issue=null,label_status='ready',erp_live='{\"bc\":{\"id\":\"BC\"},\"bl\":{\"id\":\"BL\"}}' WHERE id='a'");
+  const monitor=orderRecheckMonitor(db,{}, {readProduct:()=>assert.fail('no provider read'),readDocuments:()=>assert.fail('no provider read')});
+  await monitor.runLocal();
+  const result={source:'temu_direct',observedAt:new Date().toISOString(),packageInfoResultList:[{packageSn:'PK-1',shippingLabelStatus:0}]};
+  await db.query("INSERT INTO temu_label_jobs(reference,status,error,packages,result) VALUES('A','pending','TEMU · PDF en attente chez TEMU','[\"PK-1\"]',$1)",[JSON.stringify(result)]);
+  assert.equal((await db.query("SELECT requested>checked due FROM order_recheck_monitor WHERE order_id='a'")).rows[0].due,true);
+  await monitor.runLocal();
+  const waiting=(await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state;
+  assert.equal(waiting.blocked,false);assert.equal(waiting.holdCode,'temu_pdf_processing');
+  const businessBefore=(await db.query("SELECT to_jsonb(o) value FROM orders o WHERE id='a'")).rows[0].value;
+  await db.query("UPDATE temu_label_jobs SET status='complete',error=null WHERE reference='A'");
+  assert.equal((await db.query("SELECT requested>checked due FROM order_recheck_monitor WHERE order_id='a'")).rows[0].due,true);
+  await monitor.runLocal();
+  const complete=(await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state;
+  assert.equal(complete.blocked,false);assert.equal(complete.alert,false);assert.equal(complete.result,'Aucun blocage constaté');
+  assert.deepEqual((await db.query("SELECT to_jsonb(o) value FROM orders o WHERE id='a'")).rows[0].value,businessBefore);
  }finally{await db.close();}
 });
 
@@ -233,7 +254,7 @@ for(const scenario of ['valid','stale','future','changed-mapping','stock-review'
   const proof={bcId:'1',readOnly:true,preparationNotStarted:true,checkedAt:new Date(at+(scenario==='stale'?-16*60000:scenario==='future'?60000:0)).toISOString(),comparison:{scope:'full',different:false},errors:[],mappingFingerprint:await currentMappingFingerprint(db,o)};
   await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bcComparisonRefresh}',$1::jsonb) WHERE id='a'",[JSON.stringify(proof)]);
   await db.query("INSERT INTO erp_live_jobs(order_id,status,error) VALUES('a','review',$1)",[scenario==='provider-error'?'Stock insuffisant':null]);
-  await db.query("INSERT INTO temu_label_jobs VALUES('A','complete',null,'[\"existing-package\"]')");
+  await db.query("INSERT INTO temu_label_jobs(reference,status,error,packages) VALUES('A','complete',null,'[\"existing-package\"]')");
   if(scenario==='changed-mapping')await db.query("UPDATE lines SET quantity=2 WHERE order_id='a'");
   if(scenario==='suspended')await db.query("UPDATE orders SET suspension='{\"active\":true}' WHERE id='a'");
   if(scenario==='source-hold')await db.query("UPDATE orders SET source_payload='{\"erplainValidationHold\":true}' WHERE id='a'");
