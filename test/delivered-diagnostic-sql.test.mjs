@@ -1,0 +1,29 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {PGlite} from '@electric-sql/pglite';
+import {reconcileDeliveredDiagnostic,deliveredDiagnosticReconciler} from '../src/delivered-diagnostic-reconcile.mjs';
+import {staleDeliveredReason} from '../src/delivered-diagnostic-plan.mjs';
+async function fixture(){
+ const db=new PGlite();await db.exec(`CREATE TABLE orders(id text,reference text,channel text,issue text,label_status text,tracking_status text,resolution_pending_resume boolean,source_payload jsonb,erp_live jsonb,suspension jsonb);
+ CREATE TABLE erp_live_jobs(order_id text,status text,error text,updated_at timestamptz);CREATE TABLE carrier_jobs(order_id text,status text,error text,environment text,tracking jsonb);CREATE TABLE carrier_documents(order_id text,document_index int,pdf bytea);
+ CREATE TABLE resolution_jobs(id text,order_id text,action text,status text,error text,created_at timestamptz);CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE extra_parcels(order_id text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE audit(user_email text,action text,detail text);`);
+ await db.query("INSERT INTO orders VALUES('o','REF','shopify',$1,'blocked','delivered',true,'{\"postBcContentFreeze\":{\"enabled\":true}}','{\"bc\":{\"id\":1},\"bl\":{\"id\":2},\"stockDocument\":{\"id\":3}}','{}')",[staleDeliveredReason]);
+ await db.exec("INSERT INTO erp_live_jobs VALUES('o','complete',null,now());INSERT INTO carrier_jobs VALUES('o','ready',null,'production','[\"TRACK\"]')");await db.query("INSERT INTO carrier_documents VALUES('o',0,$1)",[Buffer.from('%PDF-existing')]);
+ const bc={id:1,status:'active',external_reference:'REF',update_stock:false,shipping_orders:{paginatorInfo:{hasMorePages:false},data:[{id:2,label:'BL2',external_reference:'REF',status:'delivered',update_stock:false}]}},stock={id:3,status:'completed',update_stock:true,notes:'LIVE : sortie de stock liée au BL BL2'};
+ const api={request:async(q)=>{assert.match(q,/^query /);assert.doesNotMatch(q,/mutation/i);return {StockRemoval:stock};}};
+ const options={readDocuments:async()=>bc,assertIdle:async()=>{}};
+ const adapter={query:(...a)=>db.query(...a),transaction:fn=>db.transaction(tx=>fn({query:(...a)=>tx.query(...a)}))};
+ const snapshot=async()=>{const out={};for(const t of ['orders','erp_live_jobs','carrier_jobs','carrier_documents','resolution_jobs','audit'])out[t]=(await db.query('SELECT * FROM '+t)).rows;return out;};
+ return {db,api,options,adapter,snapshot};
+}
+test('real SQL: dry read changes nothing; correction only changes technical flags with audit, PDF and ERP immutable; repeat no-op',async()=>{
+ const x=await fixture();try{const before=await x.snapshot();const dry=await reconcileDeliveredDiagnostic(x.adapter,x.api,'o',{...x.options,dryRun:true});assert.equal(dry.eligible,true);assert.deepEqual(await x.snapshot(),before);
+ const r=await reconcileDeliveredDiagnostic(x.adapter,x.api,'o',x.options);assert.equal(r.updated,true);const after=await x.snapshot();assert.equal(after.orders[0].issue,null);assert.equal(after.orders[0].resolution_pending_resume,false);assert.equal(after.audit.length,1);
+ for(const t of ['erp_live_jobs','carrier_jobs','carrier_documents','resolution_jobs'])assert.deepEqual(after[t],before[t]);
+ const {issue,label_status,resolution_pending_resume,...rest}=after.orders[0];const {issue:a,label_status:b,resolution_pending_resume:c,...prior}=before.orders[0];assert.deepEqual(rest,prior);
+ assert.equal((await reconcileDeliveredDiagnostic(x.adapter,x.api,'o',x.options)).updated,false);
+ }finally{await x.db.close();}
+});
+test('real SQL: concurrent diagnostic change prevents correction',async()=>{const x=await fixture();try{x.api.request=async()=>{await x.db.query("UPDATE orders SET issue='Independent error'");return {StockRemoval:{id:3,status:'completed',update_stock:true,notes:'LIVE : sortie de stock liée au BL BL2'}};};assert.equal((await reconcileDeliveredDiagnostic(x.adapter,x.api,'o',x.options)).changedDuringRead,true);assert.equal((await x.snapshot()).audit.length,0);}finally{await x.db.close();}});
+test('real SQL: audit failure rolls back all technical updates',async()=>{const x=await fixture();try{const before=await x.snapshot();const failing={query:x.adapter.query,transaction:fn=>x.db.transaction(tx=>fn({query:(sql,args)=>{if(sql.startsWith('INSERT INTO audit'))throw Error('Audit unavailable');return tx.query(sql,args);}}))};await assert.rejects(reconcileDeliveredDiagnostic(failing,x.api,'o',x.options),/Audit unavailable/);assert.deepEqual(await x.snapshot(),before);}finally{await x.db.close();}});
+test('real SQL: even a completed job with an independent error prevents provider reads and clearing',async()=>{const x=await fixture();try{await x.db.query("INSERT INTO resolution_jobs VALUES('r','o','weight','complete','Independent error',now())");x.api.request=async()=>{throw Error('Unexpected provider call');};x.options.readDocuments=async()=>{throw Error('Unexpected provider call');};const before=await x.snapshot();assert.equal((await reconcileDeliveredDiagnostic(x.adapter,x.api,'o',x.options)).independentBlocker,true);assert.deepEqual(await x.snapshot(),before);}finally{await x.db.close();}});
+test('bounded service advances remaining orders, does not run concurrently and honors disabling',async()=>{let now=1000000,enabled=true;const calls=[],rows=Array.from({length:8},(_,i)=>({id:String(i)}));const svc=deliveredDiagnosticReconciler({query:async()=>({rows})},{},{now:()=>now,enabled:()=>enabled,reconcile:async(_db,_api,id)=>{calls.push(id);}});await Promise.all([svc.run(),svc.run()]);assert.equal(calls.length,5);now+=60001;await svc.run();assert.deepEqual(calls,['0','1','2','3','4','5','6','7']);enabled=false;now+=900001;await svc.run();assert.equal(calls.length,8);});
