@@ -80,7 +80,7 @@ test('one-piece order override takes precedence over a global 64-piece mapping w
   await f.db.query("UPDATE orders SET erp_live=erp_live||$1::jsonb",[JSON.stringify({labelPreparationFingerprint:await shipmentFingerprint(f.db,before)})]);
   const result=await reconcilePreparationFromReads(f.db,f.api,'o',f.options);
   assert.equal(result.updated,true);assert.equal(result.providerMutations,0);
-  assert.equal((await f.db.query('SELECT target_qty FROM mappings')).rows[0].target_qty,64);
+  assert.equal(Number((await f.db.query('SELECT target_qty FROM mappings')).rows[0].target_qty),64);
   const o=(await f.db.query('SELECT erp_live FROM orders')).rows[0];assert.equal(o.erp_live.bl.line_items[0].quantity,1);
  }finally{await f.db.close();}
 });
