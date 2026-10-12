@@ -9,10 +9,13 @@ export const awaitingPurchaseSql="coalesce((channel='temu' AND transport_choice 
 // Retire only this exact historical diagnosis when the current carrier is valid.
 // Labels, jobs and all other preparation errors remain untouched.
 export function currentCarrierReason(o,reason){
- return ['gls','gls_pharma','gls_shop','gofo'].includes(o.carrier)&&reason==='Transporteur non déterminé'?null:reason;
+ if(!['gls','gls_pharma','gls_shop','gofo'].includes(o.carrier)||typeof reason!=='string')return reason;
+ const parts=reason.split(';');if(!parts.some(part=>part.trim()==='Transporteur non déterminé'))return reason;
+ return parts.map(part=>part.trim()).filter(part=>part&&part!=='Transporteur non déterminé').join(' ; ')||null;
 }
 function currentCarrierReasonSql(raw){
- return `(SELECT CASE WHEN carrier IN ('gls','gls_pharma','gls_shop','gofo') AND carrier_reason.raw_reason='Transporteur non déterminé' THEN NULL ELSE carrier_reason.raw_reason END FROM (SELECT (${raw}) AS raw_reason OFFSET 0) carrier_reason)`;
+ const parts="regexp_split_to_table(carrier_reason.raw_reason,';') WITH ORDINALITY AS carrier_part(part,position)";
+ return `(SELECT CASE WHEN carrier IN ('gls','gls_pharma','gls_shop','gofo') AND EXISTS(SELECT 1 FROM ${parts} WHERE btrim(part)='Transporteur non déterminé') THEN (SELECT string_agg(btrim(part),' ; ' ORDER BY position) FROM ${parts} WHERE nullif(btrim(part),'') IS NOT NULL AND btrim(part)<>'Transporteur non déterminé') ELSE carrier_reason.raw_reason END FROM (SELECT (${raw}) AS raw_reason OFFSET 0) carrier_reason)`;
 }
 export function currentReasonSql(raw){
  const stripped=currentCarrierReasonSql(withoutSharedParcelReasonSql(raw));raw='current_reason.raw_reason';const old=oldFinanceErrors.map(s=>"'"+s+"'").join(',');
@@ -65,6 +68,6 @@ export function projectCurrentDiagnostics(o){
  const proof=o.channel==='temu'&&o.erp_live?.bc?.id&&Number.isFinite(p?.confirmed?.total)&&Number.isFinite(p?.confirmed?.sourceTotal)&&p?.status==='verified'&&!p.error&&p.confirmed?.authority==='erplain'&&p.commercialBasis?.field==='estimatedRevenue'&&s&&p.commercialBasis.sourceEstimatedRevenue&&p.commercialBasis.sourceEstimatedRevenue.amount===s.amount&&p.commercialBasis.sourceEstimatedRevenue.currency===s.currency;
  if(proof){const reason=o.erp_live?.phase==='historical_review'&&o.resolution_pending_resume?'Reprise historique à vérifier : BL non créé':null;for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error']])if(target&&oldFinanceErrors.includes(target[key]))target[key]=reason;}
  for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o,'resolution_error']])if(target)target[key]=currentCarrierReason(o,target[key]);
- for(const job of o.resolution_actions||[])if(job)job.error=currentPlatformModificationReason(o,job.error);
+ if(Array.isArray(o.resolution_actions))o.resolution_actions=o.resolution_actions.map(job=>job?{...job,error:currentCarrierReason(o,currentPlatformModificationReason(o,job.error))}:job);
  return o;
 }

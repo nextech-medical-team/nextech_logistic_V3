@@ -64,8 +64,8 @@ export async function processingRows(db,ids){
    carrier_job:{error:row.carrier_error,updated_at:row.carrier_updated},
    temu_job:row.temu_status?{error:row.temu_error,updated_at:row.temu_updated}:null,
    resolution_error:row.resolution_error,resolution_error_updated_at:row.resolution_updated});
-  return processingView({...row,erp_error:current.erp_live_job.error,
-   resolution_error:current.resolution_error});
+  return {...processingView({...row,erp_error:current.erp_live_job.error,carrier_error:current.carrier_job.error,
+   resolution_error:current.resolution_error}),currentCarrier:row.diagnostic_order?.carrier||null};
  });
 }
 
