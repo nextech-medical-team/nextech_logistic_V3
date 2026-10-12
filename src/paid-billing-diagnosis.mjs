@@ -16,9 +16,9 @@ export async function reconcilePaidBillingDiagnosis(db,orderId,result){
   row.resolution_actions=(await tx.query('SELECT status,error FROM resolution_jobs WHERE order_id=$1 FOR SHARE',[orderId])).rows;
   const next=projectCurrentDiagnostics(structuredClone(row));
   const independent=next.issue||next.erp_live_job?.error||next.carrier_job?.error||next.resolution_actions.some(j=>j.error||['queued','running','waiting'].includes(j.status));
-  const packages=label?.packages&&typeof label.packages==='object'?Object.keys(label.packages):[];
+  const packages=Array.isArray(label?.packages)?[...new Set(label.packages.filter(p=>typeof p==='string'&&p.trim()))]:label?.packages&&typeof label.packages==='object'?Object.keys(label.packages):[];
   const documents=Number((await tx.query('SELECT count(*)::int AS n FROM temu_label_documents WHERE reference=$1 AND package=ANY($2::text[])',[row.reference,packages])).rows[0].n);
-  const restoreLabel=row.label_status==='blocked'&&!independent&&label?.status==='complete'&&documents>0;
+  const restoreLabel=row.label_status==='blocked'&&!independent&&label?.status==='complete'&&packages.length>0&&documents===packages.length;
   const labelStatus=restoreLabel?'production_ready':row.label_status,pendingResume=restoreLabel?false:row.resolution_pending_resume;
   const currentIssue=next.issue||(!independent&&row.label_status==='blocked'&&!restoreLabel?'Étiquette TEMU à vérifier · Document courant non confirmé':null);
   if(currentIssue===row.issue&&labelStatus===row.label_status&&pendingResume===row.resolution_pending_resume)return {changed:false,reason:'already_current'};
