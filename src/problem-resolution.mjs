@@ -1,3 +1,4 @@
+import {cancelledCycleDiagnosticReconciler} from './cancelled-cycle-diagnostic-reconcile.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {importedLabelDiagnosticReconciler} from './imported-label-diagnostic.mjs';
 import {carrierPrevalidationReconciler} from './carrier-prevalidation-diagnostic.mjs';
@@ -170,6 +171,7 @@ async function context(db,directory,id){
 export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic}={}){
  const diagnoseCarrier=refreshCarrierDiagnostic||carrierDiagnosticReader(db,directory).read;
  const pendingBlDiagnostics=pendingBlDiagnosticReconciler(db,api);
+ const cancelledCycleDiagnostic=cancelledCycleDiagnosticReconciler(db,api);
  const importedLabelDiagnostics=importedLabelDiagnosticReconciler(db,api);
  const carrierPrevalidationDiagnostics=carrierPrevalidationReconciler(db,api);
  const diagnoseShopify=refreshShopifyDiagnostic||shopifyDiagnosticReader(db,directory).read;
@@ -461,6 +463,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     if(Date.now()-lastWeightStatusRefresh>=60000){await reconcileVerifiedWeights(db);lastWeightStatusRefresh=Date.now();}
     await reconcileCompletedErpReviews(db);
     await reconcileResolvedStockReviews(db);
+    await cancelledCycleDiagnostic.run();
     await reconcileMonetaryPreviews(db);
     await db.query(`UPDATE resolution_jobs r SET status='waiting',error=null,stage='Recontrôle après correction du numéro BC',updated_at=now() FROM erp_live_jobs e,orders o WHERE r.order_id=e.order_id AND o.id=r.order_id AND r.status='review' AND r.stage='Erplain à compléter' AND (r.error LIKE '%already in use%' OR r.error='BC · Taux de TVA source à préciser') AND e.status='complete' AND e.error IS NULL AND o.erp_live->'bc'->>'status'='active' AND o.erp_live->>'verifiedAt' IS NOT NULL AND o.erp_live->>'stockCheckedAt' IS NOT NULL`);
     j=(await db.query("SELECT * FROM resolution_jobs WHERE NOT EXISTS(SELECT 1 FROM orders suspended_order WHERE suspended_order.id=resolution_jobs.order_id AND (coalesce(suspended_order.suspension->>'active','false')='true' OR suspended_order.suspension ? 'erplainCancellation')) AND status='queued' ORDER BY (SELECT processing_priority_at FROM orders WHERE id=resolution_jobs.order_id) ASC NULLS LAST,updated_at,order_id LIMIT 1")).rows[0];if(!j){await pendingBlDiagnostics.run();await carrierPrevalidationDiagnostics.run();await importedLabelDiagnostics.run();return;}
