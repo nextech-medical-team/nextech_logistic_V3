@@ -1,3 +1,4 @@
+import {orderMarginMapping} from './order-margin-mapping.mjs';
 import {temuCommercialSource} from './temu-commercial-source.mjs';
 import {temuCountryAmounts,temuFixedVat} from './temu-country-vat.mjs';
 import {equivalentReceipts,applyEquivalentReceipts} from './temu-equivalent-margin.mjs';
@@ -6,21 +7,10 @@ import vm from 'node:vm';import {readFile} from 'node:fs/promises';
 const canonical=s=>String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const amazonFields=['amazon-order-id','order-item-id','sku','product-name','quantity','purchase-date','ship-country','sales-channel','currency','order-status','fulfillment-channel','item-price','item-tax','shipping-price','shipping-tax','gift-wrap-price','gift-wrap-tax','item-promotion-discount','ship-promotion-discount'];
 const temuFields=['Order ID',"N° de l'article de la commande",'contribution SKU','N° SKU','nom du produit',"date d'achat","pays d'expédition",'quantité achetée','quantité annulée','quantité expédiée','statut de la commande','Total du prix de base après réduction','Prix de base total','Prix de vente (hors taxes)','Total du prix de vente après réductions (hors taxes)',"Total de l'expédition (hors taxes)",'Taxe sur les produits',"Taxe d'expédition",'Remboursement des produits','Réduction de la part du vendeur','Réduction de la part de Temu'];
-export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAmazonImportsFbm=false,readAsset=readFile}={}){
+export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAmazonImportsFbm=false}={}){
  const confirmedFbm=new Set(confirmedAmazonIds);
- let snapshot,sources;
- try{
-  snapshot=JSON.parse(await readAsset(new URL('./margin-published-snapshot.json',import.meta.url),'utf8'));
-  sources=JSON.parse(await readAsset(new URL('./margin-published-sources.json',import.meta.url),'utf8'));
- }catch(e){
-  if(e.code!=='ENOENT')throw e;
-  const reason='Calcul des marges indisponible : référentiel privé manquant';
-  console.warn(reason);
-  return {async get(){
-   const orders=(await db.query('SELECT id,reference,channel FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
-   return {available:false,reason,source:{url:null,version:'indisponible',capturedAt:null},calculatedAt:new Date().toISOString(),rows:orders.map(o=>({...o,status:'incomplete',profit:null,markup:null,margin:null,issues:[reason],lines:[]}))};
-  }};
- }
+ const snapshot=JSON.parse(await readFile(new URL('./margin-published-snapshot.json',import.meta.url),'utf8'));
+ const sources=JSON.parse(await readFile(new URL('./margin-published-sources.json',import.meta.url),'utf8'));
  const context=vm.createContext({window:{},Intl,console,countries:snapshot.countries,services:snapshot.services,transportGrids:snapshot.transportGrids,amazonRows:snapshot.amazon,rows:snapshot.temu,amazonEffective:r=>r,effective:r=>r,esc:s=>String(s??'')});
  context.window=context;
  for(const name of ['margin-math.js','amazon-calculation.js'])vm.runInContext(sources[name],context,{timeout:5000});
@@ -81,7 +71,7 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
    if(!Number.isFinite(price)||price<0)return fail('Tarif '+name+' indisponible pour '+weight+' kg');
    transportSource=name+' retenu dans V3 ('+carrier+') · poids calculateur '+weight+' kg · tarif publié '+price.toLocaleString('fr-FR',{maximumFractionDigits:5})+' € HT';
    return price;
-  },find(l){const found=adapters[o.channel].find(l);const v3=sourceLines.find(x=>x.id===l.id);if(found.cost&&v3?.target_quantity!=null&&Math.abs(Number(v3.target_quantity)/Number(v3.quantity)-found.cost.mapping)>1e-9)return {error:'Mapping V3 différent du calculateur publié'};return found;}};
+  },find(l){const v3=sourceLines.find(x=>x.id===l.id);const found=orderMarginMapping(adapters[o.channel].find(l),v3);if(found.cost&&v3?.target_quantity!=null&&Math.abs(Number(v3.target_quantity)/Number(v3.quantity)-found.cost.mapping)>1e-9)return {error:'Mapping V3 différent du calculateur publié'};return found;}};
   let result;try{result=context.marginEngine.analyze(raw,o.channel,checkedAdapter,{},{}).orders[0];}catch(e){result={complete:false,issues:['Diagnostic du calculateur indisponible : '+e.message],lines:[]};}
   const r=result||{complete:false,issues:['Aucune ligne à calculer'],lines:[]};
   if(equivalentOrder){try{applyEquivalentReceipts(r,equivalentReceipts(temuCommercialSource(o,temuCountryAmounts(o)),o.source_payload?.temuOrderDetail,o.reference));}catch(e){amountIssues.push(e.message);r.complete=false;}}
