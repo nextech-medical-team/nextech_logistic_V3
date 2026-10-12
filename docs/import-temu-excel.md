@@ -21,7 +21,7 @@ Validation : `npm run test:temu-import`, `npm run check` et `npx playwright test
 
 ## Essai manuel local
 
-Lancer `npm run test:temu-local`, puis ouvrir `http://127.0.0.1:31235`. Le serveur ouvre directement l’import TEMU et conserve sa base PGlite sous `data/temu-excel-local/db`. Il ne charge pas le `.env` de production. Les commandes importées sont visibles dans le tableau local. Réimporter le même fichier permet de vérifier les doublons. Les fichiers Excel restent intacts. Les imports de l’ancien serveur en mémoire doivent être refaits une fois.
+Lancer `npm run test:temu-local`, puis ouvrir `http://127.0.0.1:31235`. Le serveur ouvre directement l’import TEMU et conserve sa base PGlite sous `data/temu-excel-local/db`. Les BC/BL de test utilisent `.env.erplain-test`. Les outils de comparaison lisent les accès PROD de `.env` uniquement lors de leur utilisation, sans modifier Erplain. Les commandes importées sont visibles dans le tableau local. Réimporter le même fichier permet de vérifier les doublons. Les fichiers Excel restent intacts. Les imports de l’ancien serveur en mémoire doivent être refaits une fois.
 
 ### BC et BL dans Erplain TEST uniquement
 
@@ -60,3 +60,13 @@ Le dialogue d’achat affiche la marge après **Afficher le tarif**. Il appelle 
 Le détail de marge du tableau utilise également ce service via `/api/margins`. Le fichier privé `src/margin-published-snapshot.json` est nécessaire pour disposer des coûts réels du référentiel. Il est exclu du dépôt : en son absence, le dialogue indique **Marge indisponible**, et le détail retourne une erreur explicite. Aucun coût n’est inventé et une marge incomplète n’est pas présentée comme nulle. L’achat reste une confirmation manuelle, comme le bouton API existant ; ce raccordement n’active pas l’achat automatique sur marge positive.
 
 Vérification : `node --test test/temu-excel-margins.test.mjs test/temu-excel-labels.test.mjs`. Les tests comparent les résultats des sources API et Excel à montants vendeur identiques, vérifient le coût du devis puis de l’étiquette, et couvrent les coûts absents et les mappings différents. Les données de test sont fictives.
+
+### Périmètre de publication
+
+Le serveur principal expose l’import Excel et son aperçu authentifié. Les commandes importées restent suspendues pour validation ; leur import ne déclenche aucune préparation automatique.
+
+Les pages `/status-preview` et `/erplain-test`, ainsi que les routes `/api/local-*`, appartiennent exclusivement au serveur local `npm run test:temu-local`, lié à `127.0.0.1`. Elles ne sont pas exposées par `npm start`. L’achat réel TEMU du parcours Excel décrit ci-dessus reste un outil local à confirmation manuelle.
+
+La comparaison locale réutilise les règles du moteur de synchronisation, mais ne modifie ni les statuts Nextech ni Erplain. Les suivis GLS/GOFO sont saisis par l’utilisateur ; leur appartenance et leur exhaustivité doivent être vérifiées. Le service principal utilise les colis enregistrés dans Nextech. Publier cette branche n’active pas les écritures Erplain : les contrôles existants `ERPLAIN_LIVE_WRITES`, `MIGRATION_PREPARATION` et l’exclusion du traitement concurrent `lifecycle` restent applicables.
+
+Les exports clients, bases locales, accès API et référentiels privés restent exclus du dépôt.
