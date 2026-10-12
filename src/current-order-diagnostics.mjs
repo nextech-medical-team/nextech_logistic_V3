@@ -21,6 +21,11 @@ export function currentReasonEmptySql(raw){
  const recovered="(channel='temu' AND source_payload->'marketplacePendingCorrection' IS NULL AND source_payload->>'visibilityHold'='false' AND source_payload->>'visibilityRecoveredAt' IS NOT NULL)";
  const expression=`coalesce(CASE WHEN ${verifiedFinanceSql} AND ((${raw}) IN (${old}) OR (issue IN (${old}) AND ${generic} AND (${platformChangeVerifiedSql} OR ${recovered}))) THEN NOT coalesce((erp_live->>'phase'='historical_review' AND coalesce(resolution_pending_resume,false)),false) WHEN coalesce(${generic},false) THEN CASE WHEN ${platformChangeVerifiedSql} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE source_payload->'marketplacePendingCorrection' IS NULL END WHEN ${recovered} THEN CASE WHEN ${nonGenericIssue} THEN issue='' ELSE false END ELSE false END ELSE (${raw}) IS NULL OR (${raw})='' END,false)`;return `(SELECT ${expression} FROM (SELECT (${stripped}) AS raw_reason OFFSET 0) current_reason)`;
 }
+export function paidDeferredBillingDiagnosis(o){
+ const d=o.source_payload?.platformChangeReconciliation;
+ const matches=typeof o.issue==='string'&&(o.issue===d?.deferredReason||typeof d?.deferredReason==='string'&&o.issue===d.deferredReason.replace(/ ; TEMU · Quota partagé : lecture différée$/,''));
+ return d?.kind==='temu_address_masking'&&d.verified===true&&d.deferredBilling===true&&o.invoice_status==='paid'&&matches&&(!d.deferredLabelRead||!!o.temu_job);
+}
 export function projectCurrentDiagnostics(o){
  if(o.archived||o.label_status==='cancelled'||o.tracking_status==='cancelled'){for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o,'resolution_error']])if(target)target[key]=null;return o;}
  const partial=o.source_payload?.temuCatchupPartial;
@@ -30,7 +35,13 @@ export function projectCurrentDiagnostics(o){
   if(job&&Number.isFinite(Date.parse(job.updated_at))&&Date.parse(job.updated_at)<=Date.parse(partial.checkedAt)&&(pureTemuSourceReadError(job.error)||job.error==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'))job.error=partial.currentReason;
  }
  const deferred=o.source_payload?.platformChangeReconciliation;
- if(deferred?.kind==='temu_address_masking'&&deferred.verified===true&&deferred.deferredBilling===true&&!o.source_payload?.marketplacePendingCorrection&&o.invoice_status==='paid'&&o.issue===deferred.deferredReason&&(!deferred.deferredLabelRead||o.temu_job)){o.issue=o.temu_job?.error?'TEMU · '+o.temu_job.error:null;}
+ // A successful quota read may have retired only the known quota suffix from
+ // the card. Match that exact historical suffix without retiring other errors.
+
+ if(paidDeferredBillingDiagnosis(o)){
+  const sourceReason=o.source_payload?.marketplacePendingCorrection?currentPlatformModificationReason(o,'Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise'):null;
+  o.issue=[sourceReason,o.temu_job?.error?'TEMU · '+o.temu_job.error:null].filter(Boolean).join(' ; ')||null;
+ }
  const stock=o.erp_live?.stockIncidentRecheck,stamp=Date.parse(stock?.checkedAt),stockFresh=Number.isFinite(stamp)&&stamp<=Date.now()&&Date.now()-stamp<=15*60000;
  if(stock&&((stock.preparationRequired&&o.issue===stock.currentIssue)||(stock.status!=='resolved'&&o.issue===stock.currentError))){for(const [target,key] of [[o.erp_live_job,'error'],[o,'resolution_error']])if(target&&stockIncidentOnly(target[key])&&(target===o.erp_live_job?target[key]===stock.erpError:(stock.status==='resolved'?stock.retiredErrors:stock.observedErrors)?.includes(target[key])))target[key]=stock.status==='resolved'?(stockFresh?null:'Stock : vérification à reprendre — dernier contrôle expiré'):stock.currentError;}
 

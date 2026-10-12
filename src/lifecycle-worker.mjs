@@ -1,3 +1,4 @@
+import {reconcilePaidBillingDiagnosis} from './paid-billing-diagnosis.mjs';
 import {shopifyCancellationWorker} from './shopify-cancellation-worker.mjs';
 import {readyWeightAllowed,validateReadyPreparation} from './ready-preparation.mjs';
 import {aggregateParcels} from './status-policy.mjs';
@@ -37,7 +38,7 @@ export function lifecycleWorker(db,directory,{gateway=erplainLifecycleGateway(er
    await discover();
    const row=(await db.query(lifecycleCandidateSql)).rows[0];if(!row)return;
    const o=(await db.query('SELECT * FROM orders WHERE id=$1',[row.order_id])).rows[0];
-   let input={blId:row.bl_id,bcId:o.erp_live?.bc?.id,channel:o.channel,expectedTracking:[],events:[],preparationComplete:false};
+   let input={blId:row.bl_id,bcId:o.erp_live?.bc?.id,orderId:o.id,channel:o.channel,sourcePayload:o.source_payload,expectedTracking:[],events:[],preparationComplete:false};
    try{
     if(row.partial_id){const d=(await db.query('SELECT * FROM partial_deliveries WHERE id=$1',[row.partial_id])).rows[0];input.expectedTracking=d.tracking||[];input.preparationComplete=d.status==='ready'&&readyWeightAllowed(o.channel,d.weight_kg)&&!!d.stock_document&&!!d.selection?.length;}
     else{
@@ -71,7 +72,7 @@ export function lifecycleWorker(db,directory,{gateway=erplainLifecycleGateway(er
     await db.query('UPDATE document_lifecycle SET result=$2,error=null,checked_at=now(),requested=false,preparation_revision=$3 WHERE bl_id=$1',[row.bl_id,JSON.stringify(result),row.current_revision]);
     if(row.partial_id)await db.query("UPDATE partial_deliveries SET bl=bl||$2::jsonb WHERE id=$1",[row.partial_id,JSON.stringify({status:result.bl.status})]);
     else await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bl,status}',to_jsonb($2::text)) WHERE id=$1",[o.id,result.bl.status]);
-    if(result.billing==='paid'&&!row.partial_id)await db.query("UPDATE orders SET invoice_status='paid' WHERE id=$1",[o.id]);
+    if(result.billing==='paid'&&!row.partial_id){await db.query("UPDATE orders SET invoice_status='paid' WHERE id=$1",[o.id]);if(o.source_payload?.platformChangeReconciliation?.deferredBilling===true)await reconcilePaidBillingDiagnosis(db,o.id,result);}
    }catch(e){await db.query('UPDATE document_lifecycle SET error=$2,checked_at=now(),requested=false,preparation_revision=$3 WHERE bl_id=$1',[row.bl_id,e.message,row.current_revision]);}
   }finally{running=false;}},
   get running(){return running;}
