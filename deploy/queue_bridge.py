@@ -3,18 +3,39 @@
 import os,sys,json,re,tempfile,time,datetime
 from pathlib import Path
 STATE=Path('/var/lib/nextech-cicd')
+
+def safe_preinstall_failure(record):
+ report=record.get('report',{})
+ return record.get('status')=='failed' and report.get('installed') is False and report.get('paused') is False and not report.get('manualIntervention') and report.get('rollback')!='FAILED' and report.get('taskControlsRestored') is not False
+
+def later_baseline_allowed(record,baseline,is_ancestor):
+ report=record.get('report',{})
+ previous=report.get('baselineCommitBefore')
+ current=baseline.get('commit')
+ if not previous or not current or previous==current:return False
+ # Only a pre-install, pre-pause failure can be certified against a newer publication.
+ if report.get('installed') is not False or report.get('paused') is not False:return False
+ if report.get('manualIntervention') or report.get('rollback')=='FAILED' or report.get('taskControlsRestored') is False:return False
+ return bool(baseline.get('serverHashes')) and is_ancestor(previous,current)
+
 def restoration_certificate(record):
  # The local caller cannot assert a successful rollback: recheck it on the server.
- from dispatcher import read_current,verify_environment,health,guard,digest
+ from dispatcher import read_current,verify_environment,health,guard,digest,git
  report=record.get('report',{})
  baseline=json.loads((STATE/'baseline.json').read_text())
  expected_commit=report.get('baselineCommitBefore') or baseline['commit']
- if baseline['commit']!=expected_commit:raise ValueError('Référence publiée différente ; rapprochement Section7 nécessaire')
- expected={f['path']:f['before'] for f in report.get('files',[])} or baseline['serverHashes']
+ later=False
+ if baseline['commit']!=expected_commit:
+  def ancestor(before,after):
+   try:git('merge-base','--is-ancestor',before,after);return True
+   except Exception:return False
+  if not later_baseline_allowed(record,baseline,ancestor):raise ValueError('Référence publiée différente ; rapprochement Section7 nécessaire')
+  later=True;expected_commit=baseline['commit']
+ expected=baseline['serverHashes'] if later else ({f['path']:f['before'] for f in report.get('files',[])} or baseline['serverHashes'])
  actual=read_current(expected.keys())
  for name,sha in expected.items():
   if (digest(actual[name]) if name in actual else None)!=sha:raise ValueError('Restauration non prouvée : '+name)
- environment=report.get('environmentHashBefore') or baseline.get('environmentHash')
+ environment=baseline.get('environmentHash') if later else (report.get('environmentHashBefore') or baseline.get('environmentHash'))
  if not environment or verify_environment()!=environment:raise ValueError('Environnement non restauré')
  health()
  if report.get('paused') or report.get('taskControlsRestored') is False:
@@ -31,7 +52,15 @@ def sync(payload):
  old=json.loads((STATE/'local-queue.json').read_text()) if (STATE/'local-queue.json').exists() else {'revision':-1}
  if payload.get('revision',-1)<old['revision']:raise ValueError('Snapshot plus ancien refusé')
  resolutions=[]
- for identifier in payload.get('resolveAutomatic',[]):
+ explicit=set(payload.get('resolveAutomatic',[]))
+ identifiers=list(explicit)
+ if payload.get('resolvePreinstallFailures') is True:
+  for file in sorted((STATE/'requests').glob('*.json')):
+   candidate=json.loads(file.read_text())
+   report=STATE/'reports'/('deploy-'+candidate.get('commit','')+'.json')
+   if report.exists():candidate['report']=json.loads(report.read_text())
+   if safe_preinstall_failure(candidate) and candidate['id'] not in explicit:identifiers.append(candidate['id'])
+ for identifier in identifiers:
   if not re.fullmatch('[a-f0-9-]{36}',identifier):raise ValueError('Résolution invalide')
   matches=[p for p in (STATE/'requests').glob('*.json') if json.loads(p.read_text()).get('id')==identifier]
   if len(matches)!=1:raise ValueError('Demande automatique inconnue')
@@ -40,7 +69,11 @@ def sync(payload):
   if record['status'] not in ('failed','blocked'):raise ValueError('Échec à résoudre absent')
   report_path=STATE/'reports'/('deploy-'+record['commit']+'.json')
   if report_path.exists():record['report']=json.loads(report_path.read_text())
-  certificate=restoration_certificate(record);resolutions.append((matches[0],record,certificate))
+  try:certificate=restoration_certificate(record)
+  except Exception:
+   if identifier in explicit:raise
+   continue # No proof means no resolution; preserve the failed blocker.
+  resolutions.append((matches[0],record,certificate))
  target=STATE/'local-queue.json';temporary=target.with_suffix('.tmp');temporary.write_text(json.dumps(payload));temporary.chmod(0o600);os.replace(temporary,target)
  for file,record,certificate in resolutions:
   record['status']='resolved';record['requiresReplacement']=False;record['resolution']=certificate
