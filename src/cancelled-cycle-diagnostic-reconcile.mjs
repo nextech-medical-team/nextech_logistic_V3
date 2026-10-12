@@ -22,7 +22,8 @@ export async function reconcileCancelledCycleDiagnostic(db,api,id,{readDocuments
  const before=await snapshot(db,id,false,assertIdle);
  if(!before||before.erpJob?.error!==oldCycleDiagnostic||before.busy||before.suspended||!['amazon','shopify'].includes(before.order.channel))return {updated:false,notApplicable:true};
  if(before.labels.some(x=>x.signature!=='%PDF-')||!Array.isArray(before.carrier?.tracking)||before.carrier.tracking.length!==before.labels.length)return {updated:false,reason:'label_scope'};
- const provider={request:(q,...a)=>{if(!/^\s*query\b/.test(q)||/\bmutation\b/i.test(q))throw Error('Provider mutation prohibited');return api.request(q,...a);}};
+ let reads=0;
+ const provider={request:(q,...a)=>{if(!/^\s*query\b/.test(q)||/\bmutation\b/i.test(q))throw Error('Provider mutation prohibited');if(++reads>16)throw Error('Bounded supplier read limit exceeded');return api.request(q,...a);}};
  const checkedAt=new Date(now()).toISOString();await api.verify?.();
  const previousProof=await provePrevious(provider,before.order),currentBc=await readDocuments(provider,before.order.erp_live?.bc?.id);
  const label='V3FS-'+id+'-BC'+before.order.erp_live?.bc?.id;
