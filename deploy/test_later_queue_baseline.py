@@ -31,4 +31,22 @@ class RealCertificate(unittest.TestCase):
     env.return_value='env';health.side_effect=ValueError('unhealthy')
     with self.assertRaises(ValueError):bridge.restoration_certificate(record)
 
+class GlobalResolution(unittest.TestCase):
+ def test_all_safe_preinstall_failures_are_checked_without_id_list(self):
+  import tempfile,json
+  from pathlib import Path
+  from unittest.mock import patch
+  import queue_bridge as bridge
+  with tempfile.TemporaryDirectory() as td:
+   state=Path(td);(state/'requests').mkdir();(state/'reports').mkdir()
+   for i in range(3):
+    record={'id':f'{i+1:08x}-bbbb-cccc-dddd-eeeeeeeeeeee','commit':str(i+1)*40,'status':'failed','requiresReplacement':True,'report':{'installed':False,'paused':False,'baselineCommitBefore':'a'*40}}
+    if i==2:record['report']['manualIntervention']=True
+    (state/'requests'/f'{i}.json').write_text(json.dumps(record))
+   def certificate(record):
+    if record['commit'].startswith('2'):raise ValueError('hash mismatch')
+    return {'verified':True}
+   with patch.object(bridge,'STATE',state),patch.object(bridge,'restoration_certificate',side_effect=certificate):
+    result=bridge.sync({'version':1,'revision':1,'requests':[],'resolvePreinstallFailures':True})
+   self.assertEqual([r['status'] for r in sorted(result['automaticRequests'],key=lambda r:r['commit'])],['resolved','failed','failed'])
 if __name__=='__main__':unittest.main()

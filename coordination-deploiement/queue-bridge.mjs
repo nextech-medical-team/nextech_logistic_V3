@@ -21,7 +21,7 @@ export async function mirrorQueue(root,docs){
   rows.push({id:doc.id,createdAt:doc.createdAt,status:doc.status==='failed'?'blocked':doc.status,section:doc.section,gates:{ready:m.ready===true,openGates:m.openGates||[],commit:m.git?.commit||null,verification:m.verification?.status||null}});
  }
  const revision=Date.now();
- const result=spawnSync(config.python,[config.script],{cwd:root,input:JSON.stringify({version:1,revision,requests:rows,resolveAutomatic:config.certifiedAutomaticResolutions||[]}),encoding:'utf8',timeout:120000});
+ const result=spawnSync(config.python,[config.script],{cwd:root,input:JSON.stringify({version:1,revision,requests:rows,resolveAutomatic:config.certifiedAutomaticResolutions||[],resolvePreinstallFailures:true}),encoding:'utf8',timeout:120000});
  if(result.status!==0)throw Error('Synchronisation serveur de la file impossible ; mutation locale refusée.');
  const reply=JSON.parse(result.stdout);if(reply.status!=='PASS')throw Error('Synchronisation refusée');
  const reportDir=path.join(root,'coordination-deploiement','cicd-rapports');await fs.mkdir(reportDir,{recursive:true});
