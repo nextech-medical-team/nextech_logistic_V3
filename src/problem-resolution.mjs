@@ -1,3 +1,4 @@
+import {completedParcelDiagnosticReconciler} from './completed-parcel-diagnostic-reconcile.mjs';
 import {completedMapDiagnosticReconciler} from './completed-map-diagnostic-reconcile.mjs';
 import {deliveredDiagnosticReconciler} from './delivered-diagnostic-reconcile.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
@@ -174,6 +175,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
  const protectedRefresh=protectedRefreshDiagnosticReconciler(db,api);
  const deliveredDiagnostic=deliveredDiagnosticReconciler(db,api);
  const completedMapDiagnostic=completedMapDiagnosticReconciler(db,api);
+ const completedParcelDiagnostic=completedParcelDiagnosticReconciler(db,api);
  const diagnoseCarrier=refreshCarrierDiagnostic||carrierDiagnosticReader(db,directory).read;
  const pendingBlDiagnostics=pendingBlDiagnosticReconciler(db,api);
  const importedLabelDiagnostics=importedLabelDiagnosticReconciler(db,api);
@@ -469,6 +471,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     await protectedRefresh.run();
     await deliveredDiagnostic.run();
     await completedMapDiagnostic.run();
+    await completedParcelDiagnostic.run();
     await reconcileResolvedStockReviews(db);
     await reconcileMonetaryPreviews(db);
     await db.query(`UPDATE resolution_jobs r SET status='waiting',error=null,stage='Recontrôle après correction du numéro BC',updated_at=now() FROM erp_live_jobs e,orders o WHERE r.order_id=e.order_id AND o.id=r.order_id AND r.status='review' AND r.stage='Erplain à compléter' AND (r.error LIKE '%already in use%' OR r.error='BC · Taux de TVA source à préciser') AND e.status='complete' AND e.error IS NULL AND o.erp_live->'bc'->>'status'='active' AND o.erp_live->>'verifiedAt' IS NOT NULL AND o.erp_live->>'stockCheckedAt' IS NOT NULL`);
