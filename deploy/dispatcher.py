@@ -108,6 +108,7 @@ def deploy(commit,packet=None):
   env_hash=verify_environment()
   report['environmentHashBefore']=env_hash;report['baselineCommitBefore']=baseline['commit']
   # Dependency installation and tests are isolated from production secrets/database.
+  # The cumulative suite takes > 120s in CI; allow 15 minutes before any pause.
   with tempfile.TemporaryDirectory(prefix='v3-build-',dir=BUILD_ROOT) as workspace:
    candidate=Path(workspace)/'candidate';candidate.mkdir()
    archive=git('archive',commit)
@@ -115,7 +116,7 @@ def deploy(commit,packet=None):
    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:tar.extractall(candidate,filter='data')
    run(['chown','-R','nextech-build:nextech-build',workspace]);os.chmod(workspace,0o750)
    isolated={'PATH':'/usr/bin:/bin','HOME':'/var/lib/nextech-build','NODE_ENV':'test','CI':'true'}
-   for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],120),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
+   for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],900),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
     run([RUNUSER,'-u','nextech-build','--',*command],cwd=candidate,env=isolated,timeout=timeout)
    report['checks']='PASS'
    if not changed:
