@@ -1,4 +1,5 @@
 import {marketplaceContentFrozen} from './marketplace-content-freeze.mjs';
+import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
 import {chooseDocumentStockVariant} from './document-stock-choice.mjs';
 import {proveShopifyStatusOnly} from './shopify-status-only-proof.mjs';
@@ -88,7 +89,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  await stage('Lecture du BC et du produit équivalent');await api.verify();
  const {Order:bc}=await api.request(`query V3SubstitutionBC($id:ID!){Order(id:$id){${bcFields}}}`,{id:String(o.erp_live.bc.id)});
  if(String(bc?.id)!==String(o.erp_live.bc.id))throw Error('API Erplain · BC demandé non reçu');
- const sourceAmounts=o.channel==='temu'?temuSellerTotals(o):o.erp_live.pricing||(o.source_payload?.erplainImported?{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:null);verifySourceCommercialTotals(bc,sourceAmounts);
+ const sourceAmounts=usesRecordedBc(o)?recordedBcPricing(o,bc,{allowedStatuses:['pending','unpublished','active']}):o.channel==='temu'?temuSellerTotals(o):o.erp_live.pricing||(o.source_payload?.erplainImported?{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:null);verifySourceCommercialTotals(bc,sourceAmounts);
  if(bc.update_stock===true)await assertNoHistoricalStockRemoval(api,o);
  let plan=await findRecordedSubstitution(db,o,b,bc,api);
  if(!plan){

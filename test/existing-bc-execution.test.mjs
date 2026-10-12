@@ -1,8 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {usesRecordedBc} from '../src/existing-bc-execution.mjs';
+import {readPreservedHistoricalBc} from '../src/historical-bc-pricing.mjs';
 import {recordedBcItems,recordedBcPricing,verifyRecordedOrSourceTotals,withRecordedOrSourceGuard,readRecordedBc} from '../src/existing-bc-execution.mjs';
 const order=channel=>({channel,reference:'REF',erp_live:{bc:{id:'1'},pricing:{total:999,tax:777,currency:'USD'}},source_payload:{temuAmountsError:'API unavailable',temuOrderDetail:{orderList:[{quantity:999,sku:'SOURCE'}]}}});
 const document=()=>({id:'1',status:'active',total:12,currency:{id:'2',label:'EUR'},tax_type:'exclusive',line_items:[{type:'normal',quantity:2,price:5,tax_amount:2,variant:{id:'10',sku:'BC-SKU'},location:{id:'20'}}]});
+test('actual historical worker call does not evaluate absent TEMU source before reading an authoritative BC',async()=>{
+ const source=readFileSync(new URL('../src/erplain-live-workflow.mjs',import.meta.url),'utf8'),expression=source.match(/const historical=(await readPreservedHistoricalBc\([^;]+\));/)[1];
+ const execute=new (Object.getPrototypeOf(async function(){}).constructor)('api','o','readPreservedHistoricalBc','temuSellerTotals','usesRecordedBc','return '+expression);
+ const o=order('temu');o.erp_live.phase='historical_review';let reads=0;
+ const result=await execute({request:async query=>{assert.match(query,/^query V3PreservedHistoricalBC/);reads++;return {Order:{...document(),external_reference:'REF',update_stock:true}};}},o,readPreservedHistoricalBc,()=>assert.fail('Source TEMU must not be evaluated'),usesRecordedBc);
+ assert.equal(reads,1);assert.equal(result.authority,'recorded_bc');assert.equal(result.confirmed.total,12);
+});
 for(const channel of ['temu','shopify','amazon'])test(channel+' recorded BC ignores differing or absent marketplace amounts and lines',async()=>{
  const o=order(channel),bc=document();let evaluated=false;
  const proof=await verifyRecordedOrSourceTotals({},o,bc,()=>{evaluated=true;throw Error('Marketplace must not be read');});

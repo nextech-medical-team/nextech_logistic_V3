@@ -224,7 +224,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    // Retrying an API failure reuses the same BC; it never creates another one.
    for(const o of working.filter(o=>o.pricing)){
     try{
-     const historical=await readPreservedHistoricalBc(api,o,o.channel==='temu'?temuSellerTotals(o):null);
+     const historical=await readPreservedHistoricalBc(api,o,usesRecordedBc(o)?null:o.channel==='temu'?temuSellerTotals(o):null);
      const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{datedAt:orderDate(o.source_date),verify:bc=>verifyBcPricing(bc,o.pricing),lock:fn=>withShipmentLock(fn,['erplain-bc-numbering'])});
      const confirmed=historical?.confirmed||verifyBcPricing(actual,o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
      o.erp_live.pricing={...o.erp_live.pricing,status:'verified',error:null,confirmed,verifiedAt:new Date().toISOString()};await save(o);

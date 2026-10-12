@@ -18,8 +18,8 @@ export function recordedBcFingerprint(bc){
  const items=recordedBcItems(bc).map(l=>[String(l.variant.id),String(l.location.id),l.quantity]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
  return createHash('sha256').update(JSON.stringify({bcId:String(bc.id),items})).digest('hex');
 }
-export function recordedBcPricing(order,bc){
- if(String(bc?.id)!==String(order.erp_live?.bc?.id)||bc.status!=='active')throw Error('BC enregistré · Identité ou état du document non confirmé');
+export function recordedBcPricing(order,bc,{allowedStatuses=['active']}={}){
+ if(String(bc?.id)!==String(order.erp_live?.bc?.id)||!allowedStatuses.includes(bc.status))throw Error('BC enregistré · Identité ou état du document non confirmé');
  const total=Number(bc.total),currency=bc.currency?.label;
  if(bc.total===null||bc.total===undefined||typeof bc.total==='boolean'||String(bc.total).trim()===''||!Number.isFinite(total)||total<0||!currency)throw Error('BC enregistré · Montant ou devise non reçus');
  if(!Array.isArray(bc.line_items)||!bc.line_items.length||bc.line_items.some(l=>l.tax_amount===null||l.tax_amount===undefined||typeof l.tax_amount==='boolean'||String(l.tax_amount).trim()===''||!Number.isFinite(Number(l.tax_amount))))throw Error('BC enregistré · Montants fiscaux du document non reçus');
