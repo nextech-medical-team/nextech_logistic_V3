@@ -14,3 +14,18 @@ test('a confirmed paid invoice retires only its own deferred billing diagnosis, 
 });
 
 test('a later status-only receipt with verified unchanged preparation keeps the current diagnosis',()=>{const o=relay();o.source_payload.platformStatusObservation={version:'2026-10-11T14:00:01Z',preparationUnchanged:true};assert.equal(currentPlatformModificationReason(o,raw),'Pr\u00e9paration source v\u00e9rifi\u00e9e \u00b7 reprise \u00e0 contr\u00f4ler');});
+
+
+test('paid deferred billing retires the exact resolved quota suffix and preserves pending source and fresh errors',()=>{
+ const issue='Facturation Erplain à vérifier · SIREN missing ; VAT missing',suffix=' ; TEMU · Quota partagé : lecture différée';
+ const base={channel:'temu',issue,invoice_status:'paid',temu_job:{error:null},source_payload:{platformChangeReconciliation:{kind:'temu_address_masking',verified:true,addressFrozen:true,labelsPreserved:true,deferredBilling:true,deferredLabelRead:true,deferredReason:issue+suffix}}};
+ assert.equal(projectCurrentDiagnostics(structuredClone(base)).issue,null);
+ assert.equal(projectCurrentDiagnostics({...structuredClone(base),invoice_status:'not_due'}).issue,issue);
+ const pending=structuredClone(base);pending.source_payload.marketplacePendingCorrection={updated_at:'2026-10-11T22:00:00Z'};pending.source_payload.platformModificationFields={fields:['articles']};assert.equal(projectCurrentDiagnostics(pending).issue,'Modification source TEMU · articles à vérifier');
+ const genericPending=structuredClone(base);genericPending.source_payload.marketplacePendingCorrection={updated_at:'2026-10-11T22:00:00Z'};assert.equal(projectCurrentDiagnostics(genericPending).issue,'Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
+ const freshError=structuredClone(base);freshError.temu_job.error='Détail source indisponible';assert.equal(projectCurrentDiagnostics(freshError).issue,'TEMU · Détail source indisponible');
+ const freshQuota=structuredClone(base);freshQuota.temu_job.error='Quota partagé : lecture différée';assert.equal(projectCurrentDiagnostics(freshQuota).issue,'TEMU · Quota partagé : lecture différée');
+ const different=structuredClone(base);different.source_payload.platformChangeReconciliation.deferredReason=issue+' ; Stock insuffisant';assert.equal(projectCurrentDiagnostics(different).issue,issue);
+ const differentIssue=structuredClone(base);differentIssue.issue='Stock insuffisant';assert.equal(projectCurrentDiagnostics(differentIssue).issue,'Stock insuffisant');
+ const unconfirmed=structuredClone(base);unconfirmed.source_payload.platformChangeReconciliation.verified=false;assert.equal(projectCurrentDiagnostics(unconfirmed).issue,issue);
+});
