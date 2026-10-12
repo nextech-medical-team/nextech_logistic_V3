@@ -28,7 +28,16 @@
    box.hidden=!r.stage&&!r.priority&&!r.previewPending&&!r.monitoring?.blocked&&!r.monitoring?.followUp;
    const expanded=expandedOrders.has(ref.dataset.detail);box.classList.toggle('processing-expanded',expanded);
    const toggle=box.querySelector('.processing-details-toggle');toggle.setAttribute('aria-expanded',String(expanded));setText(toggle,expanded?'▴ Replier les détails':'▾ Afficher les détails');
-   const monitor=r.monitoring,stamp=value=>value?new Date(value).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'À vérifier';
+   // Stored monitoring can predate the current carrier choice. Keep every
+   // independent reason and the recorded control state until its next check.
+   const carrierMessage=raw=>{
+    if(!['gls','gls_pharma','gls_shop','gofo'].includes(r.currentCarrier)||typeof raw!=='string')return raw;
+    const parts=raw.split(';');if(!parts.some(part=>part.trim()==='Transporteur non déterminé'))return raw;
+    return parts.map(part=>part.trim()).filter(part=>part&&part!=='Transporteur non déterminé').join(' ; ')||null;
+   };
+   const recordedMonitor=r.monitoring;
+   const monitor=recordedMonitor?{...recordedMonitor,result:carrierMessage(recordedMonitor.result)||(recordedMonitor.result?'Transporteur déterminé · contrôle de préparation à actualiser':recordedMonitor.result)}:null;
+   const stamp=value=>value?new Date(value).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'À vérifier';
    setText(box.querySelector('.monitoring-last'),monitor?.lastCheck?'Dernière vérification : '+stamp(monitor.lastCheck):'');
    setText(box.querySelector('.monitoring-next'),monitor?.nextCheck?'Prochain contrôle : '+stamp(monitor.nextCheck):'');
    setText(box.querySelector('.monitoring-result'),monitor?.result?'Résultat : '+monitor.result:'');
@@ -43,7 +52,7 @@
    const clock=box.querySelector('.processing-elapsed');clock.dataset.since=r.since||'';clock.dataset.state=r.state||'unknown';
    setText(clock,r.stage?durationText(r.state,r.since):'');
    clock.title='Durée de l’état enregistré dans V3. Un traitement actif ne prouve pas un appel continu chez le fournisseur.';
-   setText(box.querySelector('.processing-reason'),r.reason?'Motif : '+r.reason:'');
+   setText(box.querySelector('.processing-reason'),carrierMessage(r.reason)?'Motif : '+carrierMessage(r.reason):'');
    setText(box.querySelector('.processing-preview'),r.previewPending?'Équivalent '+r.previewPending.sku+' vérifié · remplacement NON enregistré. Ouvrez « Remplacer un produit » pour confirmer.':'');
    const observed=latestObservedAt?new Date(latestObservedAt).toLocaleTimeString('fr-FR'):'';
    setText(box.querySelector('.processing-signals'),r.stage?'État V3 actualisé à '+observed+(r.lastSignal?' · dernier signal V3 : '+new Date(r.lastSignal).toLocaleString('fr-FR'):'')+(r.state==='active'?' · appel fournisseur en continu non confirmé':''): '');

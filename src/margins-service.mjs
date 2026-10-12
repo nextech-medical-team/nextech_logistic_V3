@@ -6,10 +6,22 @@ import vm from 'node:vm';import {readFile} from 'node:fs/promises';
 const canonical=s=>String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const amazonFields=['amazon-order-id','order-item-id','sku','product-name','quantity','purchase-date','ship-country','sales-channel','currency','order-status','fulfillment-channel','item-price','item-tax','shipping-price','shipping-tax','gift-wrap-price','gift-wrap-tax','item-promotion-discount','ship-promotion-discount'];
 const temuFields=['Order ID',"N° de l'article de la commande",'contribution SKU','N° SKU','nom du produit',"date d'achat","pays d'expédition",'quantité achetée','quantité annulée','quantité expédiée','statut de la commande','Total du prix de base après réduction','Prix de base total','Prix de vente (hors taxes)','Total du prix de vente après réductions (hors taxes)',"Total de l'expédition (hors taxes)",'Taxe sur les produits',"Taxe d'expédition",'Remboursement des produits','Réduction de la part du vendeur','Réduction de la part de Temu'];
-export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAmazonImportsFbm=false,loadData=null,snapshotLoader=()=>readFile(new URL('./margin-published-snapshot.json',import.meta.url),'utf8').then(JSON.parse)}={}){
+export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAmazonImportsFbm=false,readAsset=readFile,loadData=null,snapshotLoader=null}={}){
  const confirmedFbm=new Set(confirmedAmazonIds);
- const snapshot=await snapshotLoader();
- const sources=JSON.parse(await readFile(new URL('./margin-published-sources.json',import.meta.url),'utf8'));
+ let snapshot,sources;
+ try{
+  snapshot=snapshotLoader?await snapshotLoader():JSON.parse(await readAsset(new URL('./margin-published-snapshot.json',import.meta.url),'utf8'));
+  sources=JSON.parse(await readAsset(new URL('./margin-published-sources.json',import.meta.url),'utf8'));
+ }catch(e){
+  if(e.code!=='ENOENT')throw e;
+  const reason='Calcul des marges indisponible : référentiel privé manquant';
+  console.warn(reason);
+  return {async get(){
+   const supplied=loadData?await loadData():null;
+    const orders=supplied?.orders||(await db.query('SELECT id,reference,channel FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
+   return {available:false,reason,source:{url:null,version:'indisponible',capturedAt:null},calculatedAt:new Date().toISOString(),rows:orders.map(o=>({...o,status:'incomplete',profit:null,markup:null,margin:null,issues:[reason],lines:[]}))};
+  }};
+ }
  const context=vm.createContext({window:{},Intl,console,countries:snapshot.countries,services:snapshot.services,transportGrids:snapshot.transportGrids,amazonRows:snapshot.amazon,rows:snapshot.temu,amazonEffective:r=>r,effective:r=>r,esc:s=>String(s??'')});
  context.window=context;
  for(const name of ['margin-math.js','amazon-calculation.js'])vm.runInContext(sources[name],context,{timeout:5000});

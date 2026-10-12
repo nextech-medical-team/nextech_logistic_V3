@@ -17,6 +17,7 @@ export function excelMargins({db,documents,snapshotLoader}){
   try{
    calculator??=await createMarginsService(db,{loadData,snapshotLoader});
    const snapshot=await calculator.get({fresh:true});
+   if(snapshot.available===false){calculator=null;throw Object.assign(Error(snapshot.reason),{code:'ENOENT'});}
    return {...snapshot,rows:reference?snapshot.rows.filter(r=>r.reference===reference):snapshot.rows};
   }catch(e){
    const issue=e.code==='ENOENT'?'Référentiel privé des coûts absent : marge indisponible.':'Calcul de marge indisponible : '+e.message;

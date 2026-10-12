@@ -305,6 +305,12 @@ const server=http.createServer(async(req,res)=>{
 
     const user=await authenticate(db,req.headers.cookie);if(!user){json(res,401,{error:'Connexion requise'});return;}
     if(await temuReading.routes(req,res,url,user,json))return;
+    if(p==='/api/import/preview'&&req.method==='POST'){
+      const b=await body(req);permitted(user,operational);
+      if(typeof b.content!=='string'||typeof b.filename!=='string')throw new Error('Fichier absent');
+      const preview=await previewOrders(db,Buffer.from(b.content,'base64'),b.filename,b.kind,{shopifyReader:async()=>shopifyCollector(await loadShopifyConfig(directory))});json(res,200,{...preview,readOnly:process.env.MIGRATION_PREPARATION==='1'});return;
+    }
+
     if(process.env.MIGRATION_PREPARATION==='1'){
       if(p==='/api/import'&&req.method==='POST'){
         const b=await body(req);
@@ -535,12 +541,6 @@ const server=http.createServer(async(req,res)=>{
 
     if(await temuExcelImportRoutes({p,req,res,user,body,json,permitted,db}))return;
 
-    if(p==='/api/import/preview'&&req.method==='POST'){
-      const b=await body(req);permitted(user,operational);
-      if(typeof b.content!=='string'||typeof b.filename!=='string')throw new Error('Fichier absent');
-      json(res,200,await previewOrders(db,Buffer.from(b.content,'base64'),b.filename,b.kind));return;
-    }
-
     if(p==='/api/orders/processing'&&req.method==='POST'){const b=await body(req);const rows=await processingRows(db,b.ids);const monitors=new Map((await db.query('SELECT order_id,state FROM order_recheck_monitor WHERE order_id=ANY($1::text[])',[b.ids])).rows.map(m=>[m.order_id,m.state]));for(const row of rows)row.monitoring=monitors.get(row.id)||null;json(res,200,{rows,at:new Date().toISOString()});return;}
     if(p==='/api/orders/priority'&&req.method==='POST'){const b=await body(req);json(res,200,await setOrderPriority(db,b,user));return;}
     if(p==='/api/import-corrections/context'&&req.method==='GET'){permitted(user,operational);json(res,200,await importCorrectionService.context(url.searchParams.get('id')));return;}
@@ -554,7 +554,7 @@ const server=http.createServer(async(req,res)=>{
       if(typeof b.content!=='string'||typeof b.filename!=='string')throw new Error('Fichier absent');
 
       if(b.kind!=='mapping')importApprovals.assert(user,b);
-      const data=Buffer.from(b.content,'base64');const result=b.kind==='mapping'?await importMapping(db,data,b.filename):await importOrders(db,data,b.filename,b.kind,b.selection,{duplicateSelection:b.duplicateSelection,requestId:b.requestId});
+      const data=Buffer.from(b.content,'base64');const result=b.kind==='mapping'?await importMapping(db,data,b.filename):await importOrders(db,data,b.filename,b.kind,b.selection,{duplicateSelection:b.duplicateSelection,requestId:b.requestId,shopifyReader:async()=>shopifyCollector(await loadShopifyConfig(directory))});
 
       await audit(user,'import',{kind:b.kind,rows:result.rows,created:result.created,skipped:result.skipped,copies:result.copies||0,replayed:result.replayed||false,errors:result.errors.length});readerJobs.enqueue('catalog',user.email).catch(()=>{});json(res,200,result);return;
 
