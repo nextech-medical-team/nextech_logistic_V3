@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Authenticated local Section 7 bridge. The GitHub key cannot call this endpoint."""
 import os,sys,json,re,tempfile,time,datetime
-from pathlib import Path
+from pathlib import Path,PurePosixPath
 STATE=Path('/var/lib/nextech-cicd')
 
 def safe_preinstall_failure(record):
@@ -42,15 +42,41 @@ def restoration_certificate(record):
   guard('verify-restored',Path(report['backup']))
  return {'verified':True,'previousCommit':expected_commit,'fileHashes':expected,'services':['active','active'],'http':200,'environmentPreserved':True,'controlsRestored':True,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 
+def publication_certificate(row):
+ from dispatcher import read_current,verify_environment,health,guard,digest
+ from plan import safe_path
+ p=row.get('publication',{})
+ if p.get('status')!='verified' or not re.fullmatch('[a-f0-9]{40}',p.get('commit','')) or not re.fullmatch('[a-f0-9]{64}',p.get('environmentHash','')) or p.get('controlsRestored') is not True:raise ValueError('Publication non verifiee')
+ backup_name=p.get('backup','');posix=PurePosixPath(backup_name);backup=Path(backup_name)
+ backup_root=Path('/var/backups/nextech').resolve()
+ if not posix.is_absolute() or '..' in posix.parts or '\\' in backup_name or backup.resolve()==backup_root or not backup.resolve().is_relative_to(backup_root):raise ValueError('Sauvegarde de publication invalide')
+ files=p.get('files')
+ if not isinstance(files,dict) or not files or any(not safe_path(n) or (sha is not None and not re.fullmatch('[a-f0-9]{64}',sha)) for n,sha in files.items()):raise ValueError('Empreintes de publication invalides')
+ baseline=json.loads((STATE/'baseline.json').read_text())
+ if baseline.get('commit')!=p['commit']:raise ValueError('Commit installe different')
+ actual=read_current(files)
+ for n,sha in files.items():
+  if (digest(actual[n]) if n in actual else None)!=sha:raise ValueError('Publication divergente : '+n)
+ if verify_environment()!=p['environmentHash']:raise ValueError('Environnement divergent')
+ health();guard('verify-restored',backup)
+ return True
+
 def sync(payload):
  if payload.get('version')!=1 or not isinstance(payload.get('requests'),list):raise ValueError('Snapshot invalide')
  rows=payload['requests']
  for row in rows:
-  if not re.fullmatch('[a-f0-9-]{36}',row.get('id','')) or row.get('status') not in ('ready','deploying','blocked'):raise ValueError('Demande invalide')
+  if not re.fullmatch('[a-f0-9-]{36}',row.get('id','')) or row.get('status') not in ('ready','deploying','blocked','recipe_pending'):raise ValueError('Demande invalide')
   if not isinstance(row.get('createdAt'),str) or not row.get('createdAt'):raise ValueError('Date absente')
   if datetime.datetime.fromisoformat(row['createdAt'].replace('Z','+00:00')).tzinfo is None:raise ValueError('Date UTC requise')
  old=json.loads((STATE/'local-queue.json').read_text()) if (STATE/'local-queue.json').exists() else {'revision':-1}
  if payload.get('revision',-1)<old['revision']:raise ValueError('Snapshot plus ancien refusé')
+ for row in rows:
+  if row['status']!='recipe_pending':continue
+  previous=next((r for r in old.get('requests',[]) if r['id']==row['id']),{})
+  if previous.get('status')!='recipe_pending' or previous.get('publication')!=row.get('publication') or previous.get('publicationCertificate',{}).get('verified') is not True:
+   publication_certificate(row)
+  row['publicationCertificate']={'verified':True}
+
  resolutions=[]
  explicit=set(payload.get('resolveAutomatic',[]))
  identifiers=list(explicit)

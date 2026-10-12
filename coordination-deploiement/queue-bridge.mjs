@@ -16,9 +16,9 @@ export async function mirrorQueue(root,docs){
   if(obsoletePendingRequest(doc,replacementIds))continue;
   let requires=doc.requiresReplacement===true;
   for(const report of doc.reports||[]){try{if(JSON.parse(await fs.readFile(path.resolve(root,report.path),'utf8')).requiresReplacement)requires=true;}catch{}}
-  if(!['ready','deploying','blocked'].includes(doc.status)&&!(doc.status==='failed'&&requires&&!replacementIds.has(doc.id)))continue;
+  if(!['ready','deploying','blocked','recipe_pending'].includes(doc.status)&&!(doc.status==='failed'&&requires&&!replacementIds.has(doc.id)))continue;
   let m={};try{m=JSON.parse(await fs.readFile(path.resolve(root,doc.manifest),'utf8'));}catch{}
-  rows.push({id:doc.id,createdAt:doc.createdAt,status:doc.status==='failed'?'blocked':doc.status,section:doc.section,gates:{ready:m.ready===true,openGates:m.openGates||[],commit:m.git?.commit||null,verification:m.verification?.status||null}});
+  rows.push({id:doc.id,createdAt:doc.createdAt,status:doc.status==='failed'?'blocked':doc.status,section:doc.section,...(doc.status==='recipe_pending'?{publication:doc.publication,recipe:doc.recipe}:{}),gates:{ready:m.ready===true,openGates:m.openGates||[],commit:m.git?.commit||null,verification:m.verification?.status||null}});
  }
  const revision=Date.now();
  const result=spawnSync(config.python,[config.script],{cwd:root,input:JSON.stringify({version:1,revision,requests:rows,resolveAutomatic:config.certifiedAutomaticResolutions||[],resolvePreinstallFailures:true}),encoding:'utf8',timeout:120000});

@@ -54,3 +54,47 @@ class BridgeTests(unittest.TestCase):
    with patch.object(bridge,'STATE',state):
     with self.assertRaises(ValueError):bridge.sync({'version':1,'revision':6,'requests':[{'id':'../unsafe','status':'ready','createdAt':'now'}]})
    self.assertEqual(json.loads((state/'local-queue.json').read_text())['revision'],5)
+
+ def test_pending_recipe_certificate_is_server_owned_and_immutable(self):
+  with tempfile.TemporaryDirectory() as td:
+   state=Path(td);(state/'requests').mkdir();(state/'reports').mkdir()
+   row={'id':'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee','status':'recipe_pending','createdAt':'2026-10-12T10:00:00Z','publication':{'commit':'a'*40},'publicationCertificate':{'verified':True}}
+   def payload(revision):return {'version':1,'revision':revision,'requests':[dict(row)]}
+   with patch.object(bridge,'STATE',state),patch.object(bridge,'publication_certificate',side_effect=ValueError('unverified')) as certify:
+    with self.assertRaises(ValueError):bridge.sync(payload(1))
+    self.assertFalse((state/'local-queue.json').exists())
+   with patch.object(bridge,'STATE',state),patch.object(bridge,'publication_certificate',return_value=True) as certify:
+    bridge.sync(payload(1));certify.assert_called_once()
+   with patch.object(bridge,'STATE',state),patch.object(bridge,'publication_certificate',side_effect=ValueError('unverified')) as certify:
+    bridge.sync(payload(2));certify.assert_not_called()
+    row['publication']={'commit':'b'*40}
+    with self.assertRaises(ValueError):bridge.sync(payload(3))
+    self.assertEqual(json.loads((state/'local-queue.json').read_text())['revision'],2)
+
+ def test_publication_certificate_checks_runtime_and_restore(self):
+  from contextlib import ExitStack
+  with tempfile.TemporaryDirectory() as td:
+   state=Path(td);data=b'installed';sha=dispatcher.digest(data)
+   (state/'baseline.json').write_text(json.dumps({'commit':'a'*40}))
+   row={'publication':{'status':'verified','commit':'a'*40,'environmentHash':'b'*64,'controlsRestored':True,'backup':'/var/backups/nextech/test','files':{'src/a.mjs':sha}}}
+   with ExitStack() as st:
+    st.enter_context(patch.object(bridge,'STATE',state))
+    current=st.enter_context(patch.object(dispatcher,'read_current',return_value={'src/a.mjs':data}))
+    env=st.enter_context(patch.object(dispatcher,'verify_environment',return_value='b'*64))
+    health=st.enter_context(patch.object(dispatcher,'health'))
+    guard=st.enter_context(patch.object(dispatcher,'guard'))
+    self.assertTrue(bridge.publication_certificate(row));guard.assert_called_once()
+    for mocked,bad in [(current,{'src/a.mjs':b'other'}),(env,'c'*64)]:
+     good=mocked.return_value;mocked.return_value=bad
+     with self.assertRaises(ValueError):bridge.publication_certificate(row)
+     mocked.return_value=good
+    for mocked in [health,guard]:
+     mocked.side_effect=ValueError('not verified')
+     with self.assertRaises(ValueError):bridge.publication_certificate(row)
+     mocked.side_effect=None
+
+ def test_publication_certificate_rejects_unsafe_backup(self):
+  for backup in ['/var/backups/nextech','/tmp/other','/var/backups/nextech/../other','relative']:
+   row={'publication':{'status':'verified','commit':'a'*40,'environmentHash':'b'*64,'controlsRestored':True,'backup':backup,'files':{'src/a.mjs':'c'*64}}}
+   with self.subTest(backup=backup),self.assertRaisesRegex(ValueError,'Sauvegarde'):
+    bridge.publication_certificate(row)

@@ -5,11 +5,11 @@ def blockers(local,automatic,current_id,created_at):
  def date(value):return datetime.datetime.fromisoformat(value.replace('Z','+00:00'))
  def pending_request(r):
   if r['status']=='resolved':return r.get('resolution',{}).get('verified') is not True
-  if r['status'] in ('ready','deploying','blocked'):return True
+  if r['status'] in ('ready','deploying','blocked','recipe_pending'):return True
   report=r.get('report',{})
   return r['status']=='failed' and (r.get('requiresReplacement',True) or report.get('manualIntervention') or report.get('rollback')=='FAILED' or report.get('taskControlsRestored') is False)
  pending=[r for r in [*local,*automatic] if r['id']!=current_id and pending_request(r)]
- return sorted([r for r in pending if r['status']=='deploying' or date(r['createdAt'])<=date(created_at)],key=lambda r:(date(r['createdAt']),r['id']))
+ return sorted([r for r in pending if r['status'] in ('deploying','recipe_pending') or date(r['createdAt'])<=date(created_at)],key=lambda r:(date(r['createdAt']),r['id']))
 
 def validate_manifest(manifest,proofs,commit,changes):
  if manifest.get('ready') is not True or manifest.get('openGates')!=[]:raise ValueError('Gates de publication ouvertes')

@@ -27,3 +27,7 @@ class QueueTests(unittest.TestCase):
    if mutation=='proof':proofs['proof']=b'modified'
    if mutation=='candidate':changes[0]['after']='c'*64
    with self.assertRaises(ValueError):validate_manifest(m,proofs,commit,changes)
+
+ def test_pending_recipe_is_never_implicitly_overtaken(self):
+  recipe={'id':'recipe','status':'recipe_pending','createdAt':'2026-01-03','publication':{'status':'verified'}}
+  self.assertEqual(blockers([recipe],[],'next','2026-01-02'),[recipe])
