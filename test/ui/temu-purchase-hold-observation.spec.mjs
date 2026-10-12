@@ -1,0 +1,24 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+import {monitoringObservation} from '../../src/order-recheck-monitor.mjs';
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('obsolete TEMU purchase hold observation '+name,async({page})=>{
+ const now=Date.now(),reference='TEST-HOLD-QUOTA',quota='Quota partagé : lecture différée';
+ const row={id:'test-hold-quota',reference,channel:'temu',archived:false,simulation:false,recipient:'Fictif',address:{country:'FR'},source_date:new Date(now).toISOString(),sku_lines:[],erp_live:{bc:{id:'TEST-BC'},bl:{id:'TEST-BL'},phase:'bl_ready'},awaiting_purchase:true,label_status:'production_ready',tracking_status:'not_shipped',carrier:'temu',temu_job:{status:'ready',error:null},temu_auto_purchase:{checkedAt:new Date(now-60000).toISOString(),result:{status:'held',message:quota}},source_payload:{temuDirect:{source:'temu_direct',state:'verified',verifiedAt:new Date(now-1000).toISOString()},temuOrderDetail:{parentOrderMap:{parentOrderSn:reference}}}};
+ const monitor=monitoringObservation(row,{result:'Achat d’étiquette TEMU à confirmer : '+quota,blocked:false},now);
+ const writes=[],errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()!=='GET'&&!['/api/orders/processing','/api/partial/visible'].includes(new URL(r.url()).pathname))writes.push(r.url());});
+ await page.setViewportSize(viewport);
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:[row],total:1,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/orders/processing',r=>r.fulfill({json:{at:new Date(now).toISOString(),rows:[{id:row.id,monitoring:monitor}]}}));
+ await page.goto('/');
+ const card=page.locator('#order-rows .order-processing');await expect(card).toHaveCount(1);
+ await expect(card.locator('.monitoring-result')).toContainText('Achat d’étiquette TEMU à confirmer');
+ await expect(card).not.toContainText('Quota partagé');
+ await card.locator('.processing-details-toggle').click();
+ await expect(card.locator('.monitoring-result')).toBeVisible();
+ await expect(card).not.toContainText('Quota partagé');
+ await card.scrollIntoViewIfNeeded();
+ const clipping=await card.evaluate(el=>[...el.children].some(c=>c.scrollWidth>el.clientWidth+2));expect(clipping).toBe(false);
+ await page.screenshot({path:'proofs/temu-purchase-hold-observation-'+name+'.png',fullPage:true});
+ expect(writes).toEqual([]);expect(errors).toEqual([]);expect(row.temu_auto_purchase.result.message).toBe(quota);
+ fs.writeFileSync('proofs/temu-purchase-hold-observation-'+name+'.json',JSON.stringify({status:'PASS',viewport,clipping,writes,errors,confirmationPreserved:true,historyPreserved:true,scope:'Actual monitoring policy and full application using a synthetic order; no production mutation'}));
+});
