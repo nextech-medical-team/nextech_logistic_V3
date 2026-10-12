@@ -1210,11 +1210,12 @@ function equivalentCandidates(ctx){
 
 
 
-  const sku=String(line.target_sku||line.mapped_sku||(['tender','samples'].includes(ctx.order.channel)?line.source_sku:'')||'').trim();if(!sku)continue;
+  const resolved=Object.hasOwn(line,'replacement_sku');
+  const sku=String((resolved?line.replacement_sku:line.target_sku||line.mapped_sku||(['tender','samples'].includes(ctx.order.channel)?line.source_sku:''))||'').trim();if(!sku)continue;
 
 
 
-  const quantity=Number(line.target_quantity??(Number(line.source_qty)>0?Number(line.quantity)*Number(line.target_qty)/Number(line.source_qty):line.quantity));
+  const quantity=Number(resolved?line.replacement_quantity:line.target_quantity??(Number(line.source_qty)>0?Number(line.quantity)*Number(line.target_qty)/Number(line.source_qty):line.quantity));
 
 
 

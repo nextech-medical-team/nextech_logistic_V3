@@ -4,6 +4,10 @@ import {PGlite} from '@electric-sql/pglite';
 import {randomUUID} from 'node:crypto';
 import {substitution} from '../src/stock-substitution.mjs';
 import {initializeEquivalences} from '../src/equivalence-catalog.mjs';
+import {attachSkuSubstitutions} from '../src/sku-substitution-view.mjs';
+import {currentMappingLine} from '../src/current-mapping-line.mjs';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
 
 test('moteur réel : deux remplacements, aucune reprise avant le dernier, puis préparation remise en file',async()=>{
  const pg=new PGlite();await pg.waitReady;
@@ -23,7 +27,7 @@ test('moteur réel : deux remplacements, aucune reprise avant le dernier, puis p
  CREATE TABLE partial_documents(delivery_id text,document_index int,pdf bytea);
  CREATE TABLE jobs(order_id text,kind text,status text,error text);
  CREATE TABLE products(sku text primary key,weight_kg numeric,origin text,updated_at timestamptz);
- CREATE TABLE audit(user_email text,action text,detail jsonb);
+ CREATE TABLE audit(id bigserial,user_email text,action text,detail jsonb,created_at timestamptz default now());
  `);
  const wrap=e=>({query:(s,p=[])=>e.query(s,p),exec:s=>e.exec(s)}),db={...wrap(pg),transaction:f=>pg.transaction(tx=>f(wrap(tx)))};
  await initializeEquivalences(db);
@@ -57,5 +61,13 @@ test('moteur réel : deux remplacements, aucune reprise avant le dernier, puis p
  const actual=(await db.query('SELECT target_sku,target_quantity FROM lines ORDER BY target_sku')).rows;assert.deepEqual(actual.map(l=>[l.target_sku,Number(l.target_quantity)]),[['B',20],['D',20]]);
  assert.equal((await db.query('SELECT * FROM product_equivalences WHERE active=true')).rows.length,1);
  assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);assert.equal(bc.shipping_orders.data.length,0);
+ const state=(await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live;
+ assert.deepEqual(state.documentSource.lines.map(l=>[l.sku,l.quantity]).sort(),[['B',20],['D',20]]);
+ const orderRows=[{id:'o',channel:'shopify'}];await attachSkuSubstitutions(db,orderRows);
+ const ui=vm.createContext({});vm.runInContext(await readFile(new URL('../public/diagnostics.js',import.meta.url),'utf8'),ui);
+ assert.equal(ui.skuLineText(orderRows[0],{sku:'B',quantity:20}),'A (20) → B (20)');
+ assert.equal(ui.skuLineText(orderRows[0],{sku:'D',quantity:20}),'C (10) → D (20)');
+ const logisticLines=(await db.query("SELECT * FROM lines WHERE order_id='o'")).rows;
+ for(const l of logisticLines)assert.deepEqual(currentMappingLine({...l,mapped_sku:'WRONG',source_qty:1,target_qty:1000},'shopify'),{sku:l.target_sku,quantity:Number(l.target_quantity)});
  }finally{await pg.close();}
 });

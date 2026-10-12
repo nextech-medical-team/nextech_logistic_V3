@@ -4,6 +4,42 @@ import {createTrackingTestDb} from './support/tracking-db.mjs';
 import {initializeTrackingSync,trackingOverview,trackingHistory} from '../src/tracking-sync-history.mjs';
 import {trackingSyncService,trackingSyncRoutes} from '../src/tracking-sync-service.mjs';
 
+test('test limité : refuse les sélections globales, vides ou supérieures à cinq avant tout accès',async()=>{
+ const service=trackingSyncService({query:()=>{throw Error('Accès inattendu');}},'/unused');
+ for(const ids of [undefined,null,[],['a','b','c','d','e','f'],[' '],['a',null]]){
+  await assert.rejects(service.enqueue({mode:'preview',ids},{email:'test@example.test'}),/1 à 5 commandes/);
+ }
+});
+
+test('cinq commandes sélectionnées : aucune lecture ni modification de la sixième',async()=>{
+ const db=await createTrackingTestDb();
+ try{
+  await initializeTrackingSync(db);
+  const ids=Array.from({length:5},(_,i)=>'selected-'+i),reads=[];
+  for(let i=0;i<6;i++){
+   await db.query('INSERT INTO orders(id,reference,channel,erp_live) VALUES($1,$2,$3,$4)',['selected-'+i,'REF-'+i,'amazon',JSON.stringify({bc:{id:'100'},bl:{id:String(200+i)}})]);
+   await db.query('INSERT INTO carrier_jobs VALUES($1,$2,$3,$4,$5)',['selected-'+i,'gls','production','ready',JSON.stringify(['TRACK-'+i])]);
+  }
+  const service=trackingSyncService(db,'/unused',{clients:()=>({
+   carrier:{read:async(c,e,tracking)=>{reads.push(tracking);return [{carrier:c,tracking,code:'INTRANSIT',at:'2026-01-01T10:00:00Z'}];}},
+   gateway:{verifyLive:async()=>{},readBL:async id=>({id,status:'pending',orders:{data:[{id:'100',status:'confirmed'}]}}),setBLStatus:async()=>{throw Error('Écriture Erplain inattendue');}}
+  })});
+  const {run}=await service.enqueue({ids,mode:'preview'},{email:'test@example.test'});
+  await service.run();
+  assert.deepEqual(reads.sort(),['TRACK-0','TRACK-1','TRACK-2','TRACK-3','TRACK-4']);
+  const result=(await db.query('SELECT * FROM tracking_sync_runs WHERE id=$1',[run.id])).rows[0];
+  assert.equal(result.status,'complete');assert.equal(result.total,5);assert.equal(result.processed,5);
+  const changed=(await db.query("SELECT id FROM orders WHERE tracking_status='shipped' ORDER BY id")).rows.map(r=>r.id);
+  assert.deepEqual(changed,ids);
+  assert.deepEqual((await db.query('SELECT DISTINCT order_id FROM tracking_sync_observations ORDER BY order_id')).rows.map(r=>r.order_id),ids);
+  // Old global jobs still queued at deployment must fail before contacting any API.
+  await db.query("INSERT INTO tracking_sync_runs(id,requested_by,mode,order_ids) VALUES('old-global','test','preview',NULL)");
+  reads.length=0;await service.run();assert.deepEqual(reads,[]);
+  const old=(await db.query("SELECT status,error FROM tracking_sync_runs WHERE id='old-global'")).rows[0];
+  assert.equal(old.status,'failed');assert.match(old.error,/1 à 5 commandes/);
+ }finally{await db.close();}
+});
+
 test('bouton : file unique, progression, suivis V3 et historique persistant des BL',async()=>{
  const db=await createTrackingTestDb();
  try{

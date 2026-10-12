@@ -11,8 +11,16 @@ L'export initial du serveur ne contenait pas les dossiers `scripts/` et `test/`.
 
 Après activation CI/CD, chaque push main est publié par l’exécuteur Section7 : tests, file commune, preuves et verrou serveur restent obligatoires.
 
-Les instantanés métier margin-published-snapshot.json et temu-reading-reports.json sont exclus. Le périmètre privé de réimport TEMU est vide dans cette copie : aucun réimport de ce lot ne peut être autorisé par cette copie. Le service de marges nécessite son fichier de configuration privé pour démarrer. Ces exclusions concernent seulement le dépôt public ; le serveur reste inchangé.
+Les instantanés métier margin-published-snapshot.json et temu-reading-reports.json sont exclus. Le périmètre privé de réimport TEMU est vide dans cette copie : aucun réimport de ce lot ne peut être autorisé par cette copie. Le serveur démarre sans le référentiel privé de marges ; les marges restent indisponibles jusqu’à sa restauration dans src/margin-published-snapshot.json, puis au redémarrage du serveur. Aucun montant de remplacement n’est calculé.
 Les identifiants privés du lot cancelled-import-reimport sont aussi retirés ; ce lot reste désactivé dans la copie publique.
+
+## Reprise d'un remplacement après récupération TEMU
+
+La fenêtre de remplacement récupère les SKU et quantités selon le mapping actuel. Une équivalence enregistrée pour cette commande conserve ses quantités propres ; un ancien cache de préparation ne remplace pas une conversion plus récente.
+
+Les quantités sont exprimées en unités du SKU logistique Erplain. Après confirmation et vérification de la mise à jour du BC, V3 synchronise ses lignes locales et affiche `ancien SKU (quantité remplacée) → nouveau SKU (quantité équivalente)` dans la colonne SKU (quantité). Cette indication repose uniquement sur les remplacements enregistrés avec succès. Les commandes sans remplacement gardent l'affichage habituel. Les lignes déjà remplacées ne sont pas reconverties par un autre mapping.
+
+Après récupération automatique d'un achat TEMU, V3 relance la vérification d'un remplacement bloqué uniquement par « Achat TEMU en cours, incertain ou multi-colis » si un seul colis couvre toute la commande et si son PDF est disponible. Les SKU et quantités proposés sont conservés, puis vérifiés contre le BC et le stock actuels. Le résultat demande une nouvelle confirmation du remplacement. Aucun nouvel achat d'étiquette n'est effectué par cette reprise. Les achats incertains, les répartitions multi-colis, les commandes expédiées ou suspendues et les écritures déjà commencées restent à rapprocher. Cette reprise nécessite les workers actifs ; elle est désactivée en mode `MIGRATION_PREPARATION=1`.
 
 ## Synchronisation du suivi vers Erplain
 
@@ -33,11 +41,11 @@ Ce processus requiert le schéma PostgreSQL V3 actuel ; il ne crée pas de base 
 
 ### Bouton et historique dans V3
 
-Le bouton **Synchroniser les statuts**, à côté d'Actualiser dans Commandes, lance une tâche persistante en arrière-plan et ouvre la fenêtre de suivi. Il traite les commandes sélectionnées, ou toutes les commandes actives éligibles si aucune case n'est cochée. Les filtres visuels ne limitent pas cette dernière portée. **Historique des suivis** ouvre les résultats enregistrés sans appeler les transporteurs.
+Le bouton **Synchroniser les statuts**, à côté d'Actualiser dans Commandes, lance une tâche persistante en arrière-plan et ouvre la fenêtre de suivi. Pour le test, il exige de 1 à 5 commandes principales cochées. La sélection est figée au clic ; une sélection vide, des lignes de livraison partielle ou plus de 5 commandes bloquent le lancement. Le serveur valide également cette limite et refuse les anciennes tâches globales encore en attente. Les filtres visuels ne constituent pas une sélection. Les résultats et l’export de la fenêtre sont limités à la tâche lancée. Cette limite concerne le bouton et son API, pas le processus CLI dédié. **Historique des suivis** ouvre les résultats enregistrés sans appeler les transporteurs.
 
 La fenêtre affiche le transporteur, les numéros de suivi, le dernier statut physique, le statut Erplain effectivement relu, les dates et les erreurs. Les changements observés sont conservés en base, avec les valeurs avant/après ; les scans transporteurs sont présentés séparément avec leur date d'origine. L'historique commence à la première synchronisation effectuée par ce nouveau processus ; il ne reconstitue pas les anciens changements Erplain. Une erreur conserve le dernier statut connu et sa date. La recherche et la pagination permettent de retrouver une commande, un BL ou un colis.
 
-Les administrateurs, managers et opérateurs peuvent lancer une tâche ; les autres rôles peuvent consulter l'historique. Les clics multiples partagent la tâche active. Fermer la fenêtre n'arrête pas la tâche. Après un redémarrage, une tâche en cours est signalée comme interrompue et les résultats reçus restent accessibles. Le worker `tracking-sync` doit être actif. La fermeture de la fenêtre actualise le tableau des commandes.
+Les administrateurs, managers et opérateurs peuvent lancer une tâche ; les autres rôles peuvent consulter l'historique. Si une tâche est déjà active, le bouton signale que la nouvelle sélection n’a pas été lancée ; son avancement reste consultable dans l’historique. Fermer la fenêtre n'arrête pas la tâche. Après un redémarrage, une tâche en cours est signalée comme interrompue et les résultats reçus restent accessibles. Le worker `tracking-sync` doit être actif. La fermeture de la fenêtre actualise le tableau des commandes.
 
 Le serveur charge maintenant `.env` au démarrage pour ce connecteur (les variables déjà définies dans l'environnement priment). Si les écritures Erplain ne sont pas configurées, le bouton actualise les suivis V3 et conserve les propositions de changement des BL. Avec `ERPLAIN_LIVE_WRITES=1` et l'ancien `lifecycle` désactivé, il applique aussi les statuts des BL dans Erplain. L'écran indique le mode utilisé. Les autres connecteurs historiques conservent leurs configurations JSON.
 
