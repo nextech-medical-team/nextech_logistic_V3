@@ -44,6 +44,13 @@ test('existing suspension and V3 cancellation remain authoritative',()=>{
 test('unrelated errors and uncertain purchases are preserved by presentation',()=>{
  const o=order({temu_job:{status:'uncertain',error:'Résultat achat incertain',attempt_id:'known'},issue:'Écart prix'});const before=structuredClone(o);projectTemuQuantityDiagnosis(o);assert.deepEqual(o,before);
 });
+test('newer confirmed cancellation observation supersedes only stale platform presentation',()=>{
+ const observation={source:'temu_direct',reference:ref,status:3,observedAt:'2026-10-12T10:00:00Z'};
+ const o=order({platform_status:{channel:'temu',status:'2',cancelled:false,observedAt:'2026-10-12T09:00:00Z'},source_payload:{temuOrderDetail:detail(),platformCancellationObservation:observation}});
+ projectTemuQuantityDiagnosis(o);assert.equal(o.platform_status.status,'3');assert.equal(o.platform_status.observedAt,observation.observedAt);assert.equal(o.platform_status.indicative,true);assert.equal(o.tracking_status,undefined);
+ const later=order({platform_status:{status:'2',observedAt:'2026-10-12T11:00:00Z'},source_payload:o.source_payload});projectTemuQuantityDiagnosis(later);assert.equal(later.platform_status.status,'2');
+ const wrong=order({platform_status:{status:'2'},source_payload:{temuOrderDetail:detail(),platformCancellationObservation:{...observation,reference:'other'}}});projectTemuQuantityDiagnosis(wrong);assert.equal(wrong.platform_status.status,'2');
+});
 test('cancelled label recovery uses known packages without applying shipment quantity validation',async()=>{
  const pkg='PK-12345',queries=[],reads=[];
  const db={query:async(sql,args)=>{queries.push(sql);if(sql.includes('SELECT channel,source_payload'))return {rows:[]};if(sql==='SELECT * FROM temu_label_jobs WHERE reference=$1')return {rows:[{packages:[pkg],result:{source:'temu_direct'}}]};if(sql.includes('SELECT package FROM temu_label_documents'))return {rows:[{package:pkg}]};if(sql.includes('SELECT count(*)'))return {rows:[{n:1}]};return {rows:[]};}};

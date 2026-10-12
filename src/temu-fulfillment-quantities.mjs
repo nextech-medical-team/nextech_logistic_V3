@@ -34,6 +34,11 @@ export function temuFulfillmentBlock(order) {
 export function projectTemuQuantityDiagnosis(order) {
   const block = temuFulfillmentBlock(order);
   if (!block) return order;
+  const observation = order.source_payload?.platformCancellationObservation;
+  const observedAt = Date.parse(observation?.observedAt), currentAt = Date.parse(order.platform_status?.observedAt);
+  if (observation?.source === 'temu_direct' && observation.reference === order.reference && Number(observation.status) === 3 && Number.isFinite(observedAt) && observedAt <= Date.now() && (!Number.isFinite(currentAt) || observedAt > currentAt)) {
+    order.platform_status = {...order.platform_status, channel: 'temu', status: '3', cancelled: true, observedAt: observation.observedAt, indicative: true};
+  }
   for (const [target, key] of [[order, 'issue'], [order.temu_job, 'error'], [order.erp_live_job, 'error'], [order, 'resolution_error']]) {
     if (target?.[key] === invalidTemuQuantities) target[key] = block;
   }
