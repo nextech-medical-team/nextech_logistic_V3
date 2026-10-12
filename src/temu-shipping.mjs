@@ -1,4 +1,5 @@
 import {hasExternalLabel} from './temu-external-label.mjs';
+import {inspectTemuQuantities,cancelledTemuFulfillment} from './temu-fulfillment-quantities.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {excludedTemuCarrier} from './temu-purchase-policy.mjs';
 import {randomUUID,createHash} from 'node:crypto';
@@ -20,10 +21,11 @@ export function inspectTemu(detail,reference){
  // Platform risk/address/cancellation labels remain indicative; actual data and provider responses are checked below.
  if([p,...items].some(x=>String(x.orderPaymentType).toUpperCase()==='COD'))throw new Error('Paiement à la livraison incompatible');
  const packages=[...new Set(items.flatMap(i=>(i.packageSnInfo||[]).map(x=>x.packageSn)))];if(packages.some(x=>!/^PK-\d+$/.test(x)))throw new Error('Colis TEMU invalide');
- const lines=items.map(i=>({parentOrderSn:reference,orderSn:String(i.orderSn||''),quantity:Number(i.quantity)}));
- if(lines.some(l=>!l.orderSn||!Number.isInteger(l.quantity)||l.quantity<=0)||new Set(lines.map(l=>l.orderSn)).size!==lines.length)throw new Error('Articles ou quantités TEMU invalides');
- const pres=items.map(i=>names(i.orderLabel).includes('Y2_advance_sale'));if(pres.some(Boolean)&&!pres.every(Boolean))throw new Error('Précommandes et commandes ordinaires à séparer');
- return {lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,status:Number(p.parentOrderStatus),fingerprint:hash({reference,lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,payment:[p,...items].map(x=>x.orderPaymentType),deadline:p.expectShipLatestTime}),deadline:Number(p.expectShipLatestTime)*1000};
+ const {lines,cancelled,fullyCancelled}=inspectTemuQuantities(detail,reference);
+ if(fullyCancelled)throw Error(cancelledTemuFulfillment);
+ const remaining=items.filter(i=>lines.some(l=>l.orderSn===i.orderSn));
+ const pres=remaining.map(i=>names(i.orderLabel).includes('Y2_advance_sale'));if(pres.some(Boolean)&&!pres.every(Boolean))throw new Error('Précommandes et commandes ordinaires à séparer');
+ return {lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,status:Number(p.parentOrderStatus),fingerprint:hash({reference,lines,...(cancelled.length?{cancelled}:{}),packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,payment:[p,...items].map(x=>x.orderPaymentType),deadline:p.expectShipLatestTime}),deadline:Number(p.expectShipLatestTime)*1000};
 }
 export function offerParcel(offer,base,info,now=Date.now()){
  if(excludedTemuCarrier(offer))throw new Error('Cainiao exclu : choisir un autre transporteur TEMU');

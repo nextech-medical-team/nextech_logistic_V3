@@ -1,4 +1,5 @@
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
+import {projectTemuQuantityDiagnosis} from './temu-fulfillment-quantities.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
 import {withoutSharedParcelReason,withoutSharedParcelReasonSql} from './shared-parcel-diagnostic.mjs';
 import {obsoleteTemuVisibilityError,pureTemuSourceReadError} from './temu-catchup-policy.mjs';
@@ -38,6 +39,7 @@ export function paidDeferredBillingDiagnosis(o){
  return d?.kind==='temu_address_masking'&&d.verified===true&&d.deferredBilling===true&&o.invoice_status==='paid'&&matches&&(!d.deferredLabelRead||!!o.temu_job);
 }
 export function projectCurrentDiagnostics(o){
+ projectTemuQuantityDiagnosis(o);
  if(o.archived||o.label_status==='cancelled'||o.tracking_status==='cancelled'){for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o,'resolution_error']])if(target)target[key]=null;return o;}
  const partial=o.source_payload?.temuCatchupPartial;
  if(o.channel==='temu'&&partial?.currentReason&&Number.isFinite(Date.parse(partial.checkedAt))&&partial.coverage?.detail&&partial.coverage?.version&&partial.coverage?.consistency&&(!o.source_payload?.temuDirect?.attemptedAt||Date.parse(o.source_payload.temuDirect.attemptedAt)<=Date.parse(partial.checkedAt))){
