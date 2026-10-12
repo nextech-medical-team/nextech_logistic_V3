@@ -1,4 +1,5 @@
 import {usesRecordedBc,recordedBcFingerprint} from './existing-bc-execution.mjs';
+import {bcAuthorityIdentityMatches} from './erplain-bc-line-authority.mjs';
 import {bcComparisonDiagnostic} from './resolution-bc-diagnostic.mjs';
 import {assertDocumentIdle} from './erplain-document-read.mjs';
 import {mappingSelectionFingerprint} from './current-mapping-line.mjs';
@@ -11,7 +12,7 @@ export const physicalComparisonErrors=Object.freeze([
  'Écart entre la commande partielle et le BC complet : vérifier le périmètre des livraisons et les unités'
 ]);
 const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
-export function documentReadVersion(order){return JSON.stringify(canonical({bc:order.erp_live?.bc,bl:order.erp_live?.bl,stockDocument:order.erp_live?.stockDocument,documentSource:order.erp_live?.documentSource,partialSource:order.erp_live?.partialSource,comparison:order.erp_live?.bcComparisonRefresh,partial_mode:order.partial_mode,imported:order.source_payload?.erplainImported}));}
+export function documentReadVersion(order){return JSON.stringify(canonical({bc:order.erp_live?.bc,bl:order.erp_live?.bl,stockDocument:order.erp_live?.stockDocument,documentSource:order.erp_live?.documentSource,partialSource:order.erp_live?.partialSource,comparison:order.erp_live?.bcComparisonRefresh,authority:order.erp_live?.bcLineAuthority,partial_mode:order.partial_mode,imported:order.source_payload?.erplainImported}));}
 export function assertRefreshedBcDocument(order,bc){
  bcComparisonDiagnostic(order,bc,[]);
  for(const line of bc.line_items.filter(l=>l.variant)){const q=line.quantity;if(!((typeof q==='number'||typeof q==='string'&&q.trim()!=='')&&Number.isFinite(Number(q))&&Number(q)>=0))throw Error('Erplain · Quantité BC non confirmée : aucune projection remplacée');}
@@ -32,17 +33,20 @@ export async function reconcileRefreshedBcDiagnostics(tx,id,bc){
  const text=rows=>(rows||[]).map(([sku,quantity])=>sku+' × '+quantity).join(', ');
  const currentError=concordant?null:difference?'BC · Produits ou quantités des lignes Erplain différents de la source : V3 ['+text(diagnostic.comparison.expected)+'] / BC ['+text(diagnostic.comparison.observed)+']':diagnostic.comparison===null?'Comparaison BC non confirmée : '+diagnostic.errors.map(e=>e.message).join(' ; '):undefined;
  const jobs=(await tx.query("SELECT id,error,result,action FROM resolution_jobs WHERE order_id=$1 AND status='review' FOR UPDATE",[id])).rows;
- let identityUnconfirmed=false;
+ const identityConfirmed=bcAuthorityIdentityMatches(order,bc,lines);
+ let identityUnconfirmed=concordant&&!!order.erp_live?.bcLineAuthority&&!identityConfirmed;
  for(const job of jobs){
   const marker=job.result?.bcComparisonRefresh;
   const original=physicalComparisonErrors.includes(job.error)?job.error:marker&&physicalComparisonErrors.includes(marker.previousError)&&job.error===marker.currentError?marker.previousError:null;
-  if(!original||currentError===undefined||job.error===currentError&&job.action!=='compare-bc')continue;
+  if(!original||currentError===undefined)continue;
   // A SKU comparison cannot certify the ERP variant identity used by pricing.
-  // Keep that guard until the preparation identity check itself verifies it.
-  if(!usesRecordedBc(order)&&concordant&&original==='BC · Produits ou quantités des lignes Erplain différents de la source'){identityUnconfirmed=true;continue;}
+  // Only the explicit BC adoption can certify the refreshed variant identity.
+  let jobError=currentError;
+  if(!usesRecordedBc(order)&&concordant&&original==='BC · Produits ou quantités des lignes Erplain différents de la source'&&!identityConfirmed){identityUnconfirmed=true;if(!marker||job.error!=null)continue;jobError=original;}
+  if(job.error===jobError&&job.action!=='compare-bc')continue;
   const previousResult=marker&&Object.hasOwn(marker,'previousResult')?marker.previousResult:job.result;
-  const record={...(job.action==='compare-bc'?{bc:diagnostic.bc,lines:diagnostic.lines,comparison:diagnostic.comparison,errors:diagnostic.errors,message:diagnostic.message,provider:diagnostic.provider,readOnly:true,checkedAt}:{}),bcComparisonRefresh:{previousError:original,currentError,proof,...(job.action==='compare-bc'?{previousResult}:{})}};
-  await tx.query("UPDATE resolution_jobs SET result=(CASE WHEN jsonb_typeof(result)='object' THEN result ELSE jsonb_build_object('previousResult',result) END)||$3::jsonb,error=$4,updated_at=now() WHERE id=$1 AND order_id=$2 AND status='review' AND error IS NOT DISTINCT FROM $5 RETURNING id",[job.id,id,JSON.stringify(record),currentError,job.error]);
+  const record={...(job.action==='compare-bc'?{bc:diagnostic.bc,lines:diagnostic.lines,comparison:diagnostic.comparison,errors:diagnostic.errors,message:diagnostic.message,provider:diagnostic.provider,readOnly:true,checkedAt}:{}),bcComparisonRefresh:{previousError:original,currentError:jobError,proof,...(job.action==='compare-bc'?{previousResult}:{})}};
+  await tx.query("UPDATE resolution_jobs SET result=(CASE WHEN jsonb_typeof(result)='object' THEN result ELSE jsonb_build_object('previousResult',result) END)||$3::jsonb,error=$4,updated_at=now() WHERE id=$1 AND order_id=$2 AND status='review' AND error IS NOT DISTINCT FROM $5 RETURNING id",[job.id,id,JSON.stringify(record),jobError,job.error]);
  }
  if(identityUnconfirmed){proof.identityUnconfirmed=true;proof.errors=[...proof.errors,{code:'variant_identity_unconfirmed',message:'Identité variante ERP à recontrôler avant reprise'}];}
  await tx.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bcComparisonRefresh}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(proof)]);
