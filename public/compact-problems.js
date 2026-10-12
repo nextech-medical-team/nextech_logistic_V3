@@ -72,7 +72,15 @@ function compactProblemParts(raw){
  }
  return parts;
 }
+function hasCompleteOrderDocuments(order){
+ const identified=document=>document&&String(document.id??'').trim()!=='';
+ return identified(order.erp_live?.bc)&&
+  (identified(order.erp_live?.bl)||(Array.isArray(order.erplain_tracking_bls)&&order.erplain_tracking_bls.some(identified)))&&
+  (Number(order.document_count)>0||(Array.isArray(order.temu_documents)&&order.temu_documents.length>0));
+}
 function compactProblems(order){
+ // Human instruction 2026-10-12: BC + BL + existing label closes blocking messages only.
+ if(hasCompleteOrderDocuments(order))return [];
  if(order.archived||order.label_status==='cancelled'||order.tracking_status==='cancelled')return [];
  const lines=order.sku_lines||[],out=[],family=order.carrier?.startsWith('gls')?'GLS':order.carrier==='gofo'?'GOFO':order.carrier==='temu'?'TEMU':'Erplain';
  const add=p=>{if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
@@ -99,3 +107,5 @@ function compactProblems(order){
 function compactProblemButtons(order){const list=compactProblems(order),id=esc(order.id);return list.slice(0,2).map(p=>'<button class="badge warn compact-problem" data-exact-problem="'+id+'" data-problem-type="'+esc(p.type)+'" data-problem-sku="'+esc(p.sku)+'" data-problem-detail="'+esc(p.detail)+'" title="'+esc((p.sku?p.sku+' · ':'')+(p.detail||p.label))+'">'+(p.sku?'<span>'+esc(p.sku)+'</span>':'')+'<span>'+esc(p.label)+'</span></button>').join('')+(list.length>2?'<button class="link-button" data-exact-problem="'+id+'">+'+(list.length-2)+' problèmes</button>':'');}
 transportPendingText=function(order){const weight=Number(order.weight_kg),parcels=Number(order.parcel_count);if(Number.isFinite(weight)&&weight>0)return Number(weight.toPrecision(12))+' kg · '+(Number.isInteger(parcels)&&parcels>0?parcels+' colis':'nombre de colis à confirmer');if(order.channel==='temu'&&order.temu_job?.status==='ready'&&!order.temu_documents?.length)return 'Achat TEMU à confirmer';if(compactProblems(order).some(p=>p.type==='stock'))return 'Préparation arrêtée : stock insuffisant';return 'Préparation à compléter';};
 
+
+if(typeof orderProblemText==='function'){const previousOrderProblemText=orderProblemText;orderProblemText=function(order){return hasCompleteOrderDocuments(order)?'':previousOrderProblemText(order);};}

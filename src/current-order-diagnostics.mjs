@@ -1,3 +1,4 @@
+import {hasCompleteOrderDocuments} from './complete-order-documents.mjs';
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
 import {projectTemuQuantityDiagnosis} from './temu-fulfillment-quantities.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
@@ -39,6 +40,10 @@ export function paidDeferredBillingDiagnosis(o){
  return d?.kind==='temu_address_masking'&&d.verified===true&&d.deferredBilling===true&&o.invoice_status==='paid'&&matches&&(!d.deferredLabelRead||!!o.temu_job);
 }
 export function projectCurrentDiagnostics(o){
+ if(hasCompleteOrderDocuments(o)){
+  for(const [target,key] of [[o,'issue'],[o,'resolution_error'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o.pending_equivalent,'error'],...(o.resolution_actions||[]).map(job=>[job,'error']),...(o.sku_lines||[]).map(line=>[line,'catalog_issue'])])if(target)target[key]=null;
+  return o;
+ }
  projectTemuQuantityDiagnosis(o);
  if(o.archived||o.label_status==='cancelled'||o.tracking_status==='cancelled'){for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o,'resolution_error']])if(target)target[key]=null;return o;}
  const partial=o.source_payload?.temuCatchupPartial;
