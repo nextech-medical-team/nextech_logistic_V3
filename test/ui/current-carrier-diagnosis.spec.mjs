@@ -1,0 +1,20 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+import {projectCurrentDiagnostics} from '../../src/current-order-diagnostics.mjs';
+import {currentProblemClassifier} from '../../src/problem-typology-reader.mjs';
+import {selectProblemOrders} from '../../src/problem-typology.mjs';
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('obsolete carrier message '+name,async({page})=>{
+ const base={channel:'amazon',carrier:'gofo',recipient:'Synthetic recipient',source_date:'2026-10-12',address:{country:'FR'},sku_lines:[],source_payload:{},erp_live:{},label_status:'simulated',tracking_status:'not_shipped',resolution_error:'Transporteur non déterminé'};
+ const rows=[{...base,id:'ready',reference:'TEST-CARRIER-READY',label_status:'production_ready',carrier_job:{status:'ready',error:null},document_count:1},{...base,id:'failed',reference:'TEST-CARRIER-PREPARATION',carrier_job:{status:'failed',error:'Préparation modifiée depuis la validation du BL : recontrôler les quantités et le transport avant étiquette.'}},{...base,id:'unknown',reference:'TEST-CARRIER-UNKNOWN',carrier:null,label_status:'blocked'}].map(projectCurrentDiagnostics);
+ const types=selectProblemOrders(rows,[],currentProblemClassifier()).problemTypes;const writes=[],errors=[];
+ await page.setViewportSize(viewport);page.on('pageerror',e=>errors.push(e.message));
+ page.on('request',r=>{if(r.method()!=='GET'&&!['/api/orders/processing','/api/partial/visible'].includes(new URL(r.url()).pathname))writes.push(r.url());});
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows,total:3,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/order-problem-types*',r=>r.fulfill({json:{problemTypes:types}}));await page.goto('/');
+ await expect(page.locator('#order-rows tr')).toHaveCount(3);
+ const ready=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-READY'});await expect(ready.locator('.compact-problem')).toHaveCount(0);
+ const failed=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-PREPARATION'});await expect(failed).not.toContainText('Transporteur non déterminé');await expect(failed).toContainText('Validation stock / BL à actualiser');
+ const unknown=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-UNKNOWN'});await expect(unknown).toContainText('Transporteur non déterminé');
+ await failed.scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/current-carrier-'+name+'.png',fullPage:false});expect(writes).toEqual([]);expect(errors).toEqual([]);
+ fs.writeFileSync('proofs/current-carrier-'+name+'.json',JSON.stringify({status:'PASS',viewport,obsoleteMessageRemoved:true,preparationErrorPreserved:true,unknownCarrierPreserved:true,writes,errors,scope:'Synthetic data, full application UI; no production label or business mutation'}));
+});
