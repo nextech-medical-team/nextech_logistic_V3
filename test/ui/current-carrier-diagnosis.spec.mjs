@@ -1,0 +1,35 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+import {projectCurrentDiagnostics} from '../../src/current-order-diagnostics.mjs';
+import {currentProblemClassifier} from '../../src/problem-typology-reader.mjs';
+import {selectProblemOrders} from '../../src/problem-typology.mjs';
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('obsolete carrier message '+name,async({page})=>{
+ const base={channel:'amazon',carrier:'gofo',recipient:'Synthetic recipient',source_date:'2026-10-12',address:{country:'FR'},sku_lines:[],source_payload:{},erp_live:{},label_status:'simulated',tracking_status:'not_shipped',resolution_error:'Transporteur non déterminé'};
+ const rows=[{...base,id:'ready',reference:'TEST-CARRIER-READY',label_status:'production_ready',carrier_job:{status:'ready',error:null},document_count:1},{...base,id:'failed',reference:'TEST-CARRIER-PREPARATION',carrier_job:{status:'failed',error:'Préparation modifiée depuis la validation du BL : recontrôler les quantités et le transport avant étiquette.'}},{...base,id:'unknown',reference:'TEST-CARRIER-UNKNOWN',carrier:null,label_status:'blocked'}].map(projectCurrentDiagnostics);
+ const types=selectProblemOrders(rows,[],currentProblemClassifier()).problemTypes;const writes=[],errors=[];
+ await page.setViewportSize(viewport);page.on('pageerror',e=>errors.push(e.message));
+ page.on('request',r=>{if(r.method()!=='GET'&&!['/api/orders/processing','/api/partial/visible'].includes(new URL(r.url()).pathname))writes.push(r.url());});
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows,total:3,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/order-problem-types*',r=>r.fulfill({json:{problemTypes:types}}));await page.goto('/');
+ await expect(page.locator('#order-rows tr')).toHaveCount(3);
+ const ready=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-READY'});await expect(ready.locator('.compact-problem')).toHaveCount(0);
+ const failed=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-PREPARATION'});await expect(failed).not.toContainText('Transporteur non déterminé');await expect(failed).toContainText('Validation stock / BL à actualiser');
+ const unknown=page.locator('#order-rows tr').filter({hasText:'TEST-CARRIER-UNKNOWN'});await expect(unknown).toContainText('Transporteur non déterminé');
+ await failed.locator('.compact-problem').first().scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/current-carrier-'+name+'.png',fullPage:false});expect(writes).toEqual([]);expect(errors).toEqual([]);
+ fs.writeFileSync('proofs/current-carrier-'+name+'.json',JSON.stringify({status:'PASS',viewport,obsoleteMessageRemoved:true,preparationErrorPreserved:true,unknownCarrierPreserved:true,writes,errors,scope:'Synthetic data, full application UI; no production label or business mutation'}));
+});
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('seven stored monitoring carrier errors disappear '+name,async({page})=>{
+ const stale='Transporteur non déterminé',waiting='Traitement déjà en cours : attendre sa fin avant de modifier les données de la commande';
+ const rows=Array.from({length:7},(_,i)=>projectCurrentDiagnostics({id:'monitor-'+i,reference:'TEST-MONITOR-'+i,channel:'amazon',carrier:'gofo',recipient:'Synthetic recipient',source_date:'2026-10-12',address:{country:'FR'},sku_lines:[],source_payload:{},erp_live:{},label_status:i<5?'production_ready':'simulated',tracking_status:'not_shipped',document_count:i<5?1:0,resolution_error:i===0?stale+' ; '+waiting:stale,carrier_job:{status:i<5?'ready':'failed',error:i<5?null:'Préparation modifiée depuis la validation du BL'}}));
+ const processing=rows.map((o,i)=>({id:o.id,currentCarrier:o.carrier,activities:[],canPrioritize:false,monitoring:{blocked:true,followUp:true,alert:true,lastCheck:'2026-10-12T12:00:00Z',nextCheck:'2026-10-12T12:05:00Z',result:i===0?stale+' ; '+waiting:stale,nextStep:'Recontrôler les données'}}));
+ const writes=[],errors=[];await page.setViewportSize(viewport);page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()!=='GET'&&!['/api/orders/processing','/api/partial/visible'].includes(new URL(r.url()).pathname))writes.push(r.url());});
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows,total:7,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/order-problem-types*',r=>r.fulfill({json:{problemTypes:selectProblemOrders(rows,[],currentProblemClassifier()).problemTypes}}));
+ await page.route('**/api/orders/processing',r=>r.fulfill({json:{rows:processing,at:'2026-10-12T12:00:00Z'}}));
+ await page.goto('/');await expect(page.locator('#order-rows tr')).toHaveCount(7);await expect(page.locator('.monitoring-result')).toHaveCount(7);
+ await expect(page.locator('#order-rows')).not.toContainText(stale);await expect(page.locator('.monitoring-result').first()).toContainText(waiting);
+ await expect(page.locator('.compact-problem').filter({hasText:'Validation stock / BL à actualiser'})).toHaveCount(2);
+ const first=page.locator('#order-rows tr').filter({hasText:'TEST-MONITOR-0'});await first.locator('.processing-details-toggle').click();await first.locator('.monitoring-result').scrollIntoViewIfNeeded();
+ await page.screenshot({path:'proofs/carrier-monitor-'+name+'.png',fullPage:false});expect(writes).toEqual([]);expect(errors).toEqual([]);
+ fs.writeFileSync('proofs/carrier-monitor-'+name+'.json',JSON.stringify({status:'PASS',viewport,cases:7,obsoleteDisplayed:0,independentReasonsPreserved:true,productionLabelsPreserved:5,preparationErrorsPreserved:2,writes,errors,scope:'Actual full UI with persisted stale monitors and current carrier; synthetic data'}));
+});
