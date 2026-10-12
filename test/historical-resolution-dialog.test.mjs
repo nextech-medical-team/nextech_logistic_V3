@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {projectCurrentDiagnostics} from '../src/current-order-diagnostics.mjs';
 import {currentProblemClassifier} from '../src/problem-typology-reader.mjs';
+import {resolveReplacementLines} from '../src/resolution-quantities.mjs';
 
 const source=readFileSync(new URL('../src/problem-resolution.mjs',import.meta.url),'utf8');
 const body=source.slice(source.indexOf('async function context('),source.indexOf('export function resolutionService'));
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-const execute=new AsyncFunction('db','id','projectCurrentDiagnostics','attachEquivalentDiagnostics','projectSharedParcelContext','correctionCatalog','pricingFingerprint',body+';return context(db,"isolated",id);');
+const executeContext=new AsyncFunction('db','id','projectCurrentDiagnostics','attachEquivalentDiagnostics','projectSharedParcelContext','correctionCatalog','pricingFingerprint','resolveReplacementLines',body+';return context(db,"isolated",id);');
+const execute=(...args)=>executeContext(...args,resolveReplacementLines);
 function order(){return {id:'order',channel:'temu',issue:'TEMU · Prix client et TVA source incohérents',resolution_pending_resume:true,erp_live:{phase:'historical_review',bc:{id:123},pricing:{status:'verified',confirmed:{total:12,sourceTotal:12,authority:'erplain'},commercialBasis:{field:'estimatedRevenue',sourceEstimatedRevenue:{amount:12,currency:'EUR'}}}},source_payload:{temuAmounts:{data:{parentOrderMap:{estimatedRevenue:{amount:12,currency:'EUR'}}}}}};}
 async function context(o){const writes=[];const db={query:async sql=>{writes.push(sql);if(sql==='SELECT * FROM orders WHERE id=$1')return {rows:[structuredClone(o)]};if(sql==='SELECT status,error FROM erp_live_jobs WHERE order_id=$1')return {rows:[{status:'review',error:o.issue}]};return {rows:[]};}};const result=await execute(db,o.id,projectCurrentDiagnostics,async()=>{},x=>x,async()=>[],()=>null);assert.ok(writes.every(s=>s.startsWith('SELECT')));return result;}
 test('resolution context and listing agree on historical BL rather than verified old pricing',async()=>{const o=order(),before=JSON.stringify(o),ctx=await context(o);assert.equal(ctx.order.issue,'Reprise historique à vérifier : BL non créé');assert.equal(ctx.erpJob.error,ctx.order.issue);assert.equal(JSON.stringify(o),before);const problems=currentProblemClassifier()({...ctx.order,erp_live_job:ctx.erpJob});assert.equal(problems.length,1);assert.equal(problems[0].type,'historical-preparation');});
