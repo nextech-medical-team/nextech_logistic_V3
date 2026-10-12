@@ -39,6 +39,7 @@ import {initializeMarketplaceInbox,marketplaceInbox} from './marketplace-inbox.m
 import {shopifyCollector,loadShopifyConfig,marketplaceCollector,shopifyWebhook} from './marketplace-collection.mjs';
 import {runtimeConfig,initializeOperations,createRuntime} from './runtime.mjs';
 import {configureApiBudget} from './api-budget.mjs';
+import {configureTemuOrderApiPolicy} from './temu-order-api-policy.mjs';
 import {configureShipmentLocks} from './shipment-lock.mjs';
 import {installEventTriggers,liveEvents} from './live-events.mjs';
 import {trackingAudit} from './tracking-audit.mjs';
@@ -122,7 +123,7 @@ await db.withLocks(['schema'],()=>initializeImportCorrections(db));
 const importCorrectionService=importCorrections(db,erplainAccount(directory,'source'));
 await db.withLocks(['schema'],()=>initializeOrderSuspension(db));
 const suspensionService=orderSuspensionService(db,erplainAccount(directory,'live'));
-configureApiBudget(db);configureShipmentLocks(db);const cachedOrderSummary=orderSummaryCache(db);
+configureApiBudget(db);configureTemuOrderApiPolicy(db);configureShipmentLocks(db);const cachedOrderSummary=orderSummaryCache(db);
 await db.withLocks(['schema'],()=>initializeTrackingSync(db));
 if(config.background)await db.query("UPDATE tracking_sync_runs SET status='interrupted',finished_at=now(),error='Serveur redémarré : les résultats déjà reçus sont conservés. Relancez la synchronisation.' WHERE status='running'");
 await db.withLocks(['schema'],()=>initializeMovementWatch(db));
@@ -602,9 +603,3 @@ async function shutdown(){if(shuttingDown)return;shuttingDown=true;try{
  }catch{console.error('Arrêt incomplet : contrôle des traitements nécessaire');process.exit(1);}}
 
 process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
-
-
-
-
-
-

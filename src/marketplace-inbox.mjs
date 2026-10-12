@@ -27,6 +27,7 @@ export function validShopifyHmac(raw,header,secret){if(typeof header!=='string'|
 export async function receiveMarketplace(db,{channel,shop,deliveryId,payload}){
  if(!['shopify','temu'].includes(channel)||typeof shop!=='string'||!shop||shop.length>255||typeof deliveryId!=='string'||!deliveryId||deliveryId.length>300)throw Error('Identité de réception invalide');
  const window=(await db.query("SELECT value FROM settings WHERE key='marketplace_automatic'")).rows[0]?.value;if(!window?.enabled)return {skipped:true,reason:'disabled'};
+ if(channel==='temu'&&window.channels?.temu===false)return {skipped:true,reason:'temu-order-api-paused'};
  try{if(!withinReceptionStart(channel,payload,window))return {skipped:true,reason:'outside-start-date'};}catch(e){if(!String(e.message).startsWith('Date source absente'))throw e;} // Retain an undated receipt for review; do not create an order.
  const raw=JSON.stringify(payload);if(Buffer.byteLength(raw)>2*1024*1024)throw Error('Réception trop volumineuse');const signature=createHash('sha256').update(raw).digest('hex');
  const id=randomUUID();const r=await db.query('INSERT INTO marketplace_receipts(id,channel,shop,delivery_id,payload,signature) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(channel,shop,delivery_id) DO NOTHING RETURNING id',[id,channel,shop,deliveryId,raw,signature]);
@@ -46,6 +47,7 @@ export function normalizeTemuReceipt(payload,shop){
 export async function applyMarketplaceReceipt(db,r,options={}){
  const fresh=authorizedFreshTemu(r,options);
  const window=(await db.query("SELECT value FROM settings WHERE key='marketplace_automatic'")).rows[0]?.value;if(!window?.enabled)return {skipped:true,reason:'disabled'};
+ if(r.channel==='temu'&&window.channels?.temu===false)return {skipped:true,reason:'temu-order-api-paused'};
  if(!fresh&&!withinReceptionStart(r.channel,r.payload,window))return {skipped:true,reason:'outside-start-date'};
  if(r.channel==='shopify'&&shopifyDeliveryMode(r.payload)==='relay'&&!readShopifyRelay(r.payload)){
   const {shopifyCollector,loadShopifyConfig}=await import('./marketplace-collection.mjs');
@@ -120,4 +122,4 @@ export async function applyMarketplaceReceipt(db,r,options={}){
  }));
 }
 
-export function marketplaceInbox(db){let running=false;return {get running(){return running;},async run(){if(running)return;running=true;try{for(let i=0;i<25;i++){const r=await db.transaction(async tx=>{const row=(await tx.query("SELECT * FROM marketplace_receipts WHERE status='pending' OR (status='review' AND updated_at<now()-interval '5 minutes') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1")).rows[0];if(!row)return null;await tx.query("UPDATE marketplace_receipts SET status='processing' WHERE id=$1",[row.id]);return row;});if(!r)break;try{await applyMarketplaceReceipt(db,r);await db.query("UPDATE marketplace_receipts SET status='complete',error=null,updated_at=now() WHERE id=$1",[r.id]);}catch(e){await db.query("UPDATE marketplace_receipts SET status='review',error=$2,updated_at=now() WHERE id=$1",[r.id,String(e.message).slice(0,500)]);}}}finally{running=false;}}};}
+export function marketplaceInbox(db){let running=false;return {get running(){return running;},async run(){if(running)return;running=true;try{for(let i=0;i<25;i++){const r=await db.transaction(async tx=>{const row=(await tx.query("SELECT * FROM marketplace_receipts WHERE (status='pending' OR (status='review' AND updated_at<now()-interval '5 minutes')) AND NOT (channel='temu' AND coalesce((SELECT value->'channels'->>'temu' FROM settings WHERE key='marketplace_automatic'),'true')='false') ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1")).rows[0];if(!row)return null;await tx.query("UPDATE marketplace_receipts SET status='processing' WHERE id=$1",[row.id]);return row;});if(!r)break;try{const applied=await applyMarketplaceReceipt(db,r);if(applied?.reason==='temu-order-api-paused'){await db.query('UPDATE marketplace_receipts SET status=$2 WHERE id=$1',[r.id,r.status]);break;}await db.query("UPDATE marketplace_receipts SET status='complete',error=null,updated_at=now() WHERE id=$1",[r.id]);}catch(e){await db.query("UPDATE marketplace_receipts SET status='review',error=$2,updated_at=now() WHERE id=$1",[r.id,String(e.message).slice(0,500)]);}}}finally{running=false;}}};}
