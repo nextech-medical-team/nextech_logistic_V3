@@ -172,6 +172,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   if(Number(plan.replaceQuantity)===Number(plan.replacementQuantity))await rememberEquivalence(tx,plan.originalSku,plan.replacementSku);
   const state={...o.erp_live,equivalentOriginalLines:o.erp_live.equivalentOriginalLines||originals,equivalentItems:shippingProductLines(updated.line_items).map(l=>({variant:{id:String(l.variant.id)},location:{id:String(l.location.id)},quantity:Number(l.quantity),price:Number(l.price),description:l.variant.sku})),equivalentRefreshedAt:new Date().toISOString(),labelReprintNotice:labelNotice||null,equivalentReconciledFrom:plan.recoveredFrom||null,phase:'bc_created',verifiedAt:null,stockCheckedAt:null,labelPreparationFingerprint:null};
   if(attempt)state.equivalentAttemptId=b.requestId;
+  state.documentSource={...o.erp_live.documentSource,checkedAt:new Date().toISOString(),lines:shippingProductLines(updated.line_items).map(l=>({lineId:String(l.id),sku:l.variant.sku,quantity:Number(l.quantity)})),shippingOrders:updated.shipping_orders.data};
   if(historicalAfter)state.historicalStockProof=historicalAfter.proof;
   if(plan.partialProof){
    if(!o.erp_live.equivalentOriginalLines)state.equivalentOriginalLines=mappingLines;

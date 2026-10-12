@@ -1,4 +1,5 @@
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
+import {resolveReplacementLines} from './resolution-quantities.mjs';
 import {importedLabelDiagnosticReconciler} from './imported-label-diagnostic.mjs';
 import {carrierPrevalidationReconciler} from './carrier-prevalidation-diagnostic.mjs';
 import {catalogueLookupProof,refreshLookupDiagnostics} from './catalogue-lookup-diagnostics.mjs';
@@ -165,7 +166,7 @@ async function context(db,directory,id){
  const latest=(await db.query('SELECT status,error FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1',[id])).rows[0];order.resolution_error=latest?.status==='review'?latest.error:null;await attachEquivalentDiagnostics(db,[order]);
  const temuJob=order.channel==='temu'?(await db.query('SELECT status,error,packages,attempt_id FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]:null;
  projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob}));
- return projectSharedParcelContext({order,lines,job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
+ return projectSharedParcelContext({order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
 }
 export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic}={}){
  const diagnoseCarrier=refreshCarrierDiagnostic||carrierDiagnosticReader(db,directory).read;

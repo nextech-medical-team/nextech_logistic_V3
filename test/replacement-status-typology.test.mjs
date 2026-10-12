@@ -29,5 +29,8 @@ test('a completed preparation retires an older failed replacement from list and 
  for(const id of ['prepared','decision'])await db.query("INSERT INTO resolution_jobs VALUES($1,$2,$3,$4,$5,null,$6,now()-interval '1 hour')",[id+'-preview',id,'equivalent-preview','review',JSON.stringify({sku:'OLD',replacementSku:'NEW'}),'Stock insuffisant']);
  await db.query("INSERT INTO resolution_jobs VALUES('resume','prepared','resume-erp','complete','{}','{}',null,now()),('weight','decision','weight','complete','{\"sku\":\"NEW\"}','{}',null,now())");
  const rows=(await db.query(`SELECT id FROM orders WHERE ${pendingEquivalentProblemSql} ORDER BY id`)).rows;assert.deepEqual(rows.map(r=>r.id),['decision']);const orders=[{id:'prepared'},{id:'decision'}];await attachEquivalentDiagnostics(db,orders);assert.equal(orders[0].pending_equivalent,null);assert.equal(orders[1].pending_equivalent.replacementSku,'NEW');assert.equal((await db.query('SELECT count(*)::int n FROM resolution_jobs')).rows[0].n,4);
+ await db.query("INSERT INTO resolution_jobs VALUES('recovered-preview','decision','equivalent-preview','complete','{\"sku\":\"OLD\",\"replacementSku\":\"NEW\",\"replaceQuantity\":20,\"replacementQuantity\":40}','{\"previewFingerprint\":\"verified\"}',null,now()+interval '1 second')");
+ const recovered=[{id:'decision'}];await attachEquivalentDiagnostics(db,recovered);assert.equal(recovered[0].pending_equivalent.replacementQuantity,40);assert.equal(recovered[0].pending_equivalent.error,'Produit équivalent vérifié : confirmer le remplacement');
+ assert.deepEqual((await db.query(`SELECT id FROM orders WHERE ${pendingEquivalentProblemSql} ORDER BY id`)).rows.map(r=>r.id),['decision']);
  }finally{await db.close();}
 });

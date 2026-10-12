@@ -14,6 +14,14 @@ Après activation CI/CD, chaque push main est publié par l’exécuteur Section
 Les instantanés métier margin-published-snapshot.json et temu-reading-reports.json sont exclus. Le périmètre privé de réimport TEMU est vide dans cette copie : aucun réimport de ce lot ne peut être autorisé par cette copie. Le service de marges nécessite son fichier de configuration privé pour démarrer. Ces exclusions concernent seulement le dépôt public ; le serveur reste inchangé.
 Les identifiants privés du lot cancelled-import-reimport sont aussi retirés ; ce lot reste désactivé dans la copie publique.
 
+## Reprise d'un remplacement après récupération TEMU
+
+La fenêtre de remplacement récupère les SKU et quantités selon le mapping actuel. Une équivalence enregistrée pour cette commande conserve ses quantités propres ; un ancien cache de préparation ne remplace pas une conversion plus récente.
+
+Les quantités sont exprimées en unités du SKU logistique Erplain. Après confirmation et vérification de la mise à jour du BC, V3 synchronise ses lignes locales et affiche `ancien SKU (quantité remplacée) → nouveau SKU (quantité équivalente)` dans la colonne SKU (quantité). Cette indication repose uniquement sur les remplacements enregistrés avec succès. Les commandes sans remplacement gardent l'affichage habituel. Les lignes déjà remplacées ne sont pas reconverties par un autre mapping.
+
+Après récupération automatique d'un achat TEMU, V3 relance la vérification d'un remplacement bloqué uniquement par « Achat TEMU en cours, incertain ou multi-colis » si un seul colis couvre toute la commande et si son PDF est disponible. Les SKU et quantités proposés sont conservés, puis vérifiés contre le BC et le stock actuels. Le résultat demande une nouvelle confirmation du remplacement. Aucun nouvel achat d'étiquette n'est effectué par cette reprise. Les achats incertains, les répartitions multi-colis, les commandes expédiées ou suspendues et les écritures déjà commencées restent à rapprocher. Cette reprise nécessite les workers actifs ; elle est désactivée en mode `MIGRATION_PREPARATION=1`.
+
 ## Synchronisation du suivi vers Erplain
 
 Le processus `scripts/sync-tracking.mjs` lit les commandes existantes dans PostgreSQL, récupère les événements GLS / GOFO / TEMU puis propose ou applique les statuts `shipped` et `delivered` aux BL existants. Il ne lance pas le serveur ni les autres traitements métier. Il ne crée aucun document, facture ou paiement. Il n'annule pas automatiquement de document à partir d'un incident transporteur.

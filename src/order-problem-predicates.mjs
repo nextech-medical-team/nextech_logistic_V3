@@ -12,12 +12,12 @@ export const catalogProblemSql=`EXISTS(
 )`;
 export const pendingEquivalentProblemSql=`EXISTS(
  SELECT 1 FROM (
-  SELECT j.id,j.status,j.payload,j.error,j.created_at FROM resolution_jobs j
+  SELECT j.id,j.action,j.status,j.payload,j.result,j.error,j.created_at FROM resolution_jobs j
   WHERE j.order_id=orders.id AND j.action IN ('equivalent-preview','replace-equivalent')
   ORDER BY j.created_at DESC,j.id DESC LIMIT 1
  ) pending
- WHERE ${successfulPreparationAfterSql('pending')} AND pending.status='review' AND coalesce(pending.payload->>'replacementSku','')<>''
- AND (coalesce(pending.error,'')<>'' OR EXISTS(
+ WHERE ${successfulPreparationAfterSql('pending')} AND (pending.status='review' OR (pending.status='complete' AND pending.action='equivalent-preview' AND coalesce(pending.result->>'previewFingerprint','')<>'')) AND coalesce(pending.payload->>'replacementSku','')<>''
+ AND (pending.status='complete' OR coalesce(pending.error,'')<>'' OR EXISTS(
   SELECT 1 FROM resolution_jobs corrected WHERE corrected.order_id=orders.id
   AND corrected.created_at>pending.created_at AND corrected.status='complete'
   AND corrected.action IN ('weight','select-product','activate-product','create-product')

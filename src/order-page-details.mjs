@@ -1,6 +1,7 @@
 import {attachLogisticsObservations} from './logistics-observation-view.mjs';
 import {platformIndicativeView} from './platform-indicative-view.mjs';
 import {attachEquivalentDiagnostics} from './equivalent-diagnostics.mjs';
+import {attachSkuSubstitutions} from './sku-substitution-view.mjs';
 export async function orderPageDetails(db,rows){
  if(!rows.length)return;
  for(const row of rows)row.platform_status=platformIndicativeView(row);
@@ -9,6 +10,7 @@ export async function orderPageDetails(db,rows){
  for(const row of rows)row.erplain_tracking_bls=row.partial_mode?(byBl.get(row.id)||[]):row.erp_live?.documentSource?.shippingOrders?.length?row.erp_live.documentSource.shippingOrders:row.erp_live?.bl?[row.erp_live.bl]:[];
  const choices=new Map((await db.query('SELECT id,transport_choice FROM orders WHERE id=ANY($1::text[])',[rows.map(r=>r.id)])).rows.map(r=>[r.id,r.transport_choice]));for(const row of rows)row.transport_choice=choices.get(row.id)||null;
  await attachEquivalentDiagnostics(db,rows);
+ await attachSkuSubstitutions(db,rows);
  for(const row of rows)row.external_shipments=Array.isArray(row.source_payload?.historicalShipments)?row.source_payload.historicalShipments:[];
  const extras=(await db.query('SELECT order_id,id,carrier,environment,parcel_index,parcel_total,status,tracking,error FROM extra_parcels WHERE order_id=ANY($1::text[]) ORDER BY created_at,id',[rows.map(r=>r.id)])).rows;
  const byOrder=new Map();for(const {order_id,...item} of extras){const list=byOrder.get(order_id)||[];list.push(item);byOrder.set(order_id,list);}for(const row of rows)row.extra_parcels=byOrder.get(row.id)||[];
