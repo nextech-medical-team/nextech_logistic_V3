@@ -27,7 +27,7 @@ async function fixture(channel='amazon'){
  async function route(path,body,role='admin'){
   let result;await service.routes({p:path,url:new URL('http://localhost'+path),req:{method:'POST'},res:{},user:{...user,role},body:async()=>body,json:(_r,status,value)=>{result={status,...value};},permitted});return result;
  }
- async function start(){const r=await route('/api/receipts/recovery/preview',{number:receipt.label,requestId:randomUUID()});await service.run();const state=await service.status(r.id);assert.equal(state.state,'ready');assert.equal(state.plan.rows[0].status,'eligible');return r.id;}
+ async function start(expected='eligible'){const r=await route('/api/receipts/recovery/preview',{number:receipt.label,requestId:randomUUID()});await service.run();const state=await service.status(r.id);assert.equal(state.state,'ready');assert.equal(state.plan.rows[0].status,expected);return r.id;}
  return {db,engine,id,receipt,user,service,route,start,calls,actual:()=>actual,change:v=>{actual=v;},labelCalls:()=>labelCalls};
 }
 test('durable receipt preview, native resume, labels, finished result and duplicate execution',async()=>{
@@ -78,4 +78,17 @@ test('failed native preparation remains blocked and never submits a label',async
 });
 test('in_preparation is never finalized by the receipt module',async()=>{
  const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();const bl={id:'bl',status:'in_preparation'};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);await f.service.run();assert.match((await f.service.status(run)).plan.rows[0].item.error,/in_preparation/);assert.equal(f.labelCalls(),0);assert.ok(f.calls.every(q=>q.startsWith('query ')));}finally{await f.engine.close();}
+});
+for(const channel of ['amazon','temu'])test(`${channel}: existing ready BL obtains label without another ERP resume`,async()=>{
+ const f=await fixture(channel);try{
+  const bl={id:'existing',label:'SHO-EXISTING',status:'ready_to_ship',update_stock:false};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl,phase:'bl_ready'})]);
+  const run=await f.start('documents');assert.equal((await f.service.status(run)).plan.rows[0].canLabel,true);await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+  if(channel==='temu'){assert.equal(f.labelCalls(),0);assert.equal((await f.service.status(run)).plan.rows[0].item.state,'label_action_required');}
+  else{assert.equal(f.labelCalls(),1);await f.service.run();assert.equal(f.labelCalls(),1);await f.db.query("UPDATE carrier_jobs SET status='ready'");await f.db.query('INSERT INTO carrier_documents VALUES($1,0)',[f.id]);await f.service.run();assert.equal((await f.service.status(run)).plan.rows[0].item.state,'complete');}
+ }finally{await f.engine.close();}
+});
+test('another receipt can be analyzed while a native preparation is waiting',async()=>{
+ const f=await fixture();try{const first=await f.start();await f.service.submit({id:first,ids:[f.id]},f.user);await f.service.run();
+  const second=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId:randomUUID()});await f.service.run();assert.equal((await f.service.status(second.id)).state,'ready');assert.equal((await f.service.status(first)).state,'applying');assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
+ }finally{await f.engine.close();}
 });

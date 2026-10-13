@@ -55,7 +55,8 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
   const jobs=(await db.query('SELECT id,status,stage,error FROM resolution_jobs WHERE id=ANY($1::text[])',[items.map(i=>i.resolution_id).filter(Boolean)])).rows;
   const byOrder=new Map(snapshot.map(o=>[o.id,o])),byJob=new Map(jobs.map(j=>[j.id,j])),byItem=new Map(items.map(i=>[i.order_id,i]));
   const rows=[];for(const row of run.plan?.rows||[]){const o=byOrder.get(row.id),item=byItem.get(row.id),job=byJob.get(item?.resolution_id)||null;
-   rows.push({...row,labels:o?snapshotLabelLinks(o):[],labelError:o?.temu_error||null,currentBl:o?.erp_live?.bl?{id:o.erp_live.bl.id,label:o.erp_live.bl.label,status:o.erp_live.bl.status}:null,item:item?{state:item.state,error:item.error,job}:null});
+   const labels=o?snapshotLabelLinks(o):[];
+   rows.push({...row,labels,reason:row.status==='documents'&&!labels.length?'BL déjà disponible · étiquette à obtenir':row.reason,labelError:o?.temu_error||null,currentBl:o?.erp_live?.bl?{id:o.erp_live.bl.id,label:o.erp_live.bl.label,status:o.erp_live.bl.status}:null,item:item?{state:item.state,error:item.error,job}:null});
   }
   return {id:run.id,number:run.number,state:run.state,error:run.error,createdAt:run.created_at,updatedAt:run.updated_at,plan:run.plan?{...run.plan,rows}:null};
  }
@@ -65,7 +66,7 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
    const r=(await tx.query('SELECT * FROM receipt_recovery_runs WHERE id=$1 FOR UPDATE',[id])).rows[0];if(!r)throw Error('Analyse introuvable');
    const selection=[...ids].sort();if(r.selection){if(JSON.stringify(r.selection)!==JSON.stringify(selection))throw Error('Cette analyse a déjà été lancée avec une autre sélection');return {id,state:r.state,existing:true};}
    if(r.state!=='ready'||!r.plan?.coverage?.complete||Date.now()-Date.parse(r.updated_at)>30*60*1000)throw Error('Relancer une analyse complète et récente avant le traitement');
-   if(ids.some(id=>!r.plan.rows.some(row=>row.id===id&&row.status==='eligible')))throw Error('La sélection contient une commande non admissible');
+   if(ids.some(id=>!r.plan.rows.some(row=>row.id===id&&(row.status==='eligible'||row.status==='documents'&&row.canLabel))))throw Error('La sélection contient une commande non admissible');
    if((await tx.query("SELECT id FROM receipt_recovery_runs WHERE state='applying'")).rows.length)throw Error('Une autre réception est en traitement : attendre son résultat');
    for(const orderId of ids)await tx.query('INSERT INTO receipt_recovery_items(run_id,order_id,request_id) VALUES($1,$2,$3)',[id,orderId,randomUUID()]);
    await tx.query("UPDATE receipt_recovery_runs SET state='applying',selection=$2,updated_at=now() WHERE id=$1",[id,JSON.stringify(selection)]);
@@ -85,12 +86,22 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
     if(receiptHash(receipts)!==run.plan.receiptFingerprint)throw Error('Réception modifiée : relancer son analyse');
     const bc=await readErplainDocuments(api,fresh.erp_live?.bc?.id),original=run.plan.rows.find(r=>r.id===o.id);
     if(recoveryFingerprint(fresh,bc)!==original.fingerprint)throw Error('Préparation modifiée depuis l’analyse : relancer son analyse');
+    if(original.status==='documents'&&original.canLabel){
+     const check=buildReceiptPlan(receipts,[fresh],new Map([[String(bc.id),bc]])).rows[0];if(!check?.canLabel)throw Error('BL ou commande non admissible pour une étiquette');
+     if((await recoveryLabels(db,fresh)).length){await itemState(run.id,o.id,'complete');return;}
+     if(o.channel==='temu'){const t=(await db.query('SELECT error FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0];await itemState(run.id,o.id,'label_action_required',t?.error||'Obtenir l’étiquette dans le parcours TEMU.');return;}
+     await queueLabel(db,o.id,{email:run.created_by});await itemState(run.id,o.id,'label_pending');return;
+    }
     const reason=receiptOrderBlock(fresh,bc);if(reason)throw Error(reason);
     const check=buildReceiptPlan(receipts,[fresh],new Map([[String(bc.id),bc]]));if(check.rows[0]?.status!=='eligible')throw Error(check.rows[0]?.reason||'Commande non liée à cette réception');
     const result=await queueResolution(db,{id:o.id,requestId:item.request_id,action:'resume-erp',type:'stock'},{email:run.created_by});
     const queued=(await db.query('SELECT request_id FROM resolution_jobs WHERE id=$1',[result.id])).rows[0];if(queued?.request_id!==item.request_id)throw Error('Une autre intervention a démarré : attendre son résultat');
     await itemState(run.id,o.id,'preparing',null,result.id);
    });return;
+  }
+  if(item.state==='label_pending'){
+   if((await recoveryLabels(db,o)).length){await itemState(run.id,o.id,'complete');return;}
+   const c=(await db.query('SELECT status,error FROM carrier_jobs WHERE order_id=$1',[o.id])).rows[0];if(!c||['failed','review','superseded'].includes(c.status))await itemState(run.id,o.id,'blocked',c?.error||'Étiquette non disponible : rapprocher le résultat');return;
   }
   const resolution=(await db.query('SELECT status,error FROM resolution_jobs WHERE id=$1',[item.resolution_id])).rows[0];
   if(!resolution){await itemState(run.id,o.id,'blocked','Intervention de reprise introuvable');return;}
@@ -106,15 +117,11 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
    }
    await queueLabel(db,o.id,{email:run.created_by});await itemState(run.id,o.id,'label_pending');return;
   }
-  if(item.state==='label_pending'){
-   if((await recoveryLabels(db,o)).length){await itemState(run.id,o.id,'complete');return;}
-   const c=(await db.query('SELECT status,error FROM carrier_jobs WHERE order_id=$1',[o.id])).rows[0];if(!c||['failed','review','superseded'].includes(c.status))await itemState(run.id,o.id,'blocked',c?.error||'Étiquette non disponible : rapprocher le résultat');
-  }
  }
  return {get running(){return running;},preview,status,submit,
   async run(){if(running||!enabled())return;running=true;let run;
    try{
-    run=(await db.query("SELECT * FROM receipt_recovery_runs WHERE state IN ('queued','reading','applying') ORDER BY CASE WHEN state='applying' THEN 0 ELSE 1 END,created_at LIMIT 1")).rows[0];if(!run)return;
+    run=(await db.query("SELECT * FROM receipt_recovery_runs WHERE state IN ('queued','reading','applying') ORDER BY CASE WHEN state='reading' THEN 0 WHEN state='queued' THEN 1 ELSE 2 END,created_at LIMIT 1")).rows[0];if(!run)return;
    if(run.state==='applying'){activeItem=null;try{await advance(run);}catch(e){if(activeItem)await itemState(run.id,activeItem,'blocked',e.message);else throw e;}return;}
     await db.query("UPDATE receipt_recovery_runs SET state='reading',updated_at=now() WHERE id=$1",[run.id]);const plan=await preview(run.number);
     await db.query("UPDATE receipt_recovery_runs SET state='ready',plan=$2,error=null,updated_at=now() WHERE id=$1",[run.id,JSON.stringify(plan)]);
