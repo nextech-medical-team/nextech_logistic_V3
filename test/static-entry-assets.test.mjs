@@ -29,3 +29,8 @@ test('static handler rejects unknown, private and traversing paths and non-GET r
  for(const route of ['/missing.js','/src/server.mjs','/../src/server.mjs','/application.env'])assert.equal((await request(route)).bytes,undefined);
  assert.equal((await request('/temu-excel-preparation.js','POST')).bytes,undefined);
 });
+test('receipt page and its assets are served by the real static handler',async()=>{
+ const response=await request('/receptions.html');assert.ok(response.bytes);
+ const html=response.bytes.toString();assert.match(html,/receipt-number/);
+ for(const asset of ['/receipt-recovery.js','/receipt-recovery.css'])assert.deepEqual((await request(asset)).bytes,await readFile(path.join(root,'public',asset.slice(1))));
+});

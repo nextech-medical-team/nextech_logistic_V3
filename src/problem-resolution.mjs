@@ -1,3 +1,4 @@
+import {queueResolutionRequest} from './resolution-request.mjs';
 import {abandonEquivalentPreview} from './abandon-equivalent.mjs';
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
@@ -458,9 +459,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    if(p==='/api/resolutions/context'&&req.method==='GET'){json(res,200,await context(db,directory,url.searchParams.get('id')));return true;}
    if(p==='/api/resolutions/job'&&req.method==='GET'){const j=(await db.query('SELECT id,order_id,action,status,stage,result,error,created_at,updated_at,state_since FROM resolution_jobs WHERE id=$1',[url.searchParams.get('id')])).rows[0];if(!j)throw Error('Intervention introuvable');json(res,200,j);return true;}
    if(p!=='/api/resolutions'||req.method!=='POST')return false;
-   permitted(user,['admin','manager']);const b=validateResolution(await body(req));const previous=(await db.query('SELECT * FROM resolution_jobs WHERE request_id=$1',[b.requestId])).rows[0];
-   if(previous){if(JSON.stringify(previous.payload)!==JSON.stringify(b)){const keys=x=>JSON.stringify(Object.entries(x).sort());if(keys(previous.payload)!==keys(b))throw Error('Identifiant déjà utilisé pour une autre intervention');}json(res,202,{id:previous.id});return true;}
-   let id=randomUUID();await db.transaction(async tx=>{if(!(await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows.length)throw Error('Commande introuvable');if((await tx.query("SELECT 1 FROM equivalence_import_rows r JOIN equivalence_imports i ON i.id=r.batch_id WHERE r.order_id=$1 AND i.status='applying'",[b.id])).rows.length)throw Error('Import d’équivalences en cours sur cette commande : attendre son résultat');const active=(await tx.query("SELECT id FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting')",[b.id])).rows[0];if(active){id=active.id;return;}await tx.query('INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$3,$4,$5)',[id,b.id,b.requestId,b.action,JSON.stringify(b)]);await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'resolution.requested',$2)",[user.email,JSON.stringify({id,orderId:b.id,action:b.action,type:b.type,sku:b.sku,account:'Erplain LIVE'})]);});json(res,202,{id});return true;
+   permitted(user,['admin','manager']);const b=validateResolution(await body(req));json(res,202,await queueResolutionRequest(db,b,user));return true;
   },
   async run(){await reconcileCompletedBlResumptions(db);if(running)return;running=true;let j;
    try{

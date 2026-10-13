@@ -1,0 +1,94 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+import {PGlite} from '@electric-sql/pglite';
+import {initializeReceiptRecovery,receiptRecoveryService} from '../src/receipt-recovery.mjs';
+import {queueResolutionRequest} from '../src/resolution-request.mjs';
+
+async function fixture(channel='amazon'){
+ const engine=new PGlite();await engine.waitReady;const wrap=e=>({exec:s=>e.exec(s),query:(s,p=[])=>e.query(s,p)}),db={...wrap(engine),transaction:fn=>engine.transaction(tx=>fn(wrap(tx)))};
+ await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,reference text,channel text,archived boolean DEFAULT false,erp_live jsonb DEFAULT '{}',suspension jsonb DEFAULT '{}',source_payload jsonb DEFAULT '{}',received_at timestamptz DEFAULT now(),processing_priority_at timestamptz,tracking_status text DEFAULT 'not_shipped',label_status text DEFAULT 'pending',partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,address jsonb DEFAULT '{}',carrier text,weight_kg numeric,parcel_count int);
+ CREATE TABLE lines(order_id text,source_sku text,target_sku text); CREATE TABLE mappings(channel text,source_sku text,target_sku text);
+ CREATE TABLE partial_deliveries(id text,order_id text,status text); CREATE TABLE partial_documents(delivery_id text,document_index int);
+ CREATE TABLE resolution_jobs(id text PRIMARY KEY,order_id text,request_id text UNIQUE,action text,payload jsonb,status text DEFAULT 'queued',error text,stage text);
+ CREATE UNIQUE INDEX resolution_busy ON resolution_jobs(order_id) WHERE status IN ('queued','running','waiting');
+ CREATE TABLE erp_live_jobs(order_id text,status text); CREATE TABLE correction_jobs(order_id text,status text);
+ CREATE TABLE carrier_jobs(order_id text,status text,environment text,tracking jsonb,error text); CREATE TABLE carrier_documents(order_id text,document_index int);
+ CREATE TABLE temu_label_jobs(reference text,status text,error text); CREATE TABLE temu_label_documents(reference text,package text);
+ CREATE TABLE equivalence_import_rows(order_id text,batch_id text);CREATE TABLE equivalence_imports(id text,status text);
+ CREATE TABLE audit(user_email text,action text,detail jsonb);`);
+ await initializeReceiptRecovery(db);await initializeReceiptRecovery(db);
+ const id=randomUUID(),line={type:'normal',quantity:1,reserved_quantity:0,available:1,on_hand:1,location:{id:'100934'},variant:{id:'44',sku:'33 421 13B',track_inventory:true}},receipt={id:'213950',label:'PRP00000244',status:'delivered',update_stock:true,line_items:[line]};
+ let actual={id:'1925605',label:'C00014132',status:'active',update_stock:false,line_items:[line],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}},labelCalls=0;
+ await db.query('INSERT INTO orders(id,reference,channel,erp_live) VALUES($1,$2,$3,$4)',[id,'SYNTHETIC',channel,JSON.stringify({bc:{id:'1925605',label:'C00014132'},phase:'bc_created',pricing:{status:'blocked',tax_type:'exclusive',total:999}})]);
+ const calls=[],api={verify:async()=>{},request:async(q)=>{calls.push(q);assert.match(q,/^query /);if(q.includes('ReceiptByLabel'))return {PurchaseReceipts:{data:[receipt],paginatorInfo:{hasMorePages:false}}};if(q.includes('ReceiptOrderStock'))return {Orders:{data:[actual],paginatorInfo:{hasMorePages:false}}};if(q.includes('DocumentRead'))return {Order:actual};throw Error('Unexpected '+q);}};
+ const service=receiptRecoveryService(db,'unused',{api,queueLabel:async()=>{labelCalls++;await db.query("INSERT INTO carrier_jobs VALUES($1,'pending','production','[]',null)",[id]);return {id,status:'pending'};}});
+ const user={role:'admin',email:'synthetic@example.test'},permitted=(u,roles)=>{if(!roles.includes(u.role))throw Error('Forbidden');};
+ async function route(path,body,role='admin'){
+  let result;await service.routes({p:path,url:new URL('http://localhost'+path),req:{method:'POST'},res:{},user:{...user,role},body:async()=>body,json:(_r,status,value)=>{result={status,...value};},permitted});return result;
+ }
+ async function start(expected='eligible'){const r=await route('/api/receipts/recovery/preview',{number:receipt.label,requestId:randomUUID()});await service.run();const state=await service.status(r.id);assert.equal(state.state,'ready');assert.equal(state.plan.rows[0].status,expected);return r.id;}
+ return {db,engine,id,receipt,user,service,route,start,calls,actual:()=>actual,change:v=>{actual=v;},labelCalls:()=>labelCalls};
+}
+test('durable receipt preview, native resume, labels, finished result and duplicate execution',async()=>{
+ const f=await fixture();try{
+  const run=await f.start();assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+  await f.service.submit({id:run,ids:[f.id]},f.user);assert.equal((await f.service.submit({id:run,ids:[f.id]},f.user)).existing,true);
+  await f.service.run();await f.service.run();const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume-erp');assert.equal(jobs[0].payload.type,'stock');assert.equal(f.labelCalls(),0);
+  const bl={id:'bl',label:'SHO-SYNTHETIC',status:'ready_to_ship',update_stock:false};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
+  await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl,phase:'bl_ready'})]);
+  await f.service.run();assert.equal(f.labelCalls(),1);await f.service.run();assert.equal(f.labelCalls(),1);
+  await f.db.query("UPDATE carrier_jobs SET status='ready'");await f.db.query('INSERT INTO carrier_documents VALUES($1,0)',[f.id]);await f.service.run();await f.service.run();
+  const r=await f.service.status(run);assert.equal(r.state,'finished');assert.equal(r.plan.rows[0].item.state,'complete');assert.equal(r.plan.rows[0].labels.length,1);assert.match(r.plan.rows[0].labels[0].url,/carriers\/documents/);assert.equal(r.plan.rows[0].currentBl.label,bl.label);
+ }finally{await f.engine.close();}
+});
+test('TEMU never buys or falls back to a direct carrier, returns supplier refusal',async()=>{
+ const f=await fixture('temu');try{
+  const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();
+  const bl={id:'bl',label:'SHO-TEMU',status:'ready_to_ship',update_stock:false};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
+  await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);await f.db.query("INSERT INTO temu_label_jobs VALUES('SYNTHETIC','shipment_error','Non-English characters')");
+  await f.service.run();await f.service.run();const r=await f.service.status(run);assert.equal(r.state,'finished');assert.equal(r.plan.rows[0].item.state,'label_action_required');assert.match(r.plan.rows[0].labelError,/Non-English/);assert.equal(f.labelCalls(),0);
+  await f.db.query("INSERT INTO temu_label_documents VALUES('SYNTHETIC','PK1')");assert.match((await f.service.status(run)).plan.rows[0].labels[0].url,/temu\/pdf/);
+ }finally{await f.engine.close();}
+});
+test('preview changed quantity or suspension cannot enqueue any resume',async()=>{
+ const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);f.change({...f.actual(),line_items:f.actual().line_items.map(l=>({...l,quantity:2}))});await f.service.run();assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);const r=await f.service.status(run);assert.equal(r.plan.rows[0].item.state,'blocked');assert.match(r.plan.rows[0].item.error,/modifiée/);}finally{await f.engine.close();}
+});
+test('stock is read again before resume and zero available blocks the operation',async()=>{
+ const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);f.change({...f.actual(),line_items:f.actual().line_items.map(l=>({...l,available:0,on_hand:0}))});await f.service.run();assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);assert.match((await f.service.status(run)).plan.rows[0].item.error,/Stock insuffisant/);}finally{await f.engine.close();}
+});
+test('restart between native enqueue and persisted receipt linkage recovers the same request',async()=>{
+ const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);const item=(await f.db.query('SELECT * FROM receipt_recovery_items')).rows[0];const job=await queueResolutionRequest(f.db,{id:f.id,requestId:item.request_id,action:'resume-erp',type:'stock'},f.user);
+  const restarted=receiptRecoveryService(f.db,'unused',{api:{request:()=>assert.fail('No provider replay'),verify:()=>{}}});await restarted.run();assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);assert.equal((await f.db.query('SELECT * FROM receipt_recovery_items')).rows[0].resolution_id,job.id);
+ }finally{await f.engine.close();}
+});
+test('preview and execution permissions, ID binding, freshness and one execution at a time',async()=>{
+ const f=await fixture();try{
+  await assert.rejects(()=>f.route('/api/receipts/recovery/preview',{number:'PRP1',requestId:randomUUID()},'viewer'),/Forbidden/);
+  const requestId=randomUUID(),first=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId});assert.equal((await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId})).id,first.id);await assert.rejects(()=>f.route('/api/receipts/recovery/preview',{number:'OTHER',requestId}),/autre réception/);
+  await f.service.run();await assert.rejects(()=>f.route('/api/receipts/recovery/execute',{id:first.id,ids:[f.id]},'operator'),/Forbidden/);
+  await assert.rejects(()=>f.service.submit({id:first.id,ids:[randomUUID()]},f.user),/non admissible/);
+  await f.db.query("UPDATE receipt_recovery_runs SET updated_at=now()-interval '31 minutes'");await assert.rejects(()=>f.service.submit({id:first.id,ids:[f.id]},f.user),/récente/);
+  await f.db.query('UPDATE receipt_recovery_runs SET updated_at=now()');await f.service.submit({id:first.id,ids:[f.id]},f.user);
+  const second=randomUUID();await f.db.query("INSERT INTO receipt_recovery_runs(id,request_id,number,state,created_by,plan) SELECT $1,$2,number,'ready',created_by,plan FROM receipt_recovery_runs WHERE id=$3",[second,randomUUID(),first.id]);await assert.rejects(()=>f.service.submit({id:second,ids:[f.id]},f.user),/autre réception/);
+ }finally{await f.engine.close();}
+});
+test('failed native preparation remains blocked and never submits a label',async()=>{
+ const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();await f.db.query("UPDATE resolution_jobs SET status='review',error='Stock changed'");await f.service.run();assert.equal(f.labelCalls(),0);assert.equal((await f.service.status(run)).plan.rows[0].item.error,'Stock changed');}finally{await f.engine.close();}
+});
+test('in_preparation is never finalized by the receipt module',async()=>{
+ const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();const bl={id:'bl',status:'in_preparation'};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);await f.service.run();assert.match((await f.service.status(run)).plan.rows[0].item.error,/in_preparation/);assert.equal(f.labelCalls(),0);assert.ok(f.calls.every(q=>q.startsWith('query ')));}finally{await f.engine.close();}
+});
+for(const channel of ['amazon','temu'])test(`${channel}: existing ready BL obtains label without another ERP resume`,async()=>{
+ const f=await fixture(channel);try{
+  const bl={id:'existing',label:'SHO-EXISTING',status:'ready_to_ship',update_stock:false};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl,phase:'bl_ready'})]);
+  const run=await f.start('documents');assert.equal((await f.service.status(run)).plan.rows[0].canLabel,true);await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+  if(channel==='temu'){assert.equal(f.labelCalls(),0);assert.equal((await f.service.status(run)).plan.rows[0].item.state,'label_action_required');}
+  else{assert.equal(f.labelCalls(),1);await f.service.run();assert.equal(f.labelCalls(),1);await f.db.query("UPDATE carrier_jobs SET status='ready'");await f.db.query('INSERT INTO carrier_documents VALUES($1,0)',[f.id]);await f.service.run();assert.equal((await f.service.status(run)).plan.rows[0].item.state,'complete');}
+ }finally{await f.engine.close();}
+});
+test('another receipt can be analyzed while a native preparation is waiting',async()=>{
+ const f=await fixture();try{const first=await f.start();await f.service.submit({id:first,ids:[f.id]},f.user);await f.service.run();
+  const second=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId:randomUUID()});await f.service.run();assert.equal((await f.service.status(second.id)).state,'ready');assert.equal((await f.service.status(first)).state,'applying');assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
+ }finally{await f.engine.close();}
+});
