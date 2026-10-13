@@ -1,4 +1,5 @@
 import {installTemuParcelRule} from './temu-parcel-count.mjs';
+import {orderReadTransaction} from './order-read-transaction.mjs';
 import { mkdir } from 'node:fs/promises';
 
 import { PGlite } from '@electric-sql/pglite';
@@ -30,6 +31,7 @@ export async function openDatabase({directory, url} = {}) {
   const wrap = e => ({query:(s,p=[])=>e.query(s,p), exec:s=>e.exec?e.exec(s):e.query(s)});
 
   const db=wrap(engine);
+  db.readTransaction=fn=>pool?orderReadTransaction(pool,fn,wrap):engine.transaction(tx=>fn(wrap(tx)));
 
   db.transaction=async fn=>{
 
@@ -119,6 +121,9 @@ CREATE TABLE IF NOT EXISTS erplain_product_bindings(sku TEXT PRIMARY KEY,live_va
 
   `);await db.query("INSERT INTO schema_migrations(version) VALUES('core-20261005-1')");});
 
+  // Existing installations already have the core migration marker. Apply this
+  // read index independently, under the same schema lock, without altering jobs.
+  await db.withLocks(['schema'],()=>db.exec('CREATE INDEX IF NOT EXISTS resolution_order_history_idx ON resolution_jobs(order_id,created_at DESC,id DESC)'));
   await installTemuParcelRule(db);
   return db;
 
