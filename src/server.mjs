@@ -6,6 +6,7 @@ import {suspensionGuardRequired} from './suspension-route-policy.mjs';
 import {initializeOrderRecheckMonitor,orderRecheckMonitor} from './order-recheck-monitor.mjs';
 import {initializeTrackingSync} from './tracking-sync-history.mjs';
 import {trackingSyncService,trackingSyncRoutes} from './tracking-sync-service.mjs';
+import {initializeProblemDeferral,problemDeferralService} from './problem-deferral.mjs';
 import {initializeOrderSuspension,orderSuspensionService} from './order-suspension.mjs';
 import {initializeImportCorrections,importCorrections} from './import-corrections.mjs';
 import {restoreCancelledDeliveryStock} from './cancelled-delivery-stock.mjs';
@@ -123,6 +124,8 @@ const importApprovals=importAuthorization(db);
 await db.withLocks(['schema'],()=>initializeImportCorrections(db));
 const importCorrectionService=importCorrections(db,erplainAccount(directory,'source'));
 await db.withLocks(['schema'],()=>initializeOrderSuspension(db));
+await db.withLocks(['schema'],()=>initializeProblemDeferral(db));
+const deferralService=problemDeferralService(db);
 const suspensionService=orderSuspensionService(db,erplainAccount(directory,'live'));
 configureApiBudget(db);configureShipmentLocks(db);const cachedOrderSummary=orderSummaryCache(db);
 await db.withLocks(['schema'],()=>initializeTrackingSync(db));
@@ -257,7 +260,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -331,6 +334,10 @@ const server=http.createServer(async(req,res)=>{
     }
 
 
+    if(p==='/api/problem-deferral'&&req.method==='GET'){json(res,200,await deferralService.context(url.searchParams.get('id')));return;}
+    if(['/api/problem-deferral/defer','/api/problem-deferral/restore'].includes(p)&&req.method==='POST'){
+      permitted(user,operational);const b=await body(req);json(res,200,await deferralService[p.endsWith('/defer')?'defer':'restore'](b,user));return;
+    }
     if(p==='/api/orders/suspension'&&req.method==='GET'){json(res,200,await suspensionService.context(url.searchParams.get('id')));return;}
     if(['/api/orders/suspend','/api/orders/reactivate','/api/orders/cancel-erplain'].includes(p)&&req.method==='POST'){
       permitted(user,operational);const b=await body(req);const method=p.endsWith('/suspend')?'suspend':p.endsWith('/reactivate')?'reactivate':'cancelErplain';json(res,200,await suspensionService[method](b,user));return;

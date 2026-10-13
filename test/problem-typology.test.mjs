@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -103,9 +104,17 @@ test('suspension and cancelled BC retire all problem labels and fallback without
  const partial={id:'partial',erp_live:{bc:{status:'active'},bl:{status:'cancelled'}},label_status:'blocked',issue:'Stock insuffisant',lines:[]};assert.ok(classify(partial).length>0);
 });
 
+test('deferred problems keep their real diagnostics but disappear from active counts and fallback',()=>{
+ const o={id:'deferred',suspension:{problemDeferral:{active:true}},label_status:'blocked',issue:'Stock insuffisant',lines:[]};
+ const before=JSON.stringify(o);assert.ok(currentProblemClassifier()(o).length>0);
+ assert.equal(selectProblemOrders([o],['Bloqué : stock insuffisant'],currentProblemClassifier(),['deferred']).total,0);
+ assert.equal(selectProblemOrders([o],[WITHOUT_DIAGNOSTIC],()=>[],['deferred']).total,0);
+ assert.equal(JSON.stringify(o),before);
+});
+
 test('active problem gate executes before pagination and cannot be bypassed by combined status filters',async()=>{
  const {activeProblemOrderSql}=await import('../src/order-query.mjs');
- const {PGlite}=await (process.env.PGLITE_MODULE?import(process.env.PGLITE_MODULE):import('@electric-sql/pglite'));
+ const {PGlite}=await (process.env.PGLITE_MODULE?import(pathToFileURL(process.env.PGLITE_MODULE).href):import('@electric-sql/pglite'));
  const db=new PGlite();
  try{
   await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,archived boolean DEFAULT false,suspension jsonb DEFAULT '{}',label_status text DEFAULT 'simulated',tracking_status text DEFAULT 'not_shipped',erp_live jsonb DEFAULT '{}');`);
