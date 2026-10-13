@@ -215,7 +215,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     }catch(e){o.failed=true;o.erp_live.pricing={...o.erp_live.pricing,status:'blocked',error:e.message};await save(o);await fail(o,e);}
    }
    working=working.filter(o=>!o.failed);if(!working.length)return;
-   for(const o of working.filter(usesRecordedBc)){try{if(!o.source_payload?.erplainImported){const execution=await readRecordedBc(api,o);o.items=execution.items;o.erp_live.bc={...o.erp_live.bc,...execution.bc};o.erp_live.pricing=execution.pricing;}delete o.selectedProducts;delete o.pricing;await save(o);}catch(e){o.failed=true;await fail(o,e);}}
+   for(const o of working.filter(usesRecordedBc)){try{if(!o.source_payload?.erplainImported){const execution=await readRecordedBc(api,o);o.items=execution.items;o.erp_live.bc={...o.erp_live.bc,...execution.bc};o.erp_live.pricing=execution.pricing;}delete o.pricing;await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);if(!working.length)return;
    // Reconcile weights only after the BC is available. Missing weight must not
    // prevent an otherwise valid BC, but cannot borrow another variant's cache.
@@ -223,7 +223,13 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     try{
      const check=await api.request('query V3SelectedProductIdentity($id:ID!){Order(id:$id){id line_items{type quantity variant{id sku} location{id}}}}',{id:String(o.erp_live.bc.id)});
      if(String(check.Order?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité produit non confirmée');
-     const plan=selectedProductWeights(o.selectedSourceLines,o.selectedProducts,shippingProductLines(check.Order.line_items));
+     const physical=shippingProductLines(check.Order.line_items);
+     const weightLines=usesRecordedBc(o)?[...new Set(physical.map(l=>String(l.variant.id)))].map(id=>{
+      const item=physical.find(l=>String(l.variant.id)===id),sku=item.variant.sku||Object.keys(o.selectedProducts).find(k=>String(o.selectedProducts[k].id)===id);
+      const source=o.selectedSourceLines.find(l=>[l.source_sku,l.target_sku,l.mapped_sku].includes(sku));
+      return {...source,target_sku:sku,target_quantity:physical.filter(l=>String(l.variant.id)===id).reduce((n,l)=>n+Number(l.quantity),0)};
+     }):o.selectedSourceLines;
+     const plan=selectedProductWeights(weightLines,o.selectedProducts,physical);
      await cacheSelectedProductWeights(db,o.id,plan);
      const route=await selectedPreparationRouting(db,o.id,plan);
      if(!route.preserved){o.weight_kg=route.weight;if(!route.missing){o.parcel_count=route.parcels;o.carrier=route.carrier;}o.erp_live.labelPreparationFingerprint=null;await save(o);}
