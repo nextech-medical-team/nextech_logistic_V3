@@ -294,12 +294,12 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
      if(typeof snapshot.Order.update_stock!=='boolean')throw new Error('Politique de stock du BC non vérifiée');
      {const totals=xs=>{const sums=new Map();for(const l of shippingProductLines(xs)){const key=String(l.variant?.id)+':'+String(l.location?.id);sums.set(key,(sums.get(key)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};if(totals(o.items)!==totals(snapshot.Order.line_items))throw new Error('BC modifié : vérifier les produits et quantités avant BL');}
      const stockOnBc=snapshot.Order.update_stock===true;
-     if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}
+     if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o,{beforeBlPublication:true});}
      else assertFullOrderStock(snapshot.Order.line_items);
      o.erp_live.stockCheckedAt=new Date().toISOString();await save(o);
      if(!o.erp_live.bl)await batchMutation([o],'creating_bl','bl','ShippingOrderFromInput','CreateShippingOrderFrom',v=>({Order:[String(v.erp_live.bc.id)]}),'id label status update_stock');
      if(o.failed)return;
-     if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}
+     if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o,{beforeBlPublication:true});}
      if(o.erp_live.bl.status!=='unpublished'){const numbered=assertHistoricalBlNumber(await publishHistoricalBl(api,o.erp_live.bl.id));o.erp_live.bl={...o.erp_live.bl,...numbered};await save(o);}
      if(o.erp_live.bl.status==='unpublished'){
       if(o.erp_live.bl.update_stock!==false&&!(stockOnBc&&o.erp_live.bl.update_stock===true))throw new Error('Politique de stock BL inattendue : contrôle requis avant publication');
