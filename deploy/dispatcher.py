@@ -185,7 +185,7 @@ def deploy(commit,packet=None):
   report['installed']=installed;report['paused']=paused
   if paused:
    try:
-    if commit in ('29a9e13cb53da42859befd6ea5199cda77a2fc58','571fcd4524b08425031ce8165c32b3f9e750232b','50a0ac22924bf9f2bff394d6d694cf86a3abc966','0337ef46318f3a023855bb112b36cc97b80e2fa3'):
+    if commit in ('29a9e13cb53da42859befd6ea5199cda77a2fc58','571fcd4524b08425031ce8165c32b3f9e750232b','50a0ac22924bf9f2bff394d6d694cf86a3abc966','0337ef46318f3a023855bb112b36cc97b80e2fa3','227f3c682207e9a1bf65475052131dfd3f4c0e37'):
      from preserve_worker_capacity import preserve
      report['workerCapacity']=preserve(worker_pid_before,backup)
     guard('resume',backup);guard('verify-restored',backup);report['taskControlsRestored']=True
