@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {randomUUID} from 'node:crypto';
 import {substitution} from '../src/stock-substitution.mjs';
+import {preservedImportAmounts,verifyImportBcAmounts} from '../src/import-bc-commercial.mjs';
 import {initializeEquivalences} from '../src/equivalence-catalog.mjs';
 import {attachSkuSubstitutions} from '../src/sku-substitution-view.mjs';
 import {currentMappingLine} from '../src/current-mapping-line.mjs';
@@ -89,6 +90,11 @@ for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel :
  assert.equal((await db.query('SELECT * FROM product_equivalences WHERE active=true')).rows.length,1);
  assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);assert.equal(bc.shipping_orders.data.length,0);
  const state=(await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live;
+ if(preserveBcAmounts){
+  const proof=preservedImportAmounts({erp_live:state});
+  assert.equal(proof.total,30);assert.equal(proof.requestId,state.equivalentAttemptId);
+  assert.equal(verifyImportBcAmounts(bc,proof).total,30);
+ }
  assert.deepEqual(state.documentSource.lines.map(l=>[l.sku,l.quantity]).sort(),[['B',20],['D',20]]);
  const orderRows=[{id:'o',channel:'shopify'}];await attachSkuSubstitutions(db,orderRows);
  const ui=vm.createContext({});vm.runInContext(await readFile(new URL('../public/diagnostics.js',import.meta.url),'utf8'),ui);

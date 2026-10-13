@@ -1,4 +1,5 @@
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
+import {importBcAmounts} from './import-bc-commercial.mjs';
 import {chooseDocumentStockVariant} from './document-stock-choice.mjs';
 import {proveShopifyStatusOnly} from './shopify-status-only-proof.mjs';
 import {loadShopifyConfig,shopifyCollector} from './marketplace-collection.mjs';
@@ -177,6 +178,8 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   const state={...o.erp_live,equivalentOriginalLines:o.erp_live.equivalentOriginalLines||originals,equivalentItems:shippingProductLines(updated.line_items).map(l=>({variant:{id:String(l.variant.id)},location:{id:String(l.location.id)},quantity:Number(l.quantity),price:Number(l.price),description:l.variant.sku})),equivalentRefreshedAt:new Date().toISOString(),labelReprintNotice:labelNotice||null,equivalentReconciledFrom:plan.recoveredFrom||null,phase:'bc_created',verifiedAt:null,stockCheckedAt:null,labelPreparationFingerprint:null};
   if(attempt)state.equivalentAttemptId=b.requestId;
   state.documentSource={...o.erp_live.documentSource,checkedAt:new Date().toISOString(),lines:shippingProductLines(updated.line_items).map(l=>({lineId:String(l.id),sku:l.variant.sku,quantity:Number(l.quantity)})),shippingOrders:updated.shipping_orders.data};
+  if(preserveBcAmounts&&attempt)state.importBcAmounts=importBcAmounts(updated,b.requestId);
+  else delete state.importBcAmounts;
   if(historicalAfter)state.historicalStockProof=historicalAfter.proof;
   if(plan.partialProof){
    if(!o.erp_live.equivalentOriginalLines)state.equivalentOriginalLines=mappingLines;
