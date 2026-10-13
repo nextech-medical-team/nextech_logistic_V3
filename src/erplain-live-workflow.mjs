@@ -1,3 +1,4 @@
+import {preservedImportAmounts,restoreImportBcAmounts,verifyImportBcAmounts,withImportCommercialGuard} from './import-bc-commercial.mjs';
 import {invoiceCustomerType} from './invoice-customer-policy.mjs';
 import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
@@ -30,7 +31,7 @@ import {publishHistoricalBl,assertHistoricalBlNumber} from './bl-numbering.mjs';
 import {publishIncrementalBc} from './bc-numbering.mjs';
 import {ensureTemuBcPricing,temuBcPricingLoader} from './temu-bc-pricing.mjs';
 import {loadShopifyConfig,shopifyCollector} from './marketplace-collection.mjs';
-import {buildBcPricing,verifyBcPricing,verifySourceCommercialTotals,withSourceCommercialGuard,sourceCurrency} from './bc-pricing.mjs';
+import {buildBcPricing,verifyBcPricing,verifySourceCommercialTotals,sourceCurrency} from './bc-pricing.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
 import {assertBcLines,bcAddresses,preparationBlock,uncertainBc} from './bc-authorization.mjs';
 import {initializePriority,erplainEligible,priorityOrder} from './order-priority.mjs';
@@ -112,6 +113,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of working){try{
  const lines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE order_id=$1',[o.id,o.channel])).rows;
  o.selectedSourceLines=lines;
+ await restoreImportBcAmounts(db,o,lines);
  if(o.source_payload?.erplainImported){await refreshManualOrder(db,api,o);if(o.source_payload.account!=='live'||!o.erp_live?.bc?.id||!o.erp_live.importedItems?.length)throw Error('Actualiser la commande Erplain avant préparation');o.items=o.erp_live.importedItems;valid.push(o);continue;}
  if(o.erp_live?.equivalentItems){if(!o.erp_live.bc?.id)throw new Error('BC absent pour les équivalents');o.items=o.erp_live.equivalentItems;valid.push(o);continue;}
 
@@ -197,7 +199,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    working=working.filter(o=>!o.failed);
    // Correct historical tax-code differences from the current source before
    // validating commercial totals or creating any missing delivery document.
-   for(const o of working.filter(o=>o.erp_live.bc?.id)){
+   for(const o of working.filter(o=>o.erp_live.bc?.id&&!preservedImportAmounts(o))){
     try{await withShipmentLock(()=>alignHistoricalSourceVat(api,o,{save,preserveLabels:()=>preserveSubstitutionLabels(db,o.id),guard:async()=>{
      const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh);if(block)throw Error(block);
      if(JSON.stringify(fresh.source_payload?.temuAmounts?.data)!==JSON.stringify(o.source_payload?.temuAmounts?.data))throw Error('TVA source · Source financière modifiée pendant le contrôle');
@@ -207,9 +209,9 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    }
    working=working.filter(o=>!o.failed);
    // Validate existing BC source amounts before any recovery can create stock.
-   for(const o of working.filter(o=>o.erp_live.bc?.id)){try{const {Order:commercial}=await api.request('query V3SourceBeforeRecovery($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});if(String(commercial?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');const confirmed=verifySourceCommercialTotals(commercial,o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing);o.erp_live.pricing={...o.erp_live.pricing,confirmed,status:'verified',error:null,verifiedAt:new Date().toISOString()};await save(o);}catch(e){o.failed=true;await fail(o,e);}}
+   for(const o of working.filter(o=>o.erp_live.bc?.id)){try{const {Order:commercial}=await api.request('query V3SourceBeforeRecovery($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});if(String(commercial?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');const confirmed=preservedImportAmounts(o)?verifyImportBcAmounts(commercial,preservedImportAmounts(o)):verifySourceCommercialTotals(commercial,(o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing));o.erp_live.pricing={...o.erp_live.pricing,confirmed,status:'verified',error:null,verifiedAt:new Date().toISOString()};await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);
-   for(const o of working.filter(o=>!bcOnlyOrderId&&o.erp_live.phase==='creating_stock'&&!o.erp_live.stockDocument?.id)){try{const stock=await withSourceCommercialGuard(api,o.erp_live.bc.id,o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing,()=>reconcileFullStock(api,o,{allowCreate:canCreateStock(o),allowRecoverMissing:true,onAbsenceConfirmed:absenceProof=>recordStockCreationOutcome(db,o,{absenceProof}),beforeCreate:()=>claimStockCreation(db,o),onCreated:documentId=>recordStockCreationOutcome(db,o,{documentId}),onCreationFailure:error=>recordStockCreationOutcome(db,o,{error})}));if(!stock)throw stockNotFound();o.erp_live.stockDocument=stock;stockCheckConfirmed(o);o.erp_live.phase='bl_created';await save(o);}catch(e){o.failed=true;await fail(o,e);}}
+   for(const o of working.filter(o=>!bcOnlyOrderId&&o.erp_live.phase==='creating_stock'&&!o.erp_live.stockDocument?.id)){try{const stock=await withImportCommercialGuard(api,o,preservedImportAmounts(o)||(o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing),()=>reconcileFullStock(api,o,{allowCreate:canCreateStock(o),allowRecoverMissing:true,onAbsenceConfirmed:absenceProof=>recordStockCreationOutcome(db,o,{absenceProof}),beforeCreate:()=>claimStockCreation(db,o),onCreated:documentId=>recordStockCreationOutcome(db,o,{documentId}),onCreationFailure:error=>recordStockCreationOutcome(db,o,{error})}));if(!stock)throw stockNotFound();o.erp_live.stockDocument=stock;stockCheckConfirmed(o);o.erp_live.phase='bl_created';await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);
    const safe=[];for(const o of working){const block=creationResumeBlock(o);if(block)await fail(o,new Error(block));else safe.push(o);}working=safe;if(!working.length)return;
    await batchMutation(working.filter(o=>!o.erp_live.bc&&!o.erp_live.customer),'creating_customer','customer','CustomerInput','CreateCustomer',o=>({label:erplainCustomerLabel(o),customer_number:'V3:'+o.id,customer_type:invoiceCustomerType({orderId:o.id,channel:o.channel,sourcePayload:o.source_payload}),notes:'Compte V3. Aucun email envoyé.'}),'id label');
@@ -231,7 +233,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    }
    working=working.filter(o=>!o.failed);if(!working.length)return;
    // Common source check also covers existing equivalents and imported Erplain orders.
-   for(const o of working){try{const {Order:commercial}=await api.request('query V3SourceCommercialCheck($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});if(String(commercial?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');const confirmed=verifySourceCommercialTotals(commercial,o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing);o.erp_live.pricing={...o.erp_live.pricing,confirmed,status:'verified',error:null,verifiedAt:new Date().toISOString()};await save(o);}catch(e){o.failed=true;await fail(o,e);}}
+   for(const o of working){try{const {Order:commercial}=await api.request('query V3SourceCommercialCheck($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});if(String(commercial?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');const confirmed=preservedImportAmounts(o)?verifyImportBcAmounts(commercial,preservedImportAmounts(o)):verifySourceCommercialTotals(commercial,(o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing));o.erp_live.pricing={...o.erp_live.pricing,confirmed,status:'verified',error:null,verifiedAt:new Date().toISOString()};await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);if(!working.length)return;
    // Reconcile weights only after the BC is available. Missing weight must not
    // prevent an otherwise valid BC, but cannot borrow another variant's cache.
