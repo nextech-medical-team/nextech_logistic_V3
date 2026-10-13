@@ -211,3 +211,5 @@ body{font-size:13px}main input,main select,main button,dialog input,dialog selec
 /* The Shopify import screen only shows its own import information. */
 main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 #view-import-shopify #import-format-help{display:none!important}
+:where(aside nav) .receipt-navigation{display:block;padding:12px 14px;color:inherit;font-size:14px;text-decoration:none;border-radius:8px}
+:where(aside nav) .receipt-navigation:hover{background:#edf5f5}
