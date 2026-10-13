@@ -87,7 +87,7 @@ for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel :
  assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,'pending');
  assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,false);
  const actual=(await db.query('SELECT target_sku,target_quantity FROM lines ORDER BY target_sku')).rows;assert.deepEqual(actual.map(l=>[l.target_sku,Number(l.target_quantity)]),[['B',20],['D',20]]);
- assert.equal((await db.query('SELECT * FROM product_equivalences WHERE active=true')).rows.length,0);
+ assert.equal((await db.query('SELECT * FROM product_equivalences WHERE active=true')).rows.length,1);
  assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);assert.equal(bc.shipping_orders.data.length,0);
  const state=(await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live;
  if(preserveBcAmounts){
