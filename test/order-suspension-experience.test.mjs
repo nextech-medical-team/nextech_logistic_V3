@@ -55,7 +55,20 @@ await check('garde SQL de tous les traitements',async()=>{for(const [table,statu
 await check('réactivation conserve l’historique et ne démarre aucun travail',async()=>{await change('reactivate','one','Une solution est disponible.');assert.equal((await fresh()).active,false);assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='one'")).rows[0].resolution_pending_resume,true);assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='one'")).rows[0].status,'review');assert.equal((await service.context('one')).history.length,2);assert.equal(bcMutationCount,0);});
 await check('réactivation d’une commande jamais suspendue refusée',async()=>{await assert.rejects(()=>change('reactivate','control'),/déjà active/);});
 await check('traitement actif interdit la suspension',async()=>{await db.query("UPDATE erp_live_jobs SET status='processing' WHERE order_id='one'");await assert.rejects(()=>change('suspend'),/traitement en cours/);assert.equal((await fresh()).active,false);await db.query("UPDATE erp_live_jobs SET status='review' WHERE order_id='one'");});
-await check('commande expédiée refusée',async()=>{await db.query("UPDATE orders SET tracking_status='shipped' WHERE id='one'");await assert.rejects(()=>change('suspend'),/expédiée/);await db.query("UPDATE orders SET tracking_status='not_shipped' WHERE id='one'");});
+await check('suspension locale expédiée/livrée : documents conservés, annulation interdite, réactivation sans reprise',async()=>{
+ const initial=(await service.context('one')).order;
+ const {activeProblemOrderSql}=await source('order-query.mjs');
+ for(const scenario of [{tracking:'shipped'},{tracking:'delivered'},{tracking:'in_transit'},{tracking:'delivered_simulated'},{tracking:'not_shipped',bl:'shipped'},{tracking:'not_shipped',bl:'delivered'}]){
+  const erp={...initial.erp_live,...(scenario.bl?{bl:{id:'456',status:scenario.bl}}:{})};
+  await db.query('UPDATE orders SET tracking_status=$2,erp_live=$3 WHERE id=$1',['one',scenario.tracking,JSON.stringify(erp)]);
+  const before=bcMutationCount;await change('suspend','one','Commande livrée : retirer des problèmes actifs.');
+  const suspended=(await service.context('one')).order;assert.equal(suspended.suspension.active,true);assert.equal(suspended.tracking_status,scenario.tracking);assert.deepEqual(suspended.erp_live,erp);
+  assert.equal((await db.query('SELECT id FROM orders WHERE id=$1 AND '+activeProblemOrderSql,['one'])).rows.length,0);
+  await assert.rejects(()=>service.cancelErplain({id:'one',expectedVersion:(suspended.suspension.version),confirm:true},user),/annulation ERPLAIN impossible/);assert.equal(bcMutationCount,before);
+  await change('reactivate','one','Réafficher dans V3 sans reprise.');assert.equal((await service.context('one')).order.tracking_status,scenario.tracking);assert.deepEqual((await service.context('one')).order.erp_live,erp);
+ }
+ await db.query('UPDATE orders SET tracking_status=$2,erp_live=$3 WHERE id=$1',['one',initial.tracking_status,JSON.stringify(initial.erp_live)]);
+});
 await change('suspend');
 const cancel=async()=>service.cancelErplain({id:'one',expectedVersion:(await fresh()).version,confirm:true},user);
 await check('annulation ERP exige confirmation',async()=>{await assert.rejects(async()=>service.cancelErplain({id:'one',expectedVersion:(await fresh()).version},user),/Confirmer/);assert.equal(bcMutationCount,0);});
