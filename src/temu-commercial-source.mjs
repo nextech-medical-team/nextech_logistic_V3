@@ -1,3 +1,4 @@
+import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
 import {temuCountryAmounts} from './temu-country-vat.mjs';
 import {acceptedMonetaryDifference,monetaryPolicy} from './monetary-policy.mjs';
 import {temuActiveAmounts} from './temu-active-amounts.mjs';
@@ -46,4 +47,4 @@ export function temuCommercialSource(order,fallback){
  return data;
 }
 
-export function temuSellerTotals(order){const d=temuCommercialSource(order,temuCountryAmounts(order)),p=d.parentOrderMap;return {...order.erp_live?.pricing,total:Number(p.estimatedRevenue.amount)/100,tax:Number(p.taxTotalAfterDiscount.amount)/100,currency:p.estimatedRevenue.currency,commercialBasis:d.v3CommercialBasis};}
+export function temuSellerTotals(order){if(isTemuExcel(order)){const s=verifiedExcelCommercial(order);return {...order.erp_live?.pricing,total:s.total,tax:s.tax,currency:s.currency,commercialBasis:{source:'temu_excel',fingerprint:s.fingerprint}};}const d=temuCommercialSource(order,temuCountryAmounts(order)),p=d.parentOrderMap;return {...order.erp_live?.pricing,total:Number(p.estimatedRevenue.amount)/100,tax:Number(p.taxTotalAfterDiscount.amount)/100,currency:p.estimatedRevenue.currency,commercialBasis:d.v3CommercialBasis};}
