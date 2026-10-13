@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 export function cancellationBlock(o){
  const suspended=suspensionBlock(o);if(suspended)return suspended;
@@ -11,7 +12,7 @@ export function retryDecision(o,error,updatedAt,now=Date.now()){
  const attempts=Number(o.erp_live?.transientRecovery?.attempts||0);
  const readLimited=o.erp_live?.transientRecovery?.readRateLimited===true&&/Erplain HTTP 429\b/.test(error||'');
  if(!transientErpError(error)||!Number.isInteger(attempts)||(attempts>=3&&!readLimited)||attempts<0)return false;
- if(o.archived||o.partial_mode||o.resolution_pending_resume||cancellationBlock(o)||Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection')||['shipped','delivered','in_transit'].includes(o.tracking_status))return false;
+ if(o.archived||o.partial_mode||o.resolution_pending_resume||cancellationBlock(o)||(!usesRecordedBc(o)&&Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection'))||['shipped','delivered','in_transit'].includes(o.tracking_status))return false;
  if(['cancelled','closed'].includes(o.erp_live?.bc?.status)||['cancelled','closed'].includes(o.erp_live?.bl?.status))return false;
  const phase=o.erp_live?.phase;
  const initialRead=readLimited&&!phase&&!o.erp_live?.customer?.id&&!o.erp_live?.bc?.id&&!o.erp_live?.bl?.id;

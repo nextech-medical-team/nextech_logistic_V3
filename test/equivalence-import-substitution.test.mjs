@@ -56,7 +56,7 @@ for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel :
  if(preserveBcAmounts){
   await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{pricing,total}','35') WHERE id='o'");
   const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
-  await assert.rejects(substitution(db,api,o,{id:'o',sku:'A',replacementSku:'B',replaceQuantity:20,replacementQuantity:20,scope:'order'}),/Total Erplain/);
+  await assert.doesNotReject(substitution(db,api,o,{id:'o',sku:'A',replacementSku:'B',replaceQuantity:20,replacementQuantity:20,scope:'order'}));
   assert.equal(writes,0);
  }
  const first=await replace('A','B',20,!stockReview);assert.equal(first.importDeferred,!stockReview);assert.equal(writes,1);

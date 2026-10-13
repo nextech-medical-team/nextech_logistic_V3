@@ -1,4 +1,5 @@
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {resolveReplacementLines} from './resolution-quantities.mjs';
 import {importedLabelDiagnosticReconciler} from './imported-label-diagnostic.mjs';
@@ -329,7 +330,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   }
   if(j.action==='resume-erp'){
    if(o.archived||o.erp_live?.bc?.status==='cancelled')throw Error('Commande archivée ou BC annulé : reprise du BL non autorisée');
-   if(o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
+   if(!usesRecordedBc(o)&&o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
    if(o.partial_mode)throw Error('Utiliser la préparation de la livraison partielle');
    if(!o.erp_live?.bc?.id)throw Error('BC Erplain non créé');
    await stage('Relecture du stock dans Erplain LIVE');await api.verify();
@@ -339,8 +340,8 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    if(r.Order.status!=='active')throw Error('API Erplain · État actif du BC non confirmé');
    const resumeStockLines=resolutionBcLines(o,r.Order);
    if(String(r.Order.id)!==String(o.erp_live.bc.id))throw Error('API Erplain · BC reçu différent du BC demandé');
-   {
-    const desired=await readComparisonLines(db,o);
+   if(!usesRecordedBc(o)){
+    const desired=usesRecordedBc(o)?[]:await readComparisonLines(db,o);
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku,quantity=Number(l.quantity);if(typeof sku!=='string'||!sku.trim()||!Number.isFinite(quantity)||quantity<=0)throw Error('Produits ou quantités du BC non vérifiables : reprise non autorisée');sums.set(sku,(sums.get(sku)||0)+quantity);}return JSON.stringify([...sums].sort());};
     if(total(desired)!==total(resumeStockLines)&&(o.source_payload?.erplainImported||o.erp_live?.bl?.id))throw Error('Commande V3 et livraison existante différentes : vérifier les quantités avant reprise');
    }
@@ -367,10 +368,10 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    const r=await api.request(`query V3ResolutionStock($id:ID!){Order(id:$id){${o.source_payload?.erplainImported?manualOrderFields:'id status line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}'}}}`,{id:String(o.erp_live.bc.id)});
    if(!r.Order?.line_items?.length)throw Error('API Erplain · Stock non reçu : dérogation non autorisée');
    if(['closed','cancelled','completed'].includes(r.Order.status))throw Error('BC clôturé : dérogation non autorisée');
-   const desired=await readComparisonLines(db,o);
+   const desired=usesRecordedBc(o)?[]:await readComparisonLines(db,o);
    const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku;sums.set(sku,(sums.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};
    const stockLines=resolutionBcLines(o,r.Order);
-   if(total(desired)!==total(stockLines))throw Error('Commande V3 et BC différents : vérifier les quantités avant dérogation');
+   if(!usesRecordedBc(o)&&total(desired)!==total(stockLines))throw Error('Commande V3 et BC différents : vérifier les quantités avant dérogation');
    let reason;try{assertFullOrderStock(stockLines);}catch(e){if(!/stock insuffisant/i.test(e.message))throw e;reason=e.message;}
    if(!reason)throw Error('Stock suffisant : utiliser la reprise normale avec création du BL');
    // Keep the normal ERP worker on hold: a forced label is not a preparation order.
@@ -416,7 +417,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    return {message:'Données relues. Les problèmes encore présents restent affichés.',checks:await recheckOrders(db,[o.id])};
   }
   if(j.action==='resume'){
-   if(o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
+   if(!usesRecordedBc(o)&&o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
    if(o.archived||o.erp_live?.bc?.status==='cancelled'||o.tracking_status==='cancelled')throw Error('Commande archivée ou annulée : reprise non autorisée. Vérifier les documents existants avant toute décision.');
    if(o.source_payload?.erplainImported)await refreshManualOrder(db,api,o);
    if(o.archived||o.erp_live?.bc?.status==='cancelled'||o.tracking_status==='cancelled')throw Error('Commande archivée ou annulée : reprise non autorisée. Vérifier les documents existants avant toute décision.');
@@ -428,11 +429,11 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    if(o.erp_live?.bc?.id){
     await api.verify();const {Order:bc}=await api.request(`query V3ResolutionResumeBC($id:ID!){Order(id:$id){${o.source_payload?.erplainImported?manualOrderFields:'id status line_items{type quantity variant{sku}}'}}}`,{id:String(o.erp_live.bc.id)});
     if(!bc?.line_items)throw Error('API Erplain · Lignes BC non reçues');
-    const desired=await readComparisonLines(db,o);
+    const desired=usesRecordedBc(o)?[]:await readComparisonLines(db,o);
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku;sums.set(sku,(sums.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};
-    if(total(desired)!==total(resolutionBcLines(o,bc)))throw Error('Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette');
+    if(!usesRecordedBc(o)&&total(desired)!==total(resolutionBcLines(o,bc)))throw Error('Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette');
    }
-   const needsPreparationCheck=(!existing||j.result?.regenerateExisting)&&(!o.erp_live?.bl?.id||!o.erp_live?.stockCheckedAt||!o.erp_live?.verifiedAt||o.erp_live?.labelPreparationFingerprint!==await shipmentFingerprint(db,o));
+   const needsPreparationCheck=(!existing||j.result?.regenerateExisting)&&(!o.erp_live?.bl?.id||!o.erp_live?.stockCheckedAt||!o.erp_live?.verifiedAt||(!usesRecordedBc(o)&&o.erp_live?.labelPreparationFingerprint!==await shipmentFingerprint(db,o)));
    await db.transaction(async tx=>{
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
     await tx.query("INSERT INTO erp_live_jobs(order_id,status) VALUES($1,'pending') ON CONFLICT(order_id) DO UPDATE SET status=CASE WHEN erp_live_jobs.status='review' OR erp_live_jobs.status='complete' AND $2 THEN 'pending' ELSE erp_live_jobs.status END,error=CASE WHEN erp_live_jobs.status='review' OR erp_live_jobs.status='complete' AND $2 THEN null ELSE erp_live_jobs.error END",[o.id,needsPreparationCheck]);

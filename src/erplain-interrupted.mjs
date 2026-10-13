@@ -1,3 +1,4 @@
+import {usesRecordedBc,recordedBcItems,recordedBcPricing,recordedBcFingerprint} from './existing-bc-execution.mjs';
 import {temuSellerTotals} from './temu-commercial-source.mjs';
 import {createHash} from 'node:crypto';
 import {erplainAccount} from './erplain-accounts.mjs';
@@ -62,20 +63,21 @@ export async function verifyInterruptedDocuments(api,o,lines){
  const state=o.erp_live;
  const r=await reader.request('query V3InterruptedDocuments($id:ID!){Order(id:$id){id status total currency{label} line_items{type quantity tax_amount variant{id sku} location{id}}} TaxCodes(first:200){data{id active tax_rates{rate}} paginatorInfo{hasMorePages}}}',{id:String(state.bc.id)});
  if(String(r.Order?.id)!==String(state.bc.id)||r.Order.status!=='active')throw Error('BC · Document absent ou statut modifié');
- o.items=recoveryItems(o,lines,r.Order);
+ o.items=usesRecordedBc(o)?recordedBcItems(r.Order):recoveryItems(o,lines,r.Order);
  let pricing;
- if(o.channel==='temu')pricing=temuSellerTotals(o);
+ if(usesRecordedBc(o))pricing=recordedBcPricing(o,r.Order);
+ else if(o.channel==='temu')pricing=temuSellerTotals(o);
  else if(o.source_payload?.erplainImported)pricing=state.importedCommercialSource;
  else if(state.equivalentItems)pricing=state.pricing;
  else{
   if(!Array.isArray(r.TaxCodes?.data)||r.TaxCodes.paginatorInfo?.hasMorePages!==false)throw Error('API Erplain · Catalogue TVA incomplet');
   pricing=buildBcPricing(o,lines,o.items,r.TaxCodes.data,{eurExchangeRate:state.pricing?.eurExchangeRate});
  }
- verifySourceCommercialTotals(r.Order,pricing);
+ if(!usesRecordedBc(o))verifySourceCommercialTotals(r.Order,pricing);
  const stock=await reconcileFullStock(reader,o,{allowCreate:false});
  if(!stock||String(stock.id)!==String(state.stockDocument.id))throw Error('Stock Erplain · Mouvement existant non confirmé : contrôle nécessaire');
  assertHistoricalBlNumber(state.bl);
- return {stock,pricing};
+ return {stock,pricing,...(usesRecordedBc(o)?{executionFingerprint:recordedBcFingerprint(r.Order)}:{})};
 }
 
 export function interruptedErplainRecovery(db,directory,{api=erplainAccount(directory,'live'),shouldStop=()=>false}={}){
@@ -102,7 +104,8 @@ export function interruptedErplainRecovery(db,directory,{api=erplainAccount(dire
      await tx.query("UPDATE erp_live_jobs SET error=$2,updated_at=now() WHERE order_id=$1",[o.id,'Reprise Erplain · '+detail]);
      return {status:reconciliation.status,error:detail};
     }
-    const erp={...current.erp_live,stockDocument:result.stock,stockCheckedAt:at,verifiedAt:at,
+    const erp={...current.erp_live,stockDocument:result.stock,pricing:result.pricing,stockCheckedAt:at,verifiedAt:at,
+     ...(result.executionFingerprint?{mappingPreparationFingerprint:result.executionFingerprint,preparationAuthority:{kind:'recorded_bc',bcId:String(current.erp_live.bc.id),fingerprint:result.executionFingerprint}}:{}),
      labelPreparationFingerprint:await shipmentFingerprint(tx,current),
      interruptedReconciliation:{status:'complete',checkedAt:at,source:'erplain_api',externalWrites:0}};
     await tx.query("UPDATE orders SET erp_live=$2,erp_status='live_created' WHERE id=$1",[o.id,JSON.stringify(erp)]);
