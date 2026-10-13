@@ -7,7 +7,7 @@ except ImportError:
  grp=types.SimpleNamespace(getgrnam=lambda _:None) # Windows unit tests only; publisher requires Linux/root.
 from pathlib import Path
 from plan import plan,digest,safe_path
-from queue_policy import blockers,validate_manifest
+from queue_policy import blockers,validate_manifest,apply_human_priority
 
 STATE=Path('/var/lib/nextech-cicd')
 APP=Path('/opt/nextech/current')
@@ -221,6 +221,9 @@ if __name__=='__main__':
    if commit!=head:
     record['status']='superseded';atomic_json(request_path,record);print(json.dumps(record));sys.exit(0)
    deferred=blockers(local,automatic,record['id'],record['createdAt'])
+   priority_path=STATE/'human-priorities'/(commit+'.json')
+   authorization=json.loads(priority_path.read_text()) if priority_path.exists() else None
+   deferred=apply_human_priority(deferred,commit,authorization)
    if not deferred:
     record['status']='deploying';atomic_json(request_path,record)
     result=deploy(commit,packet);record['status']=result['status'];record['requiresReplacement']=result['status']=='failed';record['updatedAt']=datetime.datetime.now(datetime.timezone.utc).isoformat();record['report']=result;atomic_json(request_path,record)
