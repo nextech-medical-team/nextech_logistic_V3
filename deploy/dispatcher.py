@@ -85,7 +85,6 @@ def deploy(commit,packet=None):
  STATE.mkdir(mode=0o700,exist_ok=True)
  report={'commit':commit,'startedAt':time.time(),'status':'running','businessWritesForTesting':0}
  journal=STATE/'reports'/('deploy-'+commit+'.json');journal.parent.mkdir(mode=0o700,exist_ok=True)
- worker_pid_before=int(run(['systemctl','show','nextech-worker','-p','MainPID','--value']).strip())
  changed=[];original={};paused=False;stopped=False;installed=False;deps_swapped=False;backup=None
  try:
   atomic_json(journal,report)
@@ -130,6 +129,7 @@ def deploy(commit,packet=None):
    backend=any(x['path'].startswith('src/') or x['path'].startswith('package') for x in changed)
    report['restart']=backend;report['backup']=str(backup)
    if backend:
+    worker_pid_before=int(run(['systemctl','show','nextech-worker','-p','MainPID','--value']).strip())
     # Pause only scheduling, wait for natural completion. Never replay a business write.
     paused=True;guard('pause',backup)
     for _ in range(120):
