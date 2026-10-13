@@ -47,6 +47,7 @@ export function projectTemuPdfArchiveWarning(o){
  for(const [target,key] of [[o,'issue'],[o,'resolution_error'],[o.erp_live_job,'error'],[o.temu_job,'error'],...(o.resolution_actions||[]).map(j=>[j,'error'])]){
   const reason=target?.[key];
   if(typeof reason!=='string'||!/^(?:TEMU\s*[·:]\s*)?(?:Étiquette TEMU déjà achetée\s*:\s*PDF original indisponible|PDF (?:non réimprimable|indisponible))/i.test(reason)||/\b(?:stock|facture|paiement|BC|BL|annulation|préparation)\b/i.test(reason))continue;
+  if(reason.split(';').slice(1).some(part=>!/^conserver cette expédition\.?$/i.test(part.trim())))continue;
   warnings.push(reason);target[key]=null;
  }
  if(warnings.length)o.temu_pdf_archive_note=[...new Set(warnings)].join(' ; ');

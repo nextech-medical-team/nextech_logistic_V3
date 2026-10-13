@@ -71,7 +71,7 @@ test('delivered registered shipment retains PDF refusal as history, preserves ER
  assert.equal(projected.issue,null);assert.equal(projected.temu_job.error,null);assert.equal(projected.temu_pdf_archive_note,pastPdfWarning);
  assert.equal(projected.erp_live.bl.status,'in_preparation');assert.equal(projected.erp_live_job.error,'Stock insuffisant');assert.equal(original.issue,pastPdfWarning);
 });
-for(const variant of [{tracking_status:'in_transit'},{source_payload:{}},{issue:pastPdfWarning+' ; Stock insuffisant'},{channel:'shopify'}])test('PDF history projection requires proof and does not hide unrelated blockers '+JSON.stringify(variant),()=>{
+for(const variant of [{tracking_status:'in_transit'},{source_payload:{}},{issue:pastPdfWarning+' ; Stock insuffisant'},{issue:pastPdfWarning+' ; Produit introuvable'},{channel:'shopify'}])test('PDF history projection requires proof and does not hide unrelated blockers '+JSON.stringify(variant),()=>{
  const original={channel:'temu',tracking_status:'delivered',source_payload:{externalLabel:{active:true}},issue:pastPdfWarning,...variant};
  assert.equal(projectCurrentDiagnostics(structuredClone(original)).issue,original.issue);
 });
