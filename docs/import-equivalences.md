@@ -19,3 +19,11 @@ L’historique permet de retrouver un import après rechargement. Les résultats
 Les livraisons partielles et BC historiques conservent leurs contrôles particuliers. Plusieurs remplacements sur une même livraison partielle ou historique, ainsi que les remplacements en chaîne (A→B puis B→C), nécessitent un rapprochement et ne sont pas appliqués en lot.
 
 Les tests de recette utilisent des commandes et fournisseurs simulés ; aucun fichier métier n’est appliqué à des commandes réelles pour vérifier la publication.
+# Modèle et export des ruptures
+
+Dans Importer des équivalences, **Télécharger le modèle Excel** fournit un XLSX vierge compatible avec le format actuel. **Exporter les ruptures et équivalents** examine en lecture seule les commandes Amazon, Shopify et TEMU non archivées et non expédiées, leurs BC actuels et les références d’équivalence actives. La vérification s’effectue en arrière-plan ; le navigateur télécharge le résultat à sa fin. Les exports sont privés au compte demandeur et expirent après 30 minutes (ou un redémarrage).
+
+L’onglet **Onglet type** contient une ligne par commande/SKU en stock insuffisant, avec la quantité entière à remplacer selon le BC. Le SKU de remplacement reste vide pour permettre un choix humain. L’onglet **Équivalents proposés** présente toutes les correspondances directes actives et réciproques, avec le stock vérifié à l’emplacement de préparation. Le stock suffisant pour une ligne ne garantit pas le stock cumulé pour plusieurs commandes.
+
+Compléter les SKU de remplacement, retirer les lignes non retenues, puis analyser le fichier. Conserver les numéros de commande et SKU au format texte. **Contrôles** précise les exclusions (suspensions, livraisons existantes ou partielles) et les commandes non vérifiables (BC absent, réponse ou stock incomplet, API indisponible). Aucun résultat incomplet ne constitue une preuve de couverture complète. Au-delà de 1 000 lignes en rupture, l’export échoue explicitement sans tronquer, conformément à la limite de l’import actuel. Aucun téléchargement ne modifie les commandes, les stocks, les références ou les documents ; seuls les contrôles et la validation habituels de l’import permettent ensuite d’appliquer les choix.
+
