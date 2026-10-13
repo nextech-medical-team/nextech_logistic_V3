@@ -35,3 +35,13 @@ export function assertBlLabelWorker(o,request){
  assertBlLabelRequest(o);
  if(!request?.requestedBy||!request.at||request.blId!==String(o.erp_live.bl.id))throw Error('BL modifié après la demande d’étiquette');
 }
+
+export async function queueLabelBatchFromBl(db,ids,user){
+ if(!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(id=>typeof id!=='string'||!id))throw Error('Sélectionner de 1 à 100 commandes');
+ let queued=0;const skipped=[];
+ for(const id of [...new Set(ids)].sort()){
+  try{const result=await queueLabelFromBl(db,id,user);if(!result.existing)queued++;}
+  catch(e){skipped.push({id,reason:e.message});}
+ }
+ return {queued,skipped,message:queued+' étiquette(s) mise(s) en génération'+(skipped.length?' · '+skipped.length+' commande(s) non lancée(s) : '+skipped.map(s=>s.reason).join(' ; '):'')};
+}

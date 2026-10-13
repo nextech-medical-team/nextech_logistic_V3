@@ -11,3 +11,7 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await page.screenshot({path:'proofs/direct-label-'+name+'.png'});await button.click();await expect.poll(()=>requests.length).toBe(1);expect(requests).toEqual([{id:'direct'}]);expect(errors).toEqual([]);
  fs.writeFileSync('proofs/direct-label-'+name+'.json',JSON.stringify({status:'PASS',viewport,requests,errors,scope:'Synthetic full UI; direct endpoint only, no provider call'}));
 });
+test('existing selected-label toolbar uses the direct BL admission',async({page})=>{
+ const requests=[];await page.route('**/api/carriers/labels',r=>{requests.push(r.request().postDataJSON());return r.fulfill({status:202,json:{queued:1,skipped:[],message:'Étiquette mise en génération'}});});
+ await page.goto('/');const checkbox=page.locator('#order-rows input[data-id]').first();await checkbox.check();await page.getByRole('button',{name:'Créer les étiquettes transporteurs PROD',exact:true}).click();await expect.poll(()=>requests.length).toBe(1);expect(requests[0].ids).toHaveLength(1);
+});
