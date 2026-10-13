@@ -236,3 +236,5 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
  #view-orders .orders-with-margins tbody tr{border-bottom:3px solid #cadbd5}
  #view-orders .orders-with-margins [data-country-margin] .order-country{flex-wrap:wrap}
 }
+
+#view-orders #order-rows [data-order-date] :is(span,small){white-space:normal!important;overflow-wrap:anywhere}
