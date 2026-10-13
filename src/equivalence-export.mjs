@@ -68,6 +68,9 @@ export async function exportEquivalences(db,api,directory,{template=false}={}){
   }
   controls.addRow(['Couverture',`${orders.length} commandes examinées ; ${count} lignes en rupture vérifiées ; ${unverified} commandes non vérifiables. Consulter toutes les exclusions ci-dessus.`]);
  }
- for(const s of book.worksheets){s.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};s.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF146E5B'}};s.getRow(1).height=32;s.eachRow(row=>{row.alignment={vertical:'top',wrapText:true};});}
+ for(const s of book.worksheets){
+  s.views=[{state:'frozen',ySplit:1}];s.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};s.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF146E5B'}};
+  s.eachRow(row=>{row.alignment={vertical:'top',wrapText:true};let lines=1;row.eachCell((cell,col)=>{lines=Math.max(lines,Math.ceil(String(cell.value??'').length/Math.max(10,(s.getColumn(col).width||28)-4)));});row.height=Math.max(row.number===1?36:24,Math.min(400,lines*16+8));});
+ }
  return {filename:template?'Modele_import_equivalences.xlsx':'Ruptures_equivalences.xlsx',file:Buffer.from(await book.xlsx.writeBuffer()).toString('base64'),rows:count,unverified};
 }
