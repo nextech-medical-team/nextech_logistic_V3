@@ -9,7 +9,7 @@ import {currentMappingLine} from '../src/current-mapping-line.mjs';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
-test('moteur réel : deux remplacements, aucune reprise avant le dernier, puis préparation remise en file',async()=>{
+for(const stockReview of [false,true])test(stockReview?'moteur réel : remplacement enregistré puis stock bloqué, un autre produit peut être remplacé après preuve':'moteur réel : deux remplacements, aucune reprise avant le dernier, puis préparation remise en file',async()=>{
  const pg=new PGlite();await pg.waitReady;
  try{
  await pg.exec(`
@@ -51,10 +51,29 @@ test('moteur réel : deux remplacements, aucune reprise avant le dernier, puis p
   await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status) VALUES($1,'o',$2,'replace-equivalent',$3,'running')",[b.requestId,b.requestId,JSON.stringify(b)]);
   return substitution(db,api,o,b,{apply:true,deferResume});
  }
- const first=await replace('A','B',20,true);assert.equal(first.importDeferred,true);assert.equal(writes,1);
- assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,'review');
- assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,true);
- assert.equal((await db.query('SELECT status FROM resolution_jobs')).rows[0].status,'complete');
+ const first=await replace('A','B',20,!stockReview);assert.equal(first.importDeferred,!stockReview);assert.equal(writes,1);
+ assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,stockReview?'pending':'review');
+ assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,!stockReview);
+ assert.equal((await db.query('SELECT status FROM resolution_jobs')).rows[0].status,stockReview?'waiting':'complete');
+ if(stockReview){
+  // Reproduce waitingResolutionWorker detecting a stock failure after commit.
+  await db.query("UPDATE resolution_jobs SET status='review',error='Stock insuffisant',stage='Erplain à compléter'");
+  await db.query("UPDATE erp_live_jobs SET status='review',error='Stock insuffisant'");
+  const previewNext=async()=>substitution(db,api,(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],{id:'o',requestId:randomUUID(),sku:'C',replacementSku:'D',replaceQuantity:10,replacementQuantity:20,scope:'order'});
+  const saved=structuredClone(bc);
+  bc.line_items.find(l=>l.variant.sku==='B').quantity=19;
+  await assert.rejects(previewNext(),/rapproché/);bc=saved;
+  await db.query("UPDATE lines SET target_quantity=19 WHERE target_sku='B'");
+  await assert.rejects(previewNext(),/Synchronisation locale/);
+  await db.query("UPDATE lines SET target_quantity=20 WHERE target_sku='B'");
+  const job=(await db.query('SELECT id,payload FROM resolution_jobs')).rows[0];
+  const uncertain=structuredClone(job.payload);uncertain.substitutionAttempt.phase='mutation_started';
+  await db.query('UPDATE resolution_jobs SET payload=$1 WHERE id=$2',[JSON.stringify(uncertain),job.id]);
+  await assert.rejects(previewNext(),/remplacement interrompu/);
+  await db.query('UPDATE resolution_jobs SET payload=$1 WHERE id=$2',[JSON.stringify(job.payload),job.id]);
+  await previewNext();assert.equal(writes,1);
+  assert.equal((await db.query('SELECT status,error FROM resolution_jobs')).rows[0].error,'Stock insuffisant');
+ }
  const last=await replace('C','D',10,false,20);assert.equal(last.importDeferred,false);assert.equal(writes,2);
  assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,'pending');
  assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,false);
