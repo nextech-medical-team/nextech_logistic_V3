@@ -24,6 +24,7 @@ export async function temuRoutes({p,req,res,url,db,service,local,sync,user,json,
  if(p==='/api/temu/external-label/pdf'&&req.method==='GET'){const row=(await db.query('SELECT pdf FROM temu_external_label_documents WHERE order_id=$1',[url.searchParams.get('id')])).rows[0];if(!row){json(res,404,{error:'PDF externe absent'});return true;}res.setHeader('Content-Type','application/pdf');res.setHeader('Cache-Control','no-store');res.end(row.pdf);return true;}
  if(p.startsWith('/api/temu/excel/')){
   const excel=temuExcelPreparation(db,local);
+  if(p==='/api/temu/excel/shops'&&req.method==='GET'){permitted(user,['admin','manager']);const country=url.searchParams.get('country');if(!/^[A-Z]{2}$/.test(country||''))throw Error('Pays ISO requis');json(res,200,{shops:await local.excelShops(country)});return true;}
   if(p==='/api/temu/excel/orders'&&req.method==='GET'){json(res,200,await excel.list());return true;}
   if(p==='/api/temu/excel/preview'&&req.method==='GET'){json(res,200,await excel.preview(url.searchParams.get('reference')));return true;}
   if(p==='/api/temu/excel/prepare'&&req.method==='POST'){permitted(user,['admin','manager']);json(res,202,await excel.prepare(await body(req),user));return true;}

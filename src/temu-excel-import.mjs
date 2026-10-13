@@ -192,6 +192,7 @@ export async function temuExcelImportRoutes({p,req,res,user,body,json,permitted,
  if(!['/api/import/temu/preview','/api/import/temu/confirm'].includes(p)||req.method!=='POST')return false;
  permitted(user,['admin','manager','operator']);
  const input=await body(req);
+ if(p.endsWith('/confirm')&&input.prepare===true)permitted(user,['admin','manager']);
  json(res,200,p.endsWith('/preview')?await previewTemuExcel(db,input.files):await confirmTemuExcel(db,input,user));
  return true;
 }
