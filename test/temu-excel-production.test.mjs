@@ -1,3 +1,4 @@
+import {resolveExcelTemuShop} from '../src/temu-excel-shop.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createTemuExcelTestDatabase} from './support/temu-excel-db.mjs';
@@ -29,16 +30,15 @@ async function fixture(t){
   if(method==='bg.logistics.shipment.document.get')return {shippingLabelUrlList:[{packageSn:'PK-123',documentType:'SHIPPING_LABEL_PDF',url:'https://example.invalid/label.pdf'}]};
   throw Error(method);
  }};
- const local={excelShops:async()=>[{mallId:'123',country:'HR'}],excelShop:async mall=>{if(mall!=='123')throw Error('Boutique absente');return api;}};
+ const candidates=[{mallId:'123',api}],local={resolveExcelShop:(o,lines)=>resolveExcelTemuShop(o,lines,candidates)};
  const service=temuExcelPreparation(db,local),read=async()=>(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],lines=async()=>(await db.query("SELECT * FROM lines WHERE order_id='o' ORDER BY source_line,id")).rows;
- return {db,service,api,detail,read,lines,calls,now,get bought(){return bought;},async input(){const p=await service.preview(reference);return {reference,mallId:'123',fingerprint:p.fingerprint,confirmPreparation:true};}};
+ return {db,service,api,candidates,detail,read,lines,calls,now,get bought(){return bought;},async input(){const p=await service.preview(reference);return {reference,fingerprint:p.fingerprint,confirmPreparation:true};}};
 }
 test('production validation is explicit, atomic and idempotent; queues the existing resume action without a label purchase',async t=>{
  const f=await fixture(t),b=await f.input();assert.equal((await f.read()).suspension.active,true);assert.equal(f.calls.length,0);
  await assert.rejects(f.service.prepare(b,{...user,role:'operator'}),/Droits/);
  await assert.rejects(f.service.prepare({...b,confirmPreparation:false},user),/Confirmez/);
- await assert.rejects(f.service.prepare({...b,mallId:'wrong'},user),/Boutique/);
- const results=await Promise.all([f.service.prepare(b,user),f.service.prepare(b,user)]);assert.equal(results.filter(r=>r.replayed).length,1);
+ const results=await Promise.all([f.service.prepare({...b,mallId:"untrusted-browser-value"},user),f.service.prepare(b,user)]);assert.equal(results.filter(r=>r.replayed).length,1);
  const resumed=await f.service.preview(reference);assert.equal((await f.service.prepare({...b,fingerprint:resumed.fingerprint},user)).replayed,true);
  const o=await f.read();assert.equal(o.suspension.active,false);assert.equal(o.source_payload.mallId,'123');assert.equal(o.resolution_pending_resume,true);assert.equal(o.source_payload.temuExcelCommercial.total,84.05);
  const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.match(automaticPreparationHold(o),/achat manuel/);
@@ -49,6 +49,25 @@ test('SKU, quantity, reference, cancellation and stale preview cannot release th
   Object.assign(f.detail,structuredClone(original));change(f.detail);await assert.rejects(f.service.prepare(b,user));assert.equal((await f.read()).suspension.active,true);
  }
  Object.assign(f.detail,original);await f.db.query("UPDATE orders SET issue='Blocage indépendant' WHERE id='o'");await assert.rejects(f.service.prepare(await f.input(),user),/Blocage/);assert.equal((await f.read()).issue,'Blocage indépendant');await f.db.query("UPDATE orders SET issue=null WHERE id='o'");await f.db.query("UPDATE orders SET recipient='Autre client' WHERE id='o'");await assert.rejects(f.service.prepare(b,user),/modifiée/);assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+});
+test('automatic discovery holds missing, ambiguous and unreadable orders then retries without duplicate jobs',async t=>{
+ const f=await fixture(t),input=await f.input(),owner={mallId:'123',api:f.api};
+ const absent={mallId:'empty',api:{read:async()=>({parentOrderMap:{},orderList:[]})}};
+ for(const candidates of [[],[absent],[owner,{...owner,mallId:'other'}],[owner,{mallId:'failed',api:{read:async()=>{throw Error('quota API');}}}]]){
+  f.candidates.splice(0,f.candidates.length,...candidates);
+  await assert.rejects(f.service.prepare(input,user),/introuvable|ambigu|quota/);
+  assert.equal((await f.read()).suspension.active,true);
+  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+  assert.equal(f.bought,0);
+ }
+ f.candidates.splice(0,f.candidates.length,absent,owner);
+ await f.service.prepare(input,user);
+ assert.equal((await f.read()).source_payload.mallId,'123');
+ const before=f.calls.length;
+ assert.equal((await f.service.prepare(input,user)).replayed,true);
+ assert.equal(f.calls.length,before);
+ assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
+ assert.equal(f.bought,0);
 });
 test('production worker uses Excel source totals and shared pricing, without API amounts or double multiplication',async t=>{
  const f=await fixture(t);await f.service.prepare(await f.input(),user);const o=await f.read(),lines=await f.lines();

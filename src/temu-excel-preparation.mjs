@@ -18,22 +18,22 @@ export function temuExcelPreparation(db,local){
    FROM orders o LEFT JOIN erp_live_jobs e ON e.order_id=o.id WHERE o.channel='temu' AND o.source_payload->>'origin'='temu_excel' AND NOT o.archived ORDER BY o.source_date DESC,o.reference`)).rows};},
   async preview(reference){
    const {o,lines}=await read(reference),commercial=excelCommercialSource(o,lines);
-   return {reference,fingerprint:o.source_payload.temuExcelPreparation?.fingerprint||excelPreparationFingerprint(o,lines),commercial,lines:lines.map(l=>({sku:l.source_sku,quantity:Number(l.quantity)})),shops:await local.excelShops(o.address?.country)};
+   return {reference,fingerprint:o.source_payload.temuExcelPreparation?.fingerprint||excelPreparationFingerprint(o,lines),commercial,lines:lines.map(l=>({sku:l.source_sku,quantity:Number(l.quantity)}))};
   },
-  async prepare({reference,mallId,fingerprint,confirmPreparation},user){
+  async prepare({reference,fingerprint,confirmPreparation},user){
    if(!['admin','manager'].includes(user?.role))throw Object.assign(Error('Droits de préparation requis'),{status:403});
-   if(confirmPreparation!==true||typeof mallId!=='string'||!mallId||typeof fingerprint!=='string')throw Error('Confirmez la boutique et la préparation des BC/BL');
+   if(confirmPreparation!==true||typeof fingerprint!=='string')throw Error('Confirmez la préparation des BC/BL');
    const initial=await read(reference);
    return withShipmentLock(async()=>{
     const {o,lines}=await read(reference);
     if(o.source_payload.temuExcelPreparation){
-     if(o.source_payload.temuExcelPreparation.fingerprint===fingerprint&&o.source_payload.mallId===mallId)return {id:o.id,replayed:true,message:'Préparation déjà demandée. Consultez son avancement.'};
+     if(o.source_payload.temuExcelPreparation.fingerprint===fingerprint)return {id:o.id,replayed:true,message:'Préparation déjà demandée. Consultez son avancement.'};
      throw Error('Commande déjà raccordée : utilisez les corrections de la commande existante');
     }
     if(excelPreparationFingerprint(o,lines)!==fingerprint)throw Error('Commande modifiée : relancez la vérification');
     if(o.issue&&o.issue!==excelImportHold||o.suspension?.active!==true||o.suspension.note!==excelImportHold||o.suspension.erplainCancellation||o.source_payload.marketplacePendingCorrection||o.transport_choice||o.partial_mode||o.erp_live?.bc||o.erp_live?.customer||o.erp_live?.phase||o.tracking_status!=='not_shipped')throw Error('Blocage ou préparation existante : vérifier la commande avant raccordement');
-    const commercial=excelCommercialSource(o,lines),api=await local.excelShop(mallId,o.address?.country);
-    const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});verifyExcelTemuDetail(o,lines,detail);
+    const commercial=excelCommercialSource(o,lines),{mallId,api,detail}=await local.resolveExcelShop(o,lines);
+    verifyExcelTemuDetail(o,lines,detail);
     const info=inspectTemu(detail,reference);
     if(![1,2].includes(info.status)||info.packages.length||(detail.orderList||[]).some(l=>[3,4,5].includes(Number(l.orderStatus))||Number(l.canceledQuantityBeforeShipment)>0||[true,1,'1'].includes(l.isCancelledDuringPending)))throw Error('Commande TEMU annulée ou déjà expédiée : rapprochement requis');
     if((await readTemuShipments(api,reference,detail)).shipmentInfoDTO.length)throw Error('Une expédition TEMU existe déjà : rapprocher la commande existante dans TEMU');

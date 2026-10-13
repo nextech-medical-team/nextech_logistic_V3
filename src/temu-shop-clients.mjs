@@ -10,7 +10,7 @@ export async function loadTemuShopConfig(directory){
 // Shared connection policy used by API-imported and Excel-imported orders.
 export async function connectTemuShops(directory,{
  apiFactory=temuApi,shopLoader=loadShopVault,configLoader=()=>loadTemuShopConfig(directory),
- country,clients=new Map(),countryByMall=new Map(),connectionErrors=new Map()
+ country,strict=false,clients=new Map(),countryByMall=new Map(),connectionErrors=new Map()
 }={}){
  const config=await configLoader(),root=apiFactory(config);
  const info=await root.read('bg.open.accesstoken.info.get',{});
@@ -28,7 +28,7 @@ export async function connectTemuShops(directory,{
    verified.set(String(identity.mallId),api);
    connectionErrors.delete(String(m.country).toUpperCase());
    if(/^[A-Z]{2}$/.test(m.country||''))countryByMall.set(String(identity.mallId),m.country);
-  }catch(e){if(e.code==='TEMU_STOPPING')throw e;connectionErrors.set(String(m.country).toUpperCase(),e);}
+  }catch(e){if(strict||e.code==='TEMU_STOPPING')throw e;connectionErrors.set(String(m.country).toUpperCase(),e);}
  }
  return {clients:verified,countryByMall,connectionErrors,config};
 }
