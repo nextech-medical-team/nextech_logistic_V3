@@ -93,7 +93,7 @@ export function orderSuspensionService(db,api){
  }
  async function cancelErplain(input,user){
   authorized(user);
-  if(typeof input?.id!=='string'||typeof input.expectedVersion!=='string'||input.confirm!==true)throw Error('Confirmer explicitement l’annulation ERPLAIN');
+  if(typeof input?.id!=='string'||typeof input.expectedVersion!=='string'||(input.confirm!==true&&input.verifyOnly!==true))throw Error('Confirmer explicitement l’annulation ERPLAIN');
   return locked(input.id,async()=>{
    let order=(await db.query('SELECT * FROM orders WHERE id=$1',[input.id])).rows[0];
    if(!order?.suspension?.active||order.archived)throw Error('Suspendre la commande avant d’annuler dans ERPLAIN');
@@ -108,6 +108,14 @@ export function orderSuspensionService(db,api){
    if(![order.reference,'V3:'+order.id].includes(billing.external_reference)&&order.source_payload?.erplainImported!==true)throw Error('Identité du BC différente de la commande : annulation refusée');
    if(!['active','pending','unpublished','cancelled'].includes(bc.status))throw Error('Statut BC incompatible avec l’annulation : '+bc.status);
    if(order.suspension.erplainCancellation?.bcId&&order.suspension.erplainCancellation.bcId!==bcId)throw Error('BC différent de la précédente tentative : rapprochement requis');
+   if(input.verifyOnly===true||order.suspension.erplainCancellation){
+    const previous=order.suspension.erplainCancellation;
+    if(previous?.bcId&&previous.bcId!==bcId)throw Error('BC différent de la tentative enregistrée : rapprochement requis');
+    if(bc.status!=='cancelled'||bc.shipping_orders.data.some(b=>b.status!=='cancelled'))return {ok:true,message:'Vérification ERPLAIN : annulation non entièrement confirmée. Aucun nouvel essai effectué ; rapprochement nécessaire.'};
+    const state={...order.suspension,version:randomUUID(),erplainCancellation:{...previous,bcId,bcLabel:bc.label,status:'complete',confirmedAt:new Date().toISOString()}};
+    await db.transaction(async tx=>{await tx.query("UPDATE orders SET suspension=$2,erp_live=jsonb_set(erp_live,'{bc,status}','\"cancelled\"'::jsonb) WHERE id=$1",[order.id,JSON.stringify(state)]);await event(tx,order,'erplain_cancelled',state.note,state,user);});
+    return {ok:true,message:'Annulation ERPLAIN vérifiée. La commande reste suspendue dans V3.',suspension:state};
+   }
    // Read all related documents before the first write; never cancel another order's BL.
    const bls=[];
    for(const item of bc.shipping_orders.data){
