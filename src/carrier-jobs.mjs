@@ -2,6 +2,7 @@ import {currentMappingFingerprint} from './current-mapping-line.mjs';
 import {randomUUID} from 'node:crypto';
 import {currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
 import {assertTemuManualLabel} from './manual-label-policy.mjs';
+import {assertBlLabelWorker} from './direct-label.mjs';
 import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {assertPreparedLabelOrder} from './equivalent-auto-label.mjs';
 import {initializePriority,carrierEligible,priorityOrder} from './order-priority.mjs';
@@ -12,7 +13,7 @@ export async function initializeCarrierJobs(db){await initializePriority(db);
  await db.exec(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS erp_live JSONB NOT NULL DEFAULT '{}'; CREATE TABLE IF NOT EXISTS carrier_jobs(order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,carrier TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',reference TEXT,tracking JSONB NOT NULL DEFAULT '[]',result JSONB,attempts INT NOT NULL DEFAULT 0,error TEXT,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
  CREATE TABLE IF NOT EXISTS carrier_documents(order_id TEXT REFERENCES orders(id) ON DELETE CASCADE,document_index INT NOT NULL,pdf BYTEA NOT NULL,PRIMARY KEY(order_id,document_index));
  CREATE INDEX IF NOT EXISTS carrier_jobs_queue ON carrier_jobs(carrier,status,updated_at);`);
- await db.exec("ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'test';");
+ await db.exec("ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'test'; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS manual_bl_request JSONB;");
  await db.exec("ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS stock_override JSONB; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS creation_id TEXT; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS batch_id TEXT; CREATE TABLE IF NOT EXISTS carrier_label_history(id TEXT PRIMARY KEY,order_id TEXT REFERENCES orders(id) ON DELETE CASCADE,job JSONB NOT NULL,archived_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE TABLE IF NOT EXISTS carrier_label_history_documents(history_id TEXT REFERENCES carrier_label_history(id) ON DELETE CASCADE,document_index INT NOT NULL,pdf BYTEA NOT NULL,PRIMARY KEY(history_id,document_index));");
  // A process interruption after POST is ambiguous. Never resend that POST blindly.
  if(db.recoverInterrupted!==false)await db.query(`UPDATE carrier_jobs SET status='review',error='Traitement interrompu. Vérifier la création chez le transporteur avant toute nouvelle tentative.' WHERE status='creating'`);
@@ -79,12 +80,16 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
      assertDirectCarrierAllowed(o,carrier);
      if(o.channel==='temu')assertTemuManualLabel((await db.query('SELECT status FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0]);
      if(job.environment!=='production')throw new Error('Création TEST désactivée : reprendre la commande en production');
-     const e=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[o.id])).rows[0];
-     if(!job.stock_override){
-      assertPreparedLabelOrder(o,e);
-      if(!o.erp_live.mappingPreparationFingerprint||await currentMappingFingerprint(db,o)!==o.erp_live.mappingPreparationFingerprint)throw Error('Mapping modifié avant création : recontrôle requis');
+     const directBl=!!job.manual_bl_request?.creationId&&job.manual_bl_request.creationId===job.creation_id;
+     if(directBl)assertBlLabelWorker(o,job.manual_bl_request);
+     else{
+      const e=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[o.id])).rows[0];
+      if(!job.stock_override){
+       assertPreparedLabelOrder(o,e);
+       if(!o.erp_live.mappingPreparationFingerprint||await currentMappingFingerprint(db,o)!==o.erp_live.mappingPreparationFingerprint)throw Error('Mapping modifié avant création : recontrôle requis');
+      }
+      await assertLabelStockGate(db,o,job.stock_override);
      }
-     await assertLabelStockGate(db,o,job.stock_override);
      if((await db.query('SELECT 1 FROM carrier_documents WHERE order_id=$1 LIMIT 1',[o.id])).rows.length)throw Error('PDF existant à rapprocher : aucune nouvelle création');
      if(carrier==='gls'&&o.carrier==='gls_shop'){
       const shop=await selectedClient.resolveParcelShop(o);
@@ -107,7 +112,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
     await db.transaction(async tx=>{
      for(let i=0;i<buffers.length;i++)await tx.query(`INSERT INTO carrier_documents VALUES($1,$2,$3) ON CONFLICT(order_id,document_index) DO NOTHING`,[o.id,i,buffers[i]]);
      await tx.query(`UPDATE carrier_jobs SET status='ready',error=null,result=null,updated_at=now() WHERE order_id=$1`,[o.id]);
-     await tx.query(`UPDATE orders SET label_status=CASE WHEN resolution_pending_resume THEN label_status ELSE $2 END,issue=CASE WHEN resolution_pending_resume THEN issue ELSE null END,processing_priority_at=null WHERE id=$1`,[o.id,job.environment==='production'?'production_ready':'sandbox_ready']);
+     await tx.query(`UPDATE orders SET label_status=CASE WHEN resolution_pending_resume AND NOT $3 THEN label_status ELSE $2 END,issue=CASE WHEN resolution_pending_resume THEN issue ELSE null END,processing_priority_at=null WHERE id=$1`,[o.id,job.environment==='production'?'production_ready':'sandbox_ready',!!job.manual_bl_request&&job.manual_bl_request.creationId===job.creation_id]);
     });
     }catch(e){
     if(carrier==='gofo'&&!result&&e.zoneRejected){
