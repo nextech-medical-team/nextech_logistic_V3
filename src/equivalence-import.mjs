@@ -5,6 +5,7 @@ import {validateResolution} from './problem-resolution.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {erplainAccount} from './erplain-accounts.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
+import {exportEquivalences} from './equivalence-export.mjs';
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const quantities=rows=>{const sums=new Map();for(const l of rows.filter(l=>l.type==='normal')){const sku=l.variant.sku;sums.set(sku,(sums.get(sku)||0)+Number(l.quantity));}return [...sums].sort();};
 export async function initializeEquivalenceImports(db){
@@ -14,7 +15,7 @@ export async function initializeEquivalenceImports(db){
  if(db.recoverInterrupted!==false)await db.query("UPDATE equivalence_import_rows SET status='blocked',error='Traitement interrompu : rapprocher le BC et la demande avant toute reprise.' WHERE status='starting'");
 }
 export function equivalenceImportService(db,directory,{api=erplainAccount(directory,'live'),preview=substitution}={}){
- let running=false;
+ let running=false,exporting=false;const exports=new Map();
  async function rows(id){return (await db.query('SELECT * FROM equivalence_import_rows WHERE batch_id=$1 ORDER BY line',[id])).rows;}
  async function read(id){
   const batch=(await db.query('SELECT * FROM equivalence_imports WHERE id=$1',[id])).rows[0];if(!batch)throw Error('Import introuvable');
@@ -96,6 +97,25 @@ export function equivalenceImportService(db,directory,{api=erplainAccount(direct
  return {get running(){return running;},read,
   async routes({p,url,req,res,user,body,json,permitted}){
    if(!p.startsWith('/api/equivalence-import'))return false;permitted(user,['admin','manager']);
+   if(req.method==='GET'&&p==='/api/equivalence-import/export'){
+    const item=exports.get(url.searchParams.get('id'));
+    if(!item||item.owner!==user.email||item.expires<Date.now())throw Error('Export expiré ou introuvable : recommencer le téléchargement');
+    json(res,200,item.error?{status:'failed',error:item.error}:item.result?{status:'complete',...item.result}:{status:'checking'});return true;
+   }
+   if(req.method==='GET'&&p==='/api/equivalence-import/shortages'){
+    if(exporting)throw Error('Un export est déjà en cours : attendre sa fin');
+    for(const [id,item] of exports)if(item.expires<Date.now())exports.delete(id);
+    if(exports.size>=10)throw Error('Trop d’exports récents : attendre leur expiration');
+    exporting=true;const id=randomUUID(),item={owner:user.email,expires:Date.now()+30*60*1000};exports.set(id,item);
+    exportEquivalences(db,api,directory).then(result=>{item.result=result;},e=>{item.error=e.message;}).finally(()=>{exporting=false;item.expires=Date.now()+30*60*1000;});
+    json(res,200,{id,status:'checking'});return true;
+   }
+   if(req.method==='GET'&&p==='/api/equivalence-import/template'){
+    if(exporting)throw Error('Un export est déjà en cours : attendre sa fin');
+    exporting=true;
+    try{json(res,200,await exportEquivalences(db,api,directory,{template:p.endsWith('/template')}));}finally{exporting=false;}
+    return true;
+   }
    if(req.method==='GET'&&p==='/api/equivalence-import/history'){json(res,200,{rows:(await db.query('SELECT id,owner,status,created_at,updated_at FROM equivalence_imports ORDER BY created_at DESC LIMIT 25')).rows});return true;}
    if(req.method==='GET'&&p==='/api/equivalence-import'){json(res,200,await read(url.searchParams.get('id')));return true;}
    if(req.method==='POST'&&p==='/api/equivalence-import/analyze'){
