@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {connectTemuShops} from '../src/temu-shop-clients.mjs';
 import {excelLabelShops} from '../scripts/temu-excel-labels.mjs';
+import {temuLocalService} from '../src/temu-local.mjs';
 const config={TEMU_APP_KEY:'A',TEMU_APP_SECRET:'secret',TEMU_ACCESS_TOKEN:'root',TEMU_COUNTRIES:{root:'FR',associated:'IT'}};
 function fixture(){
  const seen=[];
@@ -27,4 +28,19 @@ test('Excel uses the same root, associated tokens and vault filtering as the exi
 test('country reconnect preserves prior clients and records only the relevant vault failure',async()=>{
  const f=fixture(),prior={};const connected=await connectTemuShops('/unused',{...f,country:'BE',clients:new Map([['previous',prior]])});
  assert.equal(connected.clients.get('previous'),prior);assert.deepEqual(f.seen,['root','eplbad']);assert.equal(connected.connectionErrors.size,1);
+});
+test('automatic Excel connection cannot silently omit a failed shop authorization',async()=>{
+ const f=fixture();
+ await assert.rejects(connectTemuShops('/unused',{...f,country:'BE',strict:true}),{code:'source_budget_deferred'});
+});
+test('automatic Excel shop discovery filters countries and uses the matching API client',async()=>{
+ const calls=[],o={reference:'PO-TEST',address:{country:'FR'}},lines=[{source_line:'item',source_sku:'SKU',quantity:2}];
+ const detail={parentOrderMap:{parentOrderSn:o.reference},orderList:[{orderSn:'item',quantity:2,productList:[{extCode:'SKU'}]}]};
+ const local=temuLocalService({},'/unused',{
+  configLoader:async()=>({...config,TEMU_COUNTRIES:{root:'IT',associated:'FR'}}),shopLoader:async()=>[],
+  apiFactory:c=>({async read(method){calls.push([c.TEMU_ACCESS_TOKEN,method]);if(method==='bg.open.accesstoken.info.get')return {mallId:'root',associatedMallTokenList:[{mallId:'associated',accessToken:'second'}]};assert.equal(c.TEMU_ACCESS_TOKEN,'second');return detail;}})
+ });
+ const resolved=await local.resolveExcelShop(o,lines);
+ assert.equal(resolved.mallId,'associated');assert.equal(resolved.detail,detail);
+ assert.deepEqual(calls,[['root','bg.open.accesstoken.info.get'],['second','bg.order.detail.v2.get']]);
 });

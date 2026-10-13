@@ -41,7 +41,7 @@ for(const [device,viewport]of [['desktop',{width:1366,height:900}],['mobile',{wi
   await page.screenshot({path:'proofs/temu-excel-'+device+'.png',fullPage:true});
   await preview.getByRole('button',{name:'Importer et préparer les commandes sélectionnées'}).click();
   await expect(preview.locator('[data-result]')).toContainText('1 préparation(s) BC/BL demandée(s)');
-  expect(preparations).toEqual([{reference:'PO-TEST-FR',mallId:'shop-FR',fingerprint:'proof',confirmPreparation:true}]);expect(confirmations[0].prepare).toBe(true);
+  expect(preparations).toEqual([{reference:'PO-TEST-FR',fingerprint:'proof',confirmPreparation:true}]);expect(confirmations[0].prepare).toBe(true);
   expect(confirmations).toHaveLength(1);expect(confirmations[0].selection).toEqual(['PO-TEST-FR']);expect(confirmations[0].files).toHaveLength(2);
   await expect(preview.locator('[data-confirm]')).toBeDisabled();
   // Selecting a single file works too, without submitting until confirmed.

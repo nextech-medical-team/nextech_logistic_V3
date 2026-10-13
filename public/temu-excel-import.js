@@ -3,13 +3,12 @@
  kind.add(new Option('Commandes TEMU · Excel multi-pays','temu_excel'));
  const panel=document.createElement('section');panel.hidden=true;panel.id='temu-excel-preview';
  panel.innerHTML=`<h3>Vérifier l’import TEMU</h3>
- <p>Sélectionnez les nouvelles commandes et leur boutique TEMU, puis confirmez l’import et la préparation des BC/BL. L’achat des étiquettes restera à confirmer après validation du BL et du stock.</p>
+ <p>Sélectionnez les nouvelles commandes, puis confirmez l’import et la préparation des BC/BL. L’achat des étiquettes restera à confirmer après validation du BL et du stock.</p>
  <p data-summary role="status"></p><div class="table-wrap"><table><thead><tr><th>Pays</th><th>Commandes</th><th>Nouvelles valides</th><th>Déjà présentes</th><th>À corriger</th></tr></thead><tbody data-countries></tbody></table></div>
  <details><summary>Fichiers analysés et erreurs</summary><div data-files></div><ul data-errors></ul></details>
  <div class="actions"><button type="button" data-new>Sélectionner les nouvelles commandes valides</button><button type="button" data-none>Tout désélectionner</button><button type="button" data-report>Télécharger le rapport</button></div>
  <p data-selection></p><div class="table-wrap"><table><thead><tr><th>Importer</th><th>Commande</th><th>Pays</th><th>Destinataire</th><th>Lignes / quantité</th><th>Situation</th></tr></thead><tbody data-orders></tbody></table></div>
  <div class="pagination"><button type="button" data-prev>Précédent</button><span data-page></span><button type="button" data-next>Suivant</button></div>
- <div data-shops></div><button type="button" data-reload-shops>Actualiser les boutiques</button>
  <button type="button" class="primary" data-confirm>Importer et préparer les commandes sélectionnées</button><button type="button" data-cancel>Annuler</button><p data-result role="status"></p>`;
  $('import-preview').after(panel);
  const find=s=>panel.querySelector(s),chosen=new Set();
@@ -18,8 +17,8 @@
  const generalHint=document.querySelector('#view-imports .hint-box p'),originalHint=generalHint?.textContent;
  const originalSubmit=form.onsubmit,originalAccept=file.accept,originalButton=$('import-button').textContent;
  let draft=null,preview=null,result=null,page=1,busy=false,lastKind=kind.value;
- const shopsByCountry=new Map(),shopChoices=new Map(),preparation=new Map();let selectedShops=null;
- function reset(){shopsByCountry.clear();shopChoices.clear();preparation.clear();selectedShops=null;draft=null;preview=null;result=null;chosen.clear();page=1;panel.hidden=true;find('[data-result]').textContent='';}
+ const preparation=new Map();
+ function reset(){preparation.clear();draft=null;preview=null;result=null;chosen.clear();page=1;panel.hidden=true;find('[data-result]').textContent='';}
  function setBusy(value){busy=value;kind.disabled=value;file.disabled=value;$('import-button').disabled=value;panel.querySelectorAll('button,input,select').forEach(e=>e.disabled=value);if(!value&&preview)render();}
  function configure(){
   const active=kind.value==='temu_excel';
@@ -31,19 +30,6 @@
  kind.addEventListener('change',configure);file.addEventListener('change',reset);configure();
  const previousShow=show;show=async function(view){if(view==='imports')configure();return previousShow(view);};
  const country=c=>c||'À vérifier';
- function selectedCountries(){return [...new Set(preview.orders.filter(o=>chosen.has(o.reference)).map(o=>o.country))];}
- function renderShops(){
-  find('[data-shops]').innerHTML=selectedCountries().map(c=>{const entry=shopsByCountry.get(c);return `<label>Boutique TEMU · ${esc(c)} <select data-shop-country="${esc(c)}" ${busy||result?'disabled':''}><option value="">Choisir la boutique</option>${(entry?.shops||[]).map(s=>`<option value="${esc(s.mallId)}" ${shopChoices.get(c)===s.mallId?'selected':''}>${esc(s.country||'Pays non renseigné')} · ${esc(s.mallId)}</option>`).join('')}</select></label>${entry?.error?'<p>'+esc(entry.error)+'</p>':''}`;}).join('');
-  find('[data-reload-shops]').disabled=busy||!draft||!!result;
- }
- async function loadShops(){
-  for(const c of [...new Set(preview.orders.filter(o=>o.eligible).map(o=>o.country))]){
-   try{const entry=await api('/api/temu/excel/shops?'+new URLSearchParams({country:c}));if(!Array.isArray(entry.shops))throw Error('Liste des boutiques invalide');shopsByCountry.set(c,entry);if(!entry.shops.some(s=>s.mallId===shopChoices.get(c)))shopChoices.delete(c);if(entry.shops.length===1&&entry.shops[0].country===c)shopChoices.set(c,entry.shops[0].mallId);if(!entry.shops.length)entry.error='Aucune boutique disponible pour '+c;}
-   catch(e){shopsByCountry.set(c,{shops:[],error:e.message});shopChoices.delete(c);}
-  }
- }
- find('[data-shops]').onchange=e=>{if(busy||result)return;const c=e.target.dataset.shopCountry;if(c){shopChoices.set(c,e.target.value);render();}};
- find('[data-reload-shops]').onclick=async()=>{if(busy||!draft||result)return;setBusy(true);try{await loadShops();}finally{setBusy(false);}};
  function render(){
   if(!preview)return;
   const pages=Math.max(1,Math.ceil(preview.orders.length/100));page=Math.min(page,pages);
@@ -52,8 +38,7 @@
   find('[data-prev]').disabled=busy||page<=1;find('[data-next]').disabled=busy||page>=pages;
   const remaining=result?result.results.filter(r=>r.status==='created'&&preparation.get(r.reference)?.status!=='prepared'):[];
   find('[data-confirm]').textContent=result?(remaining.length?'Reprendre les préparations restantes ('+remaining.length+')':'Traitement de la sélection terminé'):'Importer et préparer les commandes sélectionnées';
-  find('[data-confirm]').disabled=busy||!draft||(result?!remaining.length:!chosen.size||selectedCountries().some(c=>!shopChoices.get(c)));
-  renderShops();
+  find('[data-confirm]').disabled=busy||!draft||(result?!remaining.length:!chosen.size);
   find('[data-new]').disabled=busy||!draft||!!result;find('[data-none]').disabled=busy||!draft||!!result;
   find('[data-orders]').innerHTML=preview.orders.slice((page-1)*100,page*100).map(o=>`<tr><td><input type="checkbox" data-reference="${esc(o.reference)}" aria-label="Importer ${esc(o.reference)}" ${chosen.has(o.reference)?'checked':''} ${busy||!draft||result||!o.eligible?'disabled':''}></td><td>${esc(o.reference)}</td><td>${esc(country(o.country))}</td><td>${esc(o.recipient)}</td><td>${o.lines} / ${o.quantity}</td><td>${esc(o.issues.length?o.issues.join(' ; '):o.duplicate?'Déjà présente — ignorée':'Nouvelle commande')}</td></tr>`).join('');
  }
@@ -79,23 +64,21 @@
    find('[data-countries]').innerHTML=preview.countries.map(c=>`<tr><td>${esc(c.country)}</td><td>${c.total}</td><td>${c.newCount}</td><td>${c.duplicateCount}</td><td>${c.errorCount}</td></tr>`).join('');
    find('[data-files]').innerHTML=preview.files.map(f=>`<p>${esc(f.filename)} : ${f.orders} commandes, ${f.rows} lignes${f.error?' — '+esc(f.error):''}</p>`).join('');
    find('[data-errors]').innerHTML=preview.errors.map(r=>`<li>${esc(r.filename)}${r.row?' · ligne '+r.row:''}${r.reference?' · '+esc(r.reference):''} : ${esc(r.message)}</li>`).join('');
-   await loadShops();
    $('import-result').textContent='Analyse terminée. Vérifiez l’aperçu avant de confirmer.';panel.hidden=false;
   }catch(error){$('import-result').textContent=error.message;}finally{setBusy(false);}
  };
  find('[data-confirm]').onclick=async()=>{
   if(busy||!draft||!chosen.size)return;
-  if(!result&&selectedCountries().some(c=>!shopChoices.get(c)))return;
   setBusy(true);find('[data-result]').textContent='Enregistrement et préparation des commandes sélectionnées…';
   try{
-   if(!result){selectedShops=Object.fromEntries(shopChoices);result=await api('/api/import/temu/confirm',{...draft,selection:[...chosen],prepare:true});}
+   if(!result){result=await api('/api/import/temu/confirm',{...draft,selection:[...chosen],prepare:true});}
    const created=result.results.filter(r=>r.status==='created');
    for(let i=0;i<created.length;i++){
     const row=created[i];if(preparation.get(row.reference)?.status==='prepared')continue;
     find('[data-result]').textContent=`Vérification TEMU et préparation ${i+1} / ${created.length} · ${row.reference}…`;
     try{
      const p=await api('/api/temu/excel/preview?'+new URLSearchParams({reference:row.reference}));
-     await api('/api/temu/excel/prepare',{reference:row.reference,mallId:selectedShops[row.country],fingerprint:p.fingerprint,confirmPreparation:true});
+     await api('/api/temu/excel/prepare',{reference:row.reference,fingerprint:p.fingerprint,confirmPreparation:true});
      preparation.set(row.reference,{status:'prepared',message:'Préparation BC/BL demandée'});
     }catch(e){preparation.set(row.reference,{status:'held',message:e.message});}
    }

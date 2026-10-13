@@ -1,7 +1,7 @@
 (()=>{
  const view=$('view-imports');if(!view)return;
  const panel=document.createElement('section');panel.className='panel padded';panel.id='temu-excel-preparation';
- panel.innerHTML=`<h2>Préparer les commandes Excel TEMU</h2><p>Vérifiez la boutique avant de lancer les BC et BL dans Erplain. Après validation du BL, achetez l’étiquette dans l’écran TEMU : 0,25 kg, 10 × 8 × 0,5 cm et dernier créneau admissible.</p><button data-refresh>Actualiser les commandes Excel</button><p data-message role="status"></p><div class="table-wrap"><table><thead><tr><th>Commande</th><th>Pays</th><th>Avancement BC/BL</th><th>Actions</th></tr></thead><tbody></tbody></table></div><div data-preview></div>`;
+ panel.innerHTML=`<h2>Préparer les commandes Excel TEMU</h2><p>La boutique TEMU est identifiée automatiquement lors du lancement des BC et BL dans Erplain. Après validation du BL, achetez l’étiquette dans l’écran TEMU : 0,25 kg, 10 × 8 × 0,5 cm et dernier créneau admissible.</p><button data-refresh>Actualiser les commandes Excel</button><p data-message role="status"></p><div class="table-wrap"><table><thead><tr><th>Commande</th><th>Pays</th><th>Avancement BC/BL</th><th>Actions</th></tr></thead><tbody></tbody></table></div><div data-preview></div>`;
  view.append(panel);const get=s=>panel.querySelector(s);let busy=false;
  async function load(){
   try{const result=await api('/api/temu/excel/orders');get('tbody').innerHTML=result.rows.map(o=>{
@@ -15,15 +15,15 @@
   if(b.dataset.order){orderDetail(b.dataset.order);return;}
   if(b.dataset.label){temuOpenOrder(b.dataset.label).catch(e=>get('[data-message]').textContent=e.message);return;}
   if(!b.dataset.verify)return;
-  busy=true;b.disabled=true;get('[data-message]').textContent='Vérification des montants Excel et des boutiques disponibles…';get('[data-preview]').innerHTML='';
+  busy=true;b.disabled=true;get('[data-message]').textContent='Vérification des montants Excel avant préparation…';get('[data-preview]').innerHTML='';
   try{
    const p=await api('/api/temu/excel/preview?'+new URLSearchParams({reference:b.dataset.verify}));
-   const box=get('[data-preview]');box.innerHTML=`<h3>${esc(p.reference)}</h3><p>${p.lines.map(l=>esc(l.sku)+' × '+l.quantity).join(' ; ')}</p><p>Total BC : ${p.commercial.total.toFixed(2)} ${esc(p.commercial.currency)} · TVA : ${p.commercial.tax.toFixed(2)}</p><label>Boutique TEMU <select data-shop><option value="">Choisir la boutique</option>${p.shops.map(s=>`<option value="${esc(s.mallId)}">${esc(s.country||'Pays non renseigné')} · ${esc(s.mallId)}</option>`).join('')}</select></label><p>Cette action vérifie les articles auprès de TEMU et lance la préparation réelle des BC/BL dans Erplain. Les correspondances SKU et le stock suivent les contrôles habituels.</p><label><input type="checkbox" data-consent> Je confirme la boutique et la préparation de cette commande.</label><button data-start disabled>Lancer les BC/BL dans Erplain</button>`;
-   const ready=()=>box.querySelector('[data-start]').disabled=busy||!box.querySelector('[data-shop]').value||!box.querySelector('[data-consent]').checked;
+   const box=get('[data-preview]');box.innerHTML=`<h3>${esc(p.reference)}</h3><p>${p.lines.map(l=>esc(l.sku)+' × '+l.quantity).join(' ; ')}</p><p>Total BC : ${p.commercial.total.toFixed(2)} ${esc(p.commercial.currency)} · TVA : ${p.commercial.tax.toFixed(2)}</p><p>Cette action vérifie les articles auprès de TEMU et lance la préparation réelle des BC/BL dans Erplain. Les correspondances SKU et le stock suivent les contrôles habituels.</p><label><input type="checkbox" data-consent> Je confirme la préparation de cette commande.</label><button data-start disabled>Lancer les BC/BL dans Erplain</button>`;
+   const ready=()=>box.querySelector('[data-start]').disabled=busy||!box.querySelector('[data-consent]').checked;
    box.onchange=ready;
    box.querySelector('[data-start]').onclick=async()=>{
     if(busy)return;busy=true;ready();get('[data-message]').textContent='Contrôle API TEMU puis lancement de la préparation…';
-    try{const result=await api('/api/temu/excel/prepare',{reference:p.reference,mallId:box.querySelector('[data-shop]').value,fingerprint:p.fingerprint,confirmPreparation:true});get('[data-message]').textContent=result.message;box.innerHTML='';await load();}
+    try{const result=await api('/api/temu/excel/prepare',{reference:p.reference,fingerprint:p.fingerprint,confirmPreparation:true});get('[data-message]').textContent=result.message;box.innerHTML='';await load();}
     catch(e){get('[data-message]').textContent=e.message;}finally{busy=false;if(box.querySelector('[data-start]'))ready();}
    };
    get('[data-message]').textContent='Vérifiez les informations puis confirmez la préparation.';
