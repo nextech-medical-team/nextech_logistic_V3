@@ -1,8 +1,8 @@
-# Publication automatique de V3
+# Publication manuelle de V3
 
-Chaque push sur `main` déclenche `.github/workflows/deploy.yml`. Les branches et pull requests passent les contrôles sans accéder à la production. Le job de publication ne démarre qu'après `npm ci`, les vérifications syntaxiques, les tests applicatifs et les tests de déploiement/retour arrière.
+Dans GitHub, ouvrir **Actions → Déployer V3 manuellement → Run workflow**, sélectionner **main**, puis cliquer **Run workflow**. Seul ce déclenchement manuel lance `.github/workflows/deploy.yml`. Un push ou une fusion ne publie plus automatiquement. Le commit sélectionné au lancement doit encore être le dernier de `main` lors de la publication ; sinon relancer manuellement après vérification. Les branches et pull requests passent les contrôles sans accéder à la production. Le job de publication ne démarre qu'après `npm ci`, les vérifications syntaxiques, les tests applicatifs et les tests de déploiement/retour arrière.
 
-La branche principale exige une pull request, une revue et le contrôle `Vérifications V3` avant fusion. Le nom de ce contrôle est distinct des jobs de publication pour éviter les statuts ambigus. La publication automatique intervient après la fusion sur `main` ; les branches de travail des collègues ne sont pas publiées directement.
+La branche principale exige une pull request, une revue et le contrôle `Vérifications V3` avant fusion. Le nom de ce contrôle est distinct des jobs de publication pour éviter les statuts ambigus. La publication manuelle intervient sur demande après la fusion sur `main` ; les branches de travail des collègues ne sont pas publiées directement.
 
 Le job utilise l'environnement GitHub `production`, limité à `main`. Variables de cet environnement : `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_KNOWN_HOSTS`. Secret : `DEPLOY_SSH_KEY`. Ne jamais mettre cette clé dans Git. La vérification de l'empreinte SSH est obligatoire ; ne pas utiliser `StrictHostKeyChecking=no`.
 
@@ -30,7 +30,7 @@ En cas d'échec après installation, seuls les fichiers/dépendances concernés 
 
 Les rapports sans secrets sont stockés dans `/var/lib/nextech-cicd/reports` et dans les artefacts GitHub Actions. Consulter le job rouge en cas d'échec. Après un échec, une demande ultérieure reste bloquée jusqu’à résolution prouvée sur le serveur par Section7. Une nouvelle version corrigée exige un nouveau commit. Une exécution simplement bloquée avant publication peut être relancée après levée de sa dépendance. Le certificat de restauration vérifie les fichiers, l’environnement, les services, HTTP et les contrôles suspendus ; le client local ne peut pas déclarer seul la restauration réussie. Pour suspendre les publications, désactiver le workflow GitHub ; ne pas arrêter les services de l'application.
 
-## File commune FIFO et preuves de chaque push
+## File commune FIFO et preuves de chaque publication manuelle
 
 L'exécuteur refuse de publier tant que la file commune n'est pas initialisée. Une seconde clé locale, distincte de la clé GitHub, est limitée à la commande de synchronisation ; GitHub ne peut pas effacer les demandes des autres sections. `queue.mjs` synchronise les demandes avant toute mutation locale : en cas d'échec, la mutation est refusée. L'instantané inclut les demandes prêtes, en cours, bloquées et les échecs exigeant un remplacement encore non certifié.
 
@@ -38,4 +38,8 @@ Le serveur compare les dates `createdAt` de toutes les demandes locales et CI. U
 
 Le workflow fournit un manifeste prêt lié au SHA exact avec les empreintes des sources et des preuves : vérifications, captures ordinateur/mobile et mesure isolée. L'exécuteur revalide ready/openGates/commit/proofs/candidat, puis les empreintes serveur et ses propres tests. Les captures utilisent120 commandes fictives et un serveur de fixture : elles ne certifient pas une opération métier ni la résolution d'une commande réelle. Les tests spécifiques à une évolution doivent être ajoutés par son auteur avant fusion.
 
-Les demandes CI et leurs rapports sont conservés sur le serveur et ramenés dans `coordination-deploiement/requests` et `cicd-rapports` par `queue.mjs sync`. Ces demandes portent serverManaged : ne pas les republier par le lanceur local. Section7 synchronise à chaque reprise pour lire le résultat final. Si la dernière file locale confirmée est vide, les publications Git continuent même PC éteint ; un nouvel enqueue local ne peut être enregistré sans avoir été synchronisé au serveur.
+Les demandes CI et leurs rapports sont conservés sur le serveur et ramenés dans `coordination-deploiement/requests` et `cicd-rapports` par `queue.mjs sync`. Ces demandes portent serverManaged : ne pas les republier par le lanceur local. Section7 synchronise à chaque reprise pour lire le résultat final. Si la dernière file locale confirmée est vide, une publication manuelle GitHub peut fonctionner même PC éteint ; un nouvel enqueue local ne peut être enregistré sans avoir été synchronisé au serveur.
+
+Le bouton conserve les tests, la file FIFO, les protections GitHub, la sauvegarde, le verrou serveur et la fin naturelle des traitements. Il ne lève pas une dépendance métier ou une divergence de sources. La surveillance Section7 peut préparer et vérifier, mais ne doit plus déclencher de publication automatiquement.
+
+Le bouton conserve les tests, la file FIFO, les protections GitHub, la sauvegarde, le verrou serveur et la fin naturelle des traitements. Il ne lève pas une dépendance métier ou une divergence de sources. La surveillance Section7 peut préparer et vérifier, mais ne doit plus déclencher de publication automatiquement.
