@@ -19,8 +19,7 @@
    // Completed documents suppress current blockers without modifying processing jobs.
    if(ref.closest('tr').dataset.completeOrderDocuments==='true'){box?.remove();button?.remove();continue;}
    if(!r?.stage&&!r?.previewPending&&!r?.priority&&!r?.canPrioritize&&!r?.monitoring?.blocked&&!r?.monitoring?.followUp){box?.remove();button?.remove();continue;}
-   cell.style.setProperty('width','240px','important');body.closest('table').querySelectorAll('thead th')[index].style.setProperty('width','240px','important');
-   if(!box){box=document.createElement('div');box.className='order-processing';box.style.minWidth='220px';box.style.fontSize='12px';box.style.lineHeight='1.4';
+   if(!box){box=document.createElement('div');box.className='order-processing';box.style.minWidth='0';box.style.fontSize='12px';box.style.lineHeight='1.4';
     for(const cls of ['processing-stage','processing-position','processing-elapsed','processing-reason','processing-preview','processing-signals','processing-other','monitoring-last','monitoring-next','monitoring-result','monitoring-step','monitoring-alert']){const line=document.createElement('div');line.className=cls;line.style.overflowWrap='anywhere';if(cls==='processing-other')line.style.whiteSpace='pre-line';if(cls==='processing-preview'){line.style.fontWeight='bold';line.style.color='#8a4b00';}box.append(line);}
     const content=document.createElement('div');content.className='processing-content';content.id='processing-details-'+(++detailsSequence);
     while(box.firstChild)content.append(box.firstChild);
