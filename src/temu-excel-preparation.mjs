@@ -44,13 +44,13 @@ export function temuExcelPreparation(db,local){
      const busy=(await tx.query(`SELECT 1 FROM erp_live_jobs WHERE order_id=$1 UNION ALL SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM temu_label_jobs WHERE reference=$2 AND (attempt_id IS NOT NULL OR jsonb_array_length(packages)>0)`,[o.id,reference])).rows;
      if(busy.length)throw Error('Traitement existant à rapprocher avant raccordement');
      const at=new Date().toISOString(),jobId=randomUUID(),state={...o.suspension,active:false,note:'Import Excel TEMU vérifié ; préparation demandée.',version:randomUUID(),updatedAt:at,updatedBy:user.email};
-     const payload={...(commercial.company?{company:commercial.company,client:commercial.company}:{}),mallId,sourceShop:mallId,currency:commercial.currency,temuExcelCommercial:commercial,manualPreparationRequired:false,manualLabelPurchaseRequired:true,temuExcelPreparation:{fingerprint,mallId,at,user:user.email,jobId},temuOrderDetail:detail,temuDirect:{source:'temu_direct',state:'verified',verifiedAt:at,status:info.status}};
+     const payload={...(commercial.company?{company:commercial.company,client:commercial.company}:{}),mallId,sourceShop:mallId,currency:commercial.currency,temuExcelCommercial:commercial,manualPreparationRequired:false,manualLabelPurchaseRequired:false,temuExcelPreparation:{fingerprint,mallId,at,user:user.email,jobId},temuOrderDetail:detail,temuDirect:{source:'temu_direct',state:'verified',verifiedAt:at,status:info.status}};
      await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb,suspension=$3,issue=null WHERE id=$1',[o.id,JSON.stringify(payload),JSON.stringify(state)]);
      const request={id:o.id,requestId:jobId,action:'resume',type:'resolved'};
      await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$1,'resume',$3)",[jobId,o.id,JSON.stringify(request)]);
      await tx.query("INSERT INTO order_suspension_events(id,order_id,action,user_email,note,state) VALUES($1,$2,'reactivated',$3,$4,$5)",[randomUUID(),o.id,user.email,state.note,JSON.stringify(state)]);
      await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'temu.excel.preparation.requested',$2)",[user.email,JSON.stringify({orderId:o.id,mallId,jobId,fingerprint})]);
-     return {id:o.id,jobId,message:'Préparation BC/BL demandée dans Erplain. L’achat de l’étiquette restera à confirmer.'};
+     return {id:o.id,jobId,message:'Préparation BC/BL demandée dans Erplain. L’étiquette sera achetée automatiquement si les contrôles et la marge le permettent.'};
     });
    },['stock-mutations','temu-order:'+reference,'suspension:'+initial.o.id]);
   }

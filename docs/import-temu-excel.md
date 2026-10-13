@@ -33,7 +33,7 @@ Les prix utilisent `buildBcPricing`, partagé avec Amazon : les colonnes de prix
 
 Après validation du BL et du stock, **Étiquette et marge TEMU** ouvre l’écran TEMU existant. Afficher le tarif, vérifier la marge puis confirmer l’achat. Le moteur commun conserve ses protections contre les doubles achats et récupère le PDF et le suivi. Pour ces commandes Excel, le poids déclaré est **0,25 kg**, les dimensions **10 × 8 × 0,5 cm**, et le dernier créneau admissible de l’offre est retenu selon la limite TEMU. Les dimensions restent soumises à l’acceptation de l’API. Le devis est lié à la préparation ; une modification impose de le refaire.
 
-L’achat automatique est désactivé pour l’origine Excel, même en cas de marge positive. Le calcul de marge reste celui de `/api/margins`, alimenté par les colonnes vendeur Excel, les coûts du référentiel publié et le devis ou coût réel TEMU. Un référentiel absent ou un mapping incompatible donne une marge indisponible ou incomplète.
+L’achat automatique est activé pour les commandes Excel raccordées lorsque les contrôles existants passent et que la marge est strictement positive. Le calcul de marge reste celui de `/api/margins`, alimenté par les colonnes vendeur Excel, les coûts du référentiel publié et le devis ou coût réel TEMU. Un référentiel absent ou un mapping incompatible donne une marge indisponible ou incomplète.
 
 Les routes de raccordement sont `GET /api/temu/excel/orders`, `GET /api/temu/excel/preview` et `POST /api/temu/excel/prepare`. Les contrôles d’accès et de session du serveur principal s’appliquent. Aucun nouvel achat ni document réel n’est effectué par les tests : `node --test test/temu-excel-production.test.mjs` et `npx playwright test test/ui/temu-excel-production.spec.mjs`.
 
@@ -75,7 +75,7 @@ Le parcours Excel utilise les mêmes fonctions `temuShipping.prepare`, `temuShip
 
 Le dialogue d’achat affiche la marge après **Afficher le tarif**. Il appelle `createMarginsService`, le calculateur existant du parcours API : recettes vendeur et contribution HT issues des colonnes Excel, achats et transport fournisseur issus du référentiel publié, puis coût du devis TEMU converti en HT selon la règle existante. Après achat, le calculateur prend le coût d’étiquette retourné par TEMU. Les réductions et contributions ne sont pas comptées deux fois. Les SKU et quantités préparés dans le BC TEST sont comparés au mapping du calculateur ; une différence donne une marge incomplète.
 
-Le détail de marge du tableau utilise également ce service via `/api/margins`. Le fichier privé `src/margin-published-snapshot.json` est nécessaire pour disposer des coûts réels du référentiel. Il est exclu du dépôt : en son absence, le dialogue indique **Marge indisponible**, et le détail retourne une erreur explicite. Aucun coût n’est inventé et une marge incomplète n’est pas présentée comme nulle. L’achat reste une confirmation manuelle, comme le bouton API existant ; ce raccordement n’active pas l’achat automatique sur marge positive.
+Le détail de marge du tableau utilise également ce service via `/api/margins`. Le fichier privé `src/margin-published-snapshot.json` est nécessaire pour disposer des coûts réels du référentiel. Il est exclu du dépôt : en son absence, le dialogue indique **Marge indisponible**, et le détail retourne une erreur explicite. Aucun coût n’est inventé et une marge incomplète n’est pas présentée comme nulle. Dans le serveur local de test, l’achat reste soumis à confirmation manuelle. Dans l’application principale, le worker API existant traite les marges positives ; les autres achats restent manuels.
 
 Vérification : `node --test test/temu-excel-margins.test.mjs test/temu-excel-labels.test.mjs`. Les tests comparent les résultats des sources API et Excel à montants vendeur identiques, vérifient le coût du devis puis de l’étiquette, et couvrent les coûts absents et les mappings différents. Les données de test sont fictives.
 
@@ -88,3 +88,10 @@ Les pages `/status-preview` et `/erplain-test`, ainsi que les routes `/api/local
 La comparaison locale réutilise les règles du moteur de synchronisation, mais ne modifie ni les statuts Nextech ni Erplain. Les suivis GLS/GOFO sont saisis par l’utilisateur ; leur appartenance et leur exhaustivité doivent être vérifiées. Le service principal utilise les colis enregistrés dans Nextech. Publier cette branche n’active pas les écritures Erplain : les contrôles existants `ERPLAIN_LIVE_WRITES`, `MIGRATION_PREPARATION` et l’exclusion du traitement concurrent `lifecycle` restent applicables.
 
 Les exports clients, bases locales, accès API et référentiels privés restent exclus du dépôt.
+
+
+## Achat après préparation Excel
+
+Le worker existant `temuAutomaticPurchaseWorker` traite aussi les commandes Excel raccordées. Il lève uniquement l’attente issue de leur préparation terminée, relit Erplain, valide le BL et le stock, obtient le devis TEMU et recalcule la marge avec ce devis. La marge doit être strictement positive et le transporteur admissible selon la politique API existante (Cainiao exclu). L’achat conserve la protection contre les doublons et son audit.
+
+Une marge nulle, négative ou inconnue ne déclenche aucun achat automatique. Le bouton **Acheter l’étiquette**, dans la ligne de commande dont le BL et le stock sont validés, ouvre directement le dialogue existant avec le prix et la confirmation manuelle. Les contrôles serveur restent appliqués. Ce comportement remplace la règle antérieure d’achat exclusivement manuel pour les imports Excel.

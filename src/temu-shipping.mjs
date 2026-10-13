@@ -113,7 +113,9 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
     if(hash(excelShipmentProof(o,lines))!==current.preparationFingerprint)throw Error('Préparation Excel modifiée avant achat');
     if(o.resolution_pending_resume&&!await completedExcelPreparation(tx,o))throw Error('Préparation Excel modifiée avant achat');
     await assertLabelStockGate(tx,o);
-    return tx.query(claimSql,args);
+    const claimed=await tx.query(claimSql,args);
+    if(proof&&claimed.rows.length)await tx.query('INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) VALUES($1,$2,$3,$4)',[claimed.rows[0].attempt_id,reference,current.id,JSON.stringify(admission.audit)]);
+    return claimed;
    }):db.query(proof?"WITH claimed AS ("+claimSql+") INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) SELECT attempt_id,reference,$11,$12::jsonb FROM claimed RETURNING reference":claimSql,proof?[...args,current.id,JSON.stringify(admission.audit)]:args));if(!claim.rows.length)throw new Error('Achat déjà engagé ou commande/devis modifiés');
    try{const r=await api.buy(current.request);if(!r.packageSnList?.length||r.packageSnList.some(p=>!/^PK-\d+$/.test(p)))throw new Error('Achat sans identifiant vérifiable');await db.query("UPDATE temu_label_jobs SET packages=$2,status='pending',updated_at=now() WHERE reference=$1",[reference,JSON.stringify(r.packageSnList)]);}catch(e){await db.query("UPDATE temu_label_jobs SET status='uncertain',error=$2 WHERE reference=$1",[reference,e.message]);throw new Error('Résultat d’achat incertain. Ne pas racheter : utiliser la récupération et vérifier TEMU.');}
   });return recover(reference);},recover};
