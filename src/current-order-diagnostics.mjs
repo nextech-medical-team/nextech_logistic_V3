@@ -39,7 +39,20 @@ export function paidDeferredBillingDiagnosis(o){
  const matches=typeof o.issue==='string'&&(o.issue===d?.deferredReason||typeof d?.deferredReason==='string'&&o.issue===d.deferredReason.replace(/ ; TEMU · Quota partagé : lecture différée$/,''));
  return d?.kind==='temu_address_masking'&&d.verified===true&&d.deferredBilling===true&&o.invoice_status==='paid'&&matches&&(!d.deferredLabelRead||!!o.temu_job);
 }
+// A past PDF printing refusal is documentary history once the shipment is
+// delivered and registered. Never reopen preparation or fetch a new label for it.
+export function projectTemuPdfArchiveWarning(o){
+ if(o.channel!=='temu'||o.tracking_status!=='delivered'||o.source_payload?.externalLabel?.active!==true)return;
+ const warnings=[];
+ for(const [target,key] of [[o,'issue'],[o,'resolution_error'],[o.erp_live_job,'error'],[o.temu_job,'error'],...(o.resolution_actions||[]).map(j=>[j,'error'])]){
+  const reason=target?.[key];
+  if(typeof reason!=='string'||!/^(?:TEMU\s*[·:]\s*)?(?:Étiquette TEMU déjà achetée\s*:\s*PDF original indisponible|PDF (?:non réimprimable|indisponible))/i.test(reason)||/\b(?:stock|facture|paiement|BC|BL|annulation|préparation)\b/i.test(reason))continue;
+  warnings.push(reason);target[key]=null;
+ }
+ if(warnings.length)o.temu_pdf_archive_note=[...new Set(warnings)].join(' ; ');
+}
 export function projectCurrentDiagnostics(o){
+ projectTemuPdfArchiveWarning(o);
  if(hasCompleteOrderDocuments(o)){
   for(const [target,key] of [[o,'issue'],[o,'resolution_error'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o.pending_equivalent,'error'],...(o.resolution_actions||[]).map(job=>[job,'error']),...(o.sku_lines||[]).map(line=>[line,'catalog_issue'])])if(target)target[key]=null;
   return o;

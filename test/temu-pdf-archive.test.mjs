@@ -62,3 +62,16 @@ test('unreadable archive is preserved and never downloaded again',async t=>{
 test('no PDF ever saved remains an explicit provider refusal, without purchase',async t=>{
  const f=await fixture(t,{warning:true});const j=await f.service.recover(reference);assert.equal(j.status,'document_unavailable');assert.match(j.error,/colis déjà collecté/);assert.equal(f.downloads.length,0);
 });
+
+import {projectCurrentDiagnostics} from '../src/current-order-diagnostics.mjs';
+const pastPdfWarning='Étiquette TEMU déjà achetée : PDF original indisponible (120018027). FedEx TRACK déjà collecté ; conserver cette expédition.';
+test('delivered registered shipment retains PDF refusal as history, preserves ERPLAIN and independent blockers',()=>{
+ const original={channel:'temu',tracking_status:'delivered',source_payload:{externalLabel:{active:true}},issue:pastPdfWarning,temu_job:{status:'external',error:pastPdfWarning},erp_live:{bl:{status:'in_preparation'}},erp_live_job:{status:'review',error:'Stock insuffisant'}};
+ const projected=projectCurrentDiagnostics(structuredClone(original));
+ assert.equal(projected.issue,null);assert.equal(projected.temu_job.error,null);assert.equal(projected.temu_pdf_archive_note,pastPdfWarning);
+ assert.equal(projected.erp_live.bl.status,'in_preparation');assert.equal(projected.erp_live_job.error,'Stock insuffisant');assert.equal(original.issue,pastPdfWarning);
+});
+for(const variant of [{tracking_status:'in_transit'},{source_payload:{}},{issue:pastPdfWarning+' ; Stock insuffisant'},{channel:'shopify'}])test('PDF history projection requires proof and does not hide unrelated blockers '+JSON.stringify(variant),()=>{
+ const original={channel:'temu',tracking_status:'delivered',source_payload:{externalLabel:{active:true}},issue:pastPdfWarning,...variant};
+ assert.equal(projectCurrentDiagnostics(structuredClone(original)).issue,original.issue);
+});
