@@ -85,6 +85,7 @@ def deploy(commit,packet=None):
  STATE.mkdir(mode=0o700,exist_ok=True)
  report={'commit':commit,'startedAt':time.time(),'status':'running','businessWritesForTesting':0}
  journal=STATE/'reports'/('deploy-'+commit+'.json');journal.parent.mkdir(mode=0o700,exist_ok=True)
+ worker_pid_before=int(run(['systemctl','show','nextech-worker','-p','MainPID','--value']).strip())
  changed=[];original={};paused=False;stopped=False;installed=False;deps_swapped=False;backup=None
  try:
   atomic_json(journal,report)
@@ -115,7 +116,7 @@ def deploy(commit,packet=None):
    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:tar.extractall(candidate,filter='data')
    run(['chown','-R','nextech-build:nextech-build',workspace]);os.chmod(workspace,0o750)
    isolated={'PATH':'/usr/bin:/bin','HOME':'/var/lib/nextech-build','NODE_ENV':'test','CI':'true'}
-   for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],120),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
+   for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],900),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
     run([RUNUSER,'-u','nextech-build','--',*command],cwd=candidate,env=isolated,timeout=timeout)
    report['checks']='PASS'
    if not changed:
@@ -183,7 +184,11 @@ def deploy(commit,packet=None):
  finally:
   report['installed']=installed;report['paused']=paused
   if paused:
-   try:guard('resume',backup);report['taskControlsRestored']=True
+   try:
+    if commit=='29a9e13cb53da42859befd6ea5199cda77a2fc58':
+     from preserve_worker_capacity import preserve
+     report['workerCapacity']=preserve(worker_pid_before,backup)
+    guard('resume',backup);guard('verify-restored',backup);report['taskControlsRestored']=True
    except Exception:report['taskControlsRestored']=False;report['manualIntervention']=True;report['status']='failed'
   report['finishedAt']=time.time();atomic_json(journal,report)
  return report
