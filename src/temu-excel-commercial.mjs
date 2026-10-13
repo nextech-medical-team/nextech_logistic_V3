@@ -1,3 +1,4 @@
+import {excelOriginalLines} from './temu-excel-identity.mjs';
 import {createHash} from 'node:crypto';
 const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const cents=v=>Math.round(v*100);
@@ -39,6 +40,6 @@ export function excelCommercialSource(order,lines){
 export function verifiedExcelCommercial(order,lines){
  const saved=order.source_payload?.temuExcelCommercial;
  if(!saved?.fingerprint||saved.source!=='temu_excel'||!Number.isFinite(saved.total)||!Number.isFinite(saved.tax)||!/^[A-Z]{3}$/.test(saved.currency||''))throw Error('Excel : validation commerciale requise avant préparation');
- if(lines){const current=excelCommercialSource(order,lines);if(current.fingerprint!==saved.fingerprint||current.total!==saved.total||current.tax!==saved.tax||current.currency!==saved.currency)throw Error('Excel : prix ou articles modifiés depuis la validation');return current;}
+ if(lines){const current=excelCommercialSource(order,excelOriginalLines(order,lines));if(current.fingerprint!==saved.fingerprint||current.total!==saved.total||current.tax!==saved.tax||current.currency!==saved.currency)throw Error('Excel : prix ou articles modifiés depuis la validation');return current;}
  return saved;
 }

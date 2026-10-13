@@ -1,4 +1,11 @@
+export function excelOriginalLines(o,lines){
+ if(o.erp_live?.equivalentOriginalLines===undefined)return lines;
+ const original=o.erp_live.equivalentOriginalLines;
+ if(!Array.isArray(original)||!original.length||original.some(l=>!l.source_line||!l.source_sku||!Number.isSafeInteger(Number(l.quantity))||Number(l.quantity)<=0)||new Set(original.map(l=>String(l.source_line))).size!==original.length)throw Error('Excel : articles d’origine du remplacement absents ou invalides');
+ return original;
+}
 export function verifyExcelTemuDetail(o,lines,detail){
+ lines=excelOriginalLines(o,lines);
  if(detail?.parentOrderMap?.parentOrderSn!==o.reference||!Array.isArray(detail.orderList)||!lines.length||lines.length!==detail.orderList.length)throw Error('Articles différents entre Excel et TEMU');
  const seen=new Set();
  for(const l of lines){

@@ -1,3 +1,4 @@
+import {temuLabelPolicyMessage} from './temu-label-policy.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {advanceEquivalentLabel} from './equivalent-auto-label.mjs';
 import {regenerateProductionLabels} from './label-regeneration.mjs';
@@ -16,7 +17,7 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
    result={...(current.result||{}),...(result||{}),statusVerification};
    if(statusVerification.state==='needs_review')stage='Intervention effectuée · commande à vérifier';
   }
-  return db.query("UPDATE resolution_jobs SET status=$2,stage=$3,result=coalesce($4::jsonb,result),error=$5,updated_at=now() WHERE id=$1 AND status='waiting'",[id,status,stage,result?JSON.stringify(result):null,error]);
+  return db.query("UPDATE resolution_jobs SET status=$2,stage=$3,result=coalesce($4::jsonb,result),error=$5,updated_at=now() WHERE id=$1 AND (status='waiting' OR status='review' AND error=$6)",[id,status,stage,result?JSON.stringify(result):null,error,temuLabelPolicyMessage]);
  };
 
  async function advance(j){
@@ -31,7 +32,7 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
      if(erp?.status==='review'){await update(j.id,'review','Erplain à compléter',j.result,erp.error);return;}
 
-     const automatic=await advanceEquivalentLabel(db,j);
+     const automatic=await advanceEquivalentLabel(db,j,{repair:j.status==='review'&&j.error===temuLabelPolicyMessage});
      if(automatic.handled){
       const current=(await db.query('SELECT status,result FROM resolution_jobs WHERE id=$1',[j.id])).rows[0];
       if(current?.status==='complete'){
@@ -87,7 +88,7 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
   try{
 
-   const jobs=(await db.query("SELECT * FROM resolution_jobs WHERE status='waiting' ORDER BY updated_at,order_id LIMIT 25")).rows;
+   const jobs=(await db.query("SELECT r.* FROM resolution_jobs r JOIN orders o ON o.id=r.order_id WHERE r.status='waiting' OR (r.status='review' AND r.error=$1 AND r.action='replace-equivalent' AND o.channel='temu' AND o.transport_choice IS NULL AND NOT o.archived) ORDER BY r.updated_at,r.order_id LIMIT 25",[temuLabelPolicyMessage])).rows;
 
    for(const j of jobs){try{await advance(j);}catch(e){await update(j.id,'review','À vérifier',null,e.message);}}
 
