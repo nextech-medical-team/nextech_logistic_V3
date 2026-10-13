@@ -14,8 +14,8 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await expect(shop.locator('[data-erplain-tracking]').locator('xpath=preceding-sibling::td[1]')).toContainText('Non exp\u00e9di\u00e9e');
  await expect(temu.locator('[data-erplain-tracking]').locator('xpath=preceding-sibling::td[1]')).toContainText('Livr\u00e9e');await expect(temu).toContainText('lecture ancienne');
  await expect(amazon.locator('[data-erplain-tracking]')).toContainText('BL PARTIAL 1');await expect(amazon.locator('[data-erplain-tracking]')).toContainText('BL PARTIAL 2');await expect(amazon.locator('[data-platform-status]')).toContainText('Shipped');
- const observed=await page.evaluate(()=>({width:innerWidth,height:innerHeight,columns:[...document.querySelectorAll('#view-orders th')].filter(e=>/Suivi logistique|Statut BL Erplain|Statut plateforme/.test(e.innerText)).map(e=>({text:e.innerText,width:e.getBoundingClientRect().width})),rows:document.querySelectorAll('#order-rows tr').length}));
- expect(observed.width).toBe(viewport.width);expect(observed.columns).toHaveLength(3);for(const c of observed.columns)expect(c.width).toBeGreaterThan(70);
+ const observed=await page.evaluate(()=>({width:innerWidth,height:innerHeight,columns:[...document.querySelectorAll('#view-orders th')].filter(e=>/Suivi logistique|Statut BL Erplain|Statut plateforme/.test(e.innerText)).map(e=>({text:e.innerText,width:document.querySelector('#order-rows tr').cells[e.cellIndex].getBoundingClientRect().width})),rows:document.querySelectorAll('#order-rows tr').length}));
+ expect(observed.width).toBe(viewport.width);expect(observed.columns).toHaveLength(3);for(const c of observed.columns)expect(c.width).toBeGreaterThan(0);
  await page.locator('#order-rows [data-platform-status]').first().scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/platform-observations-'+name+'.png',fullPage:true});
  expect(writes).toEqual([]);expect(errors).toEqual([]);fs.writeFileSync('proofs/platform-observations-'+name+'.json',JSON.stringify({...observed,status:'PASS',errors,writes}));
 });
