@@ -1,11 +1,23 @@
 import {initializeOperations} from './runtime.mjs';
 import {installEventTriggers} from './live-events.mjs';
 const version='application-20261005-robustness-5';
+const carrierManualVersion='carrier-manual-bl-request-20261013-1';
 export async function initializeAppSchema(db,initializers,{background=false}={}){
  await db.withLocks(['schema'],async()=>{
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',[version])).rows.length){
    await db.transaction(async tx=>{tx.recoverInterrupted=false;await initializeOperations(tx);for(const initialize of initializers)await initialize(tx);await installEventTriggers(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',[version]);});
   }
+  // Incremental migration: existing installations already have the application
+  // marker, so adding DDL to an initializer alone does not upgrade them.
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',[carrierManualVersion])).rows.length){
+   await db.transaction(async tx=>{
+    await tx.exec('ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS manual_bl_request JSONB');
+    await tx.query('SELECT jsonb_typeof(manual_bl_request) FROM carrier_jobs LIMIT 0');
+    await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',[carrierManualVersion]);
+   });
+  }
+  // Fail startup if the recorded migration and the actual schema diverge.
+  await db.query('SELECT jsonb_typeof(manual_bl_request) FROM carrier_jobs LIMIT 0');
  });
  if(background)await recoverInterruptedJobs(db);
 }
