@@ -15,7 +15,7 @@ const units=v=>{
 };
 const qty=v=>units(v)!==null;
 const time=v=>v instanceof Date?v.getTime():typeof v==='string'?Date.parse(v):NaN;
-const fingerprint=(o,lines)=>createHash('sha256').update(JSON.stringify({id:o.id,address:o.address,weight:o.weight_kg,lines:lines.map(l=>({source_sku:l.source_sku,target_sku:l.target_sku,quantity:l.quantity,target_quantity:l.target_quantity}))})).digest('hex');
+const fingerprint=(o,lines)=>createHash('sha256').update(JSON.stringify({id:o.id,address:o.address,weight:o.weight_kg,lines:usesRecordedBc(o)?{authority:"recorded_bc",bcId:String(o.erp_live.bc.id)}:lines.map(l=>({source_sku:l.source_sku,target_sku:l.target_sku,quantity:l.quantity,target_quantity:l.target_quantity}))})).digest('hex');
 
 // This proof concerns only the superseded preparation-fingerprint rejection.
 // It is never permission to create a shipment, resume an order or debit stock.
@@ -36,7 +36,7 @@ export function carrierPrevalidationProof(o,c,e,lines,bc,{now=Date.now()}={}){
  const selected=bc.shipping_orders.data.find(b=>String(b.id)===String(s.bl.id));
  if(selected?.status!=='ready_to_ship'||!Array.isArray(selected.line_items))return fail('provider_bl_not_ready');
  const local=new Map(),actual=new Map(),identities=new Map(),parents=new Set(),proofLines=[];
- for(const l of lines)local.set(l.target_sku,(local.get(l.target_sku)||0n)+units(l.target_quantity));
+ if(!usesRecordedBc(o))for(const l of lines)local.set(l.target_sku,(local.get(l.target_sku)||0n)+units(l.target_quantity));
  for(const l of selected.line_items){
   if(l.type==='shipping_cost')continue;
   if(l.type!=='normal'||!id(l.parent_id)||parents.has(String(l.parent_id))||!id(l.variant?.id)||typeof l.variant.sku!=='string'||!l.variant.sku.trim()||!id(l.location?.id)||!qty(l.quantity))return fail('provider_bl_lines_invalid');

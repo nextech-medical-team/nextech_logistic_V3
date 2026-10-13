@@ -58,3 +58,17 @@ test('PO-079 recovery changes only local commercial checkpoint; keeps BC, stock,
   assert.deepEqual(await retirePostBcCommercialControls(wrapper,api,{orderId:order.id}),[]);assert.equal(queries.length,1);
  }finally{await db.close();}
 });
+
+import {carrierPrevalidationProof,preparationChangedError} from '../src/carrier-prevalidation-diagnostic.mjs';
+test('recorded BC carrier proof ignores absent or invalid source quantities and retains document checks',()=>{
+ const t='2026-10-13T17:00:00Z',earlier='2026-10-13T16:00:00Z';
+ const line={id:'1',type:'normal',quantity:1,variant:{id:'44',sku:'BC-SKU'},location:{id:'100934'}};
+ const bl={id:'2',status:'ready_to_ship',line_items:[{...line,parent_id:'1'}]};
+ const doc={...bc,line_items:[line],shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}};
+ const o={...order,error:null,issue:null,tracking_status:'not_shipped',label_status:'blocked',erp_live:{bc:{id:bc.id,status:'active'},bl:{id:'2',status:'ready_to_ship'},phase:'bl_ready',verifiedAt:t,stockCheckedAt:t}};
+ const c={status:'failed',error:preparationChangedError,environment:'production',result:null,tracking:[],document_count:0,stock_override:null,updated_at:earlier},e={status:'complete',error:null,updated_at:t};
+ for(const lines of [[],[{target_sku:'DIFFERENT',target_quantity:null}],[{target_sku:'OTHER',target_quantity:'invalid'}]]){
+  assert.equal(carrierPrevalidationProof(o,c,e,lines,doc,{now:Date.parse(t)}).verified,true);
+  assert.equal(carrierPrevalidationProof(o,c,e,lines,{...doc,id:'wrong'},{now:Date.parse(t)}).verified,false);
+ }
+});
