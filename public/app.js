@@ -196,7 +196,7 @@ async function audit(){const r=await api('/api/audit');$('audit-rows').innerHTML
 
 async function show(view){currentView=view;document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+view);document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));$('title').textContent=({orders:'Commandes',imports:'Imports','import-shopify':'Import Shopify',mappings:'Correspondances SKU',products:'Poids produits',connections:'Connexions',users:'Équipe',audit:'Journal des actions'})[view];try{if(view==='orders')await Promise.all([stats(),orders()]);if(view==='products')await products();if(view==='mappings')await mappings();if(view==='users')await users();if(view==='audit')await audit();if(view==='connections')await catalogStatus();}catch(e){flash(e.message,true);}}
 
-async function enter(){user=await api('/api/me');$('login').hidden=true;$('app').hidden=false;$('identity').textContent=user.email+' · '+user.role;document.querySelector('[data-view="users"]').hidden=user.role!=='admin';document.querySelector('[data-view="audit"]').hidden=!['admin','manager'].includes(user.role);document.querySelectorAll('[data-view="imports"],[data-view="import-shopify"]').forEach(el=>el.hidden=!['admin','manager','operator'].includes(user.role));$('deliver').hidden=!['admin','manager'].includes(user.role);$('tracking').hidden=!['admin','manager','operator'].includes(user.role);await show('orders');await refreshErplainProgress();}
+async function enter(){user=await api('/api/me');$('session-loading').hidden=true;$('login').hidden=true;$('app').hidden=false;$('identity').textContent=user.email+' · '+user.role;document.querySelector('[data-view="users"]').hidden=user.role!=='admin';document.querySelector('[data-view="audit"]').hidden=!['admin','manager'].includes(user.role);document.querySelectorAll('[data-view="imports"],[data-view="import-shopify"]').forEach(el=>el.hidden=!['admin','manager','operator'].includes(user.role));$('deliver').hidden=!['admin','manager'].includes(user.role);$('tracking').hidden=!['admin','manager','operator'].includes(user.role);await show('orders');await refreshErplainProgress();}
 
 $('login-form').onsubmit=async e=>{e.preventDefault();try{if(setup)await api('/api/setup',{email:$('email').value,password:$('password').value,token:$('setup-token').value});await api('/api/login',{email:$('email').value,password:$('password').value});$('password').value='';$('setup-token').value='';history.replaceState(null,'','/');await enter();}catch(e){$('login-error').textContent=e.message;}};
 
@@ -236,7 +236,7 @@ $('user-form').onsubmit=async e=>{e.preventDefault();try{await api('/api/users',
 
 async function init(){const s=await api('/api/status');setup=s.setupNeeded;if(setup){$('login-title').textContent='Bienvenue dans V3.';$('login-help').textContent='Créez votre compte administrateur. Le lien d’initialisation est dans data/premiere-connexion.txt.';$('token-label').hidden=false;$('setup-token').value=new URLSearchParams(location.hash.slice(1)).get('setup')||'';$('password').autocomplete='new-password';}else{try{await enter();}catch{}}}
 
-const startApp=()=>init().catch(e=>$('login-error').textContent=e.message);
+const startApp=async()=>{try{await init();}catch(e){$('login-error').textContent=e.message;}finally{$('session-loading').hidden=true;$('login').hidden=!$('app').hidden;}};
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',startApp,{once:true});else startApp();
 
