@@ -28,7 +28,7 @@
    }
    box.hidden=!r.stage&&!r.priority&&!r.previewPending&&!r.monitoring?.blocked&&!r.monitoring?.followUp;
    const expanded=expandedOrders.has(ref.dataset.detail);box.classList.toggle('processing-expanded',expanded);
-   const toggle=box.querySelector('.processing-details-toggle');toggle.setAttribute('aria-expanded',String(expanded));setText(toggle,expanded?'▴ Replier les détails':'▾ Afficher les détails');
+   const toggle=box.querySelector('.processing-details-toggle');toggle.setAttribute('aria-expanded',String(expanded));setText(toggle,expanded?'▴ Replier':'▾ Détails');
    // Stored monitoring can predate the current carrier choice. Keep every
    // independent reason and the recorded control state until its next check.
    const carrierMessage=raw=>{
@@ -75,7 +75,7 @@
  }
  body.addEventListener('click',async event=>{
   const details=event.target.closest('[data-processing-details]');
-  if(details){event.preventDefault();event.stopPropagation();const id=details.dataset.processingDetails,expanded=!expandedOrders.has(id);if(expanded)expandedOrders.add(id);else expandedOrders.delete(id);details.closest('.order-processing').classList.toggle('processing-expanded',expanded);details.setAttribute('aria-expanded',String(expanded));setText(details,expanded?'▴ Replier les détails':'▾ Afficher les détails');return;}
+  if(details){event.preventDefault();event.stopPropagation();const id=details.dataset.processingDetails,expanded=!expandedOrders.has(id);if(expanded)expandedOrders.add(id);else expandedOrders.delete(id);details.closest('.order-processing').classList.toggle('processing-expanded',expanded);details.setAttribute('aria-expanded',String(expanded));setText(details,expanded?'▴ Replier':'▾ Détails');return;}
 
   const button=event.target.closest('[data-priority-order]');if(!button)return;event.preventDefault();event.stopPropagation();button.disabled=true;
   try{const enabled=button.dataset.enabled!=='true';await api('/api/orders/priority',{id:button.dataset.priorityOrder,enabled});flash(enabled?'Priorité enregistrée pour la reprise. Les blocages restent à corriger et les traitements en cours continuent.':'Priorité retirée.');await refresh();}

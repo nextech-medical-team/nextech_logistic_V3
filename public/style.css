@@ -225,3 +225,14 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 #view-orders .orders-with-margins [data-country-margin] .order-country{flex-wrap:wrap;overflow-wrap:anywhere}
 
 #view-orders table.orders-with-margins th[data-column="select"]{width:28px!important}
+
+/* Narrow screens show every field as a labelled block, without horizontal scrolling. */
+@media(max-width:900px){
+ #view-orders table.orders-with-margins,#view-orders .orders-with-margins tbody,#view-orders .orders-with-margins tr{display:block;width:100%}
+ #view-orders .orders-with-margins thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ #view-orders .orders-with-margins td:not(.total-quantity-column){display:block;width:100%!important;padding:10px 12px!important;overflow-wrap:anywhere}
+ #view-orders .orders-with-margins td[data-order-column]::before{content:attr(data-order-column);display:block;font-weight:700;color:#24444e;margin-bottom:6px}
+ #view-orders .orders-with-margins td:first-child::before{content:"Sélection"}
+ #view-orders .orders-with-margins tbody tr{border-bottom:3px solid #cadbd5}
+ #view-orders .orders-with-margins [data-country-margin] .order-country{flex-wrap:wrap}
+}
