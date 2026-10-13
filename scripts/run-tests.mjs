@@ -3,4 +3,5 @@ const groups=[["--test","test/receipt-recovery.test.mjs","test/receipt-recovery-
 groups.at(-1).push('test/import-bc-commercial.test.mjs','test/historical-reservation-before-bl.test.mjs');
 groups.at(-1).push('test/abandon-equivalent.test.mjs');
 groups.at(-1).push('test/abandon-tracking-preservation.test.mjs');
+groups.at(-1).push('test/stock-information.test.mjs');
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

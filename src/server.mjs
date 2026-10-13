@@ -19,6 +19,7 @@ import {initializeStockResumeWatch,stockResumeWorker} from './stock-resume-watch
 import {initializeShopifyObservation,shopifyObservationWorker,shopifyObservationRoutes} from './shopify-observation.mjs';
 import {readingService} from './temu-reading.mjs';
 import {initializeEquivalences,equivalenceApi} from './equivalence-catalog.mjs';
+import {stockInformationService} from './stock-information.mjs';
 import {initializeV2Followup,v2Worker,v2Routes} from './v2-followup.mjs';
 import {currentPartialSkuPdf} from './label-sku-copy.mjs';
 import {initializeSkuCopies} from './label-sku-copy.mjs';
@@ -204,6 +205,7 @@ const partialTimer=backgroundInterval(()=>partialWorker.run(),1500,'partials');p
 
 for(const carrier of ['gls','gofo'])backgroundInterval(async()=>{if(carrierWorkers)await carrierWorkers.run(carrier);},1000,'carrier-'+carrier);
 
+const stockInformation=stockInformationService(db,erplainAccount(directory,'source'),directory);
 const catalog=createCatalogSync(db,directory); const allWeights=fullWeightSync(db,directory),equivalents=equivalentService(db,directory);
 
 await db.query(`UPDATE jobs SET status='pending',available_at=now() WHERE kind='label' AND status='blocked'`);
@@ -264,7 +266,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/stock-information.js','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -397,6 +399,7 @@ const server=http.createServer(async(req,res)=>{
     if(await receiptRecovery.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await resolutions.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await correctionsApi({p,url,req,res,db,user,body,json,permitted,directory}))return;
+    if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku')));return;}
     if(await equivalenceApi({p,url,req,res,db,user,body,json,permitted,api:erplainAccount(directory,'source'),directory}))return;
     if(await workspaceApi({p,url,req,res,db,user,body,json,permitted,audit,catalog,carrierConfigured:!!carrierWorkers&&!!productionConfig}))return;
 
