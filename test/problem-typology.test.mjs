@@ -45,6 +45,7 @@ async function route(path,query){
  const rows=Array.from({length:120},(_,i)=>({id:String(i),issue:i>=100?'Commande déjà expédiée sur la plateforme':'',label_status:'pending',source_payload:{},sku_lines:[]}));
  let out,sql,statsIds;
  const db={query:async(q,args)=>{if(q.startsWith('SELECT id FROM orders'))return {rows:rows.filter(o=>o.issue).map(o=>({id:o.id}))};sql={q,args};return {rows:structuredClone(rows)};}};
+ db.readTransaction=read=>read(db);
  await execute(path,{method:'GET'},new URL('https://example.test'+path+'?'+query),db,orderQuery,'NULL','NULL',async()=>{},o=>o,{snapshot:async()=>({configured:true})},{status:()=>({})},selectProblemOrders,paginateProblemOrders,currentProblemClassifier,async(_db,_params,ids)=>{statsIds=ids;return {transportStats:[],summary:{total:ids.length}};},async()=>({transportStats:[],summary:{total:120}}),(_res,status,data)=>{assert.equal(status,200);out=data;},{});
  return {out,sql,statsIds};
 }
