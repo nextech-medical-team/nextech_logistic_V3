@@ -6,6 +6,22 @@
  document.querySelector('main').append(section);
  const feedback=section.querySelector('[data-feedback]'),apply=section.querySelector('[data-apply]'),selected=new Set(),known=new Set();
  let batchId=null,batch=null,timer=null,busy=false;
+ const downloads=document.createElement('div');downloads.className='actions';
+ const help=document.createElement('p');help.textContent='Exportez les lignes des commandes en rupture, choisissez les SKU dans l’onglet Équivalents proposés, puis complétez Onglet type. Supprimez les lignes que vous ne souhaitez pas remplacer. Consultez Contrôles pour les commandes non vérifiées ou exclues. Aucun remplacement au téléchargement.';
+ section.querySelector('form').before(downloads,help);
+ for(const [path,label] of [['template','Télécharger le modèle Excel'],['shortages','Exporter les ruptures et équivalents']]){
+  const button=document.createElement('button');button.type='button';button.textContent=label;downloads.append(button);
+  button.onclick=async()=>{
+   const buttons=[...downloads.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);feedback.textContent=path==='shortages'?'Lecture des commandes et des stocks Erplain… Cette vérification peut prendre plusieurs minutes.':'Préparation du modèle…';
+   try{
+    let result=await api('/api/equivalence-import/'+path);
+    if(result.id){const id=result.id;while(result.status==='checking'){await new Promise(resolve=>setTimeout(resolve,2000));result=await api('/api/equivalence-import/export?id='+encodeURIComponent(id));}if(result.status==='failed')throw Error(result.error);}
+    const bytes=Uint8Array.from(atob(result.file),c=>c.charCodeAt(0));
+    const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),link=document.createElement('a');link.href=url;link.download=result.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+    feedback.textContent=path==='shortages'?result.rows+' ligne(s) en rupture exportée(s). '+result.unverified+' commande(s) non vérifiable(s) : consultez Contrôles dans le fichier.':'Modèle téléchargé : remplissez Onglet type puis analysez le fichier.';
+   }catch(e){feedback.textContent=e.message;}finally{buttons.forEach(b=>b.disabled=false);}
+  };
+ }
  const history=document.createElement('select');history.setAttribute('aria-label','Reprendre un import récent');history.append(new Option('Imports récents…',''));section.querySelector('form').after(history);
  async function loadHistory(){const h=await api('/api/equivalence-import/history');history.replaceChildren(new Option('Imports récents…',''));for(const r of h.rows)history.append(new Option(new Date(r.created_at).toLocaleString('fr-FR')+' · '+r.status,r.id));if(batchId)history.value=batchId;}
  history.onchange=()=>{if(!history.value)return;batchId=history.value;selected.clear();known.clear();clearTimeout(timer);refresh();};
