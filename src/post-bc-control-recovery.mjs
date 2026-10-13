@@ -1,10 +1,12 @@
 import {usesRecordedBc,readRecordedBc} from './existing-bc-execution.mjs';
 import {cancellationBlock} from './erp-transient-policy.mjs';
+import {oldFinanceErrors} from './current-order-diagnostics.mjs';
 
 // Deliberately excludes stock discrepancies, provider refusals, cancellation
 // and uncertain mutation errors. Retire an entire reason only when recognized.
 export function retiredCommercialControl(message){
  const text=String(message||'');
+ if(oldFinanceErrors.includes(text))return true;
  if(/incertaine|à vérifier :|mouvement|sortie de stock|Écart BC\/BL/i.test(text))return false;
  return /^BC · (?:Base fiscale des prix Erplain différente ou absente|Produits ou quantités des lignes Erplain différents de la source|Codes TVA Erplain différents de la source ; produits et quantités identiques|Contrôle des (?:montants|remises et écotaxes) Erplain incomplet|Prix, remises ou écotaxes des lignes Erplain différents de la source|Montants source à récupérer avant préparation|Montant Erplain non reçu|Prix de ligne Erplain absent ou invalide|Montants des lignes source (?:incomplets|incohérents)|Somme des lignes source incohérente|Précision du prix Erplain non conforme|Prix source non relié à ses montants|Montant décimal source non relié à sa ligne|Remise ou écotaxe de ligne absente ou invalide|Total Erplain .+ différent du total source .+|TVA Erplain .+ différente de la TVA source .+)$/.test(text)
  || /^Commande V3 et (?:BC|livraison existante) différents? : (?:comparer les produits et quantités avant de générer l’étiquette|vérifier les produits et quantités avant reprise|vérifier les quantités avant (?:reprise|dérogation))$/.test(text);
@@ -18,8 +20,8 @@ export function postBcRecoveryEligible(o){
 export async function retirePostBcCommercialControls(db,api,{orderId=null}={}){
  const rows=(await db.query(`SELECT o.*,e.error FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
  WHERE e.status='review' AND o.erp_live->'bc'->>'id' IS NOT NULL AND NOT o.archived
- AND (e.error LIKE 'BC · %' OR e.error LIKE 'Commande V3 et %')
- AND ($1::text IS NULL OR o.id=$1) ORDER BY e.updated_at`,[orderId])).rows;
+ AND (e.error LIKE 'BC · %' OR e.error LIKE 'Commande V3 et %' OR e.error=ANY($2::text[]))
+ AND ($1::text IS NULL OR o.id=$1) ORDER BY e.updated_at`,[orderId,oldFinanceErrors])).rows;
  const results=[];
  let attempted=0;for(const o of rows){
   if(!postBcRecoveryEligible(o))continue;

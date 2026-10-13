@@ -100,7 +100,9 @@ test('same TEMU shipping engine requires validated production BL, quotes 0.25 kg
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,created_at) VALUES('later','o','refresh','queued',now()+interval '1 minute')");
  await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/préparation à terminer/);assert.equal(f.bought,0);
  await f.db.query("DELETE FROM resolution_jobs WHERE id='later'");
- f.detail.orderList[0].quantity=4;await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/quantités/);assert.equal(f.bought,0);f.detail.orderList[0].quantity=5;
+ await f.db.query("UPDATE lines SET quantity=99 WHERE order_id='o'");
+ await f.db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{pricing}','{\"status\":\"blocked\",\"error\":\"BC · Base fiscale des prix Erplain différente ou absente\"}') WHERE id='o'");
+ f.detail.orderList[0].quantity=4; // Read current provider information without comparing commercial quantities after BC creation.
  const result=await shipping.buy(reference,plan.id,plan.amount);assert.equal(result.status,'complete');assert.equal(f.bought,1);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
 });
 
