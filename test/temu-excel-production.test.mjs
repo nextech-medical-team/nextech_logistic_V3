@@ -15,7 +15,7 @@ async function fixture(t){
  await db.exec(`ALTER TABLE orders ADD COLUMN erp_live jsonb NOT NULL DEFAULT '{}',ADD COLUMN weight_kg numeric,ADD COLUMN transport_choice text,ADD COLUMN partial_mode boolean DEFAULT false;
  ALTER TABLE lines ADD COLUMN target_sku text,ADD COLUMN target_quantity numeric;
  CREATE TABLE erp_live_jobs(order_id text,status text,error text);
- CREATE TABLE resolution_jobs(id text,order_id text,request_id text,action text,payload jsonb,status text DEFAULT 'queued',stage text DEFAULT 'En attente',error text,created_at timestamptz DEFAULT now());`);
+ CREATE TABLE resolution_jobs(id text,order_id text,request_id text,action text,payload jsonb,result jsonb,status text DEFAULT 'queued',stage text DEFAULT 'En attente',error text,created_at timestamptz DEFAULT now());`);
  await initializeTemuShipping(db);
  await db.query("INSERT INTO orders(id,channel,reference,recipient,address,source_date,source_payload,suspension,tracking_status,resolution_pending_resume) VALUES('o','temu',$1,'Client fictif',$2,'2026-10-12',$3,$4,'not_shipped',true)",[reference,JSON.stringify({country:'HR',street:'Rue fictive',postal:'10000',city:'Ville'}),JSON.stringify({origin:'temu_excel',manualPreparationRequired:true}),JSON.stringify({active:true,note:excelImportHold,version:'initial'})]);
  const excel={'Prix de vente (hors taxes)':'67,25€','Total du prix de vente après réductions (hors taxes)':'67,25€','Taxe sur les produits':'16,80€',"Total de l'expédition (hors taxes)":'0€',"Taxe d'expédition":'0€'};
@@ -41,7 +41,7 @@ test('production validation is explicit, atomic and idempotent; queues the exist
  const results=await Promise.all([f.service.prepare({...b,mallId:"untrusted-browser-value"},user),f.service.prepare(b,user)]);assert.equal(results.filter(r=>r.replayed).length,1);
  const resumed=await f.service.preview(reference);assert.equal((await f.service.prepare({...b,fingerprint:resumed.fingerprint},user)).replayed,true);
  const o=await f.read();assert.equal(o.suspension.active,false);assert.equal(o.source_payload.mallId,'123');assert.equal(o.resolution_pending_resume,true);assert.equal(o.source_payload.temuExcelCommercial.total,84.05);
- const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.match(automaticPreparationHold(o),/achat manuel/);
+ const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.ok(automaticPreparationHold(o));
 });
 test('SKU, quantity, reference, cancellation and stale preview cannot release the import hold',async t=>{
  const f=await fixture(t),b=await f.input(),original=structuredClone(f.detail);
@@ -84,7 +84,22 @@ test('same TEMU shipping engine requires validated production BL, quotes 0.25 kg
  await assert.rejects(shipping.prepare(reference),/BL validé/);
  const proof=await shipmentFingerprint(f.db,await f.read()),at=new Date().toISOString();
  await f.db.query("UPDATE orders SET erp_live=$1 WHERE id='o'",[JSON.stringify({bc:{id:'bc'},bl:{id:'bl',status:'ready_to_ship'},verifiedAt:at,stockCheckedAt:at,labelPreparationFingerprint:proof})]);await f.db.query("INSERT INTO erp_live_jobs VALUES('o','complete',null)");
+ // Reproduce the waiting worker's document-only completion: manual hold remains.
+ await f.db.query("UPDATE orders SET resolution_pending_resume=true WHERE id='o'");
+ await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
+ await f.db.query("UPDATE resolution_jobs SET status='complete',result='{\"erpOnly\":true}' WHERE order_id='o'");
+ await f.db.query("UPDATE erp_live_jobs SET status='review' WHERE order_id='o'");
+ await assert.rejects(shipping.prepare(reference),/BL validé/);
+ await f.db.query("UPDATE erp_live_jobs SET status='complete' WHERE order_id='o'");
+ await f.db.query("UPDATE resolution_jobs SET error='Contrôle à reprendre' WHERE order_id='o'");
+ await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
+ await f.db.query("UPDATE resolution_jobs SET error=null WHERE order_id='o'");
  const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'0.25');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
+ assert.equal((await f.read()).resolution_pending_resume,true);
+ assert.ok(automaticPreparationHold(await f.read()));
+ await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,created_at) VALUES('later','o','refresh','queued',now()+interval '1 minute')");
+ await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/préparation à terminer/);assert.equal(f.bought,0);
+ await f.db.query("DELETE FROM resolution_jobs WHERE id='later'");
  f.detail.orderList[0].quantity=4;await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/quantités/);assert.equal(f.bought,0);f.detail.orderList[0].quantity=5;
  const result=await shipping.buy(reference,plan.id,plan.amount);assert.equal(result.status,'complete');assert.equal(f.bought,1);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
 });
@@ -103,4 +118,28 @@ test('dedicated Excel preparation rejects customer holds and every recorded Erpl
  assert.equal(f.calls.length,0);
  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
  assert.equal(f.bought,0);
+});
+
+test('Excel uses the existing automatic worker: only positive quote-matched margin buys once and records its audit',async t=>{
+ const {initializeTemuAutomaticPurchase,temuAutomaticPurchaseWorker}=await import('../src/temu-automatic-purchase.mjs');
+ const f=await fixture(t);await f.service.prepare(await f.input(),user);
+ await f.db.exec("ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false;CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE extra_parcels(order_id text);");
+ await initializeTemuAutomaticPurchase(f.db);
+ const at=new Date().toISOString(),fingerprint=await shipmentFingerprint(f.db,await f.read());
+ await f.db.query("UPDATE orders SET erp_live=$1 WHERE id='o'",[JSON.stringify({phase:'bl_ready',pricing:{status:'verified'},bc:{id:'bc',status:'active'},bl:{id:'bl',status:'ready_to_ship'},stockDocument:{id:'stock'},verifiedAt:at,stockCheckedAt:at,labelPreparationFingerprint:fingerprint,documentSource:{checkedAt:at,stockHolds:[]}})]);
+ await f.db.query("INSERT INTO erp_live_jobs VALUES('o','complete',null)");
+ await f.db.query("UPDATE resolution_jobs SET status='complete',result='{\"erpOnly\":true}' WHERE order_id='o'");
+ await f.db.query("INSERT INTO temu_label_jobs(reference,status) VALUES($1,'to_buy')",[reference]);
+ let profit=null;
+ const shipping=temuShipping(f.db,f.api),local={amounts:async()=>({source:'temu_excel'}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
+ const margins={get:async()=>({calculatedAt:new Date().toISOString(),rows:[{reference,status:profit===null?'incomplete':profit>0?'positive':'negative',profit,shipping:2.5/1.2,shippingSource:'Devis TEMU final',issues:[]}]})};
+ const worker=temuAutomaticPurchaseWorker(f.db,local,margins,{refreshPreparation:async()=>({stockHolds:[]})});
+ for(profit of [null,-1,0]){
+  await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,0);
+  assert.equal((await f.db.query('SELECT result FROM temu_automatic_purchase_checks')).rows[0].result.status,'held');
+ }
+ profit=1;await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,1);
+ assert.equal((await f.read()).resolution_pending_resume,false);
+ const audit=(await f.db.query('SELECT decision FROM temu_automatic_purchase_audit')).rows;assert.equal(audit.length,1);assert.equal(audit[0].decision.profit,1);
+ await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,1);
 });

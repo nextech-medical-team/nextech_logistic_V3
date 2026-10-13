@@ -1,3 +1,4 @@
+import {releaseExcelPurchaseHold} from './temu-excel-purchase-admission.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
@@ -32,7 +33,7 @@ export async function initializeTemuAutomaticPurchase(db){
  CREATE TRIGGER v3_temu_purchase_result AFTER UPDATE OF result ON temu_automatic_purchase_checks FOR EACH ROW EXECUTE FUNCTION v3_temu_purchase_result_diagnostic();`);
 }
 export function automaticPreparationHold(o,now=Date.now()){
- if(o?.source_payload?.origin==='temu_excel')return 'Excel TEMU : achat manuel à confirmer';
+ if(o?.source_payload?.origin==='temu_excel'&&!o.source_payload.temuExcelPreparation)return 'Excel TEMU : préparation à terminer';
  const blocked=suspensionBlock(o);if(blocked)return blocked;
  if(!o||o.archived||o.simulation||o.channel!=='temu')return 'Commande hors périmètre des achats automatiques';
  if(hasExternalLabel(o)||o.transport_choice)return 'Étiquette ou choix de transport existant à préserver';
@@ -47,7 +48,8 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,s
  let running=false;
  async function admission(reference,plan){
   if(!enabled())throw Error('Achat automatique suspendu');
-  const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];
+  let o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];
+  if(o?.source_payload?.origin==='temu_excel'&&o.resolution_pending_resume){await releaseExcelPurchaseHold(db,o.id);o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];}
   const held=automaticPreparationHold(o);if(held)throw Error(held);
   const idle=(await db.query(`SELECT o.id FROM orders o WHERE o.id=$1
    AND EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status='complete')
