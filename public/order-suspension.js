@@ -7,15 +7,16 @@
  const date=value=>value?new Date(value).toLocaleString('fr-FR'):'';
  function feedback(message,error=false){const box=dialog.querySelector('[data-suspension-message]');box.textContent=message;box.setAttribute('role',error?'alert':'status');box.hidden=!message;if(message)box.scrollIntoView({block:'nearest'});}
  function render(message='',error=false,note=''){
-  const o=context.order,s=o.suspension||{},active=s.active===true,cancel=s.erplainCancellation,pending=uncertain||['processing','review'].includes(cancel?.status);
+  const o=context.order,s=o.suspension||{},active=s.active===true,cancel=s.erplainCancellation,pending=uncertain||['processing','review'].includes(cancel?.status),shipped=['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status)||['shipped','delivered'].includes(o.erp_live?.bl?.status);
   dialog.innerHTML='<header><h2 id="suspension-title">'+esc(o.reference)+'</h2><button type="button" data-close-suspension>Fermer</button></header>'+
-   '<p><strong>'+(active?'Commande suspendue · attente d’annulation client':'Suspendre la commande')+'</strong></p>'+
+   '<p><strong>'+(active?(shipped?'Commande suspendue dans V3 · expédition conservée':'Commande suspendue · attente d’annulation client'):'Suspendre la commande')+'</strong></p>'+
    '<p>La suspension bloque les préparations et achats dans V3. La commande reste accessible par recherche et dans « Commandes suspendues ».</p>'+
    (s.note?'<p><strong>Dernière note :</strong> '+esc(s.note)+'<br><small>'+esc(date(s.updatedAt))+' · '+esc(s.updatedBy)+'</small></p>':'')+
    '<section class="suspension-erplain"><h3>Documents ERPLAIN</h3><p>BC : <strong>'+esc(o.erp_live?.bc?.label||'Aucun BC associé')+'</strong></p><p>'+
    esc(cancel?.status==='complete'?'Annulation ERPLAIN confirmée.':pending?'Résultat à vérifier dans ERPLAIN. Ne pas relancer l’annulation.':'Aucune annulation ERPLAIN confirmée.')+'</p>'+
    (cancel?.error?'<p>'+esc(cancel.error)+'</p>':'')+
-   (active&&o.erp_live?.bc?.id&&cancel?.status!=='complete'?'<button type="button" '+(pending?'data-verify-erplain>Vérifier le résultat dans ERPLAIN':'data-cancel-erplain>Annuler dans ERPLAIN')+'</button>':'')+
+   (active&&!shipped&&o.erp_live?.bc?.id&&cancel?.status!=='complete'?'<button type="button" '+(pending?'data-verify-erplain>Vérifier le résultat dans ERPLAIN':'data-cancel-erplain>Annuler dans ERPLAIN')+'</button>':'')+
+   (shipped?'<p>Commande expédiée ou livrée : la suspension la retire des problèmes actifs. Ses statuts, documents et étiquettes restent conservés. L’annulation ERPLAIN est indisponible.</p>':'')+
    '<p>La commande client conserve son statut sur la plateforme. Les étiquettes existantes sont conservées.</p><section data-cancel-confirmation hidden aria-labelledby="cancel-confirm-title" tabindex="-1"></section></section>'+
    '<div data-suspension-message role="status" aria-live="polite" hidden></div>'+
    '<form><h3>'+(active?'Réactiver dans V3':'Suspendre dans V3')+'</h3><label>Note obligatoire pour '+(active?'réactiver':'suspendre')+'<textarea name="note" required maxlength="2000" rows="3" placeholder="Motif de la '+(active?'réactivation':'suspension')+'">'+esc(note)+'</textarea></label>'+

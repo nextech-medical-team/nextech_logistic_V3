@@ -45,7 +45,7 @@ async function idle(db,order){
  if(rows.length)throw Error('Attendre ou rapprocher le traitement en cours : '+[...new Set(rows.map(x=>x.kind))].join(', '));
 }
 function physicalBlock(order){
- if(['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status)||['shipped','delivered'].includes(order.erp_live?.bl?.status))throw Error('Commande déjà expédiée ou livrée : suspension impossible');
+ if(['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status)||['shipped','delivered'].includes(order.erp_live?.bl?.status))throw Error('Commande déjà expédiée ou livrée : annulation ERPLAIN impossible');
 }
 function version(state){return state.version||'';}
 async function event(tx,order,action,note,state,user){
@@ -72,7 +72,9 @@ export function orderSuspensionService(db,api){
    if(version(order.suspension)!==b.expectedVersion)throw Error('La commande a changé : actualiser avant de confirmer');
    if((order.suspension?.active===true)===active)throw Error(active?'Commande déjà suspendue':'Commande déjà active');
    if(!active&&['processing','review'].includes(order.suspension?.erplainCancellation?.status))throw Error('Annulation ERPLAIN à rapprocher avant réactivation');
-   physicalBlock(order);await idle(tx,order);
+   // Suspension is a local hold, including shipped/delivered orders.
+   // Physical/document cancellation keeps its separate guard below.
+   await idle(tx,order);
    const state={...order.suspension,active,note:b.note,version:randomUUID(),updatedAt:new Date().toISOString(),updatedBy:user.email};
    if(active){state.suspendedAt=state.updatedAt;state.suspendedBy=user.email;}
    // Retain documents and errors; stop queued work. Reactivation never queues a job.
