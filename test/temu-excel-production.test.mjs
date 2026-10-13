@@ -15,7 +15,7 @@ async function fixture(t){
  await db.exec(`ALTER TABLE orders ADD COLUMN erp_live jsonb NOT NULL DEFAULT '{}',ADD COLUMN weight_kg numeric,ADD COLUMN transport_choice text,ADD COLUMN partial_mode boolean DEFAULT false;
  ALTER TABLE lines ADD COLUMN target_sku text,ADD COLUMN target_quantity numeric;
  CREATE TABLE erp_live_jobs(order_id text,status text,error text);
- CREATE TABLE resolution_jobs(id text,order_id text,request_id text,action text,payload jsonb,status text DEFAULT 'queued',stage text DEFAULT 'En attente',error text,created_at timestamptz DEFAULT now());`);
+ CREATE TABLE resolution_jobs(id text,order_id text,request_id text,action text,payload jsonb,result jsonb,status text DEFAULT 'queued',stage text DEFAULT 'En attente',error text,created_at timestamptz DEFAULT now());`);
  await initializeTemuShipping(db);
  await db.query("INSERT INTO orders(id,channel,reference,recipient,address,source_date,source_payload,suspension,tracking_status,resolution_pending_resume) VALUES('o','temu',$1,'Client fictif',$2,'2026-10-12',$3,$4,'not_shipped',true)",[reference,JSON.stringify({country:'HR',street:'Rue fictive',postal:'10000',city:'Ville'}),JSON.stringify({origin:'temu_excel',manualPreparationRequired:true}),JSON.stringify({active:true,note:excelImportHold,version:'initial'})]);
  const excel={'Prix de vente (hors taxes)':'67,25€','Total du prix de vente après réductions (hors taxes)':'67,25€','Taxe sur les produits':'16,80€',"Total de l'expédition (hors taxes)":'0€',"Taxe d'expédition":'0€'};
@@ -84,7 +84,22 @@ test('same TEMU shipping engine requires validated production BL, quotes 0.25 kg
  await assert.rejects(shipping.prepare(reference),/BL validé/);
  const proof=await shipmentFingerprint(f.db,await f.read()),at=new Date().toISOString();
  await f.db.query("UPDATE orders SET erp_live=$1 WHERE id='o'",[JSON.stringify({bc:{id:'bc'},bl:{id:'bl',status:'ready_to_ship'},verifiedAt:at,stockCheckedAt:at,labelPreparationFingerprint:proof})]);await f.db.query("INSERT INTO erp_live_jobs VALUES('o','complete',null)");
+ // Reproduce the waiting worker's document-only completion: manual hold remains.
+ await f.db.query("UPDATE orders SET resolution_pending_resume=true WHERE id='o'");
+ await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
+ await f.db.query("UPDATE resolution_jobs SET status='complete',result='{\"erpOnly\":true}' WHERE order_id='o'");
+ await f.db.query("UPDATE erp_live_jobs SET status='review' WHERE order_id='o'");
+ await assert.rejects(shipping.prepare(reference),/BL validé/);
+ await f.db.query("UPDATE erp_live_jobs SET status='complete' WHERE order_id='o'");
+ await f.db.query("UPDATE resolution_jobs SET error='Contrôle à reprendre' WHERE order_id='o'");
+ await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
+ await f.db.query("UPDATE resolution_jobs SET error=null WHERE order_id='o'");
  const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'0.25');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
+ assert.equal((await f.read()).resolution_pending_resume,true);
+ assert.match(automaticPreparationHold(await f.read()),/achat manuel/);
+ await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,created_at) VALUES('later','o','refresh','queued',now()+interval '1 minute')");
+ await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/préparation à terminer/);assert.equal(f.bought,0);
+ await f.db.query("DELETE FROM resolution_jobs WHERE id='later'");
  f.detail.orderList[0].quantity=4;await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/quantités/);assert.equal(f.bought,0);f.detail.orderList[0].quantity=5;
  const result=await shipping.buy(reference,plan.id,plan.amount);assert.equal(result.status,'complete');assert.equal(f.bought,1);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
 });

@@ -1,4 +1,5 @@
 import {verifyExcelTemuDetail} from './temu-excel-identity.mjs';
+import {completedExcelPreparation} from './temu-excel-purchase-admission.mjs';
 import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
@@ -49,7 +50,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   const excelOrder=!quoteOrderPolicy&&localOrders.find(isTemuExcel);
   let excelProof;
   if(excelOrder){
-   if(excelOrder.archived||excelOrder.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(excelOrder.tracking_status)||excelOrder.resolution_pending_resume||excelOrder.issue||!excelOrder.source_payload.temuExcelPreparation)throw Error('Excel TEMU : préparation à terminer avant achat');
+   if(excelOrder.archived||excelOrder.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(excelOrder.tracking_status)||excelOrder.issue||!excelOrder.source_payload.temuExcelPreparation||excelOrder.resolution_pending_resume&&!await completedExcelPreparation(db,excelOrder))throw Error('Excel TEMU : préparation à terminer avant achat');
    await assertLabelStockGate(db,excelOrder);
    const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[excelOrder.id])).rows;verifiedExcelCommercial(excelOrder,lines);
    excelProof={order:excelOrder,lines};
@@ -110,6 +111,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
     const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[current.excelProof.order.id])).rows[0];
     const lines=(await tx.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[o.id])).rows;
     if(hash(excelShipmentProof(o,lines))!==current.preparationFingerprint)throw Error('Préparation Excel modifiée avant achat');
+    if(o.resolution_pending_resume&&!await completedExcelPreparation(tx,o))throw Error('Préparation Excel modifiée avant achat');
     await assertLabelStockGate(tx,o);
     return tx.query(claimSql,args);
    }):db.query(proof?"WITH claimed AS ("+claimSql+") INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) SELECT attempt_id,reference,$11,$12::jsonb FROM claimed RETURNING reference":claimSql,proof?[...args,current.id,JSON.stringify(admission.audit)]:args));if(!claim.rows.length)throw new Error('Achat déjà engagé ou commande/devis modifiés');
