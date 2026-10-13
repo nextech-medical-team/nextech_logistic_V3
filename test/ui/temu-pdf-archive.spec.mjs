@@ -1,0 +1,18 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+for(const width of [1366,390])test('archived PDF and existing shipment are clearly distinguished at '+width+'px',async({page})=>{
+ await page.setViewportSize({width,height:900});const calls=[];
+ const base={channel:'temu',recipient:'Client fictif',account_manager:'temu',address:{country:'FR'},sku_lines:[],source_payload:{},source_date:'10/10/26',label_status:'ready',erp_status:'live_review',tracking_status:'delivered',carrier:'temu',issue:null,erp_live:{bc:{id:'bc',status:'active'},bl:{id:'bl',label:'BL-TEST',status:'in_preparation'}},erp_live_job:{status:'review'},simulation:false};
+ const rows=[{...base,id:'saved',reference:'PO-020-123456789',temu_documents:[{package:'PK-123'}],temu_job:{status:'complete'}},{...base,id:'external',reference:'PO-020-987654321',temu_documents:[],temu_job:{status:'external'},source_payload:{}}];
+ await page.route('**/api/orders?*',route=>route.fulfill({json:{rows,total:2,pages:1,page:1,pageSize:50,summary:{total:2,labels:1,blocked:0,delivered:2},transportStats:[]}}));
+ page.on('request',request=>{if(/shipment\.document|\/api\/temu\/(recover|prepare|buy)/.test(request.url()))calls.push(request.url());});
+ await page.goto('/');
+ await expect(page.locator('a[href="/api/temu/pdf?reference=PO-020-123456789&package=PK-123"]')).toHaveText('▤ PDF TEMU ↗');
+ expect(await page.evaluate(()=>temuOrderLabelAction({temu_documents:[{package:'PK-123'}]}))).toContain('Étiquette TEMU enregistrée');
+ await expect(page.locator('[data-temu-order="PO-020-987654321"]')).toHaveText('Expédition existante');
+ await expect(page.locator('[data-temu-purchase]')).toHaveCount(0);
+ expect(await page.evaluate(()=>temuOrderLabelAction({channel:'temu',temu_job:{status:'external'}}))).not.toContain('à préparer');
+ expect(calls).toEqual([]);
+ fs.mkdirSync('proofs',{recursive:true});await page.screenshot({path:'proofs/temu-pdf-'+width+'.png',fullPage:true});
+ fs.writeFileSync('proofs/temu-pdf-'+width+'.json',JSON.stringify({status:'PASS',width,scope:'Synthetic UI: archived label and delivered external shipment, BL in_preparation preserved',providerDocumentRequests:calls.length}));
+});
