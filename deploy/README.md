@@ -42,4 +42,3 @@ Les demandes CI et leurs rapports sont conservés sur le serveur et ramenés dan
 
 Le bouton conserve les tests, la file FIFO, les protections GitHub, la sauvegarde, le verrou serveur et la fin naturelle des traitements. Il ne lève pas une dépendance métier ou une divergence de sources. La surveillance Section7 peut préparer et vérifier, mais ne doit plus déclencher de publication automatiquement.
 
-Le bouton conserve les tests, la file FIFO, les protections GitHub, la sauvegarde, le verrou serveur et la fin naturelle des traitements. Il ne lève pas une dépendance métier ou une divergence de sources. La surveillance Section7 peut préparer et vérifier, mais ne doit plus déclencher de publication automatiquement.
