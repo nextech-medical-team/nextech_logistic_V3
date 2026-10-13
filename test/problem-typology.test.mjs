@@ -88,3 +88,33 @@ test('complete documents do not receive the missing-diagnostic fallback in probl
  const r=selectProblemOrders([o],[WITHOUT_DIAGNOSTIC],currentProblemClassifier(),['complete']);
  assert.equal(r.total,0);assert.equal(r.problemTypes.length,0);
 });
+
+
+test('suspension and cancelled BC retire all problem labels and fallback without changing data',()=>{
+ const classify=currentProblemClassifier(),reason='BC · Statut modifié : contrôler avant reprise';
+ const inactive=[{id:'suspended',suspension:{active:true,note:'Attente client'}},{id:'cancelled-bc',erp_live:{bc:{id:1926983,status:'cancelled'}}},{id:'confirmed-cancellation',suspension:{erplainCancellation:{status:'complete'}}}].map(o=>({...o,label_status:'simulated',tracking_status:'not_shipped',issue:reason,resolution_error:reason,lines:[]}));
+ for(const o of inactive){const before=JSON.stringify(o);assert.equal(classify(o).length,0);assert.equal(JSON.stringify(o),before);}
+ const active={id:'active',label_status:'simulated',issue:reason,lines:[]};
+ const selected=selectProblemOrders([...inactive,active],['BC · Statut modifié : contrôler avant reprise'],()=>[{label:'BC · Statut modifié : contrôler avant reprise'}],inactive.map(o=>o.id));
+ assert.deepEqual(selected.rows.map(o=>o.id),['active']);assert.equal(selected.problemTypes[0].count,1);
+ assert.equal(selectProblemOrders(inactive,[WITHOUT_DIAGNOSTIC],()=>[],inactive.map(o=>o.id)).total,0);
+ // A single cancelled partial BL must not hide a still-active order/remainder.
+ const partial={id:'partial',erp_live:{bc:{status:'active'},bl:{status:'cancelled'}},label_status:'blocked',issue:'Stock insuffisant',lines:[]};assert.ok(classify(partial).length>0);
+});
+
+test('active problem gate executes before pagination and cannot be bypassed by combined status filters',async()=>{
+ const {activeProblemOrderSql}=await import('../src/order-query.mjs');
+ const {PGlite}=await (process.env.PGLITE_MODULE?import(process.env.PGLITE_MODULE):import('@electric-sql/pglite'));
+ const db=new PGlite();
+ try{
+  await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,archived boolean DEFAULT false,suspension jsonb DEFAULT '{}',label_status text DEFAULT 'simulated',tracking_status text DEFAULT 'not_shipped',erp_live jsonb DEFAULT '{}');`);
+  const fixtures=[['active',{},{}],['suspended',{active:true},{}],['cancelled-bc',{}, {bc:{status:'cancelled'}}],['confirmed',{erplainCancellation:{status:'complete'}},{}],['review',{erplainCancellation:{status:'review'}},{}],['reactivated',{active:false},{}],['partial',{}, {bc:{status:'active'},bl:{status:'cancelled'}}]];
+  for(const [id,s,erp]of fixtures)await db.query('INSERT INTO orders(id,suspension,erp_live) VALUES($1,$2,$3)',[id,JSON.stringify(s),JSON.stringify(erp)]);
+  await db.exec("INSERT INTO orders(id,label_status) VALUES('cancelled-label','cancelled');INSERT INTO orders(id,tracking_status) VALUES('cancelled-tracking','cancelled');INSERT INTO orders(id,archived) VALUES('archived',true)");
+  const rows=(await db.query('SELECT id FROM orders WHERE '+activeProblemOrderSql+' ORDER BY id')).rows.map(o=>o.id);assert.deepEqual(rows,['active','partial','reactivated','review']);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM orders WHERE '+activeProblemOrderSql)).rows[0].n,4);
+  assert.deepEqual((await db.query('SELECT id FROM orders WHERE '+activeProblemOrderSql+' ORDER BY id LIMIT 2 OFFSET 2')).rows.map(o=>o.id),['reactivated','review']);
+  for(const params of ['status=__problems','status=__problems,__suspended','problem=stock','problem-label=Stock'])assert.ok(orderQuery(new URLSearchParams(params)).where.includes(activeProblemOrderSql));
+  for(const params of ['', 'status=__suspended','search=cancelled-bc'])assert.ok(!orderQuery(new URLSearchParams(params)).where.includes(activeProblemOrderSql));
+ }finally{await db.close();}
+});

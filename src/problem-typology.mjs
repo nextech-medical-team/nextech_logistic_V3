@@ -3,7 +3,7 @@ import {hasCompleteOrderDocuments} from './complete-order-documents.mjs';
 export const WITHOUT_DIAGNOSTIC='Filtre problÃ¨mes sans diagnostic dÃ©taillÃ©';
 export function orderProblemLabels(order, compactProblems, inProblemFilter=false){
  if(hasCompleteOrderDocuments(order))return [];
- if(order.archived||order.label_status==='cancelled'||order.tracking_status==='cancelled')return [];
+ if(order.archived||order.suspension?.active===true||order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'||order.suspension?.erplainCancellation?.status==='complete')return [];
  const labels=[...new Set(compactProblems(order).map(d=>d.label).filter(Boolean))];
  if(!labels.length&&inProblemFilter)labels.push(WITHOUT_DIAGNOSTIC);
  return labels;
