@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {relayCommercialFingerprint} from './relay-source-reconciliation.mjs';
 import {shopifyDeliveryMode} from './shopify-delivery.mjs';
 import {readShopifyRelay,assertFreshShopifyRelay,chooseNearestParcelShop,relayComparisonAddress,sameRelayAddress} from './shopify-relay-source.mjs';
@@ -57,7 +58,7 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
        if(raw.name!==o.reference||String(raw.id)!==String(o.source_payload?.id))throw Error('GLS · Identité Shopify différente');
        const relay=readShopifyRelay(raw,{mode:o.source_payload?.shopifyDeliveryMode||shopifyDeliveryMode(raw)});if(!relay)throw Error('GLS · Métadonnées relais Shopify non reçues');
        const baseline=relayCommercialFingerprint(o.source_payload);
-       if(!baseline||baseline!==relayCommercialFingerprint(raw))throw Error('GLS · Produits, prix, taxes ou livraison Shopify à rapprocher avant création');
+       if(!usesRecordedBc(o)&&(!baseline||baseline!==relayCommercialFingerprint(raw)))throw Error('GLS · Produits, prix, taxes ou livraison Shopify à rapprocher avant création');
        const frozen=relayComparisonAddress(o,relay);
        if(!sameRelayAddress(frozen,relay.clientAddress))throw Error('GLS · Adresse client modifiée : validation de l’équipe requise');
        relay.frozenOrderAddress=structuredClone(o.address);relay.frozenClientAddress=structuredClone(frozen);

@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {erplainWeightKg} from './erplain-readonly.mjs';
 import {importedLabelMissingFields} from './erplain-label-required.mjs';
 import {pendingScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
@@ -75,7 +76,7 @@ export async function synchronizeRecoveredOrder(db,o,d){
   for(let i=local.length-1;i>=0;i--)if(!keep.includes(String(local[i].source_line)))local.splice(i,1);
  }
 
- if(totals(local)!==totals(scope?.lines||shippingProductLines(d.line_items)))problems.push('BC Erplain modifié : produits ou quantités différents des données validées dans V3');
+ if(!usesRecordedBc(o)&&totals(local)!==totals(scope?.lines||shippingProductLines(d.line_items)))problems.push('BC Erplain modifié : produits ou quantités différents des données validées dans V3');
  const a=d.shipping_address||{},address={...o.address,name:a.label||d.customer?.label||o.recipient,street:[a.address_1,a.address_2].filter(Boolean).join(' '),postal:a.postal_code||'',city:a.city||'',country:a.country||'',phone:a.phone||''};
  if(issued&&['name','street','postal','city','country','phone'].some(k=>String(address[k]||'')!==String(o.address[k]||'')))problems.push('Adresse Erplain modifiée : étiquette existante à vérifier');
  const messages=(o.erp_live.stockDocument?.id||d.update_stock===true)?problems.filter(p=>!/stock insuffisant/i.test(p)):problems;

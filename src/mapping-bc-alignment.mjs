@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {createHash} from 'node:crypto';
 
 import {readHistoricalStock,assertNoHistoricalStockRemoval} from './historical-stock-proof.mjs';
@@ -50,6 +51,7 @@ export async function assertAdditionalMappingStock(api,bc,items){
 // and an uncertain recorded mutation is never submitted a second time.
 
 export async function alignMappedBc(api,o,{save,guard,preserveLabels}){
+ if(usesRecordedBc(o)){if(o.erp_live?.mappingAlignmentAttempt?.status==='uncertain')throw Error('BC · Modification incertaine : rapprochement requis, aucune réécriture');return {unchanged:true,authority:'recorded_erplain_bc',sourceAlignmentDisabled:true};}
 
  if(!o.erp_live?.bc?.id||o.erp_live.bl?.id||o.partial_mode||o.erp_live.equivalentItems||o.source_payload?.erplainImported)return {skipped:true};
 

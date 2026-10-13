@@ -39,7 +39,7 @@ export function automaticPreparationHold(o,now=Date.now()){
  if(hasExternalLabel(o)||o.transport_choice)return 'Étiquette ou choix de transport existant à préserver';
  if(o.issue||o.source_payload?.visibilityHold||o.source_payload?.marketplacePendingCorrection||o.resolution_pending_resume||o.partial_mode)return o.issue||'Préparation à recontrôler avant achat';
  const p=o.erp_live;
- if(p?.phase!=='bl_ready'||p.pricing?.status!=='verified'||!p.bl?.id||!p.stockDocument)return 'Préparation Erplain non terminée';
+ if(p?.phase!=='bl_ready'||(!o.erp_live?.bc?.id&&p.pricing?.status!=='verified')||!p.bl?.id||!p.stockDocument)return 'Préparation Erplain non terminée';
  for(const value of [p.verifiedAt,p.stockCheckedAt]){const at=Date.parse(value);if(!Number.isFinite(at)||at>now)return 'Validation de préparation et stock à actualiser';}
  if(o.source_payload?.temuDirect?.state!=='verified')return 'Commande TEMU à vérifier';
  return null;

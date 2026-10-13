@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {verifyExcelTemuDetail} from './temu-excel-identity.mjs';
 import {completedExcelPreparation} from './temu-excel-purchase-admission.mjs';
 import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
@@ -52,7 +53,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   if(excelOrder){
    if(excelOrder.archived||excelOrder.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(excelOrder.tracking_status)||excelOrder.issue||!excelOrder.source_payload.temuExcelPreparation||excelOrder.resolution_pending_resume&&!await completedExcelPreparation(db,excelOrder))throw Error('Excel TEMU : préparation à terminer avant achat');
    await assertLabelStockGate(db,excelOrder);
-   const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[excelOrder.id])).rows;verifiedExcelCommercial(excelOrder,lines);
+   const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[excelOrder.id])).rows;if(!usesRecordedBc(excelOrder))verifiedExcelCommercial(excelOrder,lines);
    excelProof={order:excelOrder,lines};
   }
   const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=fixedWeight??(excelOrder?'0.25':Number.isFinite(knownWeight)&&knownWeight>0.25?String(Math.ceil(knownWeight*1000)/1000):'0.25');
