@@ -59,11 +59,11 @@ export function buildReceiptPlan(receipts,orders,bcs,{errors=new Map()}={}){
  const ordered=[...orders].sort((a,b)=>String(a.processing_priority_at||a.received_at||'').localeCompare(String(b.processing_priority_at||b.received_at||''))||a.id.localeCompare(b.id));
  for(const o of ordered){
   const bc=bcs.get(String(o.erp_live?.bc?.id));let needs=[],invalid=null;try{if(bc)needs=stockNeeds(bc);}catch(e){invalid=e.message;}
-  const associated=needs.some(l=>skus.has(l.sku))||(bc?.line_items||[]).some(l=>l.variant&&skus.has(l.variant.sku))||(!bc&&(o.skus||[]).some(s=>skus.has(s)));
+  const associated=needs.some(l=>keys.has(l.key)||skus.has(l.sku))||(bc?.line_items||[]).some(l=>l.variant&&(keys.has(String(l.variant.id)+':'+String(l.location?.id))||skus.has(l.variant.sku)))||(!bc&&(o.skus||[]).some(s=>skus.has(s)));
   if(!associated)continue;
   const active=(bc?.shipping_orders?.data||[]).filter(l=>!['cancelled','unpublished'].includes(l.status));
   const done=active.length===1&&finished.has(active[0].status)&&String(active[0].id)===String(o.erp_live?.bl?.id);
-  const reason=errors.get(o.id)||invalid||(!needs.some(l=>keys.has(l.key))&&bc?'SKU reçu dans un autre emplacement':null)||receiptOrderBlock(o,bc);
+  const reason=errors.get(o.id)||invalid||(!needs.some(l=>keys.has(l.key))&&bc?'SKU reçu sur une autre variante ou dans un autre emplacement':null)||receiptOrderBlock(o,bc);
   const row={id:o.id,reference:o.reference,channel:o.channel,bc:bc?.label||o.erp_live?.bc?.label||null,bls:(bc?.shipping_orders?.data||[]).map(l=>({id:l.id,label:l.label,status:l.status})),fingerprint:bc?recoveryFingerprint(o,bc):null,needs,status:done?'documents':reason?'blocked':'eligible',reason:done?'BL déjà disponible : étiquettes existantes à récupérer':reason,labels:o.labels||[],labelError:o.labelError||null};
   row.canLabel=done&&active[0].status==='ready_to_ship'&&bc.status==='active'&&!suspensionBlock(o)&&!o.archived&&!o.partial_mode&&!o.hasPartial&&!o.busy&&!o.source_payload?.visibilityHold&&!o.source_payload?.erplainValidationHold&&!['cancelled','shipped','in_transit','delivered','delivered_simulated'].includes(o.tracking_status)&&o.label_status!=='cancelled'&&!['creating_stock','creating_bl','publishing_bl','finalizing_bl'].includes(o.erp_live?.phase)&&![o.erp_live?.mappingAlignmentAttempt,o.erp_live?.sourceVatAttempt,o.erp_live?.stockCreationOutcome].some(a=>a?.status==='uncertain');
   rows.push(row);
