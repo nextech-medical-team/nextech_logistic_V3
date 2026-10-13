@@ -66,7 +66,7 @@ export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,histor
  return {commercialBefore:bc,bcId:String(bc.id),originalSku:original.variant.sku,replacementSku:variant.sku,replaceQuantity:replace,replacementQuantity:quantity,remaining,available:variant.track_inventory===false?null:Math.min(Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).available),Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).on_hand)),weightKg:weight,items,expected,previewFingerprint:fingerprint({bc,variant:{id:variant.id,sku:variant.sku,weight_amount:variant.weight_amount,weight_unit:variant.weight_unit},replace,quantity}),message:'Produit et stock vérifiés dans Erplain LIVE. Remplacement limité à cette commande.'};
 }
 function totals(lines){const sums=new Map();for(const l of lines)sums.set(l.sku,(sums.get(l.sku)||0)+Number(l.quantity));return JSON.stringify([...sums].sort());}
-export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},directory,shopifyReader,deferResume=false}={}){
+export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},directory,shopifyReader,deferResume=false,preserveBcAmounts=false}={}){
  validateSubstitution(b,apply);
  if(o.archived||o.erp_live?.bl?.id||o.erp_live?.stockDocument||/^(creating|publishing)/.test(o.erp_live?.phase||'')||(o.source_payload?.marketplacePendingCorrection&&!(o.channel==='shopify'&&o.partial_mode===true))||['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande livrée, fractionnée ou modifiée : rapprochement requis avant remplacement');
  if(!o.erp_live?.bc?.id)throw Error('Créer ou retrouver le BC LIVE avant de remplacer ses produits');
@@ -87,7 +87,10 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  await stage('Lecture du BC et du produit équivalent');await api.verify();
  const {Order:bc}=await api.request(`query V3SubstitutionBC($id:ID!){Order(id:$id){${bcFields}}}`,{id:String(o.erp_live.bc.id)});
  if(String(bc?.id)!==String(o.erp_live.bc.id))throw Error('API Erplain · BC demandé non reçu');
- const sourceAmounts=o.channel==='temu'?temuSellerTotals(o):o.erp_live.pricing||(o.source_payload?.erplainImported?{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:null);verifySourceCommercialTotals(bc,sourceAmounts);
+ // The manually supplied import preserves the current BC commercial basis.
+ // This option is supplied by the import service, never by the request body.
+ if(preserveBcAmounts&&(!Array.isArray(bc.line_items)||!bc.line_items.length))throw Error('BC · Lignes commerciales non reçues');
+ const sourceAmounts=preserveBcAmounts?{total:bc.total,tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:o.channel==='temu'?temuSellerTotals(o):o.erp_live.pricing||(o.source_payload?.erplainImported?{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:null);verifySourceCommercialTotals(bc,sourceAmounts);
  if(bc.update_stock===true)await assertNoHistoricalStockRemoval(api,o);
  let plan=await findRecordedSubstitution(db,o,b,bc,api);
  if(!plan){
@@ -150,6 +153,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  let historicalAfter=null;
  try{
  verifySourceCommercialTotals(updated,sourceAmounts);
+ if(preserveBcAmounts&&(Math.round(Number(updated.total)*100)!==Math.round(Number(sourceAmounts.total)*100)||Math.round(updated.line_items.reduce((n,l)=>n+Number(l.tax_amount),0)*100)!==Math.round(Number(sourceAmounts.tax)*100)))throw Error('Remplacement à rapprocher : les montants du BC ont changé.');
  if(!updated||String(updated.id)!==plan.bcId||updated.update_stock!==bc.update_stock||(updated.shipping_orders?.data?.length&&!plan.partialProof)||totals(shippingProductLines(updated.line_items||[]).map(l=>({sku:l.variant?.sku,quantity:l.quantity})))!==totals(plan.expected))throw Error('Remplacement non confirmé : relire le BC dans Erplain avant toute nouvelle tentative');
  if(plan.partialProof)assertPartialShippingPreserved(plan.commercialBefore,updated);
  if(!plan.reconcileOnly)verifySubstitutionShipping(bc,updated);

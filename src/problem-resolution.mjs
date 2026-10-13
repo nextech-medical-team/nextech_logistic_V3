@@ -223,7 +223,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     deferResume=(await db.query("SELECT 1 FROM equivalence_import_rows WHERE batch_id=$1 AND order_id=$2 AND status='queued'",[imported.batch_id,o.id])).rows.length>0;
     if(deferResume&&(o.partial_mode||o.erp_live?.bc?.update_stock===true))throw Error('Plusieurs remplacements sur une livraison partielle ou un BC historique : rapprochement requis avant reprise');
    }
-   const result=await substitution(db,api,o,b,{apply:j.action==='replace-equivalent',stage,directory,deferResume});
+   const result=await substitution(db,api,o,b,{apply:j.action==='replace-equivalent',stage,directory,deferResume,preserveBcAmounts:!!b.importRow});
    if(j.action==='equivalent-preview'||result.partialRemainder||result.importDeferred)return result;
    await update(j.id,'waiting','Équivalent enregistré · contrôle stock et BL',{...result,equivalent:true});return null;
   }
