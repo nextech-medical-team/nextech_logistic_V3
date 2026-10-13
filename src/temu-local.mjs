@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {resolveExcelTemuShop} from './temu-excel-shop.mjs';
 import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
 import {verifyExcelTemuDetail} from './temu-excel-identity.mjs';
@@ -54,7 +55,7 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
   try{
    const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});
    if(detail.parentOrderMap?.parentOrderSn!==reference||!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('TEMU · Identité ou articles de commande incohérents');
-   if(isTemuExcel(o)){const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[o.id])).rows;verifyExcelTemuDetail(o,lines,detail);verifiedExcelCommercial(o,lines);}
+   if(isTemuExcel(o)){const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[o.id])).rows;verifyExcelTemuDetail(o,lines,detail);if(!usesRecordedBc(o))verifiedExcelCommercial(o,lines);}
    const now=new Date().toISOString(),direct={source:'temu_direct',state:'verified',verifiedAt:now,status:Number(detail.parentOrderMap.parentOrderStatus)};
    await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuDirect:direct,temuOrderDetail:detail})]);
    await observeTemuCancellation(db,o,detail);

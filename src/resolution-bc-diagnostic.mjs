@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {comparisonLines} from './bc-comparison-lines.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
 import {resolutionBcLines} from './resolution-bc-scope.mjs';
@@ -35,10 +36,10 @@ export function bcComparisonDiagnostic(order,bc,lines){
  if(order.erp_live?.bl?.id&&!blIds.has(String(order.erp_live.bl.id)))errors.push({code:'local_bl_missing',message:'Le BL enregistré localement ne figure plus dans ce BC : rapprochement requis'});
  let comparison=null,scope=order.source_payload?.erplainImported?'pending':order.partial_mode?'partial':'full';
  try{
-  const expected=quantities(comparisonLines(lines,order.channel)),observed=quantities(order.source_payload?.erplainImported?resolutionBcLines(order,bc):physical);
+  const expected=usesRecordedBc(order)?quantities(physical):quantities(comparisonLines(lines,order.channel)),observed=quantities(usesRecordedBc(order)?physical:order.source_payload?.erplainImported?resolutionBcLines(order,bc):physical);
   const different=expected.length!==observed.length||expected.some(([sku,q],i)=>sku!==observed[i]?.[0]||Math.abs(q-observed[i][1])>1e-6);
   comparison={scope,expected,observed,different};
   if(different)errors.push({code:'physical_difference',message:scope==='partial'?'Écart entre la commande partielle et le BC complet : vérifier le périmètre des livraisons et les unités':'Produits ou quantités V3 et BC différents : vérifier les unités, conditionnements et documents avant toute reprise'});
  }catch(e){errors.push({code:'comparison_unconfirmed',message:e.message});}
- return {readOnly:true,provider:'Erplain',message:errors.length?'BC et BL relus ; rapprochement requis, aucune reprise effectuée':'BC et BL relus ; produits et quantités concordants dans le périmètre comparé',bc,lines,comparison,errors};
+ return {readOnly:true,provider:'Erplain',authority:usesRecordedBc(order)?'recorded_bc':'source',message:!errors.length&&usesRecordedBc(order)?'BC enregistré et BL relus ; préparation fondée sur le BC enregistré':errors.length?'BC et BL relus ; rapprochement requis, aucune reprise effectuée':'BC et BL relus ; produits et quantités concordants dans le périmètre comparé',bc,lines,comparison,errors};
 }

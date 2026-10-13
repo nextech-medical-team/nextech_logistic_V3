@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {usesRecordedBc,recordedBcFingerprint} from './existing-bc-execution.mjs';
 import {assertFullOrderStock} from './stock-gate.mjs';
 import {assertDocumentIdle} from './erplain-document-read.mjs';
 import {currentMappingFingerprint} from './current-mapping-line.mjs';
@@ -42,21 +43,22 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
 
  const erp=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[id])).rows[0];
  if(!stockIncidentOnly(initial.issue)&&!stockIncidentOnly(erp?.error)&&!jobs.some(j=>stockIncidentOnly(j.error)))return {notApplicable:true};
- const mapping=await currentMappingFingerprint(db,initial),fingerprint=await shipmentFingerprint(db,initial);
- let proof;
+ const frozen=usesRecordedBc(initial),fingerprint=await shipmentFingerprint(db,initial);
+ let mapping=null,proof;
  try{
   if(readError)throw Error(readError);
-  if(comparison?.concordant!==true||comparison.mappingFingerprint!==mapping)throw Error('Produits/quantités V3 et BC non confirmés');
+  mapping=frozen?recordedBcFingerprint(bc):await currentMappingFingerprint(db,initial);
+  if(comparison?.concordant!==true||comparison.mappingFingerprint!==mapping||(frozen&&comparison.authority!=='recorded_bc'))throw Error(frozen?'Lecture du BC enregistré et de ses BL non confirmée':'Produits/quantités V3 et BC non confirmés');
   if(initial.erp_live?.documentSource?.stockHolds?.length)throw Error('Mouvement de stock à rapprocher');
   let historicalProof=null;
   if(bc?.update_stock===true){const actual=(await api.request('query V3StockIncidentCreated($id:ID!){Order(id:$id){id created_at}}',{id:String(bc.id)})).Order;if(String(actual?.id)!==String(bc.id))throw Error('Identité BC non confirmée');historicalProof=(await readHistoricalStock(api,{...bc,created_at:actual.created_at},{bl:initial.erp_live.bl})).proof;}
   proof=evaluateStockIncident(initial,bc,{historicalProof});
  }catch(e){proof={status:'unverified',currentError:'Stock : vérification impossible — '+e.message};}
- proof={...proof,checkedAt:new Date(now()).toISOString(),mappingFingerprint:mapping,shipmentFingerprint:fingerprint,readOnly:true,preparationNotStarted:true};
+ proof={...proof,checkedAt:new Date(now()).toISOString(),mappingFingerprint:mapping,...(frozen?{authority:'recorded_bc'}:{}),shipmentFingerprint:fingerprint,readOnly:true,preparationNotStarted:true};
  const version=createHash('sha256').update(JSON.stringify([initial.issue,initial.erp_live,initial.partial_mode,initial.suspension,initial.source_payload])).digest('hex');
  return db.transaction(async tx=>{
   const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];await assertDocumentIdle(tx,id);
-  if(!o||createHash('sha256').update(JSON.stringify([o.issue,o.erp_live,o.partial_mode,o.suspension,o.source_payload])).digest('hex')!==version||await currentMappingFingerprint(tx,o)!==mapping||await shipmentFingerprint(tx,o)!==fingerprint)return {deferred:true};
+  if(!o||createHash('sha256').update(JSON.stringify([o.issue,o.erp_live,o.partial_mode,o.suspension,o.source_payload])).digest('hex')!==version||(!frozen&&await currentMappingFingerprint(tx,o)!==mapping)||await shipmentFingerprint(tx,o)!==fingerprint)return {deferred:true};
   const current=(await tx.query("SELECT id,action,status,error,result,created_at,updated_at FROM resolution_jobs WHERE order_id=$1 AND status='review' FOR UPDATE",[id])).rows;
   if(current.some(j=>!jobs.some(old=>old.id===j.id&&old.error===j.error&&String(old.updated_at)===String(j.updated_at))))return {deferred:true};
   const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[id])).rows[0];

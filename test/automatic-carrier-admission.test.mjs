@@ -49,12 +49,12 @@ test('blocked variants preserve hold and evidence; one invalid order does not pr
  const db=await fixture();try{
  const scenarios={temu:"UPDATE orders SET channel='temu' WHERE id=$1",suspended:"UPDATE orders SET suspension='{\"active\":true}' WHERE id=$1",cancelled:"UPDATE orders SET tracking_status='cancelled' WHERE id=$1",partial:"UPDATE orders SET partial_mode=true WHERE id=$1",archived:"UPDATE orders SET archived=true WHERE id=$1",fingerprint:"UPDATE orders SET weight_kg=2 WHERE id=$1",erp:"UPDATE erp_live_jobs SET status='review' WHERE order_id=$1",unready:"UPDATE orders SET erp_live=jsonb_set(erp_live,'{bl,status}','\"in_preparation\"') WHERE id=$1",readOnly:"UPDATE resolution_jobs SET result='{\"erpOnly\":true,\"readOnly\":true}' WHERE order_id=$1",noResume:"UPDATE resolution_jobs SET result='{\"erpOnly\":true,\"resumeAfter\":false}' WHERE order_id=$1",uncertain:"INSERT INTO carrier_jobs(order_id,carrier,status,environment,error) VALUES($1,'gls','review','production','Création incertaine')",pdf:"INSERT INTO carrier_documents VALUES($1,0,decode('255044462d','hex'))",history:"INSERT INTO carrier_label_history VALUES('history',$1,'{\"environment\":\"production\"}',now())",extra:"INSERT INTO extra_parcels VALUES('extra',$1,'failed')",busy:"INSERT INTO correction_jobs VALUES('correction',$1,'waiting')"};
  for(const [id,sql] of Object.entries(scenarios)){await order(db,id);await db.query(sql,[id]);}
- await order(db,'zz-valid','gls_shop');assert.equal(await admitPreparedCarrierLabels(db),1);
- assert.equal(await count(db,"SELECT count(*) n FROM carrier_jobs WHERE order_id NOT IN ('uncertain','zz-valid')"),0);
- assert.equal(await count(db,"SELECT count(*) n FROM orders WHERE id<>'zz-valid' AND NOT resolution_pending_resume"),0);
+ await order(db,'zz-valid','gls_shop');assert.equal(await admitPreparedCarrierLabels(db),2);
+ assert.equal(await count(db,"SELECT count(*) n FROM carrier_jobs WHERE order_id NOT IN ('uncertain','zz-valid','fingerprint')"),0);
+ assert.equal(await count(db,"SELECT count(*) n FROM orders WHERE id NOT IN ('zz-valid','fingerprint') AND NOT resolution_pending_resume"),0);
  assert.equal((await db.query("SELECT status,error FROM carrier_jobs WHERE order_id='uncertain'")).rows[0].error,'Création incertaine');
  assert.equal(await count(db,'SELECT count(*) n FROM carrier_documents'),1);
- const held=(await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='fingerprint'")).rows[0].state;assert.match(held.carrierAdmission.reason,/modifiée/);
+ assert.equal(await count(db,"SELECT count(*) n FROM carrier_jobs WHERE order_id='fingerprint'"),1); // source fingerprint no longer blocks an existing BC
  }finally{await db.close();}
 });
 

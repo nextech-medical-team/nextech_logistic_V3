@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {createHash} from 'node:crypto';
 import {readErplainDocuments} from './erplain-document-read.mjs';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
@@ -26,9 +27,9 @@ export function carrierPrevalidationProof(o,c,e,lines,bc,{now=Date.now()}={}){
  const s=o.erp_live||{},verified=time(s.verifiedAt),failedAt=time(c.updated_at),erpAt=time(e?.updated_at),stockAt=time(s.stockCheckedAt);
  if(e?.status!=='complete'||e.error!==null||s.phase!=='bl_ready'||!Number.isFinite(verified)||!Number.isFinite(failedAt)||!Number.isFinite(erpAt)||!Number.isFinite(stockAt)||verified<=failedAt||erpAt<verified||Math.max(verified,erpAt,stockAt)>now+5000)return fail('no_later_validation');
  if(!id(s.bc?.id)||s.bc.status!=='active'||!id(s.bl?.id)||s.bl.status!=='ready_to_ship')return fail('local_documents_not_ready');
- if(!Array.isArray(lines)||!lines.length||lines.some(l=>typeof l.target_sku!=='string'||!l.target_sku.trim()||!qty(l.target_quantity)))return fail('local_lines_unconfirmed');
+ if(!usesRecordedBc(o)&&(!Array.isArray(lines)||!lines.length||lines.some(l=>typeof l.target_sku!=='string'||!l.target_sku.trim()||!qty(l.target_quantity))))return fail('local_lines_unconfirmed');
  const currentFingerprint=fingerprint(o,lines);
- if(!/^[a-f0-9]{64}$/.test(s.labelPreparationFingerprint||'')||currentFingerprint!==s.labelPreparationFingerprint)return fail('current_preparation_changed');
+ if(!usesRecordedBc(o)&&(!/^[a-f0-9]{64}$/.test(s.labelPreparationFingerprint||'')||currentFingerprint!==s.labelPreparationFingerprint))return fail('current_preparation_changed');
  if(!id(bc?.id)||String(bc.id)!==String(s.bc.id)||bc.status!=='active'||!Array.isArray(bc.line_items))return fail('provider_bc_unconfirmed');
  if(!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.paginatorInfo?.hasMorePages!==false)return fail('provider_history_incomplete');
  const seen=new Set();for(const bl of bc.shipping_orders.data){if(!id(bl.id)||seen.has(String(bl.id)))return fail('provider_history_ambiguous');seen.add(String(bl.id));}
@@ -45,7 +46,7 @@ export function carrierPrevalidationProof(o,c,e,lines,bc,{now=Date.now()}={}){
   if(identities.has(sku)&&identities.get(sku)!==identity)return fail('provider_sku_ambiguous');identities.set(sku,identity);
   actual.set(sku,(actual.get(sku)||0n)+units(l.quantity));proofLines.push({parentId:String(l.parent_id),variantId:String(l.variant.id),locationId:String(l.location.id),sku,quantity:Number(l.quantity)});
  }
- if(!actual.size||local.size!==actual.size||[...local].some(([sku,q])=>q!==actual.get(sku)))return fail('current_quantities_differ');
+ if(!actual.size||(!usesRecordedBc(o)&&(local.size!==actual.size||[...local].some(([sku,q])=>q!==actual.get(sku)))))return fail('current_quantities_differ');
  return {verified:true,bcId:String(bc.id),blId:String(selected.id),blStatus:selected.status,validationAt:new Date(verified).toISOString(),previousFailureAt:new Date(failedAt).toISOString(),fingerprint:currentFingerprint,lines:proofLines,readOnly:true,businessActionAuthorized:false};
 }
 

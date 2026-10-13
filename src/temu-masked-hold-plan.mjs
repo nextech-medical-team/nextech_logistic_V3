@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {createHash} from 'node:crypto';
 import {normalizeTemuReceipt} from './marketplace-inbox.mjs';
 import {marketplaceChanged,sourceFingerprint} from './marketplace-comparison.mjs';
@@ -17,8 +18,8 @@ export function planMaskedTemuHold(e,{now=Date.now()}={}){
  let incoming,old;try{incoming=normalizeTemuReceipt(s.payload,s.shop);old=normalizeTemuReceipt(pending,s.shop);}catch(error){return stop('source_incomplete',error.message);}
  if(marketplaceChanged(o,e.priorLines,incoming)||marketplaceChanged(o,e.priorLines,old)||!sourceFingerprint(e.priorLines))return stop('real_change','Articles, quantités ou champs d’adresse divulgués réellement différents');
  const acceptedMoney=moneyData(o.source_payload?.temuAmounts?.data),currentMoney=moneyData(s.payload.detail.v3Amounts?.data);
- if(!acceptedMoney||acceptedMoney!==currentMoney)return stop('commercial_changed','Prix, taxes ou remises source différents ou incomplets');
- const p=o.erp_live;if(p?.bc?.status!=='active'||!p.bc.id||!p.bl?.id||!['ready_to_ship','shipped','delivered','completed'].includes(p.bl.status)||!['bl_ready','bl_created'].includes(p.phase)||p.pricing?.status!=='verified'||p.pricing.error)return stop('preparation','Préparation Erplain actuelle non vérifiée');
+ if(!usesRecordedBc(o)&&(!acceptedMoney||acceptedMoney!==currentMoney))return stop('commercial_changed','Prix, taxes ou remises source différents ou incomplets');
+ const p=o.erp_live;if(p?.bc?.status!=='active'||!p.bc.id||!p.bl?.id||!['ready_to_ship','shipped','delivered','completed'].includes(p.bl.status)||!['bl_ready','bl_created'].includes(p.phase)||(!usesRecordedBc(o)&&(p.pricing?.status!=='verified'||p.pricing.error)))return stop('preparation','Préparation Erplain actuelle non vérifiée');
  if(e.erpJobs?.length!==1||e.erpJobs[0].status!=='complete'||e.erpJobs[0].error)return stop('erp_job','Traitement Erplain non terminé');
  const j=e.temuJob,docs=e.temuDocuments||[],labelReadDeferred=j?.error==='Quota partagé : lecture différée';if(j?.status!=='complete'||j.error&&!labelReadDeferred||!Array.isArray(j.packages)||!j.packages.length||j.packages.some(pkg=>!docs.some(d=>String(d.package)===String(pkg)&&d.bytes>0&&d.pdfValid===true&&/^[a-f0-9]{64}$/.test(d.sha256))))return stop('label_proof','Étiquettes TEMU existantes non complètement prouvées');
  if(e.workflowJobs?.some(j=>['queued','pending','running','processing','waiting'].includes(j.status))||e.activeJobs?.length)return stop('active_job','Traitement actif conservé');
