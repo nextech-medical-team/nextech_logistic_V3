@@ -88,3 +88,19 @@ test('same TEMU shipping engine requires validated production BL, quotes 0.25 kg
  f.detail.orderList[0].quantity=4;await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/quantités/);assert.equal(f.bought,0);f.detail.orderList[0].quantity=5;
  const result=await shipping.buy(reference,plan.id,plan.amount);assert.equal(result.status,'complete');assert.equal(f.bought,1);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
 });
+
+test('dedicated Excel preparation rejects customer holds and every recorded Erplain cancellation before API calls',async t=>{
+ const f=await fixture(t);
+ for(const suspension of [
+  {active:true,note:'Annulation demandée par le client'},
+  {active:false,note:excelImportHold},
+  ...[null,{}, {status:'processing'}, {status:'complete'}].map(erplainCancellation=>({active:true,note:excelImportHold,erplainCancellation}))
+ ]){
+  await f.db.query("UPDATE orders SET suspension=$1 WHERE id='o'",[JSON.stringify(suspension)]);
+  await assert.rejects(f.service.prepare(await f.input(),user),/Blocage/);
+  assert.deepEqual((await f.read()).suspension,suspension);
+ }
+ assert.equal(f.calls.length,0);
+ assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+ assert.equal(f.bought,0);
+});

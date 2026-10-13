@@ -7,4 +7,7 @@ test('suspended order remains consultable through the normal order table and pro
 test('a suspension still blocks document creation, stock writes, label purchases and mutations',()=>{
  for(const p of ['/api/resolutions','/api/partial/create','/api/carriers/create','/api/temu/labels/buy','/api/orders/erp','/api/erplain/live/create','/api/import-corrections/apply'])assert.equal(suspensionGuardRequired(p,'POST'),true);
 });
-
+test('only the dedicated Excel import-hold transition reaches its own suspension checks',()=>{
+ assert.equal(suspensionGuardRequired('/api/temu/excel/prepare','POST'),false);
+ for(const path of ['/api/temu/excel/prepare/other','/api/temu/prepare','/api/temu/buy','/api/temu/recover'])assert.equal(suspensionGuardRequired(path,'POST'),true);
+});

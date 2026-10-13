@@ -31,7 +31,7 @@ export function temuExcelPreparation(db,local){
      throw Error('Commande déjà raccordée : utilisez les corrections de la commande existante');
     }
     if(excelPreparationFingerprint(o,lines)!==fingerprint)throw Error('Commande modifiée : relancez la vérification');
-    if(o.issue&&o.issue!==excelImportHold||o.suspension?.active!==true||o.suspension.note!==excelImportHold||o.suspension.erplainCancellation||o.source_payload.marketplacePendingCorrection||o.transport_choice||o.partial_mode||o.erp_live?.bc||o.erp_live?.customer||o.erp_live?.phase||o.tracking_status!=='not_shipped')throw Error('Blocage ou préparation existante : vérifier la commande avant raccordement');
+    if(o.issue&&o.issue!==excelImportHold||o.suspension?.active!==true||o.suspension.note!==excelImportHold||Object.hasOwn(o.suspension,'erplainCancellation')||o.source_payload.marketplacePendingCorrection||o.transport_choice||o.partial_mode||o.erp_live?.bc||o.erp_live?.customer||o.erp_live?.phase||o.tracking_status!=='not_shipped')throw Error('Blocage ou préparation existante : vérifier la commande avant raccordement');
     const commercial=excelCommercialSource(o,lines),{mallId,api,detail}=await local.resolveExcelShop(o,lines);
     verifyExcelTemuDetail(o,lines,detail);
     const info=inspectTemu(detail,reference);
