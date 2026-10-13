@@ -35,7 +35,7 @@ test('completed label and source verification survive a quota error',async()=>{c
  }finally{await fs.rm(dir,{recursive:true,force:true});}});
 test('document read deferral never changes a completed shipment to pending or clears its error',async()=>{
  const reference='PO-069-12345',old={reference,status:'complete',packages:['PK-1'],result:{source:'prior'},error:'Independent error'},writes=[];
- const db={query:async(s,a)=>{if(s.startsWith('SELECT channel'))return {rows:[{channel:'temu',source_payload:{}}]};if(s.startsWith('SELECT'))return {rows:[old]};writes.push({s,a});return {rows:[]};}};
+ const db={query:async(s,a)=>{if(s.startsWith('SELECT channel'))return {rows:[{channel:'temu',source_payload:{}}]};if(s.includes('FROM temu_label_documents'))return {rows:[]};if(s.startsWith('SELECT'))return {rows:[old]};writes.push({s,a});return {rows:[]};}};
  const api={read:async type=>{if(type==='bg.logistics.shipment.result.get')return {packageInfoResultList:[{packageSn:'PK-1',shippingLabelStatus:1,orderSendInfoList:[{parentOrderSn:reference}]}]};throw quota(60);}};
  await assert.rejects(temuShipping(db,api).recover(reference),e=>e.code==='source_budget_deferred');
  assert.equal(writes.length,1);assert.match(writes[0].s,/DO UPDATE SET packages=excluded.packages/);assert.equal(old.status,'complete');assert.equal(old.error,'Independent error');

@@ -17,7 +17,7 @@ export async function orderPageDetails(db,rows,mode='all'){
  for(const row of rows)row.external_shipments=Array.isArray(row.source_payload?.historicalShipments)?row.source_payload.historicalShipments:[];
  const refs=rows.filter(r=>r.channel==='temu').map(r=>r.reference);if(refs.length){
  const jobs=new Map((await db.query('SELECT reference,status,error,result,plan FROM temu_label_jobs WHERE reference=ANY($1::text[])',[refs])).rows.map(({reference,...job})=>[reference,job]));
- const docs=(await db.query("SELECT d.reference,d.package FROM temu_label_documents d JOIN temu_label_jobs j ON j.reference=d.reference WHERE d.reference=ANY($1::text[]) AND j.result->>'source'='temu_direct' AND j.packages ? d.package ORDER BY d.package",[refs])).rows;
+ const docs=(await db.query("SELECT d.reference,d.package FROM temu_label_documents d JOIN temu_label_jobs j ON j.reference=d.reference WHERE d.reference=ANY($1::text[]) AND j.packages ? d.package ORDER BY d.package",[refs])).rows;
  const byReference=new Map();for(const {reference,...item} of docs){const list=byReference.get(reference)||[];list.push(item);byReference.set(reference,list);}for(const row of rows)if(row.channel==='temu'){row.temu_job=jobs.get(row.reference)||null;row.temu_documents=byReference.get(row.reference)||[];}
  }
  }
