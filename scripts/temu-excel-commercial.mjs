@@ -1,44 +1,9 @@
 import {createHash} from 'node:crypto';
 import {buildBcPricing} from '../src/bc-pricing.mjs';
 const norm=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
-const cents=v=>Math.round(v*100);
 function columns(line){return Object.fromEntries(Object.entries(line.source_payload?.excel||{}).map(([k,v])=>[norm(k),v]));}
-export function excelMoney(raw,label,{optional=false,country}={}){
- if(raw==null||String(raw).trim()===''){if(optional)return {amount:0,currency:null};throw Error('Excel : montant absent — '+label);}
- const s=String(raw).trim().replace(/[\s\u00a0\u202f]/g,'');
- const match=s.match(/^(?:(EUR|USD|GBP|PLN|CZK|SEK|DKK|HUF|RON|BGN|NOK|CHF|€|£|zł|kr\.?|Kč|Ft|lei))?(\d+(?:[.,]\d{1,2})?)(EUR|USD|GBP|PLN|CZK|SEK|DKK|HUF|RON|BGN|NOK|CHF|€|£|zł|kr\.?|Kč|Ft|lei)?$/i);
- if(!match||match[1]&&match[3])throw Error('Excel : montant invalide — '+label);
- const symbol=(match[1]||match[3])?.toLowerCase();
- const currency=/^kr\.?$/.test(symbol||'')?({DK:'DKK',SE:'SEK',NO:'NOK'}[country]):symbol?({'€':'EUR','£':'GBP','zł':'PLN','kč':'CZK',ft:'HUF',lei:'RON'}[symbol]||symbol.toUpperCase()):null;
- if(symbol&&!currency)throw Error('Excel : devise kr ambiguë — pays requis');
- return {amount:Number(match[2].replace(',','.')),currency};
-}
-export function excelAmounts(lines,{country}={}){
- let currency=null;const rows=lines.map(l=>{
-  const r=columns(l);const money=(name,optional=false)=>{const m=excelMoney(r[norm(name)],name,{optional,country});if(m.currency){if(currency&&currency!==m.currency)throw Error('Excel : devises différentes');currency=m.currency;}return m.amount;};
-  const net=money('Total du prix de vente après réductions (hors taxes)'),tax=money('Taxe sur les produits'),shipping=money("Total de l'expédition (hors taxes)"),shippingTax=money("Taxe d'expédition"),beforeDiscount=money('Prix de vente (hors taxes)');
-  const sellerDiscount=money('Réduction de la part du vendeur',true),temuDiscount=money('Réduction de la part de Temu',true),refund=money('Remboursement des produits',true);
-  if(refund)throw Error('Excel : remboursement à rapprocher avant création');
-  // TEMU exports this field as a line total, already including the quantity.
-  if(Math.abs(cents(beforeDiscount-sellerDiscount-temuDiscount)-cents(net))>1)throw Error('Excel : total de ligne avant réductions, réductions et total net incohérents — '+l.source_sku);
-  return {net,tax,shipping,shippingTax,sellerDiscount,temuDiscount};
- });
- if(!currency)throw Error('Excel : devise absente');
- const sum=k=>rows.reduce((n,r)=>n+cents(r[k]),0)/100;
- return {currency,rows,net:cents(sum('net')+sum('shipping'))/100,tax:cents(sum('tax')+sum('shippingTax'))/100,total:cents(sum('net')+sum('shipping')+sum('tax')+sum('shippingTax'))/100,discount:cents(sum('sellerDiscount')+sum('temuDiscount'))/100,shipping:sum('shipping')};
-}
-export function excelPricing(order,lines,products,codes){
- const amounts=excelAmounts(lines,{country:order.address?.country});
- // Reuse Amazon's source-total, tax-rate and converted-quantity calculation.
- const source=lines.map((l,i)=>{const r=amounts.rows[i];return {...l,source_payload:{itemprice:cents(r.net+r.tax)/100,itemtax:r.tax,shippingprice:cents(r.shipping+r.shippingTax)/100,shippingtax:r.shippingTax}};});
- const pricing=buildBcPricing({...order,channel:'amazon',source_payload:{currency:amounts.currency}},source,products,codes);
- // Preserve source gross cents; inclusive pricing avoids losing a cent when
- // TEMU independently rounds net and tax columns.
- pricing.tax_type='inclusive';
- pricing.items=pricing.items.map((item,i)=>({...item,...(item.type==='shipping_cost'?{description:item.description.replace('Livraison Amazon','Livraison TEMU')} : {}),price:pricing.lineAmounts[i].gross/Number(item.quantity)}));
- pricing.lineAmounts=pricing.lineAmounts.map((item,i)=>({...item,unitPrice:pricing.items[i].price,basis:'gross'}));
- return {...pricing,source:'temu_excel',excel:amounts};
-}
+export {excelMoney,excelAmounts} from '../src/temu-excel-commercial.mjs';
+export function excelPricing(order,lines,products,codes){return buildBcPricing({...order,channel:'temu',source_payload:{...order.source_payload,origin:'temu_excel'}},lines,products,codes);}
 export function customerDetails(order,lines){
  const rows=lines.map(columns),first=rows[0]||{};const get=(...names)=>names.map(n=>first[norm(n)]).find(v=>String(v??'').trim())||'';
  const company=String(get('nom de société','nom de l’entreprise','company name','business name')).trim();

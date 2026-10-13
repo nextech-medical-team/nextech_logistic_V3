@@ -13,11 +13,27 @@ Cette première version accepte uniquement les commandes et articles **non expé
 
 **Importer les commandes sélectionnées** réanalyse les fichiers, vérifie leur empreinte et les doublons apparus depuis l’aperçu, puis enregistre le lot dans une transaction. Un identifiant de validation empêche une double soumission de recréer des commandes. Le rapport texte peut être téléchargé après analyse et après import.
 
-Les commandes sont créées avec une suspension active et la note **Import Excel TEMU : vérifier la commande et sa boutique avant toute préparation**. Aucun travail de préparation, aucune étiquette et aucun BC/BL n’est créé par cet import. L’Excel ne prouve pas la boutique API : aucune identité de boutique n’est inventée. Vérifier les données et le rattachement TEMU avant toute réactivation par les contrôles existants.
+Les commandes sont créées avec une suspension active et la note **Import Excel TEMU : vérifier la commande et sa boutique avant toute préparation**. Aucun travail de préparation, aucune étiquette et aucun BC/BL n’est créé par cet import. L’Excel ne prouve pas la boutique API : aucune identité de boutique n’est inventée. Le panneau **Préparer les commandes Excel TEMU** permet ensuite de vérifier la boutique et de demander la préparation.
 
 Les routes `POST /api/import/temu/preview` et `POST /api/import/temu/confirm` sont réservées aux administrateurs, managers et opérateurs. Les contrôles existants de session, de préparation et de suspension restent applicables. Les exports clients locaux `order_export-*.xlsx` sont exclus de Git ; les tests utilisent des données fictives.
 
 Validation : `npm run test:temu-import`, `npm run check` et `npx playwright test test/ui/temu-excel-import.spec.mjs`.
+
+## Préparation dans l’application principale
+
+Après l’import, dans le même écran, cliquer **Vérifier et préparer** pour la commande. L’application affiche les articles et le total BC calculé depuis l’Excel. Choisir la boutique TEMU, cocher la confirmation, puis **Lancer les BC/BL dans Erplain**. Cette action est réservée aux administrateurs et managers, comme les reprises Erplain existantes.
+
+La boutique est proposée par le connecteur existant, sans exposer les accès privés. Avant de lever la suspension d’import, l’application relit la commande TEMU et compare sa référence, tous les numéros de lignes, les SKU vendeur et les quantités. Une autre suspension, une annulation, une expédition ou une préparation existante interdit ce premier raccordement. Les changements survenus après l’aperçu imposent une nouvelle vérification. Une double validation renvoie la même préparation.
+
+La validation enregistre une action `resume` dans la file de résolutions existante. Ce worker applique le mapping habituel, puis appelle le worker Erplain LIVE existant pour créer, relire et vérifier les BC/BL et le stock. Les références Erplain, les doublons, les créations incertaines et les contrôles de publication suivent ce même parcours. Une correspondance SKU ou une quantité à corriger reste visible dans **Voir la commande / corriger** ; aucun mapping n’est deviné.
+
+Les prix utilisent `buildBcPricing`, partagé avec Amazon : les colonnes de prix TEMU sont des **totaux de ligne**, après réductions, avec livraison et TVA. La quantité préparée issue du mapping ne multiplie pas à nouveau ces totaux. Une empreinte des articles et montants Excel est enregistrée et revérifiée avant la préparation. Les montants API ne remplacent pas les montants Excel pour le BC.
+
+Après validation du BL et du stock, **Étiquette et marge TEMU** ouvre l’écran TEMU existant. Afficher le tarif, vérifier la marge puis confirmer l’achat. Le moteur commun conserve ses protections contre les doubles achats et récupère le PDF et le suivi. Pour ces commandes Excel, le poids déclaré est **0,25 kg**, les dimensions **10 × 8 × 0,5 cm**, et le dernier créneau admissible de l’offre est retenu selon la limite TEMU. Les dimensions restent soumises à l’acceptation de l’API. Le devis est lié à la préparation ; une modification impose de le refaire.
+
+L’achat automatique est désactivé pour l’origine Excel, même en cas de marge positive. Le calcul de marge reste celui de `/api/margins`, alimenté par les colonnes vendeur Excel, les coûts du référentiel publié et le devis ou coût réel TEMU. Un référentiel absent ou un mapping incompatible donne une marge indisponible ou incomplète.
+
+Les routes de raccordement sont `GET /api/temu/excel/orders`, `GET /api/temu/excel/preview` et `POST /api/temu/excel/prepare`. Les contrôles d’accès et de session du serveur principal s’appliquent. Aucun nouvel achat ni document réel n’est effectué par les tests : `node --test test/temu-excel-production.test.mjs` et `npx playwright test test/ui/temu-excel-production.spec.mjs`.
 
 ## Essai manuel local
 
@@ -29,7 +45,7 @@ Configurer `ERPLAIN_TEST_API_KEY` dans `.env.erplain-test` (ignoré par Git), pu
 
 Le connecteur utilise uniquement l’endpoint officiel et vérifie l’identité **101406** avant chaque mutation ; toute autre société, notamment **100174**, est refusée. Aucun connecteur de production n’est modifié. Les routes de création sont exposées uniquement par le serveur loopback de test et exigent l’origine locale. Les BC/BL et résultats incertains sont conservés sous `data/temu-excel-local/documents` pour empêcher une seconde création après rechargement ou redémarrage. Un résultat de mutation incertain ou un verrou laissé par un arrêt brutal requiert un rapprochement manuel avec Erplain avant reprise : ne pas supprimer ces fichiers pour relancer.
 
-Ce parcours local ne constitue pas l’intégration automatique TEMU au workflow Amazon de production. L’import de production reste en attente de validation ; la préparation commerciale doit être raccordée et validée séparément.
+Ce parcours local reste isolé. Le parcours de production ci-dessus utilise les workers Erplain existants et la base de l’application principale.
 
 Vérification ciblée : `node --test test/temu-erplain-test.test.mjs test/temu-excel-commercial.test.mjs test/temu-excel-import.test.mjs`.
 
@@ -65,7 +81,7 @@ Vérification : `node --test test/temu-excel-margins.test.mjs test/temu-excel-la
 
 Le serveur principal expose l’import Excel et son aperçu authentifié. Les commandes importées restent suspendues pour validation ; leur import ne déclenche aucune préparation automatique.
 
-Les pages `/status-preview` et `/erplain-test`, ainsi que les routes `/api/local-*`, appartiennent exclusivement au serveur local `npm run test:temu-local`, lié à `127.0.0.1`. Elles ne sont pas exposées par `npm start`. L’achat réel TEMU du parcours Excel décrit ci-dessus reste un outil local à confirmation manuelle.
+Les pages `/status-preview` et `/erplain-test`, ainsi que les routes `/api/local-*`, appartiennent exclusivement au serveur local `npm run test:temu-local`, lié à `127.0.0.1`. Elles ne sont pas exposées par `npm start`. Le parcours de production utilise les routes `/api/temu/prepare`, `/api/temu/buy` et `/api/temu/recover` habituelles ; les outils locaux restent séparés.
 
 La comparaison locale réutilise les règles du moteur de synchronisation, mais ne modifie ni les statuts Nextech ni Erplain. Les suivis GLS/GOFO sont saisis par l’utilisateur ; leur appartenance et leur exhaustivité doivent être vérifiées. Le service principal utilise les colis enregistrés dans Nextech. Publier cette branche n’active pas les écritures Erplain : les contrôles existants `ERPLAIN_LIVE_WRITES`, `MIGRATION_PREPARATION` et l’exclusion du traitement concurrent `lifecycle` restent applicables.
 

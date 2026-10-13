@@ -70,6 +70,7 @@
   try{
    result=await api('/api/import/temu/confirm',{...draft,selection:[...chosen]});
    find('[data-result]').textContent=result.message;draft=null;chosen.clear();
+   window.dispatchEvent(new Event('temu-excel-imported'));
    await stats().catch(()=>{});
   }catch(error){find('[data-result]').textContent=error.message;}finally{setBusy(false);}
  };

@@ -1,3 +1,4 @@
+import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
 import {temuCommercialSource} from './temu-commercial-source.mjs';
 import {temuCountryAmounts,temuFixedVat} from './temu-country-vat.mjs';
 import {temuLocalService} from './temu-local.mjs';
@@ -6,6 +7,7 @@ import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 const value=v=>v!==null&&v!==undefined&&String(v).trim()!==''&&Number.isFinite(Number(v));
 export function temuPricingIssue(order,lines){
+ if(isTemuExcel(order)){try{verifiedExcelCommercial(order,lines);return null;}catch(e){return e.message;}}
  if(order.source_payload?.visibilityHold)return 'TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU';
  if(!lines.length)return 'TEMU · Import incomplet : aucun article enregistré, reprise après nouvelle lecture TEMU';
  if(order.erp_live?.bc?.id&&order.erp_live?.equivalentOriginalLines?.length)lines=order.erp_live.equivalentOriginalLines;
@@ -37,7 +39,7 @@ export function temuBcPricingLoader(db,directory){
 }
 export async function ensureTemuBcPricing(db,order,lines,refresh){
  if(order.channel!=='temu'||temuPricingComplete(order,lines))return false;
- if(order.source_payload?.visibilityHold||!lines.length)throw Error(temuPricingIssue(order,lines));
+ if(isTemuExcel(order)||order.source_payload?.visibilityHold||!lines.length)throw Error(temuPricingIssue(order,lines));
  try{await refresh(order.reference);}catch(e){throw Error(temuFixedVat(order)!==null?'TEMU · Prix et frais de livraison indisponibles · TVA 25 % automatique'+(String(e.message).includes('3000032')?' · Accès aux montants refusé (3000032)':' · Échec de lecture des montants'):'TEMU · Récupération prix et TVA par API impossible : '+String(e.message).slice(0,350));}
  const latest=(await db.query('SELECT source_payload FROM orders WHERE id=$1',[order.id])).rows[0];
  if(!latest?.source_payload)throw Error('TEMU · Commande absente après récupération API');
