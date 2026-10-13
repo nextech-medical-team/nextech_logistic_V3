@@ -47,6 +47,7 @@ export function shippingTransition({current,target,readyConsumed=false,preparati
  if(!BL_STATUSES.has(current))throw Error('Erplain · Statut BL inconnu');
  if(!['ready_to_ship','shipped','delivered','cancelled'].includes(target))throw Error('Erplain · Modification du statut intermédiaire interdite');
  if(current===target)return {write:false,reason:'already_applied'};
+ if(current==='in_preparation'&&target==='ready_to_ship')return {write:false,reason:'preparation_ready_forbidden'};
  if(current==='cancelled')return {write:false,reason:'cancelled_terminal'};
  if(target==='cancelled'){
   if(!cancellationConfirmed)throw Error('Annulation commerciale non confirmée');

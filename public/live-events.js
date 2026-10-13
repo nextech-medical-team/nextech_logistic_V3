@@ -26,9 +26,11 @@ function orderRowVersions(snapshot,partial,diagnostics){
   orderAcceptedRenderRevision=renderAttempt;
   clearOrderRefreshFailureNotice();
   const nextVersions=orderRowVersions(JSON.parse(lastOrdersSnapshot),orderRenderData.partial.rows,orderRenderData.diagnostics);
+  const referenceSelection=selectedOrderReference();
   // All enrichments completed in the same microtask turn. Reuse unchanged DOM
   // before the next browser paint, preserving progress, focus and selection.
   for(const row of [...body.rows]){const key=rowKey(row),old=oldRows.get(key);if(key&&old&&old!==row&&old.cells.length===row.cells.length&&oldVersions.get(key)===nextVersions.get(key))row.replaceWith(old);}
+  restoreSelectedOrderReference(referenceSelection);
  };
 })();
 (()=>{

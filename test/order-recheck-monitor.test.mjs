@@ -132,7 +132,7 @@ test('bounded resource batches keep unread SKUs due and eventually cover every o
  await db.query("UPDATE lines SET source_sku='Y' WHERE order_id='b'");await db.query("INSERT INTO orders(id,reference,issue) VALUES('c','C','SKU Erplain introuvable')");await db.query("INSERT INTO lines(id,order_id,source_sku,quantity) VALUES('3','c','Z',1)");
  const reads=[];const m=orderRecheckMonitor(db,{}, {maxSkuReads:2,readProduct:async(api,sku)=>{reads.push(sku);return {usable:false,status:'missing'};},readDocuments:()=>assert.fail('SKU-only problem must not search unrelated documents')});
  await m.runLocal();await m.runExternal();assert.equal(reads.length,2);
- const pending=(await db.query("SELECT order_id,state FROM order_recheck_monitor WHERE state->>'externalResult' LIKE '%partiels%'")).rows;assert.equal(pending.length,1);
+ const pending=(await db.query("SELECT order_id,state FROM order_recheck_monitor WHERE state->>'externalStatus'='partial'")).rows;assert.equal(pending.length,1);assert.match(pending[0].state.externalResult,/budget de lectures SKU/);
  await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second' WHERE order_id=$1",[pending[0].order_id]);await m.runExternal();assert.deepEqual(reads.sort(),['X','Y','Z']);
  }finally{await db.close();}
 });
@@ -259,4 +259,25 @@ for(const scenario of ['valid','manual','stock-review','stale-stock','mapping-ch
   if(scenario==='existing-pdf')assert.equal((await db.query("SELECT encode(pdf,'hex') bytes FROM temu_label_documents")).rows[0].bytes,'010203');
   assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE status IN ('queued','running','waiting')")).rows[0].n,0);
  }finally{await db.close();}
+});
+
+test('external document budgets rotate attempts and retain precise incomplete coverage',async()=>{
+ const db=await fixture();try{
+ await db.query("UPDATE orders SET erp_live='{\"bc\":{\"id\":\"1\"}}'");
+ await db.query("INSERT INTO orders(id,reference,issue,erp_live) VALUES('c','C','SKU Erplain introuvable','{\"bc\":{\"id\":\"2\"}}')");
+ await db.query("INSERT INTO lines(id,order_id,source_sku,quantity) VALUES('3','c','X',1)");
+ const documents=[],m=orderRecheckMonitor(db,{}, {maxDocReads:1,readProduct:async()=>({usable:true,status:'active',variant:{sku:'X'}}),cacheProduct:async()=>{},readDocuments:async(_db,_api,id)=>{documents.push(id);return {};},reconcilePreparation:async()=>({})});
+ await m.runLocal();
+ for(let i=0;i<3;i++){await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second'");await m.runExternal();}
+ assert.deepEqual([...new Set(documents)].sort(),['a','b','c']);
+ const rows=(await db.query('SELECT state FROM order_recheck_monitor')).rows;
+ assert.ok(rows.every(r=>r.state.lastExternalCheck));assert.ok(rows.some(r=>r.state.externalStatus==='partial'&&r.state.externalPending.documents===true));
+ assert.ok(rows.filter(r=>r.state.externalStatus==='partial').every(r=>r.state.externalResult.includes('BC/BL')));
+ }finally{await db.close();}
+});
+
+test('actual carrier stages count as progress while polling timestamps do not',()=>{
+ const now=Date.now(),o={channel:'shopify',label_status:'production_pending',erp_live:{phase:'bl_ready',bc:{id:'bc'},bl:{id:'bl'}},carrier_job:{status:'pending'}};
+ const a=monitoringObservation(o,{},now),b=monitoringObservation({...o,carrier_job:{status:'creating'}},a,now+1000),c=monitoringObservation({...o,carrier_job:{status:'creating',updated_at:new Date(now+5000)}},b,now+5000);
+ assert.match(a.result,/worker/);assert.match(b.result,/cours/);assert.notEqual(a.progress,b.progress);assert.equal(b.progress,c.progress);assert.equal(b.lastProgress,c.lastProgress);
 });

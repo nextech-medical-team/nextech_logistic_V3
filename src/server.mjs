@@ -76,6 +76,7 @@ import {orderQuery} from './order-query.mjs';
 import http from 'node:http';
 
 import {initializeCarrierJobs,createCarrierWorkers,queueCarrierLabels} from './carrier-jobs.mjs';
+import {queueLabelFromBl} from './direct-label.mjs';
 
 import {workspaceApi} from './workspace-api.mjs';
 
@@ -369,6 +370,7 @@ const server=http.createServer(async(req,res)=>{
       }
     }
     if(p==='/api/margins'&&req.method==='GET'){permitted(user,['admin','manager','operator']);json(res,200,await margins.get());return;}
+    if(p==='/api/carriers/from-bl'&&req.method==='POST'){permitted(user,['admin','manager','operator']);const b=await body(req);json(res,202,await queueLabelFromBl(db,b.id,user));return;}
     if(await labelTools({p,req,res,db,user,body,json,audit,permitted}))return;
     if(await shopifyObservationRoutes({p,url,req,res,db,json,user,permitted}))return;
     if(await v2Routes({p,url,req,res,db,json,user,permitted}))return;

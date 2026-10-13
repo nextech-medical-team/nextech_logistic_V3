@@ -40,7 +40,7 @@ document.querySelector('.notice').innerHTML='V3 · ERPLAIN LIVE <span>Nouvelles 
 document.querySelector('#login small').textContent='Erplain LIVE connecté';
 const batch=document.querySelector('#view-orders .batch');const create=document.createElement('button');create.id='sandbox-labels';create.textContent='Créer les étiquettes transporteurs PROD';batch.append(create);
 const exportButton=document.createElement('button');exportButton.textContent='Exporter la sélection';batch.append(exportButton);
-create.onclick=async()=>{try{const r=await api('/api/carriers/labels',{ids:[...selected]});flash(r.message);await orders();}catch(e){flash(e.message,true);}};
+create.onclick=async()=>{try{const r=await api('/api/carriers/labels',{ids:[...selected]});flash(r.message);window.getSelection()?.removeAllRanges();preparedOrderResponse=null;await orders();}catch(e){flash(e.message,true);}};
 function downloadCsv(name,rows){
  const cell=v=>'"'+String(v??'').replace(/^[=+@\-\t\r]/,"'$&").replaceAll('"','""')+'"';
  const content='\ufeff'+rows.map(r=>r.map(cell).join(';')).join('\r\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:'text/csv;charset=utf-8'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);

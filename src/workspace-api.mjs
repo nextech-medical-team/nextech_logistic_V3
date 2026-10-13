@@ -2,7 +2,7 @@ import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
 import {labelAttachment} from './label-attachment.mjs';
 import {saveMapping} from './mapping-store.mjs';
 import {currentParcelPdf} from './parcel-pdf.mjs';
-import {queueCarrierLabels} from './carrier-jobs.mjs';
+import {queueLabelBatchFromBl} from './direct-label.mjs';
 import ExcelJS from 'exceljs';
 export async function workspaceApi({p,url,req,res,db,user,body,json,permitted,audit,carrierConfigured,catalog}){
  const operations=['admin','manager','operator'];
@@ -30,7 +30,7 @@ export async function workspaceApi({p,url,req,res,db,user,body,json,permitted,au
   res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition','attachment; filename="sku-mappings-v3.xlsx"');res.end(Buffer.from(await book.xlsx.writeBuffer()));return true;
  }
  if(p==='/api/carriers/labels'&&req.method==='POST'){
-  permitted(user,operations);if(!carrierConfigured)throw new Error('Accès transporteurs production non configurés');const b=await body(req);const queued=await queueCarrierLabels(db,b.ids);await audit(user,'labels.production.requested',{queued});json(res,202,{queued,message:`${queued} demandes de production ajoutées. Les files GLS et GOFO sont indépendantes.`});return true;
+  permitted(user,operations);if(!carrierConfigured)throw new Error('Accès transporteurs production non configurés');const b=await body(req);const result=await queueLabelBatchFromBl(db,b.ids,user);await audit(user,'labels.production.requested',{queued:result.queued,skipped:result.skipped});json(res,202,result);return true;
  }
  if(p==='/api/carriers/status'&&req.method==='GET'){
   const values=name=>url.searchParams.getAll(name).filter(Boolean),q='%'+(url.searchParams.get('search')||'').slice(0,100)+'%';
