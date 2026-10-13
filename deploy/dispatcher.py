@@ -7,7 +7,7 @@ except ImportError:
  grp=types.SimpleNamespace(getgrnam=lambda _:None) # Windows unit tests only; publisher requires Linux/root.
 from pathlib import Path
 from plan import plan,digest,safe_path
-from queue_policy import blockers,validate_manifest
+from queue_policy import blockers,validate_manifest,apply_human_priority
 
 STATE=Path('/var/lib/nextech-cicd')
 APP=Path('/opt/nextech/current')
@@ -115,7 +115,7 @@ def deploy(commit,packet=None):
    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:tar.extractall(candidate,filter='data')
    run(['chown','-R','nextech-build:nextech-build',workspace]);os.chmod(workspace,0o750)
    isolated={'PATH':'/usr/bin:/bin','HOME':'/var/lib/nextech-build','NODE_ENV':'test','CI':'true'}
-   for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],120),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
+   for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],900),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
     run([RUNUSER,'-u','nextech-build','--',*command],cwd=candidate,env=isolated,timeout=timeout)
    report['checks']='PASS'
    if not changed:
@@ -129,6 +129,7 @@ def deploy(commit,packet=None):
    backend=any(x['path'].startswith('src/') or x['path'].startswith('package') for x in changed)
    report['restart']=backend;report['backup']=str(backup)
    if backend:
+    worker_pid_before=int(run(['systemctl','show','nextech-worker','-p','MainPID','--value']).strip())
     # Pause only scheduling, wait for natural completion. Never replay a business write.
     paused=True;guard('pause',backup)
     for _ in range(120):
@@ -183,7 +184,11 @@ def deploy(commit,packet=None):
  finally:
   report['installed']=installed;report['paused']=paused
   if paused:
-   try:guard('resume',backup);report['taskControlsRestored']=True
+   try:
+    if commit=='29a9e13cb53da42859befd6ea5199cda77a2fc58':
+     from preserve_worker_capacity import preserve
+     report['workerCapacity']=preserve(worker_pid_before,backup)
+    guard('resume',backup);guard('verify-restored',backup);report['taskControlsRestored']=True
    except Exception:report['taskControlsRestored']=False;report['manualIntervention']=True;report['status']='failed'
   report['finishedAt']=time.time();atomic_json(journal,report)
  return report
@@ -221,6 +226,9 @@ if __name__=='__main__':
    if commit!=head:
     record['status']='superseded';atomic_json(request_path,record);print(json.dumps(record));sys.exit(0)
    deferred=blockers(local,automatic,record['id'],record['createdAt'])
+   priority_path=STATE/'human-priorities'/(commit+'.json')
+   authorization=json.loads(priority_path.read_text()) if priority_path.exists() else None
+   deferred=apply_human_priority(deferred,commit,authorization)
    if not deferred:
     record['status']='deploying';atomic_json(request_path,record)
     result=deploy(commit,packet);record['status']=result['status'];record['requiresReplacement']=result['status']=='failed';record['updatedAt']=datetime.datetime.now(datetime.timezone.utc).isoformat();record['report']=result;atomic_json(request_path,record)

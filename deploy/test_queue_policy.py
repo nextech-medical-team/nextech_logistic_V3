@@ -27,3 +27,24 @@ class QueueTests(unittest.TestCase):
    if mutation=='proof':proofs['proof']=b'modified'
    if mutation=='candidate':changes[0]['after']='c'*64
    with self.assertRaises(ValueError):validate_manifest(m,proofs,commit,changes)
+
+class PriorityTests(unittest.TestCase):
+ def test_scope_and_default_fifo(self):
+  from queue_policy import apply_human_priority as apply
+  rows=[{'id':'old','status':'ready'}]
+  for a in (None,{}, {'commit':'other','manualOnly':True,'deferredRequestIds':['old']}):self.assertEqual(apply(rows,'target',a),rows)
+ def test_only_explicit_ids_and_preserves_input(self):
+  from queue_policy import apply_human_priority as apply
+  rows=[{'id':'old','status':'ready'},{'id':'new','status':'ready'}]
+  self.assertEqual(apply(rows,'target',{'commit':'target','manualOnly':True,'deferredRequestIds':['old']}),[rows[1]])
+  self.assertEqual(len(rows),2)
+ def test_never_skip_active_or_failed(self):
+  from queue_policy import apply_human_priority as apply
+  for status in ('deploying','failed','resolved'):
+   rows=[{'id':'old','status':status}]
+   self.assertEqual(apply(rows,'target',{'commit':'target','manualOnly':True,'deferredRequestIds':['old']}),rows)
+ def test_never_skip_safety_failure(self):
+  from queue_policy import apply_human_priority as apply
+  for report in ({'manualIntervention':True},{'rollback':'FAILED'},{'taskControlsRestored':False}):
+   rows=[{'id':'old','status':'blocked','report':report}]
+   self.assertEqual(apply(rows,'target',{'commit':'target','manualOnly':True,'deferredRequestIds':['old']}),rows)

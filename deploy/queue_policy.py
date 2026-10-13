@@ -24,3 +24,12 @@ def validate_manifest(manifest,proofs,commit,changes):
  for changed in changes:
   if changed['after'] is not None and expected.get(changed['path'])!=changed['after']:raise ValueError('Fichier candidat sans preuve : '+changed['path'])
  return True
+
+def apply_human_priority(pending, commit, authorization):
+ """Explicit priority changes order only; ongoing/failed publication remains blocking."""
+ if not authorization or authorization.get('commit') != commit or authorization.get('manualOnly') is not True:
+  return pending
+ allowed=set(authorization.get('deferredRequestIds', []))
+ return [r for r in pending if r['id'] not in allowed or r['status'] not in ('ready','blocked')
+         or r.get('requiresReplacement') or r.get('report',{}).get('manualIntervention')
+         or r.get('report',{}).get('rollback')=='FAILED' or r.get('report',{}).get('taskControlsRestored') is False]
