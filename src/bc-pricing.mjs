@@ -1,3 +1,4 @@
+import {isTemuExcel,excelAmounts} from './temu-excel-commercial.mjs';
 import {acceptedMonetaryDifference} from './monetary-policy.mjs';
 export {acceptedMonetaryDifference} from './monetary-policy.mjs';
 import {temuCommercialSource} from './temu-commercial-source.mjs';
@@ -13,7 +14,7 @@ export function amount(v,field){
 }
 const cents=n=>Math.round((n+Number.EPSILON)*100);
 const optional=(v,f)=>present(v)?amount(v,f):0;
-export const sourceCurrency=o=>String((o.channel==='temu'?o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue?.currency:null)||o.source_payload?.currency||o.source_payload?.devise||'EUR').toUpperCase();
+export const sourceCurrency=o=>isTemuExcel(o)?o.source_payload?.temuExcelCommercial?.currency||o.source_payload?.currency||'EUR':String((o.channel==='temu'?o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue?.currency:null)||o.source_payload?.currency||o.source_payload?.devise||'EUR').toUpperCase();
 function taxCode(rate,codes){
  if(rate===0)return [];
  const hits=codes.filter(c=>c.active!==false&&Array.isArray(c.tax_rates)&&c.tax_rates.length===1&&Math.abs(Number(c.tax_rates[0].rate)-rate)<0.00001);
@@ -31,6 +32,15 @@ export function rateFromTax(net,tax,codes,country,context={}){
  if(!candidates.length||candidates[1]?.gap===candidates[0].gap)throw Error('BC · Taux de TVA source à préciser');return candidates[0].r;
 }
 export function buildBcPricing(order,lines,products,codes,{eurExchangeRate}={}){
+ if(isTemuExcel(order)){
+  const amounts=excelAmounts(lines,{country:order.address?.country});
+  const source=lines.map((l,i)=>{const r=amounts.rows[i];return {...l,source_payload:{itemprice:cents(r.net+r.tax)/100,itemtax:r.tax,shippingprice:cents(r.shipping+r.shippingTax)/100,shippingtax:r.shippingTax}};});
+  const pricing=buildBcPricing({...order,channel:'amazon',erp_live:{},source_payload:{currency:amounts.currency}},source,products,codes,{eurExchangeRate});
+  pricing.tax_type='inclusive';
+  pricing.items=pricing.items.map((item,i)=>({...item,...(item.type==='shipping_cost'?{description:item.description.replace('Livraison Amazon','Livraison TEMU')}:{}),price:pricing.lineAmounts[i].gross/Number(item.quantity)}));
+  pricing.lineAmounts=pricing.lineAmounts.map((item,i)=>({...item,unitPrice:pricing.items[i].price,basis:'gross'}));
+  return {...pricing,source:'temu_excel',commercialBasis:{source:'temu_excel'},excel:amounts};
+ }
  if(!lines.length||lines.length!==products.length)throw Error('BC · Lignes de prix incomplètes');
  if([...lines,...products].some(l=>!decimalNumber(l?.quantity)||Number(l.quantity)<=0))throw Error('BC · Quantité du prix source absente ou invalide');
  const src=order.source_payload||{},currency=sourceCurrency(order);

@@ -32,6 +32,7 @@ export async function initializeTemuAutomaticPurchase(db){
  CREATE TRIGGER v3_temu_purchase_result AFTER UPDATE OF result ON temu_automatic_purchase_checks FOR EACH ROW EXECUTE FUNCTION v3_temu_purchase_result_diagnostic();`);
 }
 export function automaticPreparationHold(o,now=Date.now()){
+ if(o?.source_payload?.origin==='temu_excel')return 'Excel TEMU : achat manuel à confirmer';
  const blocked=suspensionBlock(o);if(blocked)return blocked;
  if(!o||o.archived||o.simulation||o.channel!=='temu')return 'Commande hors périmètre des achats automatiques';
  if(hasExternalLabel(o)||o.transport_choice)return 'Étiquette ou choix de transport existant à préserver';

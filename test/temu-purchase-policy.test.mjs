@@ -6,7 +6,7 @@ const now=Date.now(),reference='PO-069-123456789';
 const offer=(id,name,amount)=>({channelId:id,shipCompanyId:id,shipCompanyName:name,estimatedAmount:String(amount),estimatedCurrencyCode:'EUR'});
 const detail={parentOrderMap:{parentOrderSn:reference,parentOrderStatus:2,expectShipLatestTime:Math.floor(now/1000)+86400},orderList:[{orderSn:'line-1',quantity:1}]};
 function harness(offers){let job=null,bought=0,claimed=0;return {get job(){return job;},get bought(){return bought;},get claimed(){return claimed;},db:{async query(sql,args){
- if(sql.startsWith('SELECT suspension'))return {rows:[{suspension:{}}]};
+ if(sql.startsWith('SELECT * FROM orders WHERE reference='))return {rows:[{suspension:{}}]};
  if(sql.startsWith('SELECT channel'))return {rows:[{channel:'temu',source_payload:{}}]};
  if(sql.startsWith('SELECT * FROM temu_label_jobs'))return {rows:job?[job]:[]};
  if(sql.startsWith('INSERT INTO temu_label_jobs(reference,status,plan)')){job={reference,status:'ready',plan:JSON.parse(args[1]),packages:[]};return {rows:[]};}
@@ -64,6 +64,6 @@ test('atomic order guard refuses a changed command without provider purchase',as
 
 test('quote never understates the known order weight when recomputing transport and margin',async()=>{
  const h=harness([offer(1,'GLS',2)]),read=h.db.query;
- h.db.query=async(sql,args)=>sql.startsWith('SELECT suspension')?{rows:[{suspension:{},weight_kg:'1.2345'}]}:read(sql,args);
+ h.db.query=async(sql,args)=>sql.startsWith('SELECT * FROM orders WHERE reference=')?{rows:[{suspension:{},weight_kg:'1.2345'}]}:read(sql,args);
  const p=await temuShipping(h.db,h.api).prepare(reference);assert.equal(p.request.sendRequestList[0].weight,'1.235');
 });
