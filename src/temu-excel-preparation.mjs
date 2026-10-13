@@ -18,7 +18,7 @@ export function temuExcelPreparation(db,local){
    FROM orders o LEFT JOIN erp_live_jobs e ON e.order_id=o.id WHERE o.channel='temu' AND o.source_payload->>'origin'='temu_excel' AND NOT o.archived ORDER BY o.source_date DESC,o.reference`)).rows};},
   async preview(reference){
    const {o,lines}=await read(reference),commercial=excelCommercialSource(o,lines);
-   return {reference,fingerprint:excelPreparationFingerprint(o,lines),commercial,lines:lines.map(l=>({sku:l.source_sku,quantity:Number(l.quantity)})),shops:await local.excelShops(o.address?.country)};
+   return {reference,fingerprint:o.source_payload.temuExcelPreparation?.fingerprint||excelPreparationFingerprint(o,lines),commercial,lines:lines.map(l=>({sku:l.source_sku,quantity:Number(l.quantity)})),shops:await local.excelShops(o.address?.country)};
   },
   async prepare({reference,mallId,fingerprint,confirmPreparation},user){
    if(!['admin','manager'].includes(user?.role))throw Object.assign(Error('Droits de préparation requis'),{status:403});

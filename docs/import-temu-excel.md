@@ -11,9 +11,9 @@ L’aperçu affiche les totaux par pays, les fichiers, les erreurs et toutes les
 
 Cette première version accepte uniquement les commandes et articles **non expédiés**, avec quantité à expédier égale à la quantité achetée, sans quantité déjà expédiée ou annulée. Les formules, adresses masquées et données obligatoires manquantes sont signalées avant confirmation.
 
-**Importer les commandes sélectionnées** réanalyse les fichiers, vérifie leur empreinte et les doublons apparus depuis l’aperçu, puis enregistre le lot dans une transaction. Un identifiant de validation empêche une double soumission de recréer des commandes. Le rapport texte peut être téléchargé après analyse et après import.
+**Importer et préparer les commandes sélectionnées** réanalyse les fichiers, vérifie leur empreinte et les doublons apparus depuis l’aperçu, puis enregistre le lot dans une transaction. Un identifiant de validation empêche une double soumission de recréer des commandes. Le rapport texte peut être téléchargé après analyse et après import.
 
-Les commandes sont créées avec une suspension active et la note **Import Excel TEMU : vérifier la commande et sa boutique avant toute préparation**. Aucun travail de préparation, aucune étiquette et aucun BC/BL n’est créé par cet import. L’Excel ne prouve pas la boutique API : aucune identité de boutique n’est inventée. Le panneau **Préparer les commandes Excel TEMU** permet ensuite de vérifier la boutique et de demander la préparation.
+Les commandes sont créées avec une suspension active et la note **Import Excel TEMU : vérifier la commande et sa boutique avant toute préparation**. Aucun travail de préparation, aucune étiquette et aucun BC/BL n’est créé par cet import. L’Excel ne prouve pas la boutique API : aucune identité de boutique n’est inventée. La confirmation de l’aperçu enchaîne ensuite la vérification de la boutique et la demande de préparation. Le panneau **Préparer les commandes Excel TEMU** reste disponible pour reprendre les imports antérieurs ou interrompus.
 
 Les routes `POST /api/import/temu/preview` et `POST /api/import/temu/confirm` sont réservées aux administrateurs, managers et opérateurs. Les contrôles existants de session, de préparation et de suspension restent applicables. Les exports clients locaux `order_export-*.xlsx` sont exclus de Git ; les tests utilisent des données fictives.
 
@@ -21,7 +21,9 @@ Validation : `npm run test:temu-import`, `npm run check` et `npx playwright test
 
 ## Préparation dans l’application principale
 
-Après l’import, dans le même écran, cliquer **Vérifier et préparer** pour la commande. L’application affiche les articles et le total BC calculé depuis l’Excel. Choisir la boutique TEMU, cocher la confirmation, puis **Lancer les BC/BL dans Erplain**. Cette action est réservée aux administrateurs et managers, comme les reprises Erplain existantes.
+Dans l’aperçu du fichier, les nouvelles commandes valides sont cochées par défaut. Vérifier la boutique pour chaque pays sélectionné, puis cliquer **Importer et préparer les commandes sélectionnées**. Une boutique unique explicitement configurée pour le pays est présélectionnée ; les boutiques ambiguës doivent être choisies. Cette confirmation est réservée aux administrateurs et managers, comme les reprises Erplain existantes.
+
+L’interface enregistre le lot puis vérifie et prépare chaque nouvelle commande sélectionnée, avec affichage de l’avancement. Les doublons ne sont jamais préparés par ce bouton. Les erreurs sont conservées par commande ; **Reprendre les préparations restantes** réessaie uniquement les échecs, sans réimporter le lot ni recréer une demande déjà acceptée. Si la page est fermée avant la fin, les commandes enregistrées restent accessibles dans **Préparer les commandes Excel TEMU** pour reprendre leur validation.
 
 La boutique est proposée par le connecteur existant, sans exposer les accès privés. Avant de lever la suspension d’import, l’application relit la commande TEMU et compare sa référence, tous les numéros de lignes, les SKU vendeur et les quantités. Une autre suspension, une annulation, une expédition ou une préparation existante interdit ce premier raccordement. Les changements survenus après l’aperçu imposent une nouvelle vérification. Une double validation renvoie la même préparation.
 

@@ -13,7 +13,10 @@ async function excel(reference,country){
 for(const [device,viewport]of [['desktop',{width:1366,height:900}],['mobile',{width:390,height:844}]]){
  test('import TEMU multi-pays '+device,async({page})=>{
   await page.setViewportSize(viewport);
-  const confirmations=[];
+  const confirmations=[],preparations=[];
+  await page.route('**/api/temu/excel/shops?*',route=>{const country=new URL(route.request().url()).searchParams.get('country');return route.fulfill({json:{shops:[{country,mallId:'shop-'+country}]}});});
+  await page.route('**/api/temu/excel/preview?*',route=>route.fulfill({json:{fingerprint:'proof'}}));
+  await page.route('**/api/temu/excel/prepare',route=>{preparations.push(route.request().postDataJSON());return route.fulfill({json:{message:'Préparation demandée'}});});
   await page.route('**/api/import/temu/preview',async route=>{
    const input=route.request().postDataJSON();
    const response=await previewTemuExcel({query:async()=>({rows:[]})},input.files);
@@ -36,8 +39,9 @@ for(const [device,viewport]of [['desktop',{width:1366,height:900}],['mobile',{wi
   await preview.locator('[data-reference="PO-TEST-IT"]').uncheck();
   await expect(preview.locator('[data-selection]')).toContainText('1 commande(s)');
   await page.screenshot({path:'proofs/temu-excel-'+device+'.png',fullPage:true});
-  await preview.getByRole('button',{name:'Importer les commandes sélectionnées'}).click();
-  await expect(preview.locator('[data-result]')).toContainText('Aucune préparation lancée');
+  await preview.getByRole('button',{name:'Importer et préparer les commandes sélectionnées'}).click();
+  await expect(preview.locator('[data-result]')).toContainText('1 préparation(s) BC/BL demandée(s)');
+  expect(preparations).toEqual([{reference:'PO-TEST-FR',mallId:'shop-FR',fingerprint:'proof',confirmPreparation:true}]);expect(confirmations[0].prepare).toBe(true);
   expect(confirmations).toHaveLength(1);expect(confirmations[0].selection).toEqual(['PO-TEST-FR']);expect(confirmations[0].files).toHaveLength(2);
   await expect(preview.locator('[data-confirm]')).toBeDisabled();
   // Selecting a single file works too, without submitting until confirmed.

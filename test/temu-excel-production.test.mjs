@@ -39,6 +39,7 @@ test('production validation is explicit, atomic and idempotent; queues the exist
  await assert.rejects(f.service.prepare({...b,confirmPreparation:false},user),/Confirmez/);
  await assert.rejects(f.service.prepare({...b,mallId:'wrong'},user),/Boutique/);
  const results=await Promise.all([f.service.prepare(b,user),f.service.prepare(b,user)]);assert.equal(results.filter(r=>r.replayed).length,1);
+ const resumed=await f.service.preview(reference);assert.equal((await f.service.prepare({...b,fingerprint:resumed.fingerprint},user)).replayed,true);
  const o=await f.read();assert.equal(o.suspension.active,false);assert.equal(o.source_payload.mallId,'123');assert.equal(o.resolution_pending_resume,true);assert.equal(o.source_payload.temuExcelCommercial.total,84.05);
  const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.match(automaticPreparationHold(o),/achat manuel/);
 });
