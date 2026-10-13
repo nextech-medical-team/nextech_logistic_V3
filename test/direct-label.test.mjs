@@ -24,4 +24,3 @@ test('worker refuse changement de BL après demande',()=>assert.throws(()=>asser
 test('sélection manuelle : déduplication et même admission directe',async()=>{const db=database();const r=await queueLabelBatchFromBl(db,['target','target'],{email:'operator'});assert.equal(r.queued,1);assert.deepEqual(r.skipped,[]);assert.equal(db.inserts,1);});
 test('sélection protégée : motif courant rendu sans nouvelle création',async()=>{const db=database({order:{...base,channel:'temu'}});const r=await queueLabelBatchFromBl(db,['target'],{email:'operator'});assert.equal(r.queued,0);assert.equal(r.skipped.length,1);assert.match(r.message,/TEMU/);});
 test('limite de sélection maintenue',async()=>{await assert.rejects(queueLabelBatchFromBl(database(),Array(101).fill('target'),{email:'operator'}));});
-
