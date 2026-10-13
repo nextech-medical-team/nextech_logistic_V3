@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {bcAllowedSql} from './bc-authorization.mjs';
 import {mutationBlock} from './erp-transient-policy.mjs';
@@ -28,6 +29,7 @@ export function sourceVatResolutionState(actions=[]){
  return {...currentResolutionState(current),obsoletePreviewIds:obsolete};
 }
 export function sourceVatResumeEligible(o){
+ if(usesRecordedBc(o))return false;
  return o.channel==='temu'&&o.archived===false&&!o.partial_mode&&!mutationBlock(o,{allowHeldBc:true})&&o.erp_live?.phase==='historical_review'&&!!o.erp_live.bc?.id&&!o.erp_live.bl?.id&&!o.erp_live.sourceVatAttempt?.status?.includes('uncertain')&&!o.source_payload?.erplainImported&&!o.source_payload?.visibilityHold&&!o.source_payload?.erplainValidationHold&&sourceVatReviewErrors.includes(o.error);
 }
 // Bounded local scan; one normal resolution per source financial version.
@@ -56,6 +58,7 @@ export async function queueSourceVatReviews(db){
 // Human rule: current source tax codes win. Never change an invoiced, paid or
 // shipped document, and never infer permission to change products or stock.
 export function sourceVatPlan(bc,o){
+ if(usesRecordedBc(o))return null;
  if(String(bc?.id)!==String(o.erp_live.bc.id)||bc.external_reference!==o.reference||bc.status!=='active'||typeof bc.update_stock!=='boolean')throw Error('TVA source · Identité BC non confirmée');
  if(!o.pricing?.items?.length||bc.tax_type!==o.pricing.tax_type||bc.currency?.label!==o.pricing.currency)throw Error('TVA source · Base fiscale ou devise différente');
  const expected=o.pricing.items,actual=expected.some(l=>l.type==='shipping_cost')?bc.line_items:bc.line_items?.filter(l=>!neutral(l));
@@ -80,6 +83,7 @@ export function sourceVatPlan(bc,o){
 }
 
 export async function alignHistoricalSourceVat(api,o,{save,guard,preserveLabels}){
+ if(usesRecordedBc(o)){if(o.erp_live?.sourceVatAttempt?.status==='uncertain')throw Error('TVA source · Mutation incertaine : rapprochement fournisseur requis, aucune réécriture');return {unchanged:true,authority:'recorded_erplain_bc',sourceAlignmentDisabled:true};}
  if(o.channel!=='temu'||o.erp_live?.phase!=='historical_review'||!o.erp_live.bc?.id||o.erp_live.bl?.id||o.partial_mode||o.erp_live.equivalentItems||o.source_payload?.erplainImported)return {skipped:true};
  const read=async()=>(await api.request(`query V3SourceVatBC($id:ID!){Order(id:$id){${alignmentFields}}}`,{id:String(o.erp_live.bc.id)})).Order;
  const bc=await read(),plan=sourceVatPlan(bc,o),attempt=o.erp_live.sourceVatAttempt;

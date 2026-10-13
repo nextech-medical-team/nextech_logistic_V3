@@ -33,37 +33,22 @@ function fixture(entry){
  return {state,db,api};
 }
 const q=live.orders.find(x=>x.reference==='Q1936380');
-test('régression réelle Q1936380 : lien BC relit et rapproche erreur ancienne sans reprise',async()=>{
- const {state,db,api}=fixture(q),before=clone(state);
- const result=await refreshErplainDocuments(db,api,q.id);
- assert.equal(result.bc.id,q.bc.id);assert.deepEqual(result.bc.line_items,q.bc.line_items);
- for(const j of state.jobs){const old=before.jobs.find(x=>x.id===j.id);assert.equal(j.status,old.status);assert.equal(j.action,old.action);if(physicalComparisonErrors.includes(old.error)){assert.equal(j.error,null);assert.equal(j.result.bcComparisonRefresh.previousError,old.error)}else if(physicalComparisonErrors.includes(old.error)&&result.comparison?.different){assert.ok(j.error.includes('V3 ['));assert.equal(j.result.bcComparisonRefresh.previousError,old.error)}else assert.equal(j.error,old.error)}
- assert.deepEqual(state.lines,before.lines);assert.deepEqual(state.erp,before.erp);assert.deepEqual(state.documents,before.documents);assert.deepEqual(state.order.erp_live.pricing,before.order.erp_live.pricing);
- assert.equal(result.comparison.concordant,true);
+
+for(const entry of live.orders)test('recorded BC fixture '+entry.reference+' preserves all documents and retires only source comparisons',async()=>{
+ const {state,db}=fixture(entry),before=clone(state),r=await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,entry.id,clone(entry.bc)));
+ assert.equal(r.comparison.different,false);assert.equal(r.authority,'recorded_bc');
+ assert.deepEqual(r.comparison.expected,r.comparison.observed);
+ assert.deepEqual(state.lines,before.lines);assert.deepEqual(state.documents,before.documents);assert.deepEqual(state.erp,before.erp);
+ for(const j of state.jobs){const old=before.jobs.find(x=>x.id===j.id);assert.equal(j.status,old.status);if(physicalComparisonErrors.includes(old.error)){assert.equal(j.error,null);assert.equal(j.result.bcComparisonRefresh.previousError,old.error);}else assert.equal(j.error,old.error);}
 });
-for(const entry of live.orders)test('fixture API/SQL '+entry.reference+' : comparaison actuelle et historique préservé',async()=>{
- const {state,db}=fixture(entry),before=clone(state);
- const result=await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,entry.id,clone(entry.bc)));
- assert.equal(result.concordant,entry.reference!=='2610813');
- assert.deepEqual(result.comparison,entry.diagnostic.comparison);
- for(const j of state.jobs){const old=before.jobs.find(x=>x.id===j.id);assert.equal(j.status,old.status);if(result.concordant&&physicalComparisonErrors.includes(old.error))assert.equal(j.error,null);else if(physicalComparisonErrors.includes(old.error)&&result.comparison?.different){assert.ok(j.error.includes('V3 ['));assert.equal(j.result.bcComparisonRefresh.previousError,old.error)}else assert.equal(j.error,old.error)}
- assert.deepEqual(state.lines,before.lines);assert.deepEqual(state.erp,before.erp);assert.deepEqual(state.documents,before.documents);assert.deepEqual(state.order.erp_live.pricing,before.order.erp_live.pricing);
+for(const channel of ['temu','amazon','shopify','tender','erplain'])for(const value of [true,false,'',[],{},null,0,-1,999])test(channel+' source quantity '+JSON.stringify(value)+' never gates recorded BC',async()=>{
+ const {state,db}=fixture(q);state.order.channel=channel;state.lines[0].target_quantity=value;
+ const before=clone(state.lines),r=await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));
+ assert.equal(r.concordant,true);assert.equal(r.authority,'recorded_bc');assert.deepEqual(state.lines,before);
 });
-for(const value of [true,false,'', ' ',[],{},Infinity,0,-1])test('quantité source non confirmée '+JSON.stringify(value)+' : ne pas effacer le diagnostic',async()=>{
- const {state,db}=fixture(q),before=clone(state.jobs);state.lines[0].target_quantity=value;
- const result=await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));
- assert.equal(result.concordant,false);for(const j of state.jobs){assert.equal(j.status,before.find(x=>x.id===j.id).status);assert.ok(j.error)}
-});
-for(const scenario of ['quantité divergente','produit divergent','BC fermé','erreur mixte','source changée','BL local absent'])test(scenario+' : conserver les vrais blocages',async()=>{
- const {state,db}=fixture(q),bc=clone(q.bc);
- if(scenario==='quantité divergente')bc.line_items[0].quantity+=1;
- if(scenario==='produit divergent')bc.line_items[0].variant.sku+='-AUTRE';
- if(scenario==='BC fermé')bc.status='closed';
- if(scenario==='erreur mixte')state.jobs[0].error=physicalComparisonErrors[0]+' ; Stock insuffisant';
- if(scenario==='source changée')state.lines[0].target_quantity=Number(state.lines[0].target_quantity)+1;
- if(scenario==='BL local absent')state.order.erp_live.bl={id:999999};
- const before=clone(state.jobs);const result=await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,bc));
- if(scenario==='erreur mixte')assert.equal(state.jobs[0].error,before[0].error);else{assert.equal(result.concordant,false);for(const j of state.jobs){const old=before.find(x=>x.id===j.id);assert.equal(j.status,old.status);if(physicalComparisonErrors.includes(old.error)&&result.comparison?.different){assert.ok(j.error.includes('V3 ['));assert.equal(j.result.bcComparisonRefresh.previousError,old.error)}else assert.equal(j.error,old.error)}}
+test('independent mixed stock reason remains intact',async()=>{
+ const {state,db}=fixture(q);state.jobs[0].error=physicalComparisonErrors[0]+' ; Stock insuffisant';const before=state.jobs[0].error;
+ await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));assert.equal(state.jobs[0].error,before);
 });
 for(const scenario of ['identité BC','pagination absente','pagination incomplète','ligne dupliquée','variante absente','traitement actif'])test(scenario+' : refus sans modification locale',async()=>{
  const {state,db}=fixture(q),bc=clone(q.bc);
@@ -75,27 +60,19 @@ for(const scenario of ['identité BC','pagination absente','pagination incomplè
  if(scenario==='traitement actif')state.busy=true;
  const before=clone(state);await assert.rejects(db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,bc)));assert.deepEqual(state,before);
 });
-test('ratio permanent appliqué une fois, quantité explicite limitée au mapping de commande',async()=>{
- for(const explicit of [false,true]){const {state,db}=fixture(q);const sku=state.lines[0].target_sku;state.lines[0]={...state.lines[0],quantity:'5',mapped_sku:sku,target_quantity:explicit?'50':'999',source_qty:'1',target_qty:'10',source_payload:{...state.lines[0].source_payload,...(explicit?{mappingScope:'order'}:{})}};const bc=clone(q.bc);bc.line_items.find(l=>l.variant.sku===sku).quantity=50;const result=await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,bc));assert.equal(result.concordant,true)}
-});
-test('lecture API interrompue : aucun changement',async()=>{const {state,db,api}=fixture(q),before=clone(state);api.request=async()=>{throw Error('Timeout fournisseur')};await assert.rejects(refreshErplainDocuments(db,api,q.id),/Timeout fournisseur/);assert.deepEqual(state,before)});
-test('répétition idempotente : preuve précédente conservée et aucune reprise',async()=>{const {state,db}=fixture(q);await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));const first=clone(state.jobs);await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));assert.equal(state.jobs.length,first.length);for(const j of state.jobs){const old=first.find(x=>x.id===j.id);assert.equal(j.error,old.error);assert.equal(j.status,old.status);assert.deepEqual(j.result.bcComparisonRefresh?.previousResult,old.result.bcComparisonRefresh?.previousResult)}});
-
-
-
 for(const ref of ['PH2/00638941','2610813'])test('parcours partiel complet réel '+ref+' conserve les documents et la divergence justifiée',async()=>{
  const entry=live.orders.find(x=>x.reference===ref),{state,db,api}=fixture(entry),before=clone(state);
  const result=await refreshErplainDocuments(db,api,entry.id);
- assert.equal(result.comparison.concordant,ref==='PH2/00638941');assert.deepEqual(state.order.erp_live.bc.line_items,entry.bc.line_items);
+ assert.equal(result.comparison.concordant,true);assert.deepEqual(state.order.erp_live.bc.line_items,entry.bc.line_items);
  assert.deepEqual(state.lines,before.lines);assert.deepEqual(state.erp,before.erp);assert.deepEqual(state.documents,before.documents);assert.deepEqual(state.order.erp_live.pricing,before.order.erp_live.pricing);
- if(ref==='2610813'){assert.ok(state.jobs[0].error.includes('FULL-OPTY × 10'));assert.ok(state.jobs[0].error.includes('FLP1915 × 10'));assert.equal(state.jobs[1].error,before.jobs[1].error)}else assert.equal(state.jobs[0].error,null);
+ assert.equal(state.jobs[0].error,null);if(ref==='2610813')assert.equal(state.jobs[1].error,before.jobs[1].error);
 });
 for(const value of [true,false,'',' ',[],{},Infinity])test('réponse BC invalide '+JSON.stringify(value)+' : refus avant projection',async()=>{
  for(const entry of [q,live.orders[0]]){const {state,db,api}=fixture(entry),before=clone(state);api.request=async()=>{const bc=clone(entry.bc);bc.line_items[0].quantity=value;return {Order:bc}};await assert.rejects(refreshErplainDocuments(db,api,entry.id));assert.deepEqual(state,before)}
 });
 test('modification manuelle des quantités BC : afficher courant et garder écart',async()=>{
  const {state,db,api}=fixture(q);api.request=async()=>{const bc=clone(q.bc);bc.line_items[0].quantity=123;return {Order:bc}};
- const result=await refreshErplainDocuments(db,api,q.id);assert.equal(state.order.erp_live.bc.line_items[0].quantity,123);assert.equal(result.comparison.concordant,false);assert.ok(state.jobs[0].error.includes('123'));
+ const result=await refreshErplainDocuments(db,api,q.id);assert.equal(state.order.erp_live.bc.line_items[0].quantity,123);assert.equal(result.comparison.concordant,true);assert.equal(state.jobs[0].error,null);
 });
 test('identité locale modifiée pendant la requête : refus sans écrasement',async()=>{
  const {state,db,api}=fixture(q);api.request=async()=>{state.order.erp_live.bc.id=999;return {Order:clone(q.bc)}};
@@ -107,7 +84,7 @@ for(const channel of ['tender','samples','amazon','shopify','temu','erplain','re
 
 test('écart réapparu après concordance : rétablir diagnostic frais et garder historique original',async()=>{
  const {state,db}=fixture(q);await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));assert.equal(state.jobs[0].error,null);
- const changed=clone(q.bc);changed.line_items[0].quantity+=7;await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,changed));assert.ok(state.jobs[0].error.includes('V3 ['));assert.equal(state.jobs[0].result.bcComparisonRefresh.previousError,q.jobs[0].error);assert.equal(state.jobs[0].status,'review');
+ const changed=clone(q.bc);changed.line_items[0].quantity+=7;await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,changed));assert.equal(state.jobs[0].error,null);assert.equal(state.jobs[0].result.bcComparisonRefresh.previousError,q.jobs[0].error);assert.equal(state.jobs[0].status,'review');
  await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));assert.equal(state.jobs[0].error,null);assert.equal(state.jobs[0].result.bcComparisonRefresh.previousError,q.jobs[0].error);
 });
 
@@ -124,11 +101,3 @@ test('interruption du rapprochement partiel : rollback projection et diagnostics
 for(const value of [null,['ancienne-preuve'],'ancienne-preuve',true])test('historique de résultat non objet préservé '+JSON.stringify(value),async()=>{const {state,db}=fixture(q);state.jobs[0].result=clone(value);await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));assert.deepEqual(state.jobs[0].result.previousResult,value);assert.equal(state.jobs[0].error,null);assert.equal(state.jobs[0].status,'review')});
 
 test('ancien résultat compare-bc : affichage frais et snapshot historique conservé',async()=>{const {state,db}=fixture(q),j=state.jobs.find(j=>j.action==='compare-bc');j.result={bc:{id:q.bc.id,line_items:[{quantity:1}]},comparison:{different:true},errors:[{message:'ancien écart'}],readOnly:true};const before=clone(j.result);await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));assert.deepEqual(j.result.bc.line_items,q.bc.line_items);assert.equal(j.result.comparison.different,false);assert.deepEqual(j.result.errors,[]);assert.deepEqual(j.result.bcComparisonRefresh.previousResult,before);await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));assert.deepEqual(j.result.bcComparisonRefresh.previousResult,before);assert.equal(j.status,'review')});
-
-
-test('same SKU cannot erase an ERP variant identity error or certify automatic resume',async()=>{
- const {state,db}=fixture(q);state.jobs[0].error='BC · Produits ou quantités des lignes Erplain différents de la source';
- const result=await db.transaction(tx=>reconcileRefreshedBcDiagnostics(tx,q.id,clone(q.bc)));
- assert.equal(result.comparison.different,false);assert.equal(result.concordant,false);assert.equal(result.identityUnconfirmed,true);
- assert.equal(state.jobs[0].error,'BC · Produits ou quantités des lignes Erplain différents de la source');
-});

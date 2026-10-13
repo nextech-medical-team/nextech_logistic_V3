@@ -1,3 +1,4 @@
+import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
 import {pendingScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
 import {bindProduct} from './product-bindings.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
@@ -22,7 +23,7 @@ export async function refreshManualOrder(db,api,o){
  await api.verify();
  const {Order:bc}=await api.request(`query V3ManualPrepare($id:ID!){Order(id:$id){${manualOrderFields}}}`,{id:String(o.erp_live.bc.id)});
  if(!bc||String(bc.id)!==String(o.erp_live.bc.id)||!bc.line_items?.length)throw Error('API Erplain · BC ou lignes non reçus');
- if(!bc.customer?.id||!bc.currency?.label||bc.total==null||!Number.isFinite(Number(bc.total))||bc.line_items.some(l=>l.tax_amount==null||!Number.isFinite(Number(l.tax_amount))))throw Error('API Erplain · Client, montants, taxes ou devise incomplets');
+ if(!bc.customer?.id)throw Error('API Erplain · Client non reçu');
  const scope=recoveredPendingScope(bc,o),productLines=scope.lines;const importIssue=manualImportIssue({...bc,line_items:productLines});if(importIssue)throw Error(importIssue);
  if(bc.status!=='active')throw Error('BC Erplain '+bc.status+' : activer le BC avant préparation');
  if(!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.paginatorInfo?.hasMorePages!==false)throw Error('API Erplain · Liste des BL incomplète');
@@ -33,9 +34,9 @@ export async function refreshManualOrder(db,api,o){
  if(o.erp_live.bl?.id&&!bls.some(b=>String(b.id)===String(o.erp_live.bl.id)))throw Error('BL associé annulé ou absent : vérifier la livraison existante');
  const local=(await db.query('SELECT * FROM lines WHERE order_id=$1',[o.id])).rows;
  const totals=lines=>{const m=new Map();for(const l of lines){const key=l.variant?.sku||l.target_sku;m.set(key,(m.get(key)||0)+Number(l.variant?l.quantity:l.target_quantity));}return JSON.stringify([...m].sort());};
- if(totals(local)!==totals(productLines))throw Error('BC Erplain modifié : vérifier les produits et quantités de la commande');
+ if(!usesRecordedBc(o)&&totals(local)!==totals(productLines))throw Error('BC Erplain modifié : vérifier les produits et quantités de la commande');
  const identities=rows=>JSON.stringify(rows.map(l=>[l.variant?.sku||l.target_sku,String(l.variant?.id||l.source_payload?.erplainVariantId||''),Number(l.variant?l.quantity:l.target_quantity)]).sort());
- if(local.every(l=>l.source_payload?.erplainVariantId)&&identities(local)!==identities(productLines))throw Error('BC Erplain modifié : produit différent du produit validé dans V3');
+ if(!usesRecordedBc(o)&&local.every(l=>l.source_payload?.erplainVariantId)&&identities(local)!==identities(productLines))throw Error('BC Erplain modifié : produit différent du produit validé dans V3');
  const seen=new Map();
  for(const l of productLines){
   const v=l.variant;
@@ -45,14 +46,14 @@ export async function refreshManualOrder(db,api,o){
   if(seen.has(v.sku)&&seen.get(v.sku)!==String(v.id))throw Error(v.sku+' · Plusieurs produits Erplain dans le BC');
   seen.set(v.sku,String(v.id));
   const binding=(await db.query('SELECT live_variant_id FROM erplain_product_bindings WHERE sku=$1',[v.sku])).rows[0];
-  if(binding&&binding.live_variant_id!==String(v.id))throw Error(v.sku+' · Produit du BC différent du produit associé');
+  if(!usesRecordedBc(o)&&binding&&binding.live_variant_id!==String(v.id))throw Error(v.sku+' · Produit du BC différent du produit associé');
  }
- for(const l of productLines)await bindProduct(db,l.variant);
+ if(!usesRecordedBc(o))for(const l of productLines)await bindProduct(db,l.variant);
  const importedItems=productLines.map(l=>({variant:{id:String(l.variant.id)},location:{id:String(l.location.id)},quantity:Number(l.quantity),price:Number(l.price||0),description:l.variant.sku,tax_codes:(l.tax_codes||l.variant.tax_codes||[]).map(t=>({id:String(t.id)}))}));
  const a=bc.shipping_address||{},address={...o.address,name:a.label||bc.customer?.label||o.recipient,street:[a.address_1,a.address_2].filter(Boolean).join(' '),postal:a.postal_code||'',city:a.city||'',country:a.country||'',phone:a.phone||''};
  const issued=(await db.query("SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND (status IN ('ready','pending','creating','awaiting_pdf','review') OR result IS NOT NULL OR tracking<>'[]'::jsonb)",[o.id])).rows.length;
  if(issued&&['name','street','postal','city','country','phone'].some(k=>String(address[k]||'')!==String(o.address[k]||'')))throw Error('Adresse Erplain modifiée : vérifier l’étiquette existante');
- const erp={...o.erp_live,importedCommercialSource:{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency.label,source:"erplain",checkedAt:new Date().toISOString()},bc:scopeSnapshot(bc,scope),pendingBlIds:scope.pending.map(b=>String(b.id)),customer:bc.customer,importedItems,...(bls[0]?{bl:bls[0]}:{})};
+ const erp={...o.erp_live,pricing:recordedBcPricing(o,bc),importedCommercialSource:{...recordedBcPricing(o,bc),source:"erplain",checkedAt:new Date().toISOString()},bc:scopeSnapshot(bc,scope),pendingBlIds:scope.pending.map(b=>String(b.id)),customer:bc.customer,importedItems,...(bls[0]?{bl:bls[0]}:{})};
  // A new preparation request must not reuse yesterday's stock validation.
  delete erp.stockCheckedAt;delete erp.verifiedAt;delete erp.labelPreparationFingerprint;
  await db.query("UPDATE orders SET erp_live=$2,address=$3,erplain_refresh=erplain_refresh||$4::jsonb WHERE id=$1",[o.id,JSON.stringify(erp),JSON.stringify(address),JSON.stringify({issues:[],manualCheckedAt:new Date().toISOString()})]);

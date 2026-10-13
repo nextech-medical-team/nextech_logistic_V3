@@ -1,3 +1,4 @@
+import {usesRecordedBc,recordedBcFingerprint} from './existing-bc-execution.mjs';
 import {bcComparisonDiagnostic} from './resolution-bc-diagnostic.mjs';
 import {assertDocumentIdle} from './erplain-document-read.mjs';
 import {mappingSelectionFingerprint} from './current-mapping-line.mjs';
@@ -21,11 +22,11 @@ export async function reconcileRefreshedBcDiagnostics(tx,id,bc){
  if(!order)throw Error('Commande V3 introuvable pendant comparaison');
  await assertDocumentIdle(tx,id);
  const lines=(await tx.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1 FOR SHARE OF l',[id,order.channel])).rows;
- const invalid=lines.some(l=>{const values=l.target_quantity!=null?[l.target_quantity]:(l.source_qty!=null||l.target_qty!=null)?[l.quantity,l.source_qty,l.target_qty]:[l.quantity];return values.some(v=>!((typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v))&&Number(v)>0));});
+ const invalid=!usesRecordedBc(order)&&lines.some(l=>{const values=l.target_quantity!=null?[l.target_quantity]:(l.source_qty!=null||l.target_qty!=null)?[l.quantity,l.source_qty,l.target_qty]:[l.quantity];return values.some(v=>!((typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v))&&Number(v)>0));});
  const diagnostic=bcComparisonDiagnostic(order,bc,lines);
  if(invalid){diagnostic.comparison=null;diagnostic.errors.push({code:'comparison_unconfirmed',message:'Quantités source ou ratio non confirmés : diagnostic conservé'});}
  const checkedAt=new Date().toISOString();
- const proof={checkedAt,bcId:String(bc.id),comparison:diagnostic.comparison,errors:diagnostic.errors,...(!invalid&&diagnostic.comparison?{mappingFingerprint:mappingSelectionFingerprint(lines,order.channel)}:{}),readOnly:true,preparationNotStarted:true};
+ const proof={checkedAt,bcId:String(bc.id),comparison:diagnostic.comparison,errors:diagnostic.errors,...(!invalid&&diagnostic.comparison?{mappingFingerprint:usesRecordedBc(order)?recordedBcFingerprint(bc):mappingSelectionFingerprint(lines,order.channel),authority:usesRecordedBc(order)?'recorded_bc':'source'}:{}),readOnly:true,preparationNotStarted:true};
  const concordant=bc.status==='active'&&diagnostic.comparison?.different===false&&diagnostic.errors.length===0;
  const difference=diagnostic.comparison?.different===true;
  const text=rows=>(rows||[]).map(([sku,quantity])=>sku+' × '+quantity).join(', ');
@@ -38,7 +39,7 @@ export async function reconcileRefreshedBcDiagnostics(tx,id,bc){
   if(!original||currentError===undefined||job.error===currentError&&job.action!=='compare-bc')continue;
   // A SKU comparison cannot certify the ERP variant identity used by pricing.
   // Keep that guard until the preparation identity check itself verifies it.
-  if(concordant&&original==='BC · Produits ou quantités des lignes Erplain différents de la source'){identityUnconfirmed=true;continue;}
+  if(!usesRecordedBc(order)&&concordant&&original==='BC · Produits ou quantités des lignes Erplain différents de la source'){identityUnconfirmed=true;continue;}
   const previousResult=marker&&Object.hasOwn(marker,'previousResult')?marker.previousResult:job.result;
   const record={...(job.action==='compare-bc'?{bc:diagnostic.bc,lines:diagnostic.lines,comparison:diagnostic.comparison,errors:diagnostic.errors,message:diagnostic.message,provider:diagnostic.provider,readOnly:true,checkedAt}:{}),bcComparisonRefresh:{previousError:original,currentError,proof,...(job.action==='compare-bc'?{previousResult}:{})}};
   await tx.query("UPDATE resolution_jobs SET result=(CASE WHEN jsonb_typeof(result)='object' THEN result ELSE jsonb_build_object('previousResult',result) END)||$3::jsonb,error=$4,updated_at=now() WHERE id=$1 AND order_id=$2 AND status='review' AND error IS NOT DISTINCT FROM $5 RETURNING id",[job.id,id,JSON.stringify(record),currentError,job.error]);

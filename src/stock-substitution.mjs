@@ -1,3 +1,4 @@
+import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
 import {importBcAmounts} from './import-bc-commercial.mjs';
 import {chooseDocumentStockVariant} from './document-stock-choice.mjs';
@@ -91,7 +92,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  // The manually supplied import preserves the current BC commercial basis.
  // This option is supplied by the import service, never by the request body.
  if(preserveBcAmounts&&(!Array.isArray(bc.line_items)||!bc.line_items.length))throw Error('BC · Lignes commerciales non reçues');
- const sourceAmounts=preserveBcAmounts?{total:bc.total,tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:o.channel==='temu'?temuSellerTotals(o):o.erp_live.pricing||(o.source_payload?.erplainImported?{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:null);verifySourceCommercialTotals(bc,sourceAmounts);
+ const sourceAmounts=usesRecordedBc(o)?recordedBcPricing(o,bc):preserveBcAmounts?{total:bc.total,tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:o.channel==='temu'?temuSellerTotals(o):o.erp_live.pricing||(o.source_payload?.erplainImported?{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:null);if(!usesRecordedBc(o))verifySourceCommercialTotals(bc,sourceAmounts);
  if(bc.update_stock===true)await assertNoHistoricalStockRemoval(api,o);
  let plan=await findRecordedSubstitution(db,o,b,bc,api);
  if(!plan){
@@ -153,7 +154,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  const updated=changed.UpdateOrder;
  let historicalAfter=null;
  try{
- verifySourceCommercialTotals(updated,sourceAmounts);
+ if(!usesRecordedBc(o))verifySourceCommercialTotals(updated,sourceAmounts);
  if(preserveBcAmounts&&(Math.round(Number(updated.total)*100)!==Math.round(Number(sourceAmounts.total)*100)||Math.round(updated.line_items.reduce((n,l)=>n+Number(l.tax_amount),0)*100)!==Math.round(Number(sourceAmounts.tax)*100)))throw Error('Remplacement à rapprocher : les montants du BC ont changé.');
  if(!updated||String(updated.id)!==plan.bcId||updated.update_stock!==bc.update_stock||(updated.shipping_orders?.data?.length&&!plan.partialProof)||totals(shippingProductLines(updated.line_items||[]).map(l=>({sku:l.variant?.sku,quantity:l.quantity})))!==totals(plan.expected))throw Error('Remplacement non confirmé : relire le BC dans Erplain avant toute nouvelle tentative');
  if(plan.partialProof)assertPartialShippingPreserved(plan.commercialBefore,updated);
