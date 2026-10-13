@@ -44,7 +44,7 @@
    setText(box.querySelector('.monitoring-next'),monitor?.nextCheck?'Prochain contrôle : '+stamp(monitor.nextCheck):'');
    setText(box.querySelector('.monitoring-result'),monitor?.result?'Résultat : '+monitor.result:'');
    setText(box.querySelector('.monitoring-step'),monitor?.nextStep?'Étape suivante : '+monitor.nextStep:'');
-   const alert=box.querySelector('.monitoring-alert');setText(alert,monitor?.alert?(monitor.externalOverdue?'Vérification externe en retard : deux cycles sans contrôle complet':'Sans progression depuis plus d’une heure'):'');alert.setAttribute('role','status');alert.style.fontWeight='bold';alert.style.color='#8a4b00';
+   const alert=box.querySelector('.monitoring-alert');setText(alert,monitor?.alert?(monitor.externalOverdue?'Vérification externe en retard : deux cycles sans contrôle complet'+(monitor.externalResult&&monitor.externalStatus!=='complete'?' · '+monitor.externalResult:''):'Sans progression depuis plus d’une heure'):'');alert.setAttribute('role','status');alert.style.fontWeight='bold';alert.style.color='#8a4b00';
    setText(box.querySelector('.processing-stage'),r.stage|| (r.monitoring?.blocked?'Contrôle des blocages':r.monitoring?.followUp?'Contrôle de la commande':r.previewPending?'Remplacement à confirmer':'Priorité enregistrée · en attente de préparation'));
    const status=cell.querySelector(':scope > .badge');
    if(status&&r.stage&&(status.dataset.processingStatus||['Traitement en cours','À générer','En attente'].includes(status.textContent.trim()))){
