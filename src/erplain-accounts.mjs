@@ -1,4 +1,5 @@
 import {erplainFetch,erplainRetryDelay} from './erplain-transport.mjs';
+import {guardErplainReadyMutation} from './erplain-ready-transition.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 export function confirmedRateLimitRejection(payload){
@@ -11,6 +12,7 @@ export function erplainAccount(directory,account,{fetchImpl=fetch,loadConfig=asy
   const mutation=/^mutation\s/.test(query);if(!/^query\s/.test(query)&&!mutation)throw new Error('Opération interdite');
   if((mutation||/\bmutation\b/i.test(query))&&(account!=='live'||process.env.ERPLAIN_LIVE_WRITES!=='1'||process.env.MIGRATION_PREPARATION==='1'||!identity))throw new Error('ERPLAIN LIVE : écriture non autorisée ou identité non vérifiée');
   if(process.env.MIGRATION_PREPARATION==='1'&&/\b(?:Orders|Order|ShippingOrders|ShippingOrder|Invoices|Invoice|Estimates|PurchaseOrders)\s*\(/.test(query))throw new Error('ERPLAIN LIVE : commandes suspendues jusqu’au GO');
+  if(mutation)await guardErplainReadyMutation(query,variables,request);
   const c=await loadConfig();
   if(c.url!=='https://api.erplain.app/graphql'||Number(c.companyId)!==expected)throw new Error('Configuration ERPLAIN LIVE incohérente');
   const response=await erplainFetch(c,c.url,()=>({method:'POST',redirect:'error',signal:AbortSignal.timeout(45000),headers:{'content-type':'application/json',authorization:'Bearer '+c.apiKey,'x-company-id':String(expected)},body:JSON.stringify({query,variables})}),{fetchImpl,readOnly:!mutation&&!/\bmutation\b/i.test(query)});
