@@ -12,7 +12,7 @@
  function refresh(){
   for(const button of root.querySelectorAll('.compact-problem[data-problem-type="stock"]')){
    const sku=button.dataset.problemSku;if(!sku||button.nextElementSibling?.hasAttribute('data-stock-information'))continue;
-   const info=document.createElement('small');info.setAttribute('data-stock-information',sku);info.setAttribute('aria-live','polite');info.style.cssText='display:block;white-space:normal;overflow-wrap:anywhere;margin:4px 0 8px';info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';button.after(info);
+   const info=document.createElement('small');info.setAttribute('data-stock-information',sku);info.setAttribute('aria-live','polite');info.style.cssText='display:block;max-width:min(320px,calc(100vw - 80px));white-space:normal;overflow-wrap:anywhere;margin:4px 0 8px';info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';button.after(info);
    load(sku).then(data=>{if(!info.isConnected)return;info.dataset.expiresAt=String(cache.get(sku)?.until||Date.now()+60000);if(data.error)info.textContent='À venir ERPLAIN : non vérifiée · équivalents V3 : non vérifiés';else info.innerHTML=html(data);});
   }
  }
