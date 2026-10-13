@@ -26,7 +26,7 @@ def tree(commit):
  for entry in entries:
   metadata,name=entry.split('\t',1)
   if safe_path(name):
-   if metadata.split()[0] not in ('100644','100755'):raise ValueError('Type Git refusÃ© : '+name)
+   if metadata.split()[0] not in ('100644','100755'):raise ValueError('Type Git refusé : '+name)
    names.append(name)
  return {n:git('show',commit+':'+n) for n in names if safe_path(n)}
 def read_current(names):
@@ -34,7 +34,7 @@ def read_current(names):
  for name in names:
   target=APP/name
   # Never traverse an application symlink into business data or /etc.
-  if target.is_symlink() or not target.resolve().is_relative_to(APP.resolve()):raise ValueError('Lien serveur refusÃ© : '+name)
+  if target.is_symlink() or not target.resolve().is_relative_to(APP.resolve()):raise ValueError('Lien serveur refusé : '+name)
   if target.is_file():result[name]=target.read_bytes()
  return result
 def atomic_json(path,value):
@@ -58,7 +58,7 @@ def health():
  # TLS validation is enabled; no authentication or business request.
  with urllib.request.urlopen('https://v3.nextechlogistic.fr/',timeout=20) as response:
   if response.status!=200:raise ValueError('HTTP non conforme')
-  if response.read()!= (APP/'public/index.html').read_bytes():raise ValueError('Version HTTP diffÃ©rente')
+  if response.read()!= (APP/'public/index.html').read_bytes():raise ValueError('Version HTTP différente')
 def wait_web():
  for _ in range(45):
   try:
@@ -67,13 +67,13 @@ def wait_web():
     if r.status==200 and r.read()==(APP/'public/index.html').read_bytes():return
   except Exception:pass
   time.sleep(2)
- raise ValueError('Le nouveau serveur web ne rÃ©pond pas correctement')
+ raise ValueError('Le nouveau serveur web ne répond pas correctement')
 def stop(service):
  run(['systemctl','stop',service])
- if run(['systemctl','show',service,'-p','Result','--value']).strip()!=b'success':raise ValueError('ArrÃªt non propre : '+service)
+ if run(['systemctl','show',service,'-p','Result','--value']).strip()!=b'success':raise ValueError('Arrêt non propre : '+service)
 def verify_environment():
  env=Path('/etc/nextech/application.env')
- if not env.is_file() or env.stat().st_uid!=0 or env.stat().st_mode&0o007:raise ValueError('Environnement de production non sÃ©curisÃ©')
+ if not env.is_file() or env.stat().st_uid!=0 or env.stat().st_mode&0o007:raise ValueError('Environnement de production non sécurisé')
  names={x.split('=',1)[0] for x in env.read_text().splitlines() if '=' in x and not x.startswith('#')}
  if not {'DATABASE_URL','PUBLIC_ORIGIN','PORT','SHOP_VAULT_FILE'}<=names:raise ValueError('Variables requises absentes')
  for service in SERVICES:
@@ -90,7 +90,7 @@ def deploy(commit,packet=None):
   atomic_json(journal,report)
   head=fetch()
   if commit!=head:
-   report['status']='superseded';report['reason']='Un push plus rÃ©cent existe';return report
+   report['status']='superseded';report['reason']='Un push plus récent existe';return report
   baseline=json.loads((STATE/'baseline.json').read_text())
   git('merge-base','--is-ancestor',baseline['commit'],commit)
   old,new=tree(baseline['commit']),tree(commit)
@@ -101,7 +101,7 @@ def deploy(commit,packet=None):
   validate_manifest(packet['manifest'],proofs,commit,changed)
   proof_dir=STATE/'proofs'/commit;proof_dir.mkdir(parents=True,mode=0o700,exist_ok=True)
   for name,data in proofs.items():
-   if name not in ('checks.log','desktop.png','mobile.png','performance.json'):raise ValueError('Nom de preuve refusÃ©')
+   if name not in ('checks.log','desktop.png','mobile.png','performance.json'):raise ValueError('Nom de preuve refusé')
    target=proof_dir/name;target.write_bytes(data);target.chmod(0o600)
   atomic_json(proof_dir/'manifest.json',packet['manifest'])
   report['verification']={'status':'PASS','commit':commit,'proofs':{name:digest(data) for name,data in proofs.items()},'serverBaseline':'PASS'}
@@ -135,12 +135,12 @@ def deploy(commit,packet=None):
     for _ in range(120):
      try:guard('check',backup);break
      except subprocess.CalledProcessError:time.sleep(10)
-    else:raise ValueError('Traitements encore actifs : dÃ©ploiement diffÃ©rÃ©')
+    else:raise ValueError('Traitements encore actifs : déploiement différé')
     stopped=True;stop('nextech-worker');guard('check',backup);stop('nextech-web');guard('check',backup)
    # Recheck after draining, under the same global lock.
    latest=read_current(names)
    if plan(old,new,latest,baseline['serverHashes'])!=changed:raise ValueError('Conflit avant installation')
-   if verify_environment()!=env_hash:raise ValueError('Configuration modifiÃ©e pendant publication')
+   if verify_environment()!=env_hash:raise ValueError('Configuration modifiée pendant publication')
    installed=True
    for item in changed:
     path=APP/item['path']
@@ -153,16 +153,16 @@ def deploy(commit,packet=None):
     run(['chown','-R','root:nextech',str(APP/'node_modules')])
    for item in changed:
     path=APP/item['path'];actual=digest(path.read_bytes()) if path.is_file() else None
-    if actual!=item['after']:raise ValueError('Empreinte installÃ©e incorrecte : '+item['path'])
+    if actual!=item['after']:raise ValueError('Empreinte installée incorrecte : '+item['path'])
    if backend:run(['systemctl','start','nextech-web']);wait_web();run(['systemctl','start','nextech-worker'])
    health()
-   if verify_environment()!=env_hash:raise ValueError('Environnement de production altÃ©rÃ©')
+   if verify_environment()!=env_hash:raise ValueError('Environnement de production altéré')
    for item in changed:baseline['serverHashes'][item['path']]=item['after']
    baseline['commit']=commit;atomic_json(STATE/'baseline.json',baseline)
    report['status']='deployed'
  except Exception as error:
   # Never expose subprocess stderr: it may contain a credential from application output.
-  report['status']='failed';report['error']=str(error) if not isinstance(error,subprocess.CalledProcessError) else 'Une commande de contrÃ´le a Ã©chouÃ© (code '+str(error.returncode)+')'
+  report['status']='failed';report['error']=str(error) if not isinstance(error,subprocess.CalledProcessError) else 'Une commande de contrôle a échoué (code '+str(error.returncode)+')'
   if installed:
    try:
     if stopped:
@@ -205,7 +205,7 @@ if __name__=='__main__':
  STATE.mkdir(mode=0o700,exist_ok=True);request_dir=STATE/'requests';request_dir.mkdir(mode=0o700,exist_ok=True)
  request_path=request_dir/(commit+'.json')
  existing=json.loads(request_path.read_text()) if request_path.exists() else None
- if existing and existing['status'] in ('failed','resolved'):sys.exit('Ce commit a Ã©chouÃ© ; rÃ©soudre le blocage et publier un nouveau commit corrigÃ©')
+ if existing and existing['status'] in ('failed','resolved'):sys.exit('Ce commit a échoué ; résoudre le blocage et publier un nouveau commit corrigé')
  record=existing or {'id':str(uuid.uuid5(uuid.NAMESPACE_URL,'nextech-cicd:'+commit)),'commit':commit,'section':7,'serverManaged':True,'createdAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'status':'ready'}
  deadline=time.monotonic()+1200
  while True:
@@ -213,10 +213,10 @@ if __name__=='__main__':
   with open('/var/lock/nextech-deploy.lock','a') as lock:
    try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
    except BlockingIOError:
-    if time.monotonic()>deadline:sys.exit('Verrou Section7 encore occupÃ©')
+    if time.monotonic()>deadline:sys.exit('Verrou Section7 encore occupé')
     time.sleep(2);continue
    mirror=STATE/'local-queue.json'
-   if not mirror.exists():sys.exit('File commune non initialisÃ©e ; publication refusÃ©e')
+   if not mirror.exists():sys.exit('File commune non initialisée ; publication refusée')
    local=json.loads(mirror.read_text())['requests']
    automatic=[json.loads(p.read_text()) for p in request_dir.glob('*.json')]
    head=fetch()
@@ -236,5 +236,5 @@ if __name__=='__main__':
    record['status']='ready';record['waitingFor']=[r['id'] for r in deferred];atomic_json(request_path,record)
   # Release the global lock so Section7 can publish the older request.
   if time.monotonic()>deadline:
-   record['status']='blocked';atomic_json(request_path,record);print(json.dumps({'status':'blocked','request':record,'reason':'Demande antÃ©rieure encore ouverte'}));sys.exit(1)
+   record['status']='blocked';atomic_json(request_path,record);print(json.dumps({'status':'blocked','request':record,'reason':'Demande antérieure encore ouverte'}));sys.exit(1)
   time.sleep(10)
