@@ -49,7 +49,7 @@ export function equivalenceImportService(db,directory,{api=erplainAccount(direct
   const originals=response.Order.line_items?.filter(l=>l.type==='normal'&&l.variant?.sku===data.sku);
   if(originals?.length!==1)throw Error('SKU de base absent ou ambigu dans le BC');
   const payload=validateResolution({id:o.id,requestId:randomUUID(),action:'equivalent-preview',type:'stock',sku:data.sku,replacementSku:data.replacementSku,replaceQuantity:Number(originals[0].quantity),replacementQuantity:data.replacementQuantity,scope:'order',resumeAfter:true});
-  const plan=await preview(db,api,o,payload,{directory});
+  const plan=await preview(db,api,o,payload,{directory,preserveBcAmounts:true});
   if(!Number.isFinite(plan.available))throw Error('Stock de remplacement non suivi ou non vérifié');
   await db.query("UPDATE equivalence_import_rows SET status='valid',order_id=$3,data=$4,error=null WHERE batch_id=$1 AND line=$2",[r.batch_id,r.line,o.id,JSON.stringify({...data,orderId:o.id,channel:o.channel,country:o.address?.country,replaceQuantity:payload.replaceQuantity,available:plan.available,payload,plan})]);
  }
@@ -60,7 +60,7 @@ export function equivalenceImportService(db,directory,{api=erplainAccount(direct
    if(other.length)throw Error('Intervention concurrente : attendre et réanalyser le fichier');
    const earlier=(await rows(r.batch_id)).filter(x=>x.order_id===o.id&&x.status==='applied');
    const p=r.data.payload;
-   const plan=await preview(db,api,o,p,{directory});
+   const plan=await preview(db,api,o,p,{directory,preserveBcAmounts:true});
    if(!earlier.length&&plan.previewFingerprint!==r.data.plan.previewFingerprint)throw Error('Commande ou produit modifié depuis l’aperçu : réanalyser le fichier');
    if(earlier.length){
     if(o.erp_live?.equivalentAttemptId!==earlier.at(-1).request_id)throw Error('Commande modifiée hors de cet import : rapprochement requis');
