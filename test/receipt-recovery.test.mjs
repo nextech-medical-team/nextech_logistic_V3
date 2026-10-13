@@ -35,3 +35,8 @@ test('large inventories use filtered collections rather than aliases exceeding t
  const os=Array.from({length:201},(_,i)=>order(String(i))),calls=[],api={request:async(q,v)=>{calls.push(q);assert.match(q,/Orders\(first:100/);assert.equal(v.where.column,'ID');return {Orders:{data:v.where.value.map(id=>bc(os.find(o=>o.erp_live.bc.id===id))),paginatorInfo:{hasMorePages:false}}};}};
  const result=await readRecoveryBcs(api,os);assert.equal(result.bcs.size,201);assert.equal(result.errors.size,0);assert.equal(calls.length,3);
 });
+test('quota or provider outage stops the scan and keeps every unread order unverified',async()=>{
+ const orders=Array.from({length:201},(_,i)=>order(String(i)));let calls=0;
+ const r=await readRecoveryBcs({request:async()=>{calls++;const e=Error('Erplain HTTP 429');e.httpStatus=429;throw e;}},orders);
+ assert.equal(calls,1);assert.equal(r.errors.size,201);assert.equal(r.bcs.size,0);
+});

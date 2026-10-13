@@ -36,7 +36,12 @@ export async function readRecoveryBcs(api,orders){
    const connection=pageData(result.Orders);if(connection.paginatorInfo.hasMorePages)throw Error('Liste des BC incomplète');
    const returned=new Map();for(const bc of connection.data){if(!bc?.id||!batch.includes(String(bc.id))||returned.has(String(bc.id)))throw Error('Identité BC non confirmée');returned.set(String(bc.id),bc);}
    for(const id of batch){let bc=returned.get(id);if(!bc)throw Error('BC demandé absent de la réponse');if(bc.shipping_orders?.paginatorInfo?.hasMorePages)bc=await readErplainDocuments(api,id);bcs.set(id,bc);}
-  }catch(e){for(const o of orders.filter(o=>batch.includes(String(o.erp_live?.bc?.id))))errors.set(o.id,'Lecture BC indisponible : '+e.message);}
+  }catch(e){
+   const deferred=e.httpStatus===429||e.httpStatus>=500||/(?:HTTP\s+)?(?:429|503|504)|timeout|network|fetch failed|ETIMEDOUT|ECONN/i.test(e.message);
+   const unavailable=deferred?ids.slice(start):batch;
+   for(const o of orders.filter(o=>unavailable.includes(String(o.erp_live?.bc?.id))))errors.set(o.id,'Lecture BC indisponible : '+e.message);
+   if(deferred)break;
+  }
  }
  return {bcs,errors};
 }
