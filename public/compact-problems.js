@@ -95,7 +95,7 @@ function compactProblems(order){
  // Historical job errors do not invalidate a mapping present on the current lines.
  const visible=out.filter(p=>{
   if(!p.sku&&(p.type==='weight'||p.type==='stock'&&new Set(lines.map(l=>l.sku||l.mapped_sku||l.source_sku).filter(Boolean)).size===1)&&out.some(x=>x.type===p.type&&x.sku&&x.label===p.label))return false;
-  if(pendingLine&&p.sku===pending.sku&&Number(pending.replaceQuantity)>=Number(pendingLine.quantity)&&Number(pendingLine.quantity)>0&&['weight','weight-unit','stock','missing','inactive','duplicate'].includes(p.type))return false;
+  // An unconfirmed preview does not retire the original product diagnostics.
   if(pendingLine&&!p.sku&&p.detail===pending.error)return false;
   if(p.type!=='mapping')return true;
   const relevant=lines.filter(l=>[l.source_sku,l.sku,l.mapped_sku].filter(Boolean).some(s=>s===p.sku||problemMentionsSku(p.detail,s)));

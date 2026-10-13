@@ -1,3 +1,4 @@
+import {retiredCommercialControl} from './post-bc-control-recovery.mjs';
 import {releaseExcelPurchaseHold} from './temu-excel-purchase-admission.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
@@ -37,7 +38,7 @@ export function automaticPreparationHold(o,now=Date.now()){
  const blocked=suspensionBlock(o);if(blocked)return blocked;
  if(!o||o.archived||o.simulation||o.channel!=='temu')return 'Commande hors périmètre des achats automatiques';
  if(hasExternalLabel(o)||o.transport_choice)return 'Étiquette ou choix de transport existant à préserver';
- if(o.issue||o.source_payload?.visibilityHold||o.source_payload?.marketplacePendingCorrection||o.resolution_pending_resume||o.partial_mode)return o.issue||'Préparation à recontrôler avant achat';
+ if((o.issue&&!(o.erp_live?.bc?.id&&retiredCommercialControl(o.issue)))||o.source_payload?.visibilityHold||(!o.erp_live?.bc?.id&&o.source_payload?.marketplacePendingCorrection)||o.resolution_pending_resume||o.partial_mode)return o.issue||'Préparation à recontrôler avant achat';
  const p=o.erp_live;
  if(p?.phase!=='bl_ready'||(!o.erp_live?.bc?.id&&p.pricing?.status!=='verified')||!p.bl?.id||!p.stockDocument)return 'Préparation Erplain non terminée';
  for(const value of [p.verifiedAt,p.stockCheckedAt]){const at=Date.parse(value);if(!Number.isFinite(at)||at>now)return 'Validation de préparation et stock à actualiser';}
