@@ -1,3 +1,4 @@
+import {abandonEquivalentPreview} from './abandon-equivalent.mjs';
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {resolveReplacementLines} from './resolution-quantities.mjs';
@@ -60,7 +61,7 @@ const productTypes=['mapping','missing','duplicate','inactive','weight','weight-
 const actionTypes={
  'manual-temu-pricing':['temu-pricing'],
  'choose-carrier':['routing'],
- 'equivalent-preview':['stock'],'replace-equivalent':['stock'],
+ 'equivalent-preview':['stock'],'replace-equivalent':['stock'],'abandon-equivalent':['stock'],
  'reconcile-bc':['bc'],
  'check-sku':productTypes,'mapping':['mapping','missing'],'select-product':['duplicate'],
  'accept-source-change':['platform'],
@@ -84,11 +85,12 @@ export function validateResolution(b){
  if(b?.action==='refresh')assertRefreshProvider(b.provider);
  if(!actionTypes[b.action]?.includes(b.type))throw Error('Action incompatible avec le problème sélectionné');
  if(typeof b.id!=='string'||!b.id||!/^[a-f0-9-]{36}$/i.test(String(b.requestId)))throw Error('Commande et identifiant de demande requis');
- const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider']}[b.action]||[])];
+ const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'abandon-equivalent':['previewJobId'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider']}[b.action]||[])];
  if(Object.keys(b).some(k=>!allowed.includes(k)))throw Error('La fenêtre ne peut modifier que les informations de ce problème');
  if(['check-sku','weight','select-product','activate-product','create-product'].includes(b.action)&&(!String(b.sku||'').trim()||b.sku.length>199))throw Error('SKU Erplain requis');
  if(b.resumeAfter!==undefined&&typeof b.resumeAfter!=='boolean')throw Error('Option de reprise invalide');
  if(['equivalent-preview','replace-equivalent'].includes(b.action))validateSubstitution(b,b.action==='replace-equivalent');
+ if(b.action==='abandon-equivalent'&&(typeof b.previewJobId!=='string'||!b.previewJobId))throw Error('Identifiant de l’aperçu requis');
  if(b.action==='choose-carrier'&&!['gls','gofo'].includes(b.carrier))throw Error('Choisir GLS ou GOFO');
  if(b.action==='mapping'){normalizeMapping(b);validateMappingScope(b.scope);}
  if(['weight','create-product'].includes(b.action)&&(!Number.isFinite(Number(b.weightKg))||Number(b.weightKg)<=0||Number(b.weightKg)>3000))throw Error('Poids unitaire entre 0 et 3000 kg requis');
@@ -216,6 +218,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    const busy=(await db.query("SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status IN ('pending','creating','awaiting_pdf')",[o.id])).rows.length;
    if(busy)throw Error('Traitement déjà en cours : attendre sa fin avant de modifier les données de la commande');
   }
+  if(j.action==='abandon-equivalent')return abandonEquivalentPreview(db,{orderId:o.id,previewJobId:b.previewJobId,resolutionId:j.id});
   if(['equivalent-preview','replace-equivalent'].includes(j.action)){
    let deferResume=false;
    if(b.importRow){
