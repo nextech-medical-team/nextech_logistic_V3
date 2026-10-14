@@ -32,4 +32,5 @@ groups.push(['--test','test/equivalent-preview-recheck.test.mjs']);
 groups.push(['--test','test/manual-legacy-label-retry.test.mjs']);
 groups.push(['--test','test/temu-excel-purchase-admission.test.mjs']);
 groups.push(['--test','test/stock-lock-resume.test.mjs']);
+groups.push(['--test','test/partial-complete-documents.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
