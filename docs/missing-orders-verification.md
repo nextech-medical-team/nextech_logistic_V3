@@ -1,8 +1,8 @@
 # Vérification des commandes manquantes
 
-Dans **Paramètres → Vérification des commandes**, choisir une période (28 jours par défaut, 2 à 60 jours) puis cliquer sur **Vérifier Shopify et TEMU**.
+Dans **Paramètres → Vérification des commandes**, sélectionner **Shopify** ou **TEMU — tous pays**, choisir une ancienneté minimale (24 heures par défaut, 24 à 720 heures), puis cliquer sur **Lancer la vérification**. Seule la plateforme sélectionnée est consultée.
 
-Le module affiche exclusivement les commandes créées dans cette période, âgées de strictement plus de 24 heures et absentes des références ou références source V3 pour la plateforme correspondante. Les commandes archivées comptent comme présentes. Tous les statuts source sont inclus, y compris les annulations.
+Le module affiche exclusivement les commandes créées dans cette période, âgées de strictement plus que le seuil choisi (24 heures par défaut) et absentes des références ou références source V3 pour la plateforme correspondante. Les commandes archivées comptent comme présentes. Tous les statuts source sont inclus, y compris les annulations.
 
 La lecture utilise la boutique Shopify configurée dans `shopify-readonly.json` et toutes les boutiques TEMU accessibles via la connexion principale, ses jetons associés et le coffre des boutiques. Aucun filtre de pays n'est appliqué. L'historique réellement accessible dépend des droits API et des boutiques connectées. Le client TEMU existant utilise le point d'accès européen : cette fonction n'ajoute pas de connexion à d'autres régions API.
 
