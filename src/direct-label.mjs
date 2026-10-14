@@ -1,6 +1,7 @@
 import {canRetryFailedCarrier,hasUncertainCarrierHistory} from './carrier-attempt-proof.mjs';
 import {randomUUID} from 'node:crypto';
 import {assertManualLabelOrder} from './manual-label-policy.mjs';
+import {tenderBlLabelPayload} from './tender-bl-label-payload.mjs';
 
 export function assertBlLabelRequest(o){
  if(o?.channel==='temu')throw Error('Générer l’étiquette dans le parcours TEMU');
@@ -26,8 +27,10 @@ export async function queueLabelFromBl(db,id,user){
   if(await hasUncertainCarrierHistory(tx,id,{manualRequest:true}))throw Error('Étiquette ou création incertaine dans l’historique : rapprocher son résultat');
   if((await tx.query("SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') LIMIT 1",[id])).rows.length)throw Error('Modification en cours : attendre sa fin');
   const request={blId:String(o.erp_live.bl.id),creationId:randomUUID(),requestedBy:user.email,at:new Date().toISOString()};
+  const blPayload=await tenderBlLabelPayload(tx,o);if(blPayload){request.blPayload=blPayload;request.previousParcelCalculation={weightKg:o.weight_kg,parcels:o.parcel_count};}
   await tx.query("INSERT INTO carrier_jobs(order_id,carrier,status,environment,creation_id,manual_bl_request) VALUES($1,$2,'pending','production',$3,$4) ON CONFLICT(order_id) DO UPDATE SET carrier=excluded.carrier,status='pending',environment='production',creation_id=excluded.creation_id,manual_bl_request=excluded.manual_bl_request,attempts=0,error=null,failure_phase=null,creation_started_at=null,updated_at=now()",[id,o.carrier.startsWith('gls')?'gls':'gofo',request.creationId,JSON.stringify(request)]);
   await tx.query("UPDATE orders SET label_status='production_pending',processing_priority_at=now() WHERE id=$1",[id]);
+  if(blPayload)await tx.query('UPDATE orders SET weight_kg=$2,parcel_count=$3 WHERE id=$1',[id,blPayload.weightKg,blPayload.parcels]);
   await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'label.manual_from_bl',$2)",[user.email,JSON.stringify({orderId:id,...request})]);
   return {id,status:'pending',existing:false};
  });

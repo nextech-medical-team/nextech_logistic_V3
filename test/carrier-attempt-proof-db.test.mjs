@@ -20,6 +20,20 @@ async function fixture(){
  return {e,db,erp,job:async()=>(await db.query("SELECT * FROM carrier_jobs WHERE order_id='o'")).rows[0]};
 }
 
+test('native single-BL label queue persists its measured cargo and produces three PDFs exactly once without changing ERP or old V3 lines',async()=>{
+ const {e,db,erp,job}=await fixture();try{
+ await db.exec("CREATE TABLE products(sku text PRIMARY KEY,weight_kg numeric);INSERT INTO products VALUES('A',0.0038),('B',0.004),('C',0.004),('D',0.0068);INSERT INTO lines(id,order_id,source_line,source_sku,target_sku,quantity,target_quantity) VALUES('old','o','1','OLD','OLD',55000,55000);");
+ erp.bl.line_items=[['A',1500],['B',8000],['C',8000],['D',2000]].map(([sku,quantity])=>({type:'normal',quantity,variant:{sku}}));
+ await db.query("UPDATE orders SET channel='tender',carrier='gls_pharma',weight_kg=74500,parcel_count=2484,erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);
+ await queueLabelFromBl(db,'o',{email:'operator'});await queueLabelFromBl(db,'o',{email:'operator'});const request=(await job()).manual_bl_request;assert.equal(request.blPayload.parcels,3);assert.equal(request.previousParcelCalculation.parcels,2484);
+ // A later catalogue change never redefines the already requested shipment.
+ await db.exec("UPDATE products SET weight_kg=99 WHERE sku='A'");
+ let posts=0;const workers=createCarrierWorkers(db,null,{clients:{gls:async(o,{beforeCreate})=>{assert.equal(o.weight_kg,83.3);assert.equal(o.parcel_count,3);assert.equal(o.lines.length,4);await beforeCreate();posts++;return {reference:'R',tracking:['T1','T2','T3'],documents:[1,2,3].map(n=>Buffer.from('%PDF-1.4 synthetic '+n).toString('base64'))};}}});
+ await workers.run('gls');await workers.run('gls');assert.equal(posts,1);assert.equal((await job()).status,'ready');assert.equal((await db.query("SELECT count(*)::int n FROM carrier_documents WHERE order_id='o'")).rows[0].n,3);
+ const saved=(await db.query("SELECT erp_live,weight_kg,parcel_count FROM orders WHERE id='o'")).rows[0];assert.deepEqual(saved.erp_live,erp);assert.equal(Number(saved.weight_kg),83.3);assert.equal(saved.parcel_count,3);assert.equal(Number((await db.query("SELECT quantity FROM lines WHERE id='old'")).rows[0].quantity),55000);assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='label.manual_from_bl'")).rows[0].n,1);
+ }finally{await e.close();}
+});
+
 test('cleared phone failure archive resumes through real SQL; newer unrelated audit cannot hide proof',async()=>{
  const {e,db,erp,job}=await fixture();try{
  const archived={order_id:'o',status:'failed',attempts:1,creation_id:'reserved',result:null,reference:null,tracking:[],error:null,updated_at:'2026-10-14T10:01:44.515Z'};
