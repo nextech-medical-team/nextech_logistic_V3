@@ -4,7 +4,25 @@ import {connectTemuShops} from '../src/temu-shop-clients.mjs';
 import {excelLabelShops} from '../scripts/temu-excel-labels.mjs';
 import {temuLocalService} from '../src/temu-local.mjs';
 import {resolveExcelTemuShop} from '../src/temu-excel-shop.mjs';
+import {temuShopError} from '../src/temu-shop-error.mjs';
 const config={TEMU_APP_KEY:'A',TEMU_APP_SECRET:'secret',TEMU_ACCESS_TOKEN:'root',TEMU_COUNTRIES:{root:'FR',associated:'IT'}};
+test('application refusal identifies principal authorization without exposing credentials',async()=>{
+ const failure=Object.assign(Error('The application information query is abnormal'),{code:'4000000'});
+ await assert.rejects(connectTemuShops('/unused',{configLoader:async()=>config,shopLoader:async()=>[],apiFactory:()=>({read:async()=>{throw failure;}})}),e=>e.code==='4000000'&&/accès principal.*autorisation/.test(e.message)&&/clé d’application/.test(e.message));
+ const redacted=temuShopError(Object.assign(Error('access-token app-secret'),{code:'4000000'}),'boutique SI',['access-token','app-secret']);
+ assert.doesNotMatch(redacted.message,/access-token|app-secret/);
+ const stopping=Object.assign(Error('stopping'),{code:'TEMU_STOPPING'});assert.equal(temuShopError(stopping,'shop'),stopping);
+});
+test('unrelated vault authorization failure names its country instead of blaming delivery country',async()=>{
+ const f=fixture();
+ await assert.rejects(connectTemuShops('/unused',{...f,strict:true,apiFactory:c=>({read:async()=>{
+  if(c.TEMU_ACCESS_TOKEN==='root')return {mallId:'root'};
+  throw Object.assign(Error('The application information query is abnormal'),{code:'4000000'});
+ }})}),e=>e.code==='4000000'&&/boutique ES du coffre/.test(e.message));
+});
+test('order lookup failure identifies the shop and requested reference',async()=>{
+ await assert.rejects(resolveExcelTemuShop({reference:'PO-181-TEST'},[],[{mallId:'shop-1',api:{read:async()=>{throw Object.assign(Error('refused'),{code:'4000000'});}}}]),e=>e.code==='4000000'&&/boutique shop-1.*PO-181-TEST/.test(e.message));
+});
 function fixture(){
  const seen=[];
  const apiFactory=c=>({token:c.TEMU_ACCESS_TOKEN,async read(type){
@@ -90,4 +108,51 @@ test('discovery distinguishes missing country access from an order absent in con
  const o={reference:'PO-RO-TEST',address:{country:'RO'}};
  await assert.rejects(resolveExcelTemuShop(o,[],[]),/Aucune boutique.*RO/);
  await assert.rejects(resolveExcelTemuShop(o,[],[{mallId:'shop',api:{read:async()=>({})}}]),/PO-RO-TEST introuvable.*1 boutique.*RO/);
+});
+const unavailable=()=>Object.assign(Error('The application information query is abnormal'),{code:'4000000'});
+const order={reference:'PO-141-19314940851830296',address:{country:'NL'}},orderLines=[{source_line:'item',source_sku:'SKU',quantity:1}];
+const orderDetail={parentOrderMap:{parentOrderSn:order.reference},orderList:[{orderSn:'item',quantity:1,productList:[{extCode:'SKU'}]}]};
+const owner={mallId:'owner',api:{read:async()=>orderDetail}};
+test('unavailable application does not prevent an exact match from another shop',async()=>{
+ const refused={mallId:'refused',api:{read:async()=>{throw unavailable();}}};
+ const result=await resolveExcelTemuShop(order,orderLines,[refused,owner]);
+ assert.equal(result.mallId,'owner');assert.equal(result.shopWarnings.length,1);
+ await assert.rejects(resolveExcelTemuShop(order,orderLines,[refused]),/abnormal/);
+ await assert.rejects(resolveExcelTemuShop(order,orderLines,[refused,owner,{...owner,mallId:'duplicate'}]),/ambigu/);
+ await assert.rejects(resolveExcelTemuShop(order,[{...orderLines[0],quantity:2}],[refused,owner]));
+});
+test('timeouts quotas and other application errors still block despite an exact match',async()=>{
+ for(const error of [Object.assign(Error('quota'),{code:'source_budget_deferred'}),Error('timeout'),Object.assign(Error('other refusal'),{code:'4000000'}),Object.assign(Error('stop'),{code:'TEMU_STOPPING'})]){
+  await assert.rejects(resolveExcelTemuShop(order,orderLines,[owner,{mallId:'failed',api:{read:async()=>{throw error;}}}]),e=>e.message.includes(error.message));
+ }
+});
+test('unavailable principal application permits vault discovery and subsequent reconnect',async()=>{
+ const stored={...order,source_payload:{mallId:'owner'}};
+ const calls=[];
+ const local=temuLocalService({query:async()=>({rows:[stored]})},'/unused',{
+  configLoader:async()=>config,shopLoader:async()=>[{country:'FR',appKey:'other',appSecret:'other-secret',accessToken:'vault'}],
+  apiFactory:c=>({read:async method=>{
+   calls.push([c.TEMU_ACCESS_TOKEN,method]);
+   if(c.TEMU_ACCESS_TOKEN==='root')throw unavailable();
+   if(method==='bg.open.accesstoken.info.get')return {mallId:'owner'};
+   if(method==='bg.order.detail.v2.get')return orderDetail;
+   throw Error('confirmed owner diagnostic');
+  }})
+ });
+ const result=await local.resolveExcelShop(order,orderLines);
+ assert.equal(result.mallId,'owner');assert.match(result.shopWarnings[0].message,/accès principal/);
+ const diagnostic=await local.diagnose(order.reference);assert.match(diagnostic.errors[0].message,/confirmed owner diagnostic/);
+ assert.equal(calls.filter(([token,method])=>token==='vault'&&method==='bg.open.accesstoken.info.get').length,2);
+});
+test('unavailable vault application is recorded while another shop can confirm the order',async()=>{
+ const connected=await connectTemuShops('/unused',{
+  configLoader:async()=>config,shopLoader:async()=>[{country:'BE',appKey:'B',appSecret:'s',accessToken:'failed'}],strict:true,allowUnavailableApplications:true,
+  apiFactory:c=>({read:async method=>{
+   if(c.TEMU_ACCESS_TOKEN==='failed')throw unavailable();
+   return method==='bg.open.accesstoken.info.get'?{mallId:'owner'}:orderDetail;
+  }})
+ });
+ const result=await resolveExcelTemuShop(order,orderLines,[...connected.clients].map(([mallId,api])=>({mallId,api})),connected.unavailableApplications);
+ assert.equal(result.mallId,'owner');assert.match(result.shopWarnings[0].message,/boutique BE/);
+ await assert.rejects(resolveExcelTemuShop(order,orderLines,[],connected.unavailableApplications),/boutique BE/);
 });

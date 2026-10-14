@@ -32,7 +32,7 @@ export function temuExcelPreparation(db,local){
     }
     if(excelPreparationFingerprint(o,lines)!==fingerprint)throw Error('Commande modifiée : relancez la vérification');
     if(o.issue&&o.issue!==excelImportHold||o.suspension?.active!==true||o.suspension.note!==excelImportHold||Object.hasOwn(o.suspension,'erplainCancellation')||o.source_payload.marketplacePendingCorrection||o.transport_choice||o.partial_mode||o.erp_live?.bc||o.erp_live?.customer||o.erp_live?.phase||o.tracking_status!=='not_shipped')throw Error('Blocage ou préparation existante : vérifier la commande avant raccordement');
-    const commercial=excelCommercialSource(o,lines),{mallId,api,detail}=await local.resolveExcelShop(o,lines);
+    const commercial=excelCommercialSource(o,lines),{mallId,api,detail,shopWarnings=[]}=await local.resolveExcelShop(o,lines);
     verifyExcelTemuDetail(o,lines,detail);
     const info=inspectTemu(detail,reference);
     if(![1,2].includes(info.status)||info.packages.length||(detail.orderList||[]).some(l=>[3,4,5].includes(Number(l.orderStatus))||Number(l.canceledQuantityBeforeShipment)>0||[true,1,'1'].includes(l.isCancelledDuringPending)))throw Error('Commande TEMU annulée ou déjà expédiée : rapprochement requis');
@@ -44,13 +44,13 @@ export function temuExcelPreparation(db,local){
      const busy=(await tx.query(`SELECT 1 FROM erp_live_jobs WHERE order_id=$1 UNION ALL SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM temu_label_jobs WHERE reference=$2 AND (attempt_id IS NOT NULL OR jsonb_array_length(packages)>0)`,[o.id,reference])).rows;
      if(busy.length)throw Error('Traitement existant à rapprocher avant raccordement');
      const at=new Date().toISOString(),jobId=randomUUID(),state={...o.suspension,active:false,note:'Import Excel TEMU vérifié ; préparation demandée.',version:randomUUID(),updatedAt:at,updatedBy:user.email};
-     const payload={...(commercial.company?{company:commercial.company,client:commercial.company}:{}),mallId,sourceShop:mallId,currency:commercial.currency,temuExcelCommercial:commercial,manualPreparationRequired:false,manualLabelPurchaseRequired:false,temuExcelPreparation:{fingerprint,mallId,at,user:user.email,jobId},temuOrderDetail:detail,temuDirect:{source:'temu_direct',state:'verified',verifiedAt:at,status:info.status}};
+     const payload={...(commercial.company?{company:commercial.company,client:commercial.company}:{}),mallId,sourceShop:mallId,currency:commercial.currency,temuExcelCommercial:commercial,manualPreparationRequired:false,manualLabelPurchaseRequired:false,temuExcelPreparation:{fingerprint,mallId,at,user:user.email,jobId,shopWarnings},temuOrderDetail:detail,temuDirect:{source:'temu_direct',state:'verified',verifiedAt:at,status:info.status}};
      await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb,suspension=$3,issue=null WHERE id=$1',[o.id,JSON.stringify(payload),JSON.stringify(state)]);
      const request={id:o.id,requestId:jobId,action:'resume',type:'resolved'};
      await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$1,'resume',$3)",[jobId,o.id,JSON.stringify(request)]);
      await tx.query("INSERT INTO order_suspension_events(id,order_id,action,user_email,note,state) VALUES($1,$2,'reactivated',$3,$4,$5)",[randomUUID(),o.id,user.email,state.note,JSON.stringify(state)]);
-     await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'temu.excel.preparation.requested',$2)",[user.email,JSON.stringify({orderId:o.id,mallId,jobId,fingerprint})]);
-     return {id:o.id,jobId,message:'Préparation BC/BL demandée dans Erplain. L’étiquette sera achetée automatiquement si les contrôles et la marge le permettent.'};
+     await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'temu.excel.preparation.requested',$2)",[user.email,JSON.stringify({orderId:o.id,mallId,jobId,fingerprint,shopWarnings})]);
+     return {id:o.id,jobId,shopWarnings,message:(shopWarnings.length?shopWarnings.length+' autre(s) accès TEMU indisponible(s) ; boutique de la commande vérifiée. ':'')+'Préparation BC/BL demandée dans Erplain. L’étiquette sera achetée automatiquement si les contrôles et la marge le permettent.'};
     });
    },['stock-mutations','temu-order:'+reference,'suspension:'+initial.o.id]);
   }

@@ -69,6 +69,16 @@ test('automatic discovery holds missing, ambiguous and unreadable orders then re
  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
  assert.equal(f.bought,0);
 });
+test('confirmed shop can queue preparation while retaining another application refusal',async t=>{
+ const f=await fixture(t),input=await f.input();
+ f.candidates.unshift({mallId:'unavailable',api:{read:async()=>{throw Object.assign(Error('The application information query is abnormal'),{code:'4000000'});}}});
+ const result=await f.service.prepare(input,user);
+ assert.equal(result.shopWarnings.length,1);assert.match(result.message,/accès TEMU indisponible/);
+ assert.equal((await f.read()).source_payload.temuExcelPreparation.shopWarnings[0].code,'4000000');
+ assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
+ assert.equal(f.bought,0);
+ assert.equal((await f.service.prepare(input,user)).replayed,true);
+});
 test('production worker uses Excel source totals and shared pricing, without API amounts or double multiplication',async t=>{
  const f=await fixture(t);await f.service.prepare(await f.input(),user);const o=await f.read(),lines=await f.lines();
  assert.equal(await ensureTemuBcPricing(f.db,o,lines,()=>assert.fail('No API amount request')),false);
