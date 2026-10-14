@@ -305,3 +305,5 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
  #view-orders table.orders-fixed-layout.orders-with-margins tbody tr.order-row-expanded>td:not(.total-quantity-column){display:block;height:auto;min-height:0;max-height:none}
  #view-orders .orders-fixed-layout tr.order-row-expanded{min-height:320px}
 }
+
+@media(max-width:900px){#view-orders .orders-fixed-layout>thead{width:1px;max-width:1px;height:1px}}
