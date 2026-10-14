@@ -34,3 +34,16 @@ test('recovery recognizes native and legacy numbers and rejects ambiguous result
  const duplicated=result('CL-0042');duplicated.Customers.data.push({...duplicated.Customers.data[0],id:'78'});
  assert.throws(()=>customerCheckpointResult(duplicated,'order-1','CL-0042'),/ambigu/);
 });
+test('number generation preserves provider errors instead of hiding them behind a missing number',async()=>{
+ const {erplainAccount}=await import('../src/erplain-accounts.mjs');
+ const previous=process.env.ERPLAIN_LIVE_WRITES;process.env.ERPLAIN_LIVE_WRITES='1';
+ try{
+  const api=erplainAccount('unused','live',{loadConfig:async()=>({url:'https://api.erplain.app/graphql',companyId:100174,apiKey:'fake-test-key'}),fetchImpl:async(_url,options)=>{
+   const {query}=JSON.parse(options.body);
+   return new Response(JSON.stringify(query.includes('V3CheckAccount')?{data:{Company:{id:100174}}}:{data:{GenerateCustomerNumber:null},errors:[{path:['GenerateCustomerNumber'],message:'Customer sequence unavailable'}]}),{status:200});
+  }});
+  await api.verify();const o=order();delete o.erp_live.customerNumber;
+  await assert.rejects(ensureErplainCustomerNumber(api,o,async()=>assert.fail('no number to save')),/Customer sequence unavailable/);
+  assert.equal(o.erp_live.customerNumber,undefined);
+ }finally{if(previous===undefined)delete process.env.ERPLAIN_LIVE_WRITES;else process.env.ERPLAIN_LIVE_WRITES=previous;}
+});

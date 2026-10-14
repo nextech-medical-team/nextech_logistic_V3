@@ -20,7 +20,7 @@ export function erplainCustomerInput(o){
 }
 export async function ensureErplainCustomerNumber(api,o,save){
  if(o.channel!=='temu'||o.erp_live?.customerNumber)return;
- const result=await api.request('mutation V3CustomerNumber {GenerateCustomerNumber}',{},0,true);
+ const result=await api.request('mutation V3CustomerNumber {GenerateCustomerNumber}');
  const value=result?.GenerateCustomerNumber;
  if(!['string','number'].includes(typeof value)||!clean(value)||clean(value).startsWith('V3:'))throw Error('Client TEMU : numéro Erplain non reçu');
  o.erp_live.customerNumber=clean(value);await save(o);
