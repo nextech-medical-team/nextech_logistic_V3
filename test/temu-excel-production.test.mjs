@@ -109,7 +109,7 @@ test('dedicated Excel preparation rejects customer holds and every recorded Erpl
  assert.equal(f.bought,0);
 });
 
-test('Excel uses the existing automatic worker: only positive quote-matched margin buys once and records its audit',async t=>{
+test('Excel never buys automatically, including positive margins and previously queued candidates',async t=>{
  const {initializeTemuAutomaticPurchase,temuAutomaticPurchaseWorker}=await import('../src/temu-automatic-purchase.mjs');
  const f=await fixture(t);await f.service.prepare(await f.input(),user);
  await f.db.exec("ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false;CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE extra_parcels(order_id text);");
@@ -124,14 +124,11 @@ test('Excel uses the existing automatic worker: only positive quote-matched marg
  const shipping=temuShipping(f.db,f.api),local={amounts:async()=>({source:'temu_excel'}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
  const margins={get:async()=>({calculatedAt:new Date().toISOString(),rows:[{reference,status:profit===null?'incomplete':profit>0?'positive':'negative',profit,shipping:2.5/1.2,shippingSource:'Devis TEMU final',issues:[]}]})};
  const worker=temuAutomaticPurchaseWorker(f.db,local,margins,{refreshPreparation:async()=>({stockHolds:[]})});
- for(profit of [null,-1,0]){
-  await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,0);
-  assert.equal((await f.db.query('SELECT result FROM temu_automatic_purchase_checks')).rows[0].result.status,'held');
+ for(profit of [null,-1,0,1]){
+  await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');
+  assert.equal((await worker.run()).status,'disabled');assert.equal(f.bought,0);
  }
- profit=1;await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,1);
- assert.equal((await f.read()).resolution_pending_resume,false);
- const audit=(await f.db.query('SELECT decision FROM temu_automatic_purchase_audit')).rows;assert.equal(audit.length,1);assert.equal(audit[0].decision.profit,1);
- await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,1);
+ assert.equal((await f.db.query('SELECT * FROM temu_automatic_purchase_audit')).rows.length,0);
 });
 
 test('Excel replacement keeps original TEMU identity and prices, and recovers the owned direct-carrier review without creating a carrier label',async t=>{

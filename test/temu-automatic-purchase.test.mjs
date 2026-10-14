@@ -9,30 +9,34 @@ test('automatic admission preserves independent holds and requires validated pre
  assert.equal(automaticPreparationHold({...order,erp_live:{...order.erp_live,verifiedAt:new Date(now-10*86400000).toISOString(),stockCheckedAt:new Date(now-10*86400000).toISOString()}},now),null);
  assert.ok(automaticPreparationHold(null,now));
 });
-test('disabled worker performs no reads or purchases',async()=>{
- const worker=temuAutomaticPurchaseWorker({query(){throw Error('unexpected read');}},{},{},{enabled:()=>false});await worker.run();assert.equal(worker.running,false);
-});
-test('latest negative margin prevents buy claim',async()=>{
- const executionNow=Date.now(),currentOrder={...order,erp_live:{...order.erp_live,documentSource:{checkedAt:new Date(executionNow).toISOString(),stockHolds:[]}}};
- let calls=0,bought=0;const saved=[];
- const plan={id:'p',currency:'EUR',amount:6,selected:1,expiresAt:executionNow+60000,offers:[{channelId:1,shippingCompanyName:'GLS'}]};
- const db={async query(sql,args){
- if(sql.startsWith('INSERT INTO temu_automatic'))return {rows:[]};
- if(sql.startsWith('SELECT c.reference'))return {rows:[{reference:order.reference}]};
- if(sql.startsWith('SELECT * FROM orders'))return {rows:[currentOrder]};
- if(sql.startsWith('SELECT coalesce'))return {rows:[{lines:[]}]};
- if(sql.startsWith('SELECT o.id'))return {rows:[{id:'o'}]};
- if(sql.startsWith('UPDATE temu_automatic')){saved.push(JSON.parse(args[1]));return {rows:[]};}
- throw Error(sql);
- }};
- const local={async amounts(){return {};},async prepare(){return plan;},async buy(ref,id,amount,opts){await opts.beforeClaim(plan);bought++;return {status:'complete'};}};
- const margins={async get(options){assert.equal(options.fresh,true);calls++;return {calculatedAt:new Date().toISOString(),rows:[{reference:order.reference,status:calls===1?'positive':'negative',profit:calls===1?1:-1,shipping:5,shippingSource:'Devis TEMU final',issues:[]}]};}};
- await temuAutomaticPurchaseWorker(db,local,margins,{stockGate:async()=>{},refreshPreparation:async()=>({notFound:false,stockHolds:[]})}).run();assert.equal(calls,2);assert.equal(bought,0);assert.equal(saved[0].status,'held');assert.match(saved[0].message,/confirmer/);
+test('legacy callers never read or buy, including enabled settings and positive margins',async()=>{
+ const forbidden=()=>assert.fail('Automatic purchase path must not run');
+ for(const enabled of [true,false]){
+  const worker=temuAutomaticPurchaseWorker({query:forbidden},{prepare:forbidden,buy:forbidden},{get:forbidden},{enabled:()=>enabled,refreshPreparation:forbidden});
+  assert.equal((await worker.run()).status,'disabled');assert.equal(worker.running,false);
+ }
 });
 
-test('failed document read or current stock hold never reaches pricing or purchase',async()=>{
- for(const refreshPreparation of [async()=>{throw Error('Erplain unavailable');},async()=>({notFound:false,stockHolds:[{message:'Stock incompatible'}]})]){
- const saved=[];const db={async query(sql,args){if(sql.startsWith('INSERT'))return {rows:[]};if(sql.startsWith('SELECT c.reference'))return {rows:[{reference:order.reference}]};if(sql.startsWith('SELECT *'))return {rows:[order]};if(sql.startsWith('SELECT o.id'))return {rows:[{id:'o'}]};if(sql.startsWith('SELECT coalesce'))return {rows:[{lines:[]}]};if(sql.startsWith('UPDATE')){saved.push(JSON.parse(args[1]));return {rows:[]};}throw Error(sql);}};
- await temuAutomaticPurchaseWorker(db,{amounts(){throw Error('Pricing must not start');},buy(){throw Error('Purchase forbidden');}},{},{stockGate:async()=>{},refreshPreparation}).run();assert.equal(saved[0].status,'held');assert.match(saved[0].message,/Erplain unavailable|Stock incompatible/);
+test('manual purchase route requires explicit confirmation; recovery remains available',async()=>{
+ const {temuRoutes}=await import('../src/temu-routes.mjs');
+ let buys=0,recoveries=0,audits=0;
+ const ctx={p:'/api/temu/buy',req:{method:'POST'},res:{},url:new URL('https://example.invalid'),service:{},local:{buy:async(ref,id,amount)=>{assert.equal(ref,'PO-1-2');assert.equal(id,'quote');assert.equal(amount,2.5);buys++;return {};},recover:async()=>{recoveries++;return {};}},user:{role:'operator'},permitted:()=>{},audit:async()=>{audits++;},json:()=>{}};
+ for(const confirmPurchase of [undefined,false,'true',1]){
+  await assert.rejects(temuRoutes({...ctx,body:async()=>({confirmPurchase})}),/Confirmation explicite/);
  }
+ assert.equal(buys,0);assert.equal(audits,0);
+ await temuRoutes({...ctx,body:async()=>({reference:'PO-1-2',planId:'quote',amount:2.5,confirmPurchase:true})});
+ assert.equal(buys,1);assert.equal(audits,1);
+ await temuRoutes({...ctx,p:'/api/temu/recover',body:async()=>({reference:'PO-1-2'})});
+ assert.equal(recoveries,1);assert.equal(buys,1);
+});
+test('saved automatic switch cannot re-enable purchases and server schedules no purchase worker',async()=>{
+ const {validateTaskControls,taskControls}=await import('../src/background-controls.mjs');
+ assert.throws(()=>validateTaskControls({'temu-automatic-purchase':true}),/manuel/);
+ assert.deepEqual(validateTaskControls({'temu-automatic-purchase':false}),{'temu-automatic-purchase':false});
+ const controls=await taskControls({query:async()=>({rows:[{value:{'temu-automatic-purchase':true,'temu-logistics':true}}]})});
+ assert.equal(controls['temu-automatic-purchase'],false);assert.equal(controls['temu-logistics'],true);
+ const {readFile}=await import('node:fs/promises');
+ const server=await readFile(new URL('../src/server.mjs',import.meta.url),'utf8');
+ assert.doesNotMatch(server,/temuAutomaticPurchaseWorker|temuAutoPurchase\.run/);
 });

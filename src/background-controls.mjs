@@ -2,10 +2,11 @@ export const backgroundTasks=['receipt-recovery','temu-automatic-purchase','stoc
 export function validateTaskControls(input){
  if(!input||typeof input!=='object'||Array.isArray(input))throw Error('Interrupteurs invalides');
  for(const [key,value] of Object.entries(input))if(!backgroundTasks.includes(key)||typeof value!=='boolean')throw Error('Traitement ou valeur invalide');
+ if(input['temu-automatic-purchase']===true)throw Error('Achat TEMU exclusivement manuel : confirmation du prix requise');
  return input;
 }
 export async function taskControls(db,input){
  if(input!==undefined){validateTaskControls(input);await db.query("INSERT INTO settings(key,value) VALUES('background_tasks',$1) ON CONFLICT(key) DO UPDATE SET value=settings.value||excluded.value",[JSON.stringify(input)]);}
  const saved=(await db.query("SELECT value FROM settings WHERE key='background_tasks'")).rows[0]?.value||{};
- return Object.fromEntries(backgroundTasks.map(name=>[name,saved[name]!==false]));
+ return Object.fromEntries(backgroundTasks.map(name=>[name,name==='temu-automatic-purchase'?false:saved[name]!==false]));
 }

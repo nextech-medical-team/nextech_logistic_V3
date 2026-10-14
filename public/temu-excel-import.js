@@ -3,7 +3,7 @@
  kind.add(new Option('Commandes TEMU · Excel multi-pays','temu_excel'));
  const panel=document.createElement('section');panel.hidden=true;panel.id='temu-excel-preview';
  panel.innerHTML=`<h3>Vérifier l’import TEMU</h3>
- <p>Sélectionnez les nouvelles commandes, puis confirmez l’import et la préparation des BC/BL. Après validation du BL et du stock, l’achat est automatique si la marge est positive et le transporteur admissible ; sinon, utilisez le bouton d’achat manuel.</p>
+ <p>Sélectionnez les nouvelles commandes, puis confirmez l’import et la préparation des BC/BL. Après validation du BL et du stock, utilisez le bouton d’achat manuel et confirmez le prix de chaque étiquette.</p>
  <p data-summary role="status"></p><div class="table-wrap"><table><thead><tr><th>Pays</th><th>Commandes</th><th>Nouvelles valides</th><th>Déjà présentes</th><th>À corriger</th></tr></thead><tbody data-countries></tbody></table></div>
  <details><summary>Fichiers analysés et erreurs</summary><div data-files></div><ul data-errors></ul></details>
  <div class="actions"><button type="button" data-new>Sélectionner les nouvelles commandes valides</button><button type="button" data-none>Tout désélectionner</button><button type="button" data-report>Télécharger le rapport</button></div>
@@ -24,7 +24,7 @@
   const active=kind.value==='temu_excel';
   if(lastKind!==kind.value){file.value='';reset();$('import-result').textContent='';lastKind=kind.value;}
   file.multiple=active;file.accept=active||kind.value==='purchases'?'.xlsx':originalAccept;hint.hidden=!active;form.classList.toggle('temu-excel-form',active);
-  if(generalHint)generalHint.textContent=active?'Après analyse, sélectionnez les nouvelles commandes et confirmez leur import avec préparation des BC/BL. Les étiquettes à marge positive suivent ensuite le parcours d’achat automatique.':originalHint;
+  if(generalHint)generalHint.textContent=active?'Après analyse, sélectionnez les nouvelles commandes et confirmez leur import avec préparation des BC/BL. Les étiquettes nécessitent ensuite votre confirmation du prix avant achat.':originalHint;
   $('import-button').textContent=active?'Analyser les fichiers':originalButton;
  }
  kind.addEventListener('change',configure);file.addEventListener('change',reset);configure();
@@ -83,7 +83,7 @@
     }catch(e){preparation.set(row.reference,{status:'held',message:e.message});}
    }
    const prepared=created.filter(r=>preparation.get(r.reference)?.status==='prepared').length,held=created.length-prepared;
-   find('[data-result]').textContent=`${created.length} commande(s) importée(s) · ${prepared} préparation(s) BC/BL demandée(s) · ${held} à vérifier · ${result.skipped} déjà présente(s) ignorée(s). L’achat automatique dépend de la validation du BL, du stock et de la marge.`+(held?' '+created.filter(r=>preparation.get(r.reference)?.status==='held').map(r=>r.reference+' : '+preparation.get(r.reference).message).join(' ; '):'');
+   find('[data-result]').textContent=`${created.length} commande(s) importée(s) · ${prepared} préparation(s) BC/BL demandée(s) · ${held} à vérifier · ${result.skipped} déjà présente(s) ignorée(s). L’achat des étiquettes reste manuel après validation du BL et du stock.`+(held?' '+created.filter(r=>preparation.get(r.reference)?.status==='held').map(r=>r.reference+' : '+preparation.get(r.reference).message).join(' ; '):'');
    if(!held){draft=null;chosen.clear();}
    window.dispatchEvent(new Event('temu-excel-imported'));
    await stats().catch(()=>{});
