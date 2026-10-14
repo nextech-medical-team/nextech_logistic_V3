@@ -3,7 +3,7 @@
  const filter=document.createElement('button');filter.type='button';filter.textContent='Commandes suspendues';filter.id='suspended-orders-filter';$('all-problems').after(filter);
  filter.onclick=()=>{resetFilters();if($('problem-type'))$('problem-type').selectedIndex=-1;status.value='__suspended';compactFilters.forEach(x=>x.sync());page=1;show('orders');};
  const dialog=document.createElement('dialog');dialog.className='order-suspension-dialog';dialog.setAttribute('aria-labelledby','suspension-title');document.body.append(dialog);
- let context=null,busy=false,opening=false,uncertain=false;
+ let context=null,busy=false,opening=false,uncertain=false,localReadPending=false,pendingLocalActive=null,readGeneration=0;
  const date=value=>value?new Date(value).toLocaleString('fr-FR'):'';
  function feedback(message,error=false){const box=dialog.querySelector('[data-suspension-message]');box.textContent=message;box.setAttribute('role',error?'alert':'status');box.hidden=!message;if(message)box.scrollIntoView({block:'nearest'});}
  function render(message='',error=false,note=''){
@@ -34,21 +34,57 @@
    box.scrollIntoView({block:'nearest'});box.focus();
   };
   const verify=dialog.querySelector('[data-verify-erplain]');if(verify)verify.onclick=()=>submit('cancel-erplain',{verifyOnly:true});
+  if(localReadPending){
+   dialog.querySelectorAll('button,textarea').forEach(b=>{if(!b.hasAttribute('data-close-suspension'))b.disabled=true;});
+   const verify=document.createElement('button');verify.type='button';verify.textContent='Actualiser le résultat dans V3';
+   verify.onclick=()=>refreshLocal(context.order.id,++readGeneration,message,true,'',true,pendingLocalActive);dialog.querySelector('[data-suspension-message]').after(verify);
+  }
   feedback(message,error);
  }
  async function load(id){const result=await api('/api/orders/suspension?id='+encodeURIComponent(id));if(result.order?.id!==id)throw Error('La réponse ne correspond pas à la commande.');context=result;}
+ async function refreshLocal(id,generation,message,failed=false,requestId='',alsoRefreshList=false,desiredActive=null){
+  const readStarted=performance.now();
+  try{
+   const fresh=await api('/api/orders/suspension?id='+encodeURIComponent(id)+(requestId?'&requestId='+encodeURIComponent(requestId):''));
+   if(generation!==readGeneration||busy)return;if(fresh.order?.id!==id)throw Error('La réponse ne correspond pas à la commande.');
+   // Never change the version/BC behind an already displayed ERP confirmation.
+   if(dialog.open&&dialog.querySelector('[data-cancel-confirmation]')?.hidden===false)return;
+   // A fresh read can confirm an uncertain local result; it never resubmits it.
+   context=fresh;localReadPending=false;
+   if(dialog.open&&dialog.querySelector('[data-cancel-confirmation]')?.hidden!==false){
+    const note=dialog.querySelector('textarea')?.value||'';
+    const currentActive=fresh.order.suspension?.active===true,matches=desiredActive===null||currentActive===desiredActive;
+    const confirmed=currentActive?'État confirmé : commande suspendue dans V3.':'État confirmé : commande non suspendue dans V3.';
+    render(failed?(matches?confirmed:'État V3 relu. '+message):(matches?message:'L’état a changé depuis l’enregistrement. '+confirmed),!matches,note);
+   }
+  }catch(error){
+   if(generation===readGeneration&&dialog.open)render(message+' · Historique et état non actualisés : '+error.message,true,dialog.querySelector('textarea')?.value||'');
+  }finally{console.debug('order-suspension-read', {requestId,readMs:Math.round(performance.now()-readStarted)});}
+  if(alsoRefreshList&&generation===readGeneration)void refreshList(generation,message);
+ }
+ async function refreshList(generation,message){
+  try{await orders();}catch(error){if(generation===readGeneration&&dialog.open)feedback(message+' · Liste non actualisée : '+error.message,true);}
+ }
  async function submit(action,extra){
-  if(busy)return;busy=true;dialog.setAttribute('aria-busy','true');const id=context.order.id,note=dialog.querySelector('textarea')?.value||'';
+  if(busy)return;busy=true;dialog.setAttribute('aria-busy','true');const id=context.order.id,note=dialog.querySelector('textarea')?.value||'',generation=++readGeneration;
   dialog.querySelectorAll('button,textarea').forEach(x=>x.disabled=true);
   feedback(action==='cancel-erplain'?(extra.verifyOnly?'Vérification du résultat dans ERPLAIN…':'Contrôle des documents et annulation ERPLAIN en cours…'):'Enregistrement en cours…');
-  let message='',failed=false;
-  try{const result=await api('/api/orders/'+action,{id,expectedVersion:context.order.suspension?.version||'',...extra});message=result.message||'Action enregistrée.';if(action==='cancel-erplain')uncertain=false;}
+  let message='',failed=false,result;
+  try{result=await api('/api/orders/'+action,{id,expectedVersion:context.order.suspension?.version||'',...extra});message=result.message||'Action enregistrée.';if(action==='cancel-erplain')uncertain=false;}
   catch(e){failed=true;message=e.message||'La demande a échoué.';if(action==='cancel-erplain')uncertain=true;}
+  if(action!=='cancel-erplain'){
+   pendingLocalActive=action==='suspend';
+   // Only a committed POST result enables the success state, never optimism.
+   if(!failed&&result?.suspension)context.order.suspension=result.suspension;
+   localReadPending=failed;busy=false;dialog.removeAttribute('aria-busy');render(message,failed,failed?note:'');
+   void refreshLocal(id,generation,message,failed,result?.requestId||'',false,pendingLocalActive);void refreshList(generation,message);return;
+  }
+  // Provider cancellation retains its existing reconciliation safeguards.
   try{await load(id);}catch(e){failed=true;message+=' · Le suivi V3 n’a pas pu être relu : '+e.message;}
   busy=false;dialog.removeAttribute('aria-busy');render(message,failed,failed?note:'');
   try{await orders();}catch(e){feedback(message+' · Liste non actualisée : '+e.message,true);}
  }
- document.addEventListener('click',async e=>{const button=e.target.closest('[data-order-suspension]');if(!button||busy||opening)return;opening=true;uncertain=false;
+ document.addEventListener('click',async e=>{const button=e.target.closest('[data-order-suspension]');if(!button||busy||opening)return;opening=true;uncertain=false;localReadPending=false;pendingLocalActive=null;readGeneration++;
   try{await load(button.dataset.orderSuspension);render();if(!dialog.open)dialog.showModal();}catch(error){alert('Impossible d’ouvrir la suspension : '+error.message);}finally{opening=false;}
  });
  dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault();});

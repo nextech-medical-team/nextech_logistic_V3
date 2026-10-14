@@ -1,3 +1,4 @@
+import {orderLocalTransaction} from './order-local-transaction.mjs';
 import {installTemuParcelRule} from './temu-parcel-count.mjs';
 import {orderReadTransaction} from './order-read-transaction.mjs';
 import { mkdir } from 'node:fs/promises';
@@ -44,6 +45,8 @@ export async function openDatabase({directory, url} = {}) {
     catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
 
   };
+
+  db.localTransaction=fn=>pool?orderLocalTransaction(pool,fn):engine.transaction(async tx=>({result:await fn(wrap(tx)),timings:{connectionMs:0,transactionMs:0,totalMs:0}}));
 
   db.kind=pool?'postgres':'pglite';
   db.recoverInterrupted=true;
