@@ -2,6 +2,7 @@ import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {temuApi} from './temu-api.mjs';
 import {loadShopVault} from './temu-shop-vault.mjs';
+import {temuShopError,unavailableTemuApplication} from './temu-shop-error.mjs';
 
 export async function loadTemuShopConfig(directory){
  return JSON.parse((await readFile(path.join(directory,'temu-production.json'),'utf8')).replace(/^\uFEFF/,''));
@@ -10,14 +11,16 @@ export async function loadTemuShopConfig(directory){
 // Shared connection policy used by API-imported and Excel-imported orders.
 export async function connectTemuShops(directory,{
  apiFactory=temuApi,shopLoader=loadShopVault,configLoader=()=>loadTemuShopConfig(directory),
- country,strict=false,clients=new Map(),countryByMall=new Map(),connectionErrors=new Map()
+ country,strict=false,allowUnavailableApplications=false,clients=new Map(),countryByMall=new Map(),connectionErrors=new Map()
 }={}){
  const config=await configLoader(),root=apiFactory(config);
- const info=await root.read('bg.open.accesstoken.info.get',{});
- if(!info.mallId)throw Error('TEMU · Identité de la boutique absente');
+ let info;const unavailableApplications=[];
+ try{info=await root.read('bg.open.accesstoken.info.get',{});}
+ catch(e){const error=temuShopError(e,'accès principal — vérification de l’autorisation',[config.TEMU_APP_KEY,config.TEMU_APP_SECRET,config.TEMU_ACCESS_TOKEN]);if(!allowUnavailableApplications||!unavailableTemuApplication(e))throw error;unavailableApplications.push(error);connectionErrors.set('MAIN',error);}
+ if((!info&&!unavailableApplications.length)||(info&&!info.mallId))throw Error('TEMU · Identité de la boutique absente');
  const verified=country?new Map(clients):new Map();
- verified.set(String(info.mallId),root);
- for(const m of info.associatedMallTokenList||[])if(m.mallId&&m.accessToken)verified.set(String(m.mallId),apiFactory({...config,TEMU_ACCESS_TOKEN:m.accessToken}));
+ if(info){connectionErrors.delete('MAIN');verified.set(String(info.mallId),root);}
+ for(const m of info?.associatedMallTokenList||[])if(m.mallId&&m.accessToken)verified.set(String(m.mallId),apiFactory({...config,TEMU_ACCESS_TOKEN:m.accessToken}));
  for(const m of await shopLoader(directory)){
   if(country&&String(m.country).toUpperCase()!==String(country).toUpperCase())continue;
   try{
@@ -31,7 +34,7 @@ export async function connectTemuShops(directory,{
    const shopCountry=String(m.country||'').trim().toUpperCase();
    if(/^[A-Z]{2}$/.test(shopCountry))countryByMall.set(String(identity.mallId),shopCountry);
    for(const associated of identity.associatedMallTokenList||[])if(associated.mallId&&associated.accessToken&&!verified.has(String(associated.mallId)))verified.set(String(associated.mallId),apiFactory({...shopConfig,TEMU_ACCESS_TOKEN:associated.accessToken}));
-  }catch(e){if(strict||e.code==='TEMU_STOPPING')throw e;connectionErrors.set(String(m.country).toUpperCase(),e);}
+  }catch(e){const error=temuShopError(e,'boutique '+String(m.country||'sans pays')+' du coffre — vérification de l’autorisation',[m.appKey,m.appSecret,m.accessToken]);const unavailable=allowUnavailableApplications&&unavailableTemuApplication(e);if(e.code==='TEMU_STOPPING'||strict&&!unavailable)throw error;if(unavailable)unavailableApplications.push(error);connectionErrors.set(String(m.country).toUpperCase(),error);}
  }
- return {clients:verified,countryByMall,connectionErrors,config};
+ return {clients:verified,countryByMall,connectionErrors,config,unavailableApplications};
 }
