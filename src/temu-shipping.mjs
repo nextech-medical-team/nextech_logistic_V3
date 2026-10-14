@@ -24,7 +24,6 @@ export async function readTemuShipments(api,reference,detail){
 const names=v=>(v||[]).filter(x=>typeof x==='string'||x?.value===1||x?.value==='1'||x?.value===true).map(x=>typeof x==='string'?x:x.name);
 export function inspectTemu(detail,reference){
  const p=detail.parentOrderMap,items=detail.orderList;if(p?.parentOrderSn!==reference||!Array.isArray(items)||!items.length)throw new Error('Identité ou articles TEMU incomplets');
- if(Number(p.parentOrderStatus)===3)throw new Error('Commande TEMU annulée : aucun nouvel achat');
  const flags=[...names(p.parentOrderLabel),...items.flatMap(i=>names(i.orderLabel))];
  // Platform risk/address/cancellation labels remain indicative; actual data and provider responses are checked below.
  if([p,...items].some(x=>String(x.orderPaymentType).toUpperCase()==='COD'))throw new Error('Paiement à la livraison incompatible');

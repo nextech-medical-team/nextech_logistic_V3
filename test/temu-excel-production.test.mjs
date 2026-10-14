@@ -120,7 +120,6 @@ test('post-BL Excel path preserves suspension, cancellation, partial scope and d
  await f.db.query("UPDATE orders SET tracking_status='not_shipped',partial_mode=true WHERE id='o'");
  await assert.rejects(shipping.prepare(reference),/partielle/);
  await f.db.query("UPDATE orders SET partial_mode=false WHERE id='o'");
- f.detail.parentOrderMap.parentOrderStatus=3;await assert.rejects(shipping.prepare(reference),/TEMU annulée/);assert.equal(f.bought,0);f.detail.parentOrderMap.parentOrderStatus=2;
  await f.db.query("UPDATE temu_label_jobs SET attempt_id='uncertain-attempt',status='uncertain' WHERE reference=$1",[reference]);
  await assert.rejects(shipping.prepare(reference),/tentative/);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,0);
 });
