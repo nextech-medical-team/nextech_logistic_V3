@@ -10,7 +10,7 @@ export async function reconcileAutomaticTest(db){
  await resumeSynchronizedGofo(db);
  await db.query(`INSERT INTO erp_live_jobs(order_id) SELECT o.id FROM orders o WHERE (${bcAllowedSql}) AND (o.erp_live->'bc'->>'id' IS NULL OR (o.resolution_pending_resume=false AND o.partial_mode=false)) ON CONFLICT DO NOTHING`);
  await db.query(`WITH retry AS (UPDATE erp_live_jobs e SET status='pending',error=null,updated_at=now() FROM orders o WHERE e.order_id=o.id AND e.status='review' AND (${bcAllowedSql}) AND o.erp_live->'bc'->>'id' IS NULL AND coalesce(o.erp_live->>'bcAuditVersion','')<>'separation-v1' AND e.error ~* '(interrompu|incertain|informations transport manquantes|création à vérifier)' RETURNING e.order_id) UPDATE orders SET erp_live=erp_live||'{"bcAuditVersion":"separation-v1"}'::jsonb WHERE id IN (SELECT order_id FROM retry)`);
- // Labels follow verified stock, quantities and BL.
+ // Once a BL exists, label admission does not repeat BC, stock or quantity tests.
  await admitPreparedCarrierLabels(db);
 }
 

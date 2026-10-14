@@ -1,5 +1,6 @@
 import {suspensionBlock} from './order-suspension.mjs';
 import {temuLabelPolicyMessage} from './temu-label-policy.mjs';
+import {hasCreatedBl} from './created-bl-label.mjs';
 import {randomUUID} from 'node:crypto';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
 import {assertManualLabelOrder} from './manual-label-policy.mjs';
@@ -11,6 +12,7 @@ export function assertPreparedLabelOrder(o,e){
   const hold=suspensionBlock(o);if(hold)throw Error(hold);
   if(o.archived||o.partial_mode||o.source_payload?.externalLabel?.active||['cancelled','shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande TEMU non admissible à une nouvelle étiquette');
  }else assertManualLabelOrder(o,o?.carrier);
+ if(hasCreatedBl(o)){if(cancellationBlock(o))throw Error(cancellationBlock(o));if(o.duplicate_of)throw Error('Commande en doublon');if(String(o.reference||'').startsWith('DEMO-'))throw Error('Commande fictive');return;}
  const blocked=cancellationBlock(o)||o.source_payload?.erplainValidationHold&&'Validation Erplain suspendue'||o.source_payload?.marketplacePendingCorrection&&'Commande modifiée sur la plateforme'||o.duplicate_of&&'Commande en doublon'||o.issue;
  if(blocked)throw Error(String(blocked));
  if(String(o.reference||'').startsWith('DEMO-'))throw Error('Commande fictive');
