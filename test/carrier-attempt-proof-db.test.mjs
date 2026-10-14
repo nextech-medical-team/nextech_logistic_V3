@@ -4,6 +4,8 @@ import {PGlite} from '@electric-sql/pglite';
 import {queueLabelFromBl} from '../src/direct-label.mjs';
 import {initializeCarrierJobs,createCarrierWorkers} from '../src/carrier-jobs.mjs';
 import {initializeAppSchema} from '../src/schema-startup.mjs';
+import {hasUncertainCarrierHistory} from '../src/carrier-attempt-proof.mjs';
+import {synchronizeRecoveredOrder} from '../src/erplain-targeted-orders.mjs';
 async function fixture(){
  const e=new PGlite();await e.waitReady;const wrap=x=>({query:(s,p=[])=>x.query(s,p),exec:s=>x.exec(s)});
  const db={...wrap(e),transaction:fn=>e.transaction(tx=>fn(wrap(tx))),withLocks:async(_,fn)=>fn(),recoverInterrupted:false};
@@ -17,6 +19,36 @@ async function fixture(){
  await db.query("INSERT INTO orders(id,channel,reference,carrier,address,erp_live,label_status,weight_kg,parcel_count) VALUES('o','amazon','SYNTHETIC','gofo',$1,$2,'simulated',1,1)",[JSON.stringify({name:'Synthetic',street:'1 rue Test',city:'Paris',postal:'75001',country:'FR'}),JSON.stringify(erp)]);
  return {e,db,erp,job:async()=>(await db.query("SELECT * FROM carrier_jobs WHERE order_id='o'")).rows[0]};
 }
+
+test('cleared phone failure archive resumes through real SQL; newer unrelated audit cannot hide proof',async()=>{
+ const {e,db,erp,job}=await fixture();try{
+ const archived={order_id:'o',status:'failed',attempts:1,creation_id:'reserved',result:null,reference:null,tracking:[],error:null,updated_at:'2026-10-14T10:01:44.515Z'};
+ await db.query("INSERT INTO carrier_label_history(id,order_id,job) VALUES('h','o',$1)",[JSON.stringify(archived)]);
+ await db.query("INSERT INTO audit(user_email,action,detail,created_at) VALUES('system','erplain.label_preflight_refreshed',$1,'2026-10-14T10:01:44.515266Z')",[JSON.stringify({orderId:'o',currentError:null,previousError:'Erplain LIVE · Informations obligatoires manquantes : Numéro de téléphone',labelPurchased:false})]);
+ await db.query("INSERT INTO audit(user_email,action,detail,created_at) VALUES('system','carrier.imported_fields_diagnostic_revalidated',$1,'2026-10-14T11:00:00Z')",[JSON.stringify({orderId:'o',currentError:'different'})]);
+ assert.equal(await hasUncertainCarrierHistory(db,'o'),false);
+ await queueLabelFromBl(db,'o',{email:'operator'});await queueLabelFromBl(db,'o',{email:'operator'});
+ assert.equal((await job()).status,'pending');
+ assert.deepEqual((await db.query("SELECT job FROM carrier_label_history WHERE id='h'")).rows[0].job,archived);
+ assert.deepEqual((await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live,erp);
+ await db.query("INSERT INTO carrier_label_history_documents(history_id,document_index,pdf) VALUES('h',0,$1)",[Buffer.from('%PDF-1.4 archive')]);
+ assert.equal(await hasUncertainCarrierHistory(db,'o'),true);
+ }finally{await e.close();}
+});
+
+test('future Erplain refresh preserves original phone failure before clearing displayed diagnostic',async()=>{
+ const {e,db,job}=await fixture();try{
+ await db.exec("ALTER TABLE orders ADD COLUMN recipient text;ALTER TABLE orders ADD COLUMN erplain_refresh jsonb DEFAULT '{}';CREATE TABLE erp_live_jobs(order_id text,status text);CREATE TABLE partial_deliveries(order_id text,status text);");
+ const original='Erplain LIVE · Informations obligatoires manquantes : Numéro de téléphone';
+ await db.query("INSERT INTO carrier_jobs(order_id,carrier,status,attempts,error,tracking) VALUES('o','gofo','failed',1,$1,'[]')",[original]);
+ const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
+ const line={id:'l',type:'normal',variant:{id:'v',sku:'SKU',track_inventory:true},quantity:1,shipped_quantity:0,reserved_quantity:0,on_hand:5,available:5,location:{id:'loc'}};
+ const d={id:'bc',label:'BC1',status:'active',external_reference:'REF',customer:{id:'c',label:'Client'},update_stock:true,line_items:[line],shipping_address:{label:'Client',address_1:'1 rue Test',city:'Paris',postal_code:'75001',country:'FR',phone:'0612345678'},shipping_orders:{data:[{id:'bl',label:'BL1',status:'in_preparation',line_items:[{...line,parent_id:'l'}]}],paginatorInfo:{hasMorePages:false}}};
+ await db.transaction(tx=>synchronizeRecoveredOrder(tx,o,d));
+ const j=await job();assert.equal(j.error,null);assert.equal(j.original_error,original);assert.equal(j.failure_phase,'preflight');assert.equal(j.creation_started_at,null);
+ assert.equal(j.status,'failed');assert.equal(j.attempts,1);
+ }finally{await e.close();}
+});
 test('existing BL bypasses preparation despite fiscal/quantity/stock proof absent; two clicks create once',async()=>{
  const {e,db,erp,job}=await fixture();try{
  await Promise.all([queueLabelFromBl(db,'o',{email:'operator'}),queueLabelFromBl(db,'o',{email:'operator'})]);

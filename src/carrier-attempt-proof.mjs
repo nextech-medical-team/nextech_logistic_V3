@@ -7,6 +7,18 @@ export async function installCarrierAttemptProof(db){
  ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS original_error TEXT;`);
 }
 function noCreationEvidence(job){return !job.result&&!job.reference&&Array.isArray(job.tracking)&&job.tracking.length===0;}
+export function provesClearedImportedPreflight(job,audit){
+ const d=audit?.detail;
+ // This historical read-only refresher cleared the displayed phone error.
+ // Its exact audit event/timestamp proves the archive was a local refusal.
+ return audit?.action==='erplain.label_preflight_refreshed'
+ &&job.status==='failed'&&noCreationEvidence(job)
+ &&!job.creation_started_at&&(!job.failure_phase||job.failure_phase==='preflight')
+ &&job.error===null&&d?.currentError===null&&d.orderId===job.order_id
+ &&/^Erplain LIVE · Informations obligatoires manquantes : /.test(d.previousError||'')
+ &&d.labelPurchased===false&&Number.isFinite(Date.parse(job.updated_at))
+ &&new Date(job.updated_at).getTime()===new Date(audit.created_at).getTime();
+}
 export function provesImportedFieldsPreflight(job,audit){
  const d=audit?.detail,p=d?.proof;
  return job.status==='failed'&&noCreationEvidence(job)
@@ -41,10 +53,11 @@ export async function canRetryFailedCarrier(db,job,{manualRequest=false}={}){
  ].includes(job.error))return true;
  // Existing unambiguous validation errors and jobs never attempted keep their policy.
  if(job.attempts===0||localValidation.test(job.error||''))return true;
- const {rows}=await db.query(`SELECT detail,created_at FROM audit
- WHERE action IN ('carrier.prevalidation_diagnostic_revalidated','carrier.imported_fields_diagnostic_revalidated') AND detail->>'orderId'=$1
- ORDER BY created_at DESC LIMIT 1`,[job.order_id]);
- return provesLegacyPreflight(job,rows[0])||provesImportedFieldsPreflight(job,rows[0]);
+ const {rows}=await db.query(`SELECT action,detail,created_at FROM audit
+ WHERE action IN ('carrier.prevalidation_diagnostic_revalidated','carrier.imported_fields_diagnostic_revalidated','erplain.label_preflight_refreshed') AND detail->>'orderId'=$1
+ AND date_trunc('milliseconds',created_at)=date_trunc('milliseconds',$2::timestamptz)
+ ORDER BY created_at DESC`,[job.order_id,job.updated_at]);
+ return rows.some(a=>provesLegacyPreflight(job,a)||provesImportedFieldsPreflight(job,a)||provesClearedImportedPreflight(job,a));
 }
 export async function hasUncertainCarrierHistory(db,id){
  const {rows}=await db.query(`SELECT h.id,h.job,

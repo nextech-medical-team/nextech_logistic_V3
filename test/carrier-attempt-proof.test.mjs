@@ -7,7 +7,7 @@ const audit={created_at:job.updated_at,detail:{orderId:'order',currentError:job.
 test('legacy generic diagnostic uses immutable audit provenance rather than business checks',async()=>{
  assert(provesLegacyPreflight(job,audit));
  const calls=[];assert(await canRetryFailedCarrier({query:async(...a)=>{calls.push(a);return {rows:[audit]};}},job));
- assert.equal(calls.length,1);assert.deepEqual(calls[0][1],['order']);
+ assert.equal(calls.length,1);assert.deepEqual(calls[0][1],['order',job.updated_at]);
 });
 for(const [name,patch] of Object.entries({newCreation:{creation_id:'new'},result:{result:{}},reference:{reference:'existing'},tracking:{tracking:['T']},missingTracking:{tracking:undefined},laterUpdate:{updated_at:'2026-10-11T00:00:00Z'}}))test('legacy evidence rejects '+name,()=>assert.equal(provesLegacyPreflight({...job,...patch},audit),false));
 for(const [name,patch] of Object.entries({wrongOrder:{orderId:'other'},wrongError:{currentError:'different'},providerError:{previousError:'Timeout'},providerWrites:{businessWrites:1},labelPurchased:{labelPurchased:true},wrongPriorTime:{previousUpdatedAt:'invalid'}}))test('audit rejects '+name,()=>assert.equal(provesLegacyPreflight(job,{...audit,detail:{...audit.detail,...patch}}),false));
