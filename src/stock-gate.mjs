@@ -13,8 +13,14 @@ export function assertFullOrderStock(lines){
  return true;
 }
 
+export const stockLockMessage='Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison';
+export function isStockLockMessage(message){return message===stockLockMessage||String(message||'').startsWith(stockLockMessage+' · ');}
 export async function assertStockResolved(db,variantIds,{orderId='',deliveryId=''}={}){
- const partial=(await db.query("SELECT d.id FROM partial_deliveries d WHERE d.id<>$2 AND d.bl->>'status'='pending' AND d.stock_document IS NULL AND EXISTS(SELECT 1 FROM jsonb_array_elements(d.selection) AS x(value) WHERE x.value->>'variantId'=ANY($1::text[])) LIMIT 1",[variantIds.map(String),deliveryId])).rows;
- const full=(await db.query("SELECT id FROM orders WHERE id<>$2 AND erp_live->>'phase'='creating_stock' AND erp_live->'stockDocument' IS NULL AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(erp_live->'stockPendingVariants','[]'::jsonb)) AS x(value) WHERE x.value=ANY($1::text[])) LIMIT 1",[variantIds.map(String),orderId])).rows;
- if(partial.length||full.length)throw new Error('Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison');
+ const partial=(await db.query("SELECT d.id,o.reference,d.bl->>'label' bl_label,d.updated_at FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE d.id<>$2 AND d.bl->>'status'='pending' AND (d.stock_document IS NULL OR d.stock_document='null'::jsonb) AND EXISTS(SELECT 1 FROM jsonb_array_elements(d.selection) AS x(value) WHERE x.value->>'variantId'=ANY($1::text[])) ORDER BY d.updated_at,d.id LIMIT 1",[variantIds.map(String),deliveryId])).rows;
+ const full=(await db.query("SELECT o.id,o.reference,o.erp_live->'bl'->>'label' bl_label,e.updated_at FROM orders o LEFT JOIN erp_live_jobs e ON e.order_id=o.id WHERE o.id<>$2 AND o.erp_live->>'phase'='creating_stock' AND (o.erp_live->'stockDocument' IS NULL OR o.erp_live->'stockDocument'='null'::jsonb) AND EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(o.erp_live->'stockPendingVariants','[]'::jsonb)) AS x(value) WHERE x.value=ANY($1::text[])) ORDER BY e.updated_at NULLS LAST,o.id LIMIT 1",[variantIds.map(String),orderId])).rows;
+ if(partial.length||full.length){
+  const blocker=partial[0]||full[0],age=Date.now()-Date.parse(blocker.updated_at),overdue=Number.isFinite(age)&&age>=900000;
+  const detail=[blocker.reference&&'commande '+blocker.reference,blocker.bl_label&&'BL '+blocker.bl_label,overdue&&'blocage prolongé : rapprochement requis'].filter(Boolean).join(' · ');
+  const error=new Error(stockLockMessage+(detail?' · '+detail:''));error.code='STOCK_RECONCILIATION_PENDING';error.blockerId=blocker.id;error.blockerReference=blocker.reference;error.overdue=overdue;throw error;
+ }
 }
