@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';import fs from 'node:fs';
-for(const [name,viewport] of [['desktop',{width:1366,height:900}],['mobile',{width:390,height:844}]])test(name+' synthetic UI',async({page})=>{
+for(const [name,viewport] of [['desktop',{width:1366,height:900}],['mobile',{width:390,height:844}]])test(name+' synthetic UI',async({page,baseURL})=>{
  await page.setViewportSize(viewport);
- await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:31234/')?route.continue():route.abort());
+ await page.route('**/*',route=>route.request().url().startsWith(baseURL+'/')?route.continue():route.abort());
  await page.goto('/');await expect(page.locator('#page-info')).toContainText('120 commandes');
  const filter=page.locator('details').filter({has:page.locator('summary').filter({hasText:'Type de problème'})});
  await filter.locator('summary').click();
