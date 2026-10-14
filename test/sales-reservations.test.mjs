@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newSalesBcInput} from '../src/erplain-live-workflow.mjs';
+import {newSalesBcInput,assertNewBcStockPolicy} from '../src/erplain-live-workflow.mjs';
 import {publishIncrementalBc,assertPublishedBcReservation} from '../src/bc-numbering.mjs';
 import {verifyHistoricalStock,historicalPendingLines} from '../src/historical-stock-proof.mjs';
 import {assertFullOrderStock} from '../src/stock-gate.mjs';
@@ -96,3 +96,5 @@ test('partial finalization reads every BL ledger and never creates a separate st
  const result=await confirmDeliveryReady(api,{bcId:f.document.id,blId:f.selected.id,lines:f.selected.line_items,stockOnBc:true,pendingBlScope:true,allowPendingSiblings:true});assert.equal(result.status,'ready_to_ship');assert.equal(calls.filter(q=>q.startsWith('mutation ')).length,1);assert.ok(!calls.some(q=>q.includes('CreateStockRemoval')));
  f.selected.status='in_preparation';const count=calls.length;await assert.rejects(confirmDeliveryReady(api,{bcId:f.document.id,blId:f.selected.id,lines:f.selected.line_items,stockOnBc:true,pendingBlScope:true,allowPendingSiblings:true}),/interdit/);assert.ok(calls.slice(count).every(q=>q.startsWith('query ')));
 });
+
+test('recorded recovery preserves new reservation intent and never reclassifies it as legacy',()=>{const o=order();o.erp_live.bcReservationPolicy='erplain_bc_bl';assert.throws(()=>assertNewBcStockPolicy(o,{update_stock:false}),/rapprochement/);assert.throws(()=>assertNewBcStockPolicy(o,{}),/rapprochement/);assert.doesNotThrow(()=>assertNewBcStockPolicy(o,{update_stock:true}));assert.doesNotThrow(()=>assertNewBcStockPolicy(order(),{update_stock:false}));});

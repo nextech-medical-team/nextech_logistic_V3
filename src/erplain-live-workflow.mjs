@@ -62,7 +62,7 @@ export function newSalesBcInput(o,priceLevelId){
  const addresses=bcAddresses(o.address);
  return {...o.documentMetadata,status:'unpublished',update_stock:true,customer:{id:String(o.erp_live.customer.id)},currency:o.currency,price_level:{id:String(priceLevelId)},dated_at:orderDate(o.source_date),...addresses,tax_type:o.pricing.tax_type,line_items:o.pricing.items,notes:o.channel==='tender'?String(o.source_payload?.notes??''):'Commande '+o.reference,internal_notes:technicalMarker(o)+' Prix source contrôlés avant publication. [V3-PRICING:1]'};
 }
-function assertNewBcStockPolicy(o,bc){if(o.erp_live.bcReservationPolicy==='erplain_bc_bl'&&bc.update_stock!==true)throw Error('BC · Politique de réservation différente de la création : rapprochement requis');}
+export function assertNewBcStockPolicy(o,bc){if(o.erp_live.bcReservationPolicy==='erplain_bc_bl'&&bc.update_stock!==true)throw Error('BC · Politique de réservation différente de la création : rapprochement requis');}
 export function creationResumeBlock(o){
  const state=o.erp_live||{};
  if(uncertainBc(o))return 'BC Erplain · Création à vérifier : aucun BC confirmé, aucune nouvelle création automatique';
