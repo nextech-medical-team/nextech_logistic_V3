@@ -87,3 +87,16 @@ test('a pending row with a persisted creation marker never replays its POST',asy
  assert.equal((await job()).status,'review');assert.equal((await job()).failure_phase,'provider');assert((await job()).creation_started_at);
  }finally{await e.close();}
 });
+test('BC fingerprint failure and archived preflight do not repeat business checks or erase the archive',async()=>{
+ const {e,db,job,erp}=await fixture();try{
+ const error='Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.',stamp='2026-10-14T10:31:36.497Z';
+ const archived={order_id:'o',status:'failed',attempts:1,creation_id:'old-attempt',result:null,reference:null,tracking:[],error,updated_at:stamp};
+ const detail={orderId:'o',currentError:error,previousError:'Erplain LIVE · Numéro de téléphone invalide : corriger avant création de l’étiquette',businessWrites:0,labelPurchased:false,proof:{readOnly:true,businessActionAuthorized:false}};
+ await db.query("INSERT INTO carrier_label_history(id,order_id,job) VALUES('h','o',$1)",[JSON.stringify(archived)]);
+ await db.query("INSERT INTO audit(action,detail,created_at) VALUES('carrier.imported_fields_diagnostic_revalidated',$1,$2)",[JSON.stringify(detail),stamp]);
+ await db.query("INSERT INTO carrier_jobs(order_id,carrier,status,attempts,creation_id,error) VALUES('o','gofo','failed',1,'new-attempt','BC modifié depuis sa préparation : recontrôle requis')");
+ await queueLabelFromBl(db,'o',{email:'operator'});assert.equal((await job()).status,'pending');
+ assert.deepEqual((await db.query("SELECT job FROM carrier_label_history WHERE id='h'")).rows[0].job,archived);
+ assert.deepEqual((await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live,erp);
+ }finally{await e.close();}
+});
