@@ -355,3 +355,5 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 
 #order-action-tooltip{position:fixed;z-index:10000;max-width:min(320px,calc(100vw - 16px));padding:8px 10px;border-radius:6px;background:#153c38;color:#fff;font-size:13px;line-height:1.4;box-shadow:0 3px 12px #16332d33;pointer-events:none;overflow-wrap:anywhere}
 #order-action-tooltip[hidden]{display:none}
+
+#view-orders #order-rows td .order-icon-action[data-erplain-document-kind]::after{content:attr(data-erplain-document-kind);text-transform:uppercase;position:absolute;bottom:1px;right:1px;font-size:7px;line-height:1;background:#eef6f3;padding:1px;border-radius:2px}
