@@ -60,6 +60,13 @@ function orderRowVersions(snapshot,partial,diagnostics){
  const body=document.getElementById('order-rows'),table=body?.closest('table');if(!table)return;
  const weights={reference:1.35,manager:.9,date:.8,bc:.9,bl:.9,recipient:1.2,sku:1.35,carrier:1.1,label:1.5,tracking:1,'erplain-tracking':1,'platform-status':1,'country-margin':1};
  const expanded=new Set();
+ const tooltip=document.createElement('div');tooltip.id='order-action-tooltip';tooltip.role='tooltip';tooltip.hidden=true;document.body.append(tooltip);
+ let describedControl=null;
+ function hideTooltip(){tooltip.hidden=true;describedControl?.removeAttribute('aria-describedby');describedControl=null;}
+ function showTooltip(event){const control=event.target.closest?.('.order-icon-action');if(!control)return;describedControl?.removeAttribute('aria-describedby');describedControl=control;tooltip.textContent=control.title;tooltip.hidden=false;control.setAttribute('aria-describedby',tooltip.id);const box=control.getBoundingClientRect();tooltip.style.left=Math.max(8,Math.min(box.left,innerWidth-tooltip.offsetWidth-8))+'px';tooltip.style.top=Math.max(8,box.top-tooltip.offsetHeight-8)+'px';}
+ body.addEventListener('mouseover',showTooltip);body.addEventListener('focusin',showTooltip);
+ body.addEventListener('mouseout',event=>{if(describedControl&&!describedControl.contains(event.relatedTarget))hideTooltip();});body.addEventListener('focusout',hideTooltip);body.addEventListener('click',hideTooltip);window.addEventListener('scroll',hideTooltip,true);window.addEventListener('resize',hideTooltip);
+
  function apply(row,reference,button,key){
   const open=expanded.has(key),changed=row.classList.contains('order-row-expanded')!==open;
   row.classList.toggle('order-row-expanded',open);

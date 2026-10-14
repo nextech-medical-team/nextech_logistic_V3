@@ -42,3 +42,9 @@ test('incoming quantities stay visible in collapsed SKU and expanded cards use h
  await row.locator('[data-order-more-info]').click();const cards=await row.locator('td[data-fixed-column="label"],td[data-fixed-column="carrier"],td[data-fixed-column="sku"]').evaluateAll(c=>c.map(n=>({x:n.getBoundingClientRect().x,y:n.getBoundingClientRect().y,width:n.getBoundingClientRect().width})));expect(new Set(cards.map(c=>c.x)).size).toBe(3);expect(cards.every(c=>c.width>250)).toBe(true);
  await expect(row.locator('[data-stock-information]:not([data-stock-preview])').first()).toContainText('Aucun équivalent');
 });
+
+test('explanatory icons preserve names, show descriptions on hover and focus, and keep the arrow',async({page})=>{
+ await page.setViewportSize({width:1440,height:1000});await fixture(page);const row=page.locator('[data-detail="A"]').locator('xpath=ancestor::tr'),bc=row.getByRole('button',{name:'Actualiser le BC Erplain',exact:true});
+ await expect(bc.locator('svg')).toHaveCount(1);await expect(bc).toHaveAttribute('title','Actualiser le BC Erplain');await bc.scrollIntoViewIfNeeded();await bc.hover();await expect(page.getByRole('tooltip')).toContainText('Actualiser le BC Erplain');await bc.focus();await expect(page.getByRole('tooltip')).toBeVisible();
+ await expect(row.locator('[data-order-more-info]')).toHaveText('▾');await row.locator('[data-order-more-info]').click();await expect(row.locator('[data-order-more-info]')).toHaveText('▴');await expect(row.getByRole('button',{name:'Suspendre la commande',exact:true}).locator('svg')).toHaveCount(1);await expect(row.getByRole('button',{name:'Différer le problème',exact:true}).locator('svg')).toHaveCount(1);await expect(bc).toBeVisible();
+});
