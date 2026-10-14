@@ -85,7 +85,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   assertWholeTemuPackage(o,originals,temu.result,temu.packages[0]);
   if(!(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1 AND package=$2',[o.reference,temu.packages[0]])).rows.length)throw Error('Récupérer le PDF TEMU acheté avant remplacement');
  }
- const labelNotice=o.partial_mode?'Les livraisons, étiquettes et suivis existants sont conservés intégralement. Seul le reliquat du BC est modifié ; aucun achat ni réimpression automatique.':temu||carrier?'Étiquette existante conservée intégralement, y compris ses mentions SKU, quantités et numéro de suivi. Le remplacement concerne la commande et le BC ; aucun achat ni réimpression automatique.':'Après validation du stock et du BL, l’étiquette sera créée automatiquement. Aucun clic supplémentaire ne sera nécessaire.';
+ const labelNotice=o.partial_mode?'Les livraisons, étiquettes et suivis existants sont conservés intégralement. Seul le reliquat du BC est modifié ; aucun achat ni réimpression automatique.':temu||carrier?'Même étiquette et même suivi conservés. Les mentions SKU et quantités de l’édition V3 sont actualisées automatiquement avec l’équivalent. Téléchargez cette édition pour la réimprimer ; aucun nouvel achat.':'Après validation du stock et du BL, l’étiquette sera créée automatiquement. Aucun clic supplémentaire ne sera nécessaire.';
  await stage('Lecture du BC et du produit équivalent');await api.verify();
  const {Order:bc}=await api.request(`query V3SubstitutionBC($id:ID!){Order(id:$id){${bcFields}}}`,{id:String(o.erp_live.bc.id)});
  if(String(bc?.id)!==String(o.erp_live.bc.id))throw Error('API Erplain · BC demandé non reçu');

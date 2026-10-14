@@ -81,7 +81,7 @@ export function equivalenceImportService(db,directory,{api=erplainAccount(direct
     await tx.query("UPDATE equivalence_import_rows SET status='processing',request_id=$3,job_id=$4,data=$5 WHERE batch_id=$1 AND line=$2 AND status='queued'",[r.batch_id,r.line,requestId,jobId,JSON.stringify({...r.data,plan})]);
     await tx.query("INSERT INTO audit(user_email,action,detail) SELECT owner,'equivalence.import.requested',$2::jsonb FROM equivalence_imports WHERE id=$1",[r.batch_id,JSON.stringify({batchId:r.batch_id,line:r.line,orderId:o.id,jobId,sku:p.sku,replacementSku:p.replacementSku})]);
    });
-  },['erplain-live-workflow','stock-mutations']);
+  },['stock-mutations']);
  }
  async function block(r,error){
   await db.query("UPDATE equivalence_import_rows SET status='blocked',error=$3 WHERE batch_id=$1 AND line=$2",[r.batch_id,r.line,error]);

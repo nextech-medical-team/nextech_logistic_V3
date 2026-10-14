@@ -17,8 +17,8 @@ export async function skuContextHash(db,orderId){
  if(!r)throw Error('Commande introuvable pour vérifier les mentions SKU');return digest(Buffer.from(JSON.stringify(r.context)));
 }
 export async function savedSkuCopy(db,bytes,key){
- const preserved=(await db.query('SELECT source_hash,pdf FROM label_sku_copies WHERE document_key=$1 ORDER BY created_at DESC,id DESC LIMIT 1',['preserved:'+key])).rows[0];
- if(preserved){if(preserved.source_hash!==digest(bytes))throw Error('Source de l’étiquette préservée modifiée : rapprochement requis. Aucun PDF remplacé.');return Buffer.from(preserved.pdf);}
+ const preserved=(await db.query('SELECT source_hash,pdf,order_id,created_at FROM label_sku_copies WHERE document_key=$1 ORDER BY created_at DESC,id DESC LIMIT 1',['preserved:'+key])).rows[0];
+ if(preserved){if(preserved.source_hash!==digest(bytes))throw Error('Source de l’étiquette préservée modifiée : rapprochement requis. Aucun PDF remplacé.');return equivalentSkuEdition(db,preserved,key);}
  const row=(await db.query('SELECT pdf,order_id,context_hash FROM label_sku_copies WHERE document_key=$1 AND source_hash=$2 ORDER BY created_at DESC,id DESC LIMIT 1',[key,digest(bytes)])).rows[0];
  if(!row)return null;if(!row.context_hash||row.context_hash!==await skuContextHash(db,row.order_id))throw Error('Copie SKU devenue obsolète : la commande, le BL ou le colis a changé. Contrôler les mentions avant toute impression. Aucune nouvelle étiquette achetée.');return Buffer.from(row.pdf);
 }
@@ -92,3 +92,58 @@ export async function saveSkuCopy(db,item,replacements,user){
  return {...result,id};
 }
 
+
+
+// An edition is derived from the retained PDF and committed substitutions.
+// It never writes a carrier document, buys a label or checks Erplain/stock.
+export async function equivalentSkuEdition(db,preserved,key){
+ const original=Buffer.from(preserved.pdf);
+ try{
+  const order=(await db.query('SELECT id,carrier,partial_mode FROM orders WHERE id=$1',[preserved.order_id])).rows[0];
+  // A replacement of the remainder does not change already delivered parcels.
+  if(!order||order.partial_mode||key.startsWith('partial:'))return original;
+  let kind=key.startsWith('temu:')?'temu':order.carrier;
+  if(key.startsWith('extra:'))kind=(await db.query('SELECT carrier FROM extra_parcels WHERE id=$1',[key.slice(6)])).rows[0]?.carrier||kind;
+  const [,reference,packageSn]=key.startsWith('temu:')?key.split(':'):[];
+  const substitutions=(await db.query(`SELECT detail FROM audit WHERE action='order.product_substituted' AND created_at >= $2 AND
+   (detail->>'orderId'=$1 OR detail->>'orderId' IN (
+    SELECT o.id FROM orders o WHERE o.partial_mode=false AND o.reference IN (
+     SELECT a->>'parentOrderSn' FROM temu_label_jobs j
+     CROSS JOIN LATERAL jsonb_array_elements(coalesce(j.result->'packageInfoResultList','[]'::jsonb)) p
+     CROSS JOIN LATERAL jsonb_array_elements(coalesce(p->'orderSendInfoList','[]'::jsonb)) a
+     WHERE j.reference=$3 AND p->>'packageSn'=$4))) ORDER BY created_at,id`,[order.id,preserved.created_at,reference||null,packageSn||null])).rows.map(r=>r.detail);
+  if(!substitutions.length)return original;
+  return await renderEquivalentSkuEdition(original,kind,substitutions);
+ }catch{return original;} // Edition errors never become a new shipping gate.
+}
+
+export async function renderEquivalentSkuEdition(bytes,kind,substitutions){
+ const {doc,blocks}=await skuTextBlocks(bytes,kind),streams=new Map();
+ let changed=false;const fonts={};
+ const format=n=>new Intl.NumberFormat('fr-FR',{useGrouping:false,maximumFractionDigits:6}).format(n);
+ for(const b of blocks){
+  let value=b.value;
+  for(const r of substitutions){
+   const from=String(r.originalSku||''),to=String(r.replacementSku||''),oldQty=Number(r.replaceQuantity),newQty=Number(r.replacementQuantity);
+   if(!from||!to||!(oldQty>0)||!(newQty>0)||!Number.isFinite(oldQty+newQty))continue;
+   const escaped=from.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+   value=value.replace(new RegExp('(^|[ ;])'+escaped+' \\(([\\d ,.]+)( pcs)?\\)','g'),(all,prefix,units,suffix)=>{
+    const quantity=Number(units.replace(/ /g,'').replace(',','.'));
+    if(!Number.isFinite(quantity))return all;
+    const rest=quantity>oldQty?from+' ('+format(quantity-oldQty)+(suffix||'')+') ; ':'';
+    return prefix+rest+to+' ('+format(Math.min(quantity,oldQty)*newQty/oldQty)+(suffix||'')+')';
+   });
+  }
+  if(value===b.value)continue;
+  const style=b.bold?'bold':'regular';fonts[style]??=await doc.embedFont(b.bold?StandardFonts.HelveticaBold:StandardFonts.Helvetica);
+  const font=fonts[style],size=Math.min(b.size,b.width/Math.max(1,font.widthOfTextAtSize(value,1)));
+  const name=b.gls?'Helvetica-SkuCopy':b.bold?'Helvetica-Bold-910141':'Helvetica-910141';
+  doc.getPages()[b.pageIndex].node.setFontDictionary(PDFName.of(name),font.ref);
+  const encoded=font.encodeText(value).toString().slice(1,-1);
+  const block=b.gls?'q\nBT\n/'+name+' '+size+' Tf\n'+b.td+'\n<'+encoded+'> Tj\nET\nQ':b.block.replace(/\/(Helvetica(?:-Bold)?-[\d]+) [\d.]+ Tf/,'/'+name+' '+size+' Tf').replace('<'+b.hex+'> Tj','<'+encoded+'> Tj');
+  streams.set(b.ref,(streams.get(b.ref)||b.text).replace(b.block,block));changed=true;
+ }
+ if(!changed)return Buffer.from(bytes);
+ for(const [ref,text] of streams)doc.context.assign(ref,doc.context.flateStream(Buffer.from(text,'latin1')));
+ return Buffer.from(await doc.save());
+}
