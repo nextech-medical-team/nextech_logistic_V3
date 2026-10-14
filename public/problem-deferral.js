@@ -1,7 +1,11 @@
 (()=>{
  const status=$('status');status.add(new Option('Différées · problèmes reportés','__deferred'));
- const filter=document.createElement('button');filter.type='button';filter.textContent='Commandes différées';$('suspended-orders-filter').after(filter);
- filter.onclick=()=>{resetFilters();if($('problem-type'))$('problem-type').selectedIndex=-1;status.value='__deferred';compactFilters.forEach(x=>x.sync());page=1;show('orders');};
+ const filter=document.createElement('button');filter.type='button';filter.id='deferred-orders-filter';filter.textContent='Commandes différées';$('suspended-orders-filter').after(filter);
+ filter.onclick=()=>{resetFilters();if($('problem-type'))$('problem-type').selectedIndex=-1;status.value='__deferred';compactFilters.forEach(x=>x.sync());page=1;syncDeferredFilter();show('orders');};
+ const syncDeferredFilter=()=>{const active=[...status.selectedOptions].some(option=>option.value==='__deferred');filter.setAttribute('aria-pressed',String(active));filter.classList.toggle('problems-filter-active',active);filter.textContent=active?'✓ Commandes différées · actif':'Commandes différées';};
+ status.addEventListener('change',syncDeferredFilter);
+ const ordersBeforeDeferredFilter=orders;orders=async function(...args){syncDeferredFilter();return ordersBeforeDeferredFilter.apply(this,args);};
+ syncDeferredFilter();
  const modal=document.createElement('dialog');modal.className='order-suspension-dialog';modal.setAttribute('aria-labelledby','deferral-title');document.body.append(modal);
  let context=null,busy=false,request=0;
  function render(message='',error=false,note=''){
