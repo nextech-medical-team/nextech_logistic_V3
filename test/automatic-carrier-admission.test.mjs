@@ -1,4 +1,5 @@
 import {currentMappingFingerprint} from '../src/current-mapping-line.mjs';
+import {recordedBcFingerprint} from '../src/existing-bc-execution.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
@@ -30,6 +31,26 @@ async function order(db,id,carrier='gls',channel='shopify'){
  await db.query("INSERT INTO resolution_jobs(id,order_id,action,status,result) VALUES($1,$2,'refresh','complete','{\"erpOnly\":true,\"labelRequested\":false}')",[id+'-resolution',id]);
 }
 const count=async(db,sql)=>Number((await db.query(sql)).rows[0].n);
+
+test('recorded BC proof is shared by admission and worker; changed BC stays blocked',async()=>{
+ const db=await fixture();try{
+  for(const id of ['recorded','changed']){
+   await order(db,id);
+   const o=(await db.query('SELECT * FROM orders WHERE id=$1',[id])).rows[0];
+   const bc={...o.erp_live.bc,line_items:[{variant:{id:'variant'},location:{id:'stock'},quantity:5}]};
+   const proof=recordedBcFingerprint(bc);
+   await db.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[id,JSON.stringify({...o.erp_live,bc,mappingPreparationFingerprint:proof,preparationAuthority:{kind:'recorded_bc',bcId:bc.id,fingerprint:proof}})]);
+  }
+  assert.equal(await queueCarrierLabels(db,['recorded','changed']),2);
+  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bc,line_items,0,quantity}','6') WHERE id='changed'");
+  let posts=0;
+  const worker=createCarrierWorkers(db,null,{clients:{gls:async()=>{posts++;return {reference:'ref',tracking:['track'],documents:[Buffer.from('%PDF-1.4').toString('base64')]};}}});
+  await worker.run('gls');await worker.run('gls');
+  assert.equal(posts,1);
+  assert.equal((await db.query("SELECT status FROM carrier_jobs WHERE order_id='recorded'")).rows[0].status,'ready');
+  assert.match((await db.query("SELECT error FROM carrier_jobs WHERE order_id='changed'")).rows[0].error,/Mapping modifié/);
+ }finally{await db.close();}
+});
 
 test('existing automatic admission resumes Boutique and Relais plus all direct carriers; repeat and restart never duplicate',async()=>{
  const db=await fixture();try{
