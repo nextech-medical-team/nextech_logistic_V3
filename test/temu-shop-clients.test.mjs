@@ -179,3 +179,13 @@ test('Excel without a shop binds only on later TEMU access; refusal leaves BC pr
  assert.equal(result.errors.length,0);assert.equal(stored.source_payload.mallId,'owner');assert.equal(writes,1);
  assert.equal(stored.source_payload.temuDirect,undefined); // Shop binding alone is not purchase authorization.
 });
+test('explicit order-not-found in another shop does not reject the verified owner',async()=>{
+ const absent={mallId:'absent',api:{read:async()=>{throw Object.assign(Error('TEMU refuse l’opération : 140020002 Order not found'),{code:'140020002'});}}};
+ for(const candidates of [[absent,owner],[owner,absent]])assert.equal((await resolveExcelTemuShop(order,orderLines,candidates)).mallId,'owner');
+ await assert.rejects(resolveExcelTemuShop(order,orderLines,[absent]),/introuvable.*1 boutique/);
+ await assert.rejects(resolveExcelTemuShop(order,orderLines,[absent,owner,{...owner,mallId:'duplicate'}]),/ambigu/);
+ await assert.rejects(resolveExcelTemuShop(order,[{...orderLines[0],quantity:2}],[absent,owner]),/quantités/);
+ for(const failure of [Object.assign(Error('authorization refused'),{code:'140020002'}),Object.assign(Error('Order not found'),{code:'OTHER'})]){
+  await assert.rejects(resolveExcelTemuShop(order,orderLines,[owner,{mallId:'failed',api:{read:async()=>{throw failure;}}}]),e=>e.code===failure.code);
+ }
+});
