@@ -337,3 +337,6 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 #view-orders #order-rows tr.order-row-expanded td[data-fixed-column="reference"]>:is(button,a){width:auto!important;max-width:250px!important;margin:0!important}
 #view-orders #order-rows tr.order-row-expanded td[data-fixed-column="reference"]>.order-processing{flex-basis:100%}
 #view-orders #order-rows tr:not(.order-row-expanded) td .link-button{font-size:11px!important;line-height:1.3!important;margin:4px 0!important;padding:3px 2px!important}
+
+#view-orders #order-rows tr:not(.order-row-expanded) td button[data-compact-label]{font-size:0!important;border:1px solid #b9d3cb;border-radius:5px;background:#f1f7f5;min-height:28px;padding:4px!important}
+#view-orders #order-rows tr:not(.order-row-expanded) td button[data-compact-label]::after{content:attr(data-compact-label);font-size:11px;line-height:1.3}

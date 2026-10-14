@@ -84,7 +84,9 @@ function orderRowVersions(snapshot,partial,diagnostics){
     const position=String(++column);if(cell.style.gridColumn!==position)cell.style.gridColumn=position;
    }
    for(const control of row.querySelectorAll('button.link-button')){
-    if(!control.title)control.title=control.textContent.trim();
+    const text=control.textContent.trim();if(!control.title)control.title=text;
+    const short=text==='Actualiser le BC Erplain'?'↻ BC':text==='Actualiser les BL Erplain'?'↻ BL':text==='Remplacer un produit'?'Produit':text==='Choisir un autre transporteur'?'Transport':text==='Enregistrer une étiquette externe'?'Étiquette externe':text==='Vérifier les étiquettes existantes'?'Étiquettes':null;
+    if(short){control.dataset.compactLabel=short;control.setAttribute('aria-label',text);}
    }
    const key=reference.hasAttribute('data-delivery-detail')?'delivery:'+row.querySelector('[data-delivery-select]').dataset.deliverySelect:'order:'+reference.dataset.detail;
    let button=row.querySelector('[data-order-more-info]');
