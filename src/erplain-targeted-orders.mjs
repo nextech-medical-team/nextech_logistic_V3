@@ -86,14 +86,14 @@ export async function synchronizeRecoveredOrder(db,o,d){
   await db.query('UPDATE orders SET address=$2,recipient=$3 WHERE id=$1',[o.id,JSON.stringify({...address,street1:a.address_1||'',street2:a.address_2||''}),d.customer?.label||o.recipient]);
   // Only retire a definite preflight rejection, never a carrier creation with
   // uncertain outcome, tracking, response or documents. Preserve its audit.
-  const old=(await db.query("SELECT error FROM carrier_jobs c WHERE c.order_id=$1 AND c.status='failed' AND c.result IS NULL AND coalesce(c.tracking,'[]'::jsonb)='[]'::jsonb AND NOT EXISTS(SELECT 1 FROM carrier_documents x WHERE x.order_id=c.order_id)",[o.id])).rows[0];
+  const old=(await db.query("SELECT error FROM carrier_jobs c WHERE c.order_id=$1 AND c.status='failed' AND c.creation_started_at IS NULL AND coalesce(c.failure_phase,'preflight')='preflight' AND c.result IS NULL AND c.reference IS NULL AND coalesce(c.tracking,'[]'::jsonb)='[]'::jsonb AND NOT EXISTS(SELECT 1 FROM carrier_documents x WHERE x.order_id=c.order_id)",[o.id])).rows[0];
   const prefix='Erplain LIVE · Informations obligatoires manquantes : ';
   if(old?.error?.startsWith(prefix)){
    const selected=scope?.pending?.find(b=>String(b.id)===String(o.erp_live?.bl?.id))||d.shipping_orders?.data?.find(b=>String(b.id)===String(o.erp_live?.bl?.id));
    const missing=importedLabelMissingFields(d,selected||o.erp_live?.bl||{}),next=missing.length?prefix+missing.join(', '):null;
    if(next!==old.error){
     await db.query("INSERT INTO audit(user_email,action,detail) VALUES('system','erplain.label_preflight_refreshed',$1)",[JSON.stringify({orderId:o.id,previousError:old.error,currentError:next,labelPurchased:false})]);
-    await db.query("UPDATE carrier_jobs SET error=$2,updated_at=now() WHERE order_id=$1 AND status='failed' AND error=$3 AND result IS NULL AND coalesce(tracking,'[]'::jsonb)='[]'::jsonb",[o.id,next,old.error]);
+    await db.query("UPDATE carrier_jobs SET error=$2,original_error=coalesce(original_error,error),failure_phase='preflight',updated_at=now() WHERE order_id=$1 AND status='failed' AND error=$3 AND creation_started_at IS NULL AND coalesce(failure_phase,'preflight')='preflight' AND result IS NULL AND reference IS NULL AND coalesce(tracking,'[]'::jsonb)='[]'::jsonb AND NOT EXISTS(SELECT 1 FROM carrier_documents x WHERE x.order_id=carrier_jobs.order_id)",[o.id,next,old.error]);
    }
   }
  }
