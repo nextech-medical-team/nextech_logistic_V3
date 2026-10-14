@@ -40,7 +40,15 @@ export function pendingScope(d,{preparedBlId=null}={}){
  return {lines,pending,finished,scoped:true};
 }
 export function scopeSnapshot(d,scope=pendingScope(d)){
- return {...d,shipping_orders:{...d.shipping_orders,data:scope.scoped?scope.pending:d.shipping_orders.data},excluded_shipping_orders:scope.finished,pendingScope:scope.scoped};
+ return {...d,excluded_shipping_orders:scope.finished,pendingScope:scope.scoped};
+}
+
+// Recovery retains history; preparation must still use pendingScope directly.
+export function recoveryScope(d){
+ if(!Array.isArray(d.shipping_orders?.data)||d.shipping_orders.paginatorInfo?.hasMorePages!==false)throw Error('Liste des BL incomplète : récupération bloquée');
+ try{return pendingScope(d);}catch(e){
+  return {lines:shippingProductLines(d.line_items||[]),pending:[],finished:d.shipping_orders.data.filter(b=>['shipped','delivered','completed'].includes(b.status)),scoped:false,preparationIssue:e.message};
+ }
 }
 
 // Existing imports may continue their already selected BL after preparation.
