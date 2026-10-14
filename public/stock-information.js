@@ -20,6 +20,7 @@
  const watched=new Set();
  const visible=new IntersectionObserver(entries=>{for(const {target:info,isIntersecting}of entries)if(isIntersecting&&info.isConnected&&!info.dataset.started){info.dataset.started='true';info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';load(info.dataset.stockInformation).then(data=>show(info,data));visible.unobserve(info);watched.delete(info);}},{rootMargin:'0px'});
  function refresh(){
+  for(const summary of root.querySelectorAll('[data-stock-preview]'))if(summary.parentElement?.dataset.fixedColumn!=='sku')summary.remove();
   for(const info of watched)if(!info.isConnected){visible.unobserve(info);watched.delete(info);}
   for(const button of root.querySelectorAll('.compact-problem[data-problem-type="stock"]')){
    const sku=button.dataset.problemSku;if(!sku)continue;

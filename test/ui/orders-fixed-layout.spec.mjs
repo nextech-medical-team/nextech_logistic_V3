@@ -37,7 +37,7 @@ test('arrow preserves expansion across a changed row and treats partial deliveri
 test('incoming quantities stay visible in collapsed SKU and expanded cards use horizontal space',async({page})=>{
  await page.setViewportSize({width:1440,height:1000});await fixture(page);
  const row=page.locator('[data-detail="A"]').locator('xpath=ancestor::tr'),summary=row.locator('[data-stock-preview]').first();
- await summary.scrollIntoViewIfNeeded();await expect(summary).toContainText('10');await expect(summary).toContainText('LONG-SKU-REFERENCE-TEST');await expect(summary).toBeInViewport();
+ await summary.scrollIntoViewIfNeeded();await expect(summary).toContainText('10');await expect(summary).toContainText('LONG-SKU-REFERENCE-TEST');await expect(row.locator('[data-stock-preview]')).toHaveCount(1);await expect(row.locator('[data-fixed-column=carrier] [data-stock-preview]')).toHaveCount(0);await expect(summary).toBeInViewport();
  const box=await summary.boundingBox(),cell=await row.locator('[data-fixed-column="sku"]').boundingBox();expect(box.y).toBeGreaterThanOrEqual(cell.y);expect(box.y+box.height).toBeLessThanOrEqual(cell.y+cell.height);
  await row.locator('[data-order-more-info]').click();const cards=await row.locator('td[data-fixed-column="label"],td[data-fixed-column="carrier"],td[data-fixed-column="sku"]').evaluateAll(c=>c.map(n=>({x:n.getBoundingClientRect().x,y:n.getBoundingClientRect().y,width:n.getBoundingClientRect().width})));expect(new Set(cards.map(c=>c.x)).size).toBe(3);expect(cards.every(c=>c.width>250)).toBe(true);
  await expect(row.locator('[data-stock-information]:not([data-stock-preview])').first()).toContainText('Aucun équivalent');
