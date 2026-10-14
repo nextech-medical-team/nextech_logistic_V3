@@ -16,6 +16,7 @@ groups.at(-1).push('test/manual-platform-cancellation-ui.test.mjs');
 groups.at(-1).push('test/missing-orders-verification.test.mjs');
 groups.at(-1).push('test/receipt-candidates.test.mjs','test/receipt-warehouse-export.test.mjs','test/receipt-provider-filter.test.mjs');
 groups.push(['--test','test/carrier-attempt-proof.test.mjs','test/carrier-attempt-proof-db.test.mjs','test/carrier-cleared-preflight.test.mjs']);
+groups.push(['--test','test/bc-document-reservation.test.mjs']);
 groups.at(-1).push('test/erplain-global-lock-removal.test.mjs');
 groups.at(-1).push('test/recorded-bc-preparation-scope.test.mjs');
 groups.at(-1).push('test/equivalent-label-edition.test.mjs');
@@ -30,7 +31,7 @@ groups.push(['--test','test/missing-draft-recovery.test.mjs']);
 groups.push(manualCreatedBlWaitingGroup);
 groups.push(['--test','test/equivalent-preview-recheck.test.mjs']);
 groups.push(['--test','test/manual-legacy-label-retry.test.mjs']);
-groups.push(['--test','test/temu-excel-purchase-admission.test.mjs']);
+groups.push(['--test','test/temu-excel-purchase-admission.test.mjs','test/temu-excel-label-admission.test.mjs','test/source-product-name.test.mjs']);
 groups.push(['--test','test/stock-lock-resume.test.mjs']);
 groups.push(['--test','test/partial-complete-documents.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

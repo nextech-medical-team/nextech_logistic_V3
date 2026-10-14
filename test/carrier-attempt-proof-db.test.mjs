@@ -49,6 +49,30 @@ test('future Erplain refresh preserves original phone failure before clearing di
  assert.equal(j.status,'failed');assert.equal(j.attempts,1);
  }finally{await e.close();}
 });
+
+test('retired mapping refusal resumes once through existing BL with no ERP mutation',async()=>{
+ const {e,db,erp,job}=await fixture();try{
+ await db.query("INSERT INTO carrier_jobs(order_id,carrier,status,attempts,error,creation_id,tracking) VALUES('o','gofo','failed',1,'Mapping modifié avant création : recontrôle requis','old','[]')");
+ await queueLabelFromBl(db,'o',{email:'operator'});await queueLabelFromBl(db,'o',{email:'operator'});
+ let posts=0;const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async(_o,{beforeCreate})=>{await beforeCreate();posts++;return {reference:'R',tracking:['T']};},gofoLabel:async()=>Buffer.from('%PDF-1.4 test').toString('base64')}});
+ await workers.run('gofo');await workers.run('gofo');assert.equal(posts,1);assert.equal((await job()).status,'ready');
+ assert.deepEqual((await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live,erp);
+ }finally{await e.close();}
+});
+
+test('fresh manual BL request admits an archived first local mapping refusal, preserves it, and still refuses provider HTTP errors',async()=>{
+ const {e,db,erp,job}=await fixture();try{
+ const archived={order_id:'o',status:'failed',attempts:1,error:'Mapping modifié avant création : recontrôle requis',creation_id:'reserved-before-validation',result:null,reference:null,tracking:[],updated_at:'2026-10-14T08:33:48.394Z'};
+ await db.query("INSERT INTO carrier_label_history(id,order_id,job) VALUES('legacy-mapping','o',$1)",[JSON.stringify(archived)]);
+ assert.equal(await hasUncertainCarrierHistory(db,'o'),true);
+ assert.equal(await hasUncertainCarrierHistory(db,'o',{manualRequest:true}),false);
+ await queueLabelFromBl(db,'o',{email:'operator'});assert.equal((await job()).status,'pending');
+ assert.deepEqual((await db.query("SELECT job FROM carrier_label_history WHERE id='legacy-mapping'")).rows[0].job,archived);
+ assert.deepEqual((await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live,erp);
+ await db.query("INSERT INTO carrier_label_history(id,order_id,job) VALUES('provider-refusal','o',$1)",[JSON.stringify({...archived,error:'Transporteur GLS (création étiquette) : HTTP 400 — réponse vide, aucun motif fourni par le transporteur'})]);
+ assert.equal(await hasUncertainCarrierHistory(db,'o',{manualRequest:true}),true);
+ }finally{await e.close();}
+});
 test('existing BL bypasses preparation despite fiscal/quantity/stock proof absent; two clicks create once',async()=>{
  const {e,db,erp,job}=await fixture();try{
  await Promise.all([queueLabelFromBl(db,'o',{email:'operator'}),queueLabelFromBl(db,'o',{email:'operator'})]);

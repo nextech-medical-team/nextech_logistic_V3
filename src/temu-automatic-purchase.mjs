@@ -1,4 +1,5 @@
 import {retiredCommercialControl} from './post-bc-control-recovery.mjs';
+import {hasCreatedBl} from './created-bl-label.mjs';
 import {releaseExcelPurchaseHold} from './temu-excel-purchase-admission.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
@@ -34,10 +35,13 @@ export async function initializeTemuAutomaticPurchase(db){
  CREATE TRIGGER v3_temu_purchase_result AFTER UPDATE OF result ON temu_automatic_purchase_checks FOR EACH ROW EXECUTE FUNCTION v3_temu_purchase_result_diagnostic();`);
 }
 export function automaticPreparationHold(o,now=Date.now()){
- if(o?.source_payload?.origin==='temu_excel'&&!o.source_payload.temuExcelPreparation)return 'Excel TEMU : préparation à terminer';
  const blocked=suspensionBlock(o);if(blocked)return blocked;
  if(!o||o.archived||o.simulation||o.channel!=='temu')return 'Commande hors périmètre des achats automatiques';
+ if(o.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(o.tracking_status))return 'Commande annulée ou déjà expédiée';
  if(hasExternalLabel(o)||o.transport_choice)return 'Étiquette ou choix de transport existant à préserver';
+ if(o.partial_mode)return 'Utiliser le BL de la livraison partielle';
+ if(hasCreatedBl(o))return null;
+ if(o?.source_payload?.origin==='temu_excel'&&!o.source_payload.temuExcelPreparation)return 'Excel TEMU : préparation à terminer';
  if((o.issue&&!(o.erp_live?.bc?.id&&retiredCommercialControl(o.issue)))||o.source_payload?.visibilityHold||(!o.erp_live?.bc?.id&&o.source_payload?.marketplacePendingCorrection)||o.resolution_pending_resume||o.partial_mode)return o.issue||'Préparation à recontrôler avant achat';
  const p=o.erp_live;
  if(p?.phase!=='bl_ready'||(!o.erp_live?.bc?.id&&p.pricing?.status!=='verified')||!p.bl?.id||!p.stockDocument)return 'Préparation Erplain non terminée';
@@ -50,22 +54,21 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,s
  async function admission(reference,plan){
   if(!enabled())throw Error('Achat automatique suspendu');
   let o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];
-  if(o?.source_payload?.origin==='temu_excel'&&o.resolution_pending_resume){await releaseExcelPurchaseHold(db,o.id);o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];}
+  if(!hasCreatedBl(o)&&o?.source_payload?.origin==='temu_excel'&&o.resolution_pending_resume){await releaseExcelPurchaseHold(db,o.id);o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];}
   const held=automaticPreparationHold(o);if(held)throw Error(held);
   const idle=(await db.query(`SELECT o.id FROM orders o WHERE o.id=$1
-   AND EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status='complete')
+   AND (${hasCreatedBl(o)?'true':"EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status='complete')"})
    AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id)
    AND NOT EXISTS(SELECT 1 FROM carrier_documents d WHERE d.order_id=o.id)
    AND NOT EXISTS(SELECT 1 FROM extra_parcels x WHERE x.order_id=o.id)
    AND NOT EXISTS(SELECT 1 FROM temu_label_documents t WHERE t.reference=o.reference)
-   AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting','review'))
-   AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting','review'))`,[o.id])).rows;
+   ${hasCreatedBl(o)?'':"AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting','review')) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting','review'))"}`,[o.id])).rows;
   if(!idle.length)throw Error('Correction, reprise ou étiquette existante à rapprocher avant achat');
-  const lineProof=(await db.query("SELECT coalesce(jsonb_agg(to_jsonb(l) ORDER BY source_line,id),'[]'::jsonb) lines FROM lines l WHERE order_id=$1",[o.id])).rows[0]?.lines||[];
-  await stockGate(db,o);
+  const lineProof=hasCreatedBl(o)?[]:(await db.query("SELECT coalesce(jsonb_agg(to_jsonb(l) ORDER BY source_line,id),'[]'::jsonb) lines FROM lines l WHERE order_id=$1",[o.id])).rows[0]?.lines||[];
+  if(!hasCreatedBl(o))await stockGate(db,o);
   if(plan){
    const source=o.erp_live?.documentSource,checked=Date.parse(source?.checkedAt);
-   if(!Number.isFinite(checked)||checked>Date.now()||Date.now()-checked>5*60000||!Array.isArray(source.stockHolds)||source.stockHolds.length)throw Error('Achat d’étiquette TEMU à confirmer : relecture Erplain et stock avant achat non validée');
+   if(!hasCreatedBl(o)&&(!Number.isFinite(checked)||checked>Date.now()||Date.now()-checked>5*60000||!Array.isArray(source.stockHolds)||source.stockHolds.length))throw Error('Achat d’étiquette TEMU à confirmer : relecture Erplain et stock avant achat non validée');
    const decision=automaticTemuMarginDecision(await margins.get({fresh:true}),reference,plan);
    if(!decision.allowed)throw Error(decision.message+' : '+decision.reason);
    return {...decision,orderProof:{id:o.id,erpLive:o.erp_live,sourcePayload:o.source_payload,address:o.address,suspension:o.suspension,weight:o.weight_kg,lines:lineProof}};
@@ -89,8 +92,10 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,s
    const reference=candidate.reference;let result;
    try{
     const admitted=await admission(reference);
-    const documents=await refreshPreparation(admitted.id);
-    if(documents.notFound||!Array.isArray(documents.stockHolds)||documents.stockHolds.length)throw Error(documents.stockHolds?.map(h=>h.message).filter(Boolean).join(' ; ')||'Documents ou stock Erplain à rapprocher avant achat');
+    if(!hasCreatedBl(admitted)){
+     const documents=await refreshPreparation(admitted.id);
+     if(documents.notFound||!Array.isArray(documents.stockHolds)||documents.stockHolds.length)throw Error(documents.stockHolds?.map(h=>h.message).filter(Boolean).join(' ; ')||'Documents ou stock Erplain à rapprocher avant achat');
+    }
     await admission(reference);
     const amounts=await local.amounts(reference,{force:true});if(amounts.error)throw Error('Achat d’étiquette TEMU à confirmer : '+amounts.error);
     const plan=await local.prepare(reference);
