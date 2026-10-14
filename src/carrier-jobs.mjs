@@ -1,3 +1,4 @@
+import {installCarrierAttemptProof,markCarrierCreationStarted,recordCarrierFailure} from './carrier-attempt-proof.mjs';
 import {usesRecordedBc,recordedBcFingerprint} from './existing-bc-execution.mjs';
 function assertRecordedPreparationUnchanged(o){
  const authority=o.erp_live?.preparationAuthority;
@@ -24,6 +25,7 @@ export async function initializeCarrierJobs(db){await initializePriority(db);
  CREATE INDEX IF NOT EXISTS carrier_jobs_queue ON carrier_jobs(carrier,status,updated_at);`);
  await db.exec("ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'test'; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS manual_bl_request JSONB;");
  await db.exec("ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS stock_override JSONB; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS creation_id TEXT; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS batch_id TEXT; CREATE TABLE IF NOT EXISTS carrier_label_history(id TEXT PRIMARY KEY,order_id TEXT REFERENCES orders(id) ON DELETE CASCADE,job JSONB NOT NULL,archived_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE TABLE IF NOT EXISTS carrier_label_history_documents(history_id TEXT REFERENCES carrier_label_history(id) ON DELETE CASCADE,document_index INT NOT NULL,pdf BYTEA NOT NULL,PRIMARY KEY(history_id,document_index));");
+ await installCarrierAttemptProof(db);
  // A process interruption after POST is ambiguous. Never resend that POST blindly.
  if(db.recoverInterrupted!==false)await db.query(`UPDATE carrier_jobs SET status='review',error='Traitement interrompu. Vérifier la création chez le transporteur avant toute nouvelle tentative.' WHERE status='creating'`);
 }
@@ -78,7 +80,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
     const {rows}=await tx.query(`SELECT * FROM carrier_jobs WHERE carrier=$1 AND ${carrierEligible} ORDER BY ${priorityOrder('carrier_jobs')} FOR UPDATE SKIP LOCKED LIMIT 1`,[carrier]);
     if(!rows.length)return null;await tx.query(`UPDATE carrier_jobs SET status=$2,attempts=attempts+1,updated_at=now() WHERE order_id=$1`,[rows[0].order_id,rows[0].status==='pending'?'creating':'awaiting_pdf']);return rows[0];
    });if(!job)return;
-   let result=job.result;
+   let result=job.result,creationStarted=!!job.creation_started_at;
    try{
     const selectedClient=job.environment==='production'?productionClient:client;
     if(!selectedClient)throw new Error('Accès transporteur production non configurés');
@@ -111,6 +113,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
      // No database transaction is held during a network call.
      if(job.environment==='production')o.duplicate_of=o.id;
      const shipment={...o,id:job.creation_id||o.id};
+     await markCarrierCreationStarted(db,o.id);creationStarted=true;
      result=carrier==='gls'?await selectedClient.gls(shipment,{onParcel:async partial=>{await db.query("UPDATE carrier_jobs SET result=$2,tracking=$3,updated_at=now() WHERE order_id=$1",[o.id,JSON.stringify(partial),JSON.stringify(partial.tracking)]);}}):await selectedClient.gofoCreate(shipment);
      await db.query(`UPDATE carrier_jobs SET result=$2,reference=$3,tracking=$4,status='awaiting_pdf',updated_at=now() WHERE order_id=$1`,[o.id,JSON.stringify(result),result.reference,JSON.stringify(result.tracking)]);
     }
@@ -127,12 +130,12 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
     if(carrier==='gofo'&&!result&&e.zoneRejected){
      await db.transaction(async tx=>{
       await tx.query("UPDATE orders SET carrier='gls',parcel_count=ceil(weight_kg/30),source_payload=source_payload||$2::jsonb WHERE id=$1",[job.order_id,JSON.stringify({gofoZoneRefusal:{reason:e.message,at:new Date().toISOString(),fallback:'gls'}})]);
-      await tx.query("UPDATE carrier_jobs SET carrier='gls',status='pending',attempts=0,error=$2,updated_at=now() WHERE order_id=$1",[job.order_id,'Bascule GLS après refus explicite de zone GOFO : '+e.message]);
+      await tx.query("UPDATE carrier_jobs SET carrier='gls',status='pending',attempts=0,error=$2,failure_phase=null,creation_started_at=null,updated_at=now() WHERE order_id=$1",[job.order_id,'Bascule GLS après refus explicite de zone GOFO : '+e.message]);
       await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','carrier.gofo_zone_fallback',$1)",[JSON.stringify({orderId:job.order_id,reason:e.message})]);
      });return;
     }
     const status=result?(carrier==='gofo'&&job.attempts+1<5?'awaiting_pdf':'review'):(e.uncertain?'review':'failed');
-    await db.query(`UPDATE carrier_jobs SET status=$2,error=$3,updated_at=now() WHERE order_id=$1`,[job.order_id,status,e.message]);
+    await recordCarrierFailure(db,job.order_id,{status,error:e.message,creationStarted,hasResult:!!result});
    }
   }finally{active.delete(carrier);}
  }

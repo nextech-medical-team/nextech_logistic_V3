@@ -12,5 +12,6 @@ groups.at(-1).push('test/erplain-live-recovery.test.mjs');
 groups.at(-1).push('test/manual-platform-cancellation.test.mjs');
 groups.at(-1).push('test/manual-platform-cancellation-ui.test.mjs');
 groups.at(-1).push('test/missing-orders-verification.test.mjs');
+groups.push(['--test','test/carrier-attempt-proof.test.mjs','test/carrier-attempt-proof-db.test.mjs']);
 groups.push(quotaGroup);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
