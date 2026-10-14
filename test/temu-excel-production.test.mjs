@@ -55,7 +55,7 @@ test('automatic discovery holds missing, ambiguous and unreadable orders then re
  const absent={mallId:'empty',api:{read:async()=>({parentOrderMap:{},orderList:[]})}};
  for(const candidates of [[],[absent],[owner,{...owner,mallId:'other'}],[owner,{mallId:'failed',api:{read:async()=>{throw Error('quota API');}}}]]){
   f.candidates.splice(0,f.candidates.length,...candidates);
-  await assert.rejects(f.service.prepare(input,user),/introuvable|ambigu|quota/);
+  await assert.rejects(f.service.prepare(input,user),/Aucune boutique|introuvable|ambigu|quota/);
   assert.equal((await f.read()).suspension.active,true);
   assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
   assert.equal(f.bought,0);
