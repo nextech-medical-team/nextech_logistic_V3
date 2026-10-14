@@ -10,8 +10,8 @@ import {currentMappingLine} from '../src/current-mapping-line.mjs';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
-for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel : '+scenario,async()=>{
- const stockReview=scenario==='stock-review',preserveBcAmounts=scenario==='bc-amounts';
+for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-drift','legacy-queued-price-drift'])test('moteur réel : '+scenario,async()=>{
+ const stockReview=scenario==='stock-review',moneyDrift=scenario==='lost-response-price-drift',legacy=scenario==='legacy-queued-price-drift',preserveBcAmounts=scenario==='bc-amounts'||moneyDrift||legacy;
  const pg=new PGlite();await pg.waitReady;
  try{
  await pg.exec(`
@@ -40,7 +40,7 @@ for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel :
  const api={verify:async()=>{},request:async(q,v)=>{
   if(q.includes('V3SubstitutionBC'))return {Order:structuredClone(bc)};
   if(q.includes('V3SubstitutionProduct'))return {Variants:{data:[variants[v.where.value]],paginatorInfo:{hasMorePages:false}}};
-  if(q.includes('mutation V3SubstituteOrder')){writes++;bc={...bc,line_items:v.input.line_items.map((i,n)=>{if(i.id)return {...bc.line_items.find(l=>l.id===i.id),quantity:i.quantity};const found=Object.values(variants).find(x=>x.id===i.variant.id);return line(100+writes+n,found.sku,i.quantity,i.price);})};return {UpdateOrder:structuredClone(bc)};}
+  if(q.includes('mutation V3SubstituteOrder')){writes++;bc={...bc,line_items:v.input.line_items.map((i,n)=>{if(i.id)return {...bc.line_items.find(l=>l.id===i.id),quantity:i.quantity};const found=Object.values(variants).find(x=>x.id===i.variant.id);return line(100+writes+n,found.sku,i.quantity,i.price);})};if(moneyDrift){bc.total=42;bc.line_items[0].price=999;bc.line_items[0].tax_amount=13;if(writes===1)throw Error('Simulated lost response after provider commit');}return {UpdateOrder:structuredClone(bc)};}
   throw Error('Appel inattendu '+q);
  }};
  await db.query("INSERT INTO orders VALUES('o','#EXEMPLE','shopify','{}',$1,'{}','gofo',null,1,false,false,'not_shipped',.3,false,'pending',null)",[JSON.stringify({bc:{id:'11',status:'active'},pricing:{total:30,tax:0,currency:'EUR'}})]);
@@ -50,7 +50,20 @@ for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel :
   const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],b={id:'o',requestId:randomUUID(),sku,replacementSku,replaceQuantity:quantity,replacementQuantity,scope:'order'};
   const preview=await substitution(db,api,o,b,{preserveBcAmounts});
   Object.assign(b,{confirmEquivalent:true,previewFingerprint:preview.previewFingerprint});
+  if(legacy){
+   b.previewFingerprint='a'.repeat(64);preview.previewFingerprint=b.previewFingerprint;
+   await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status,result) VALUES($1,'o',$1,'equivalent-preview',$2,'complete',$3)",[randomUUID(),JSON.stringify(b),JSON.stringify(preview)]);
+   bc.total=73;bc.line_items[0].price=456;
+  }
   await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status) VALUES($1,'o',$2,'replace-equivalent',$3,'running')",[b.requestId,b.requestId,JSON.stringify(b)]);
+  if(moneyDrift&&writes===0){
+   await assert.rejects(substitution(db,api,o,b,{apply:true,deferResume,preserveBcAmounts}),/lost response/);
+   await db.query("UPDATE resolution_jobs SET status='review',error='Lost response after provider commit' WHERE request_id=$1",[b.requestId]);
+   const recovery=await substitution(db,api,o,b,{preserveBcAmounts});assert.equal(recovery.reconcileOnly,true);assert.equal(writes,1);
+   b.previewFingerprint=recovery.previewFingerprint;
+   b.requestId=randomUUID();
+   await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status) VALUES($1,'o',$1,'replace-equivalent',$2,'running')",[b.requestId,JSON.stringify(b)]);
+  }
   return substitution(db,api,o,b,{apply:true,deferResume,preserveBcAmounts});
  }
  if(preserveBcAmounts){
@@ -62,7 +75,7 @@ for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel :
  const first=await replace('A','B',20,!stockReview);assert.equal(first.importDeferred,!stockReview);assert.equal(writes,1);
  assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,stockReview?'pending':'review');
  assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,!stockReview);
- assert.equal((await db.query('SELECT status FROM resolution_jobs')).rows[0].status,stockReview?'waiting':'complete');
+ assert.equal((await db.query('SELECT status FROM resolution_jobs ORDER BY created_at DESC LIMIT 1')).rows[0].status,stockReview?'waiting':'complete');
  if(stockReview){
   // Reproduce waitingResolutionWorker detecting a stock failure after commit.
   await db.query("UPDATE resolution_jobs SET status='review',error='Stock insuffisant',stage='Erplain à compléter'");
@@ -83,7 +96,7 @@ for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel :
   assert.equal((await db.query('SELECT status,error FROM resolution_jobs')).rows[0].error,'Stock insuffisant');
  }
  const last=await replace('C','D',10,false,20);assert.equal(last.importDeferred,false);assert.equal(writes,2);
- assert.equal(bc.total,30);assert.equal(bc.line_items.reduce((n,l)=>n+Number(l.price)*Number(l.quantity),0),30);
+ assert.equal(bc.total,legacy?73:moneyDrift?42:30);if(!moneyDrift&&!legacy)assert.equal(bc.line_items.reduce((n,l)=>n+Number(l.price)*Number(l.quantity),0),30);
  assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,'pending');
  assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,false);
  const actual=(await db.query('SELECT target_sku,target_quantity FROM lines ORDER BY target_sku')).rows;assert.deepEqual(actual.map(l=>[l.target_sku,Number(l.target_quantity)]),[['B',20],['D',20]]);
@@ -92,8 +105,8 @@ for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel :
  const state=(await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live;
  if(preserveBcAmounts){
   const proof=preservedImportAmounts({erp_live:state});
-  assert.equal(proof.total,30);assert.equal(proof.requestId,state.equivalentAttemptId);
-  assert.equal(verifyImportBcAmounts(bc,proof).total,30);
+  assert.equal(proof.total,legacy?73:moneyDrift?42:30);assert.equal(proof.requestId,state.equivalentAttemptId);
+  assert.equal(verifyImportBcAmounts(bc,proof).total,legacy?73:moneyDrift?42:30);
  }
  assert.deepEqual(state.documentSource.lines.map(l=>[l.sku,l.quantity]).sort(),[['B',20],['D',20]]);
  const orderRows=[{id:'o',channel:'shopify'}];await attachSkuSubstitutions(db,orderRows);

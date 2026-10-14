@@ -86,7 +86,7 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
        if(existing.status==='ready'&&(erp?.status==='complete'||manualCreatedBlLabel)){await update(j.id,'complete','Terminé',{message:manualCreatedBlLabel?'Étiquette existante conservée pour le BL déjà créé.':'Étiquette existante conservée et documents Erplain LIVE vérifiés.'});return;}
        await update(j.id,'waiting','Suivi de l’étiquette existante',{...j.result,labelRequested:true});return;
       }
-      const r=await regenerate(db,{ids:[o.id],batchId:'resolution-'+j.id});if(r.skipped.length)throw Error(r.skipped[0].reason);
+      const r=await regenerate(db,{ids:[o.id],batchId:'resolution-'+j.id,manualRequest:j.action==='choose-carrier'});if(r.skipped.length)throw Error(r.skipped[0].reason);
       await update(j.id,'waiting','Génération de l’étiquette GLS/GOFO PROD',{...j.result,labelRequested:true});return;
      }
 

@@ -1,5 +1,6 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {readSubstitutionAttempt} from './substitution-attempt.mjs';
-import {verifySourceCommercialTotals,withSourceCommercialGuard} from './bc-pricing.mjs';
+import {withSourceCommercialGuard} from './bc-pricing.mjs';
 
 export function importBcAmounts(bc,requestId){
  return {version:1,bcId:String(bc.id),requestId,total:bc.total,tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label};
@@ -12,10 +13,7 @@ export function preservedImportAmounts(order){
 }
 export function verifyImportBcAmounts(bc,proof){
  if(String(bc?.id)!==proof.bcId)throw Error('BC importé · Identité différente');
- const confirmed=verifySourceCommercialTotals(bc,proof);
- const cents=v=>Math.round(Number(v)*100);
- if(cents(confirmed.total)!==cents(proof.total)||cents(confirmed.tax)!==cents(proof.tax))throw Error('BC importé · Montants modifiés depuis le remplacement');
- return confirmed;
+ return {total:bc.total??null,tax:Array.isArray(bc.line_items)&&bc.line_items.every(l=>l.tax_amount!=null&&Number.isFinite(Number(l.tax_amount)))?bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0):null,currency:bc.currency?.label??null,comparisonPerformed:false};
 }
 // Recover the commercial basis of imports committed before this proof existed.
 // Read only: no uncertain mutation is replayed and no platform price is adopted.
@@ -30,6 +28,7 @@ export async function restoreImportBcAmounts(db,order,lines){
  order.erp_live.importBcAmounts=importBcAmounts(attempt.plan.commercialBefore,attempt.requestId);
 }
 export async function withImportCommercialGuard(api,order,source,fn){
+ if(usesRecordedBc(order))return fn();
  const proof=preservedImportAmounts(order);
  if(!proof)return withSourceCommercialGuard(api,order.erp_live.bc.id,source,fn);
  const {Order:bc}=await api.request('query V3ImportBeforeStock($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:proof.bcId});

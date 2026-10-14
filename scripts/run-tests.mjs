@@ -14,16 +14,19 @@ groups.at(-1).push('test/erplain-live-recovery.test.mjs');
 groups.at(-1).push('test/manual-platform-cancellation.test.mjs');
 groups.at(-1).push('test/manual-platform-cancellation-ui.test.mjs');
 groups.at(-1).push('test/missing-orders-verification.test.mjs');
-
 groups.at(-1).push('test/receipt-candidates.test.mjs','test/receipt-warehouse-export.test.mjs','test/receipt-provider-filter.test.mjs');
-
-groups.push(['--test','test/carrier-attempt-proof.test.mjs','test/carrier-attempt-proof-db.test.mjs']);
+groups.push(['--test','test/carrier-attempt-proof.test.mjs','test/carrier-attempt-proof-db.test.mjs','test/carrier-cleared-preflight.test.mjs']);
 groups.at(-1).push('test/erplain-global-lock-removal.test.mjs');
 groups.at(-1).push('test/recorded-bc-preparation-scope.test.mjs');
 groups.at(-1).push('test/equivalent-label-edition.test.mjs');
+
+
+
+groups.at(-1).push('test/equivalence-post-bc-policy.test.mjs');
 
 groups.push(quotaGroup);
 groups.push(recoveredPreparationGroup);
 groups.push(['--test','test/missing-draft-recovery.test.mjs']);
 groups.push(manualCreatedBlWaitingGroup);
+groups.push(['--test','test/manual-legacy-label-retry.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

@@ -5,6 +5,7 @@ import {chosenRoute,defaultRouting} from '../src/routing.mjs';
 import {assertDirectCarrierAllowed} from '../src/temu-label-policy.mjs';
 import {assertManualLabelOrder,assertTemuManualLabel} from '../src/manual-label-policy.mjs';
 import {regenerateProductionLabels} from '../src/label-regeneration.mjs';
+import {installCarrierAttemptProof} from '../src/carrier-attempt-proof.mjs';
 import {shipmentFingerprint} from '../src/label-stock-gate.mjs';
 import {reconcileTemuRouting} from '../src/temu-routing-reconciliation.mjs';
 import {currentProblemClassifier} from '../src/problem-typology-reader.mjs';
@@ -47,6 +48,7 @@ test('manual production queue preserves TEMU package, PDF and tracking; no-choic
  CREATE TABLE IF NOT EXISTS correction_jobs(order_id text,status text);
  CREATE TABLE IF NOT EXISTS extra_parcels(order_id text);
  CREATE TABLE IF NOT EXISTS partial_deliveries(order_id text);`);
+ await installCarrierAttemptProof(db);
  const beforePdf=Buffer.from('existing PDF, never modified');
  for(const [id,choice,status] of [['manual','gls','shipment_error'],['automatic',null,'shipment_error'],['uncertain','gls','uncertain']]){
   const o={...order(choice),id,reference:'CASE-'+id,recipient:'Test',weight_kg:0.02,parcel_count:1,carrier:choice||'temu',address:{name:'Test',street:'1 Rue Test',postal:'75001',city:'Paris',country:'FR'},erp_live:{bc:{status:'active'},bl:{id:'bl-'+id,status:'ready_to_ship'},verifiedAt:'2026-10-11',stockCheckedAt:'2026-10-11'}};
