@@ -10,9 +10,8 @@ export async function assertLabelStockGate(db,o,override){
  if(o.partial_mode)throw Error('Utiliser les quantités et le BL de la livraison partielle');
  if(override?.requestedBy&&override?.at&&override.fingerprint===await shipmentFingerprint(db,o))return;
  const allowed=(await db.query(`SELECT id FROM orders WHERE id=$1 AND ${validatedDeliverySql}`,[o.id])).rows.length;
- if(!allowed)throw Error('Étiquette bloquée : contrôle du stock et BL validé requis. En cas de stock insuffisant, utiliser le bouton dédié de dérogation.');
+ if(!allowed)throw Error('Étiquette bloquée : contrôle du stock et BL validé requis.');
  if(marketplaceContentFrozen(o))return;
  if(!o.erp_live.labelPreparationFingerprint)throw Error('Validation de la préparation à actualiser avant étiquette.');
  if(o.erp_live.labelPreparationFingerprint!==await shipmentFingerprint(db,o))throw Error('Préparation modifiée depuis la validation du BL : actualiser la préparation du transport avant étiquette.');
 }
-

@@ -1,3 +1,5 @@
+import {suspensionBlock} from './order-suspension.mjs';
+import {temuLabelPolicyMessage} from './temu-label-policy.mjs';
 import {randomUUID} from 'node:crypto';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
 import {assertManualLabelOrder} from './manual-label-policy.mjs';
@@ -5,7 +7,10 @@ import {addressIssue} from './domain.mjs';
 import {cancellationBlock} from './erp-transient-policy.mjs';
 
 export function assertPreparedLabelOrder(o,e){
- assertManualLabelOrder(o,o?.carrier);
+ if(o?.channel==='temu'&&!o.transport_choice){
+  const hold=suspensionBlock(o);if(hold)throw Error(hold);
+  if(o.archived||o.partial_mode||o.source_payload?.externalLabel?.active||['cancelled','shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande TEMU non admissible à une nouvelle étiquette');
+ }else assertManualLabelOrder(o,o?.carrier);
  const blocked=cancellationBlock(o)||o.source_payload?.erplainValidationHold&&'Validation Erplain suspendue'||o.source_payload?.marketplacePendingCorrection&&'Commande modifiée sur la plateforme'||o.duplicate_of&&'Commande en doublon'||o.issue;
  if(blocked)throw Error(String(blocked));
  if(String(o.reference||'').startsWith('DEMO-'))throw Error('Commande fictive');
@@ -25,7 +30,7 @@ export async function advanceEquivalentLabel(db,job,{repair=false}={}){
   const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[job.order_id])).rows[0];
   if(!o)throw Error('Commande introuvable');
   const j=(await tx.query('SELECT * FROM resolution_jobs WHERE id=$1 FOR UPDATE',[job.id])).rows[0];
-  if(!j||!(j.status==='waiting'||repair&&j.status==='complete'))return {handled:true,state:'unchanged'};
+  if(!j||!(j.status==='waiting'||repair&&(j.status==='complete'||j.status==='review'&&j.error===temuLabelPolicyMessage&&o.channel==='temu'&&!o.transport_choice)))return {handled:true,state:'unchanged'};
   if(o.partial_mode||j.result?.partialRemainder)return {handled:false};
   const busy=(await tx.query("SELECT id FROM resolution_jobs WHERE order_id=$1 AND id<>$2 AND status IN ('queued','running','waiting')",[o.id,j.id])).rows;
   if(busy.length)return {handled:true,state:'busy'};
@@ -67,7 +72,11 @@ export async function advanceEquivalentLabel(db,job,{repair=false}={}){
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
     await save('complete','Terminé','Étiquette TEMU existante conservée. Produit équivalent et BL validés.');return {handled:true,state:'preserved_temu'};
    }
-   throw Error('Étiquette TEMU à préparer dans le circuit TEMU ; aucun achat transporteur direct');
+   if(temu?.attempt_id||temu?.packages?.length||td.length||['purchasing','uncertain','pending','complete','cancelled','cancellation_requested','not_to_ship'].includes(temu?.status))throw Error('Expédition TEMU existante ou état à vérifier : aucun nouvel achat');
+   result.erpOnly=true;
+   await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
+   await save('complete','Terminé','Produit équivalent et BL validés. Étiquette à traiter par le circuit TEMU selon la marge.');
+   return {handled:true,state:'temu_ready'};
   }
   if(temu&&(temu.attempt_id||temu.packages?.length))throw Error('Expédition TEMU existante : rapprochement requis');
   if(!['gls','gls_pharma','gls_shop','gofo'].includes(o.carrier))throw Error('Transporteur non déterminé');

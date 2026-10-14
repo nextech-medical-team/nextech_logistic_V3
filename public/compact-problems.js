@@ -33,6 +33,8 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(text==='Poids ou nombre de colis absent')return result('parcel-preparation','Poids du colis / nombre de colis à vérifier','');
  if(/synchronisation Erplain/i.test(text))return result('catalog-sync','Catalogue Erplain à synchroniser');
  if(/Poids.*(?:non renseigné|manquant|absent)/i.test(text))return result('weight','Poids manquant');
+ // Legacy gate messages include hypothetical override guidance, not a shortage.
+ if(/^Étiquette bloquée : contrôle du stock et BL validé requis\./i.test(text))return result('preparation','Validation stock / BL à effectuer','');
  if(/stock insuffisant/i.test(text))return result('stock','Bloqué : stock insuffisant');
  if(/BC existant contient d’autres|Commande V3 et BC différents|Écart BC\/BL|BC modifié/i.test(text))return result('bc','Commande V3 et BC différents');
  if(/^BC · Produits ou quantités des lignes Erplain différents de la source$/.test(text))return result('bc','Commande V3 et BC différents','');

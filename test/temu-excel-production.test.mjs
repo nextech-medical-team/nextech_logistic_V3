@@ -17,7 +17,7 @@ async function fixture(t){
  CREATE TABLE erp_live_jobs(order_id text,status text,error text);
  CREATE TABLE resolution_jobs(id text,order_id text,request_id text,action text,payload jsonb,result jsonb,status text DEFAULT 'queued',stage text DEFAULT 'En attente',error text,created_at timestamptz DEFAULT now());`);
  await initializeTemuShipping(db);
- await db.query("INSERT INTO orders(id,channel,reference,recipient,address,source_date,source_payload,suspension,tracking_status,resolution_pending_resume) VALUES('o','temu',$1,'Client fictif',$2,'2026-10-12',$3,$4,'not_shipped',true)",[reference,JSON.stringify({country:'HR',street:'Rue fictive',postal:'10000',city:'Ville'}),JSON.stringify({origin:'temu_excel',manualPreparationRequired:true}),JSON.stringify({active:true,note:excelImportHold,version:'initial'})]);
+ await db.query("INSERT INTO orders(id,channel,reference,recipient,address,source_date,source_payload,suspension,tracking_status,resolution_pending_resume) VALUES('o','temu',$1,'Client fictif',$2,'2026-10-12',$3,$4,'not_shipped',true)",[reference,JSON.stringify({name:'Client fictif',country:'HR',street:'Rue fictive',postal:'10000',city:'Ville'}),JSON.stringify({origin:'temu_excel',manualPreparationRequired:true}),JSON.stringify({active:true,note:excelImportHold,version:'initial'})]);
  const excel={'Prix de vente (hors taxes)':'67,25€','Total du prix de vente après réductions (hors taxes)':'67,25€','Taxe sur les produits':'16,80€',"Total de l'expédition (hors taxes)":'0€',"Taxe d'expédition":'0€'};
  await db.query("INSERT INTO lines(id,order_id,source_line,source_sku,quantity,source_payload,target_sku,target_quantity) VALUES('l','o','item','SKU',5,$1,'ERP-SKU',10)",[JSON.stringify({temuOrderSn:'item',excel})]);
  const now=Math.floor(Date.now()/1000),detail={parentOrderMap:{parentOrderSn:reference,parentOrderStatus:2,expectShipLatestTime:now+4*86400},orderList:[{orderSn:'item',orderStatus:2,quantity:5,productList:[{extCode:'SKU'}]}]};
@@ -55,7 +55,7 @@ test('automatic discovery holds missing, ambiguous and unreadable orders then re
  const absent={mallId:'empty',api:{read:async()=>({parentOrderMap:{},orderList:[]})}};
  for(const candidates of [[],[absent],[owner,{...owner,mallId:'other'}],[owner,{mallId:'failed',api:{read:async()=>{throw Error('quota API');}}}]]){
   f.candidates.splice(0,f.candidates.length,...candidates);
-  await assert.rejects(f.service.prepare(input,user),/introuvable|ambigu|quota/);
+  await assert.rejects(f.service.prepare(input,user),/Aucune boutique|introuvable|ambigu|quota/);
   assert.equal((await f.read()).suspension.active,true);
   assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
   assert.equal(f.bought,0);
@@ -144,4 +144,39 @@ test('Excel uses the existing automatic worker: only positive quote-matched marg
  assert.equal((await f.read()).resolution_pending_resume,false);
  const audit=(await f.db.query('SELECT decision FROM temu_automatic_purchase_audit')).rows;assert.equal(audit.length,1);assert.equal(audit[0].decision.profit,1);
  await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,1);
+});
+
+test('Excel replacement keeps original TEMU identity and prices, and recovers the owned direct-carrier review without creating a carrier label',async t=>{
+ const {advanceEquivalentLabel}=await import('../src/equivalent-auto-label.mjs');
+ const {temuLabelPolicyMessage}=await import('../src/temu-label-policy.mjs');
+ const {verifyExcelTemuDetail}=await import('../src/temu-excel-identity.mjs');
+ const {verifiedExcelCommercial}=await import('../src/temu-excel-commercial.mjs');
+ const f=await fixture(t);await f.service.prepare(await f.input(),user);
+ const original=await f.lines();
+ await f.db.exec("ALTER TABLE resolution_jobs ADD COLUMN updated_at timestamptz DEFAULT now();CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text,document_index int);CREATE TABLE carrier_label_history(id text,order_id text);CREATE TABLE extra_parcels(id text,order_id text,status text);");
+ await f.db.query("UPDATE lines SET source_line='ERP:replacement',source_sku='EQUIVALENT',quantity=100,target_sku='EQUIVALENT',target_quantity=100,source_payload='{\"origin\":\"erplain_live_equivalent\"}' WHERE order_id='o'");
+ const at=new Date().toISOString();
+ await f.db.query("UPDATE orders SET weight_kg=0.19,resolution_pending_resume=true,erp_live=$1 WHERE id='o'",[JSON.stringify({phase:'bl_ready',bc:{id:'bc',status:'active'},bl:{id:'bl',status:'ready_to_ship'},verifiedAt:at,stockCheckedAt:at,equivalentOriginalLines:original})]);
+ const proof=await shipmentFingerprint(f.db,await f.read());
+ await f.db.query("UPDATE orders SET erp_live=erp_live||$1::jsonb WHERE id='o'",[JSON.stringify({labelPreparationFingerprint:proof})]);
+ await f.db.query("INSERT INTO erp_live_jobs VALUES('o','complete',null)");
+ await f.db.query("UPDATE resolution_jobs SET status='complete' WHERE order_id='o'");
+ await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,error,result,created_at) VALUES('equivalent','o','replace-equivalent','review',$1,'{\"erpOnly\":true}',now()+interval '1 second')",[temuLabelPolicyMessage]);
+ const current=await f.lines(),o=await f.read();
+ assert.doesNotThrow(()=>verifyExcelTemuDetail(o,current,f.detail));assert.equal(verifiedExcelCommercial(o,current).total,84.05);
+ const beforeBc={...o,erp_live:{...o.erp_live,bc:null}};
+ f.detail.orderList[0].quantity=6;
+ assert.doesNotThrow(()=>verifyExcelTemuDetail(o,current,f.detail)); // Recorded BC remains the execution authority.
+ assert.throws(()=>verifyExcelTemuDetail(beforeBc,current,f.detail),/quantités/);f.detail.orderList[0].quantity=5;
+ assert.throws(()=>verifyExcelTemuDetail(o,current,{...f.detail,parentOrderMap:{parentOrderSn:'OTHER'}}),/Identité/);
+ const modified=structuredClone(o);modified.erp_live.equivalentOriginalLines[0].quantity=6;assert.throws(()=>verifiedExcelCommercial(modified,current),/modifiés/);
+ for(const invalid of [null,[],[{}]])assert.throws(()=>verifyExcelTemuDetail({...beforeBc,erp_live:{...beforeBc.erp_live,equivalentOriginalLines:invalid}},current,f.detail),/origine/);
+ const job={id:'equivalent',order_id:'o',action:'replace-equivalent'};
+ assert.equal((await advanceEquivalentLabel(f.db,job,{repair:true})).state,'temu_ready');
+ assert.equal((await f.db.query("SELECT status,error FROM resolution_jobs WHERE id='equivalent'")).rows[0].status,'complete');
+ assert.equal((await f.read()).resolution_pending_resume,false);
+ assert.equal((await f.db.query('SELECT * FROM carrier_jobs')).rows.length,0);
+ const plan=await temuShipping(f.db,f.api).prepare(reference);assert.equal(plan.amount,2.5);assert.equal(f.bought,0);
+ assert.equal((await f.lines())[0].source_sku,'EQUIVALENT');
+ assert.equal((await advanceEquivalentLabel(f.db,job,{repair:true})).state,'temu_ready');assert.equal(f.bought,0);
 });
