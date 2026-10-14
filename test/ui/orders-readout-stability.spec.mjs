@@ -25,3 +25,10 @@ for(const fails of [false,true])test('changed visible rows never paint without t
  expect(observed.length).toBeGreaterThan(0);expect(observed.every(frame=>frame.processing)).toBe(true);await expect(page.locator('#order-rows')).toContainText('Destinataire actualisé');
  if(fails)await expect(page.locator('.processing-position').first()).toContainText('non confirmé');expect(f.errors).toEqual([]);
 });
+
+test('a late processing response cannot replace a newer observation',async({page})=>{
+ await fixture(page);let read=0;
+ await page.route('**/api/orders/processing',async r=>{const current=++read;if(current===1)await new Promise(resolve=>setTimeout(resolve,200));await r.fulfill({json:{at:new Date().toISOString(),rows:['A','B'].map(id=>({id,stage:current===1?'Ancien état':'État récent',state:'blocked',since:'2026-10-13T10:00:00Z'}))}});});
+ await page.evaluate(async()=>{const old=window.V3OrderProcessing.read(['A','B']);await new Promise(resolve=>setTimeout(resolve,30));window.V3OrderProcessing.acceptSnapshot(await window.V3OrderProcessing.read(['A','B']));window.V3OrderProcessing.acceptSnapshot(await old);});
+ await expect(page.locator('.processing-stage').first()).toHaveText('État récent');
+});

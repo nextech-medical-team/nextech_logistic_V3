@@ -1,7 +1,7 @@
 (()=>{
  const body=document.getElementById('order-rows');if(!body)return;
- let busy=false,refreshTimer,latest=new Map(),latestObservedAt=null;
- const expandedOrders=new Set();let detailsSequence=0,readRevision=0,acceptedRevision=0;
+ let busy=false,refreshTimer,latest=new Map(),latestObservedAt=new Map();
+ const expandedOrders=new Set();let detailsSequence=0,readRevision=0;const acceptedRevisions=new Map();
  const setText=(el,value)=>{if(el.textContent!==value)el.textContent=value;};
  function elapsed(since){
   if(!since||!Number.isFinite(new Date(since).getTime()))return 'Début non disponible';
@@ -55,7 +55,7 @@
    clock.title='Durée de l’état enregistré dans V3. Un traitement actif ne prouve pas un appel continu chez le fournisseur.';
    setText(box.querySelector('.processing-reason'),carrierMessage(r.reason)?'Motif : '+carrierMessage(r.reason):'');
    setText(box.querySelector('.processing-preview'),r.previewPending?'Équivalent '+r.previewPending.sku+' vérifié · remplacement NON enregistré. Ouvrez « Remplacer un produit » pour confirmer.':'');
-   const observed=latestObservedAt?new Date(latestObservedAt).toLocaleTimeString('fr-FR'):'';
+   const observedAt=latestObservedAt.get(ref.dataset.detail),observed=observedAt?new Date(observedAt).toLocaleTimeString('fr-FR'):'';
    setText(box.querySelector('.processing-signals'),r.stage?'État V3 actualisé à '+observed+(r.lastSignal?' · dernier signal V3 : '+new Date(r.lastSignal).toLocaleString('fr-FR'):'')+(r.state==='active'?' · appel fournisseur en continu non confirmé':''): '');
    setText(box.querySelector('.processing-other'),(r.activities||[]).filter(a=>a.service!==r.service||a.step!==r.step).map(a=>a.service+' · '+a.step+' · '+durationText(a.state,a.since)+(a.reason?' · '+a.reason:'')).join('\n'));
    if(!button){button=document.createElement('button');button.type='button';button.className='processing-priority';ref.parentElement.append(button);}
@@ -70,7 +70,7 @@
  function showReadFailure(){for(const box of body.querySelectorAll('.order-processing')){setText(box.querySelector('.processing-position'),'Connexion interrompue · état actuel non confirmé');const clock=box.querySelector('.processing-elapsed');clock.dataset.since='';setText(clock,'Durée non actualisée · dernier état conservé');}for(const button of body.querySelectorAll('.processing-priority'))button.disabled=true;}
  function acceptSnapshot(result){
   if(!result||JSON.stringify(result.ids)!==JSON.stringify(rowIds()))return;
-  if(!result.error&&result.revision>=acceptedRevision){acceptedRevision=result.revision;latest=new Map(result.rows.map(r=>[r.id,r]));latestObservedAt=result.at;}
+  if(!result.error){const rows=new Map(result.rows.map(r=>[r.id,r]));for(const id of result.ids){if(result.revision<(acceptedRevisions.get(id)||0))continue;acceptedRevisions.set(id,result.revision);if(rows.has(id))latest.set(id,rows.get(id));else latest.delete(id);latestObservedAt.set(id,result.at);}const visible=new Set(result.ids);for(const id of latest.keys())if(!visible.has(id)){latest.delete(id);latestObservedAt.delete(id);acceptedRevisions.delete(id);}}
   // Populate replacement rows before the browser can paint their empty state.
   paint();if(result.error)showReadFailure();clearTimeout(refreshTimer);
  }
