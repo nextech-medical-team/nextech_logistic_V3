@@ -83,6 +83,9 @@ function orderRowVersions(snapshot,partial,diagnostics){
     if(heading.classList.contains('total-quantity-column'))continue;
     const position=String(++column);if(cell.style.gridColumn!==position)cell.style.gridColumn=position;
    }
+   for(const control of row.querySelectorAll('button.link-button')){
+    if(!control.title)control.title=control.textContent.trim();
+   }
    const key=reference.hasAttribute('data-delivery-detail')?'delivery:'+row.querySelector('[data-delivery-select]').dataset.deliverySelect:'order:'+reference.dataset.detail;
    let button=row.querySelector('[data-order-more-info]');
    if(!button){
