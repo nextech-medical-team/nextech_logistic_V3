@@ -1,3 +1,4 @@
+import {hasPartialCreatedBl} from './created-bl-label.mjs';
 import {readErplainDocuments,assertDocumentIdle} from './erplain-document-read.mjs';
 export const syncedBlFields='id label status update_stock line_items{id parent_id quantity price variant{id sku} location{id}}';
 
@@ -57,6 +58,8 @@ export async function refreshPartialFromErplain(db,api,id,{document=null,identit
 
   const update={...d,bl,status:cancelled?'cancelled':d.status==='cancelled'?'review':d.status,selection,stock_document:stock?{...d.stock_document,id:stock.id,label:stock.label,status:stock.status,update_stock:stock.update_stock}:d.stock_document};
 
+  // Stock discrepancies remain allocation diagnostics; they cannot veto labels.
+  if(hasPartialCreatedBl(update)&&update.status==='review'&&['finalizing_bl','bl_ready'].includes(d.stage)&&!d.carrier_result&&!d.tracking?.length){update.status='bl_ready';update.error=null;}
   const issue=stockMismatch(update,stock);if(issue)holds.push({deliveryId:d.id,bl:bl.label,stockId:d.stock_document?.id,stockLabel:d.stock_document?.label,message:issue});updates.push(update);
 
  }
@@ -68,7 +71,7 @@ export async function refreshPartialFromErplain(db,api,id,{document=null,identit
  const allocatedBlIds=bc.shipping_orders.data.filter(b=>!['cancelled','unpublished'].includes(b.status)).map(b=>String(b.id));
  const source={allocatedBlIds,allocations,checkedAt:new Date().toISOString(),lines:bc.line_items.filter(l=>l.variant).map(l=>({lineId:String(l.id),sku:l.variant?.sku,quantity:Number(l.quantity)})),pricing:{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount||0),0),currency:bc.currency?.label},stockHolds:holds};
 
- await db.transaction(async tx=>{await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[id]);await assertDocumentIdle(tx,id);const changed=(await tx.query("SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM partial_deliveries WHERE order_id=$1 AND status IN ('creating_bl','publishing_bl','creating_stock','finalizing_bl','creating_label','awaiting_pdf')",[id])).rows;if(changed.length)throw Error('Traitement démarré pendant la lecture : actualisation différée');for(const d of updates)await tx.query('UPDATE partial_deliveries SET status=$2,selection=$3,bl=$4,stock_document=$5,error=$6,updated_at=now() WHERE id=$1',[d.id,d.status,JSON.stringify(d.selection),JSON.stringify(d.bl),JSON.stringify(d.stock_document),holds.find(h=>h.deliveryId===d.id)?.message||(d.status==='review'?d.error:null)]);
+ await db.transaction(async tx=>{await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[id]);await assertDocumentIdle(tx,id);const changed=(await tx.query("SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM partial_deliveries WHERE order_id=$1 AND status IN ('creating_bl','publishing_bl','creating_stock','finalizing_bl','creating_label','awaiting_pdf')",[id])).rows;if(changed.length)throw Error('Traitement démarré pendant la lecture : actualisation différée');for(const d of updates)await tx.query('UPDATE partial_deliveries SET status=$2,selection=$3,bl=$4,stock_document=$5,error=$6,updated_at=now() WHERE id=$1',[d.id,d.status,JSON.stringify(d.selection),JSON.stringify(d.bl),JSON.stringify(d.stock_document),d.status==='review'?d.error:null]);
 
   await tx.query("UPDATE orders SET erp_live=jsonb_set(jsonb_set(jsonb_set(erp_live,'{bc}',$2::jsonb),'{partialSource}',$3::jsonb),'{documentSource}',$4::jsonb) WHERE id=$1",[id,JSON.stringify({...o.erp_live.bc,...bc}),JSON.stringify(source),JSON.stringify({...source,shippingOrders:bc.shipping_orders.data})]);
 

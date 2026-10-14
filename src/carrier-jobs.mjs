@@ -1,6 +1,8 @@
 import {installCarrierAttemptProof,markCarrierCreationStarted,recordCarrierFailure} from './carrier-attempt-proof.mjs';
+import {hasCreatedBl} from './created-bl-label.mjs';
 import {usesRecordedBc,recordedBcFingerprint} from './existing-bc-execution.mjs';
 function assertRecordedPreparationUnchanged(o){
+ if(hasCreatedBl(o))return;
  const authority=o.erp_live?.preparationAuthority;
  // A changed global mapping or an absent legacy fingerprint never vetoes a label.
  // When a recorded BC proof exists, keep the newer protection against changing
@@ -41,13 +43,13 @@ export async function queueCarrierLabels(db,ids,{automatic=false}={}){
    if((await tx.query('SELECT order_id FROM carrier_jobs WHERE order_id=$1',[id])).rows.length)continue;
    if((await tx.query("SELECT 1 FROM correction_jobs WHERE order_id=$1 AND status IN ('pending','queued','running','applying','checking','waiting','review') LIMIT 1",[id])).rows.length)throw Error('Correction en cours ou à vérifier avant étiquette');
    const actions=(await tx.query(resolutionStateSql,[id])).rows,state=currentResolutionState(actions);
-   if(state.reviews.length||state.pendingReplacement||actions[0]?.result?.readOnly||actions[0]?.result?.resumeAfter===false)throw Error('Décision de préparation à vérifier avant étiquette');
+   if((!hasCreatedBl(o)&&(state.reviews.length||state.pendingReplacement))||actions[0]?.result?.readOnly||actions[0]?.result?.resumeAfter===false)throw Error('Décision de préparation à vérifier avant étiquette');
    if(o.source_payload?.visibilityHold||o.source_payload?.historicalShipments?.length||o.source_payload?.externalLabel?.active)throw Error('Expédition ou suspension existante à rapprocher');
    const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1 FOR SHARE',[id])).rows[0];
    assertPreparedLabelOrder(o,e);
-   if(!o.erp_live.bc?.id)throw Error('Identité du BC non vérifiée');
+   if(!hasCreatedBl(o)&&!o.erp_live.bc?.id)throw Error('Identité du BC non vérifiée');
    if(!['gls','gls_pharma','gls_shop','gofo'].includes(o.carrier))throw Error('Transporteur non déterminé');
-   if(o.resolution_pending_resume){
+   if(o.resolution_pending_resume&&!hasCreatedBl(o)){
     const r=actions[0];
     if(r?.status!=='complete'||r.error||r.result?.partialRemainder||!(r.result?.erpOnly||r.result?.equivalent))throw Error('Préparation suspendue : terminer sa validation');
    }

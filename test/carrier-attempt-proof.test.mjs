@@ -9,7 +9,7 @@ test('legacy generic diagnostic uses immutable audit provenance rather than busi
  const calls=[];assert(await canRetryFailedCarrier({query:async(...a)=>{calls.push(a);return {rows:[audit]};}},job));
  assert.equal(calls.length,1);assert.deepEqual(calls[0][1],['order',job.updated_at]);
 });
-for(const [name,patch] of Object.entries({laterAttempt:{attempts:2},newCreation:{creation_id:'new'},result:{result:{}},reference:{reference:'existing'},tracking:{tracking:['T']},missingTracking:{tracking:undefined},laterUpdate:{updated_at:'2026-10-11T00:00:00Z'}}))test('legacy evidence rejects '+name,()=>assert.equal(provesLegacyPreflight({...job,...patch},audit),false));
+for(const [name,patch] of Object.entries({newCreation:{creation_id:'new'},result:{result:{}},reference:{reference:'existing'},tracking:{tracking:['T']},missingTracking:{tracking:undefined},laterUpdate:{updated_at:'2026-10-11T00:00:00Z'}}))test('legacy evidence rejects '+name,()=>assert.equal(provesLegacyPreflight({...job,...patch},audit),false));
 for(const [name,patch] of Object.entries({wrongOrder:{orderId:'other'},wrongError:{currentError:'different'},providerError:{previousError:'Timeout'},providerWrites:{businessWrites:1},labelPurchased:{labelPurchased:true},wrongPriorTime:{previousUpdatedAt:'invalid'}}))test('audit rejects '+name,()=>assert.equal(provesLegacyPreflight(job,{...audit,detail:{...audit.detail,...patch}}),false));
 test('no audit proof never permits generic legacy failures',async()=>assert.equal(await canRetryFailedCarrier({query:async()=>({rows:[]})},job),false));
 test('legacy recorded-BC fingerprint rejection is known preflight even with assigned creation id',async()=>{
@@ -67,4 +67,15 @@ test('authentication refusal never records creation marker',async()=>{
 test('marker persistence failure prevents actual provider POST after authentication',async()=>{
  let creates=0;const client=createProductionCarriers(config,{fetchImpl:async(url)=>{if(url.endsWith('/token'))return Response.json({accessToken:'synthetic'});creates++;assert.fail('no creation POST');}});
  await assert.rejects(client.gofoCreate(shipment,{beforeCreate:async()=>{throw Error('database failure');}}),/database failure/);assert.equal(creates,0);
+});
+
+for(const attempts of [1,2,10,99])test('proven preflight retry is independent of attempt count '+attempts,async()=>{
+ const db={query:async()=>({rows:[audit]})};
+ assert(await canRetryFailedCarrier(db,{...job,attempts}));
+ assert(provesImportedFieldsPreflight({...fieldJob,attempts},fieldAudit));
+ assert(await canRetryFailedCarrier({query:async()=>({rows:[fieldAudit]})},{...fieldJob,attempts}));
+ assert(await canRetryFailedCarrier(db,{...job,attempts,creation_started_at:null,failure_phase:'preflight'}));
+ for(const patch of [{creation_started_at:'2026-10-14T00:00:00Z'},{failure_phase:'provider'},{result:{}},{tracking:['T']},{reference:'R'}])assert.equal(await canRetryFailedCarrier(db,{...job,attempts,...patch}),false);
+ assert.equal(await canRetryFailedCarrier({query:async()=>({rows:[]})},{...job,attempts,error:'Timeout'}),false);
+ assert.equal(provesImportedFieldsPreflight({...fieldJob,attempts,updated_at:'2026-10-14T00:00:00Z'},fieldAudit),false);
 });

@@ -63,7 +63,7 @@ test('worker preflight failure remains safely resumable after diagnostic rewrite
  await queueLabelFromBl(db,'o',{email:'operator'});await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bl,id}','\"changed\"') WHERE id='o'");
  await createCarrierWorkers(db,null,{clients:{gofoCreate:()=>assert.fail('provider called')}}).run('gofo');
  const j=await job();assert.equal(j.status,'failed');assert.equal(j.failure_phase,'preflight');assert.equal(j.creation_started_at,null);assert.match(j.original_error,/BL modifié/);
- await db.query("UPDATE carrier_jobs SET error='Diagnostic de revalidation' WHERE order_id='o'");
+ await db.query("UPDATE carrier_jobs SET attempts=99,error='Diagnostic de revalidation' WHERE order_id='o'");
  await queueLabelFromBl(db,'o',{email:'operator'});assert.equal((await job()).status,'pending');assert.equal((await job()).creation_started_at,null);
  }finally{await e.close();}
 });
