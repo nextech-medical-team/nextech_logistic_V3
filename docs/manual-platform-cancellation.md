@@ -1,6 +1,6 @@
 # Actualisation manuelle des annulations
 
-Dans « Toutes les commandes », cliquer sur « Actualiser les annulations Temu / Shopify ». Le module parcourt toutes les commandes V3 non archivées de ces deux canaux, indépendamment des filtres affichés. Il n'importe pas de nouvelles commandes et ne démarre aucun contrôle périodique.
+Dans le menu, ouvrir « Annulations Temu / Shopify », puis cliquer sur « Actualiser les annulations Temu / Shopify ». Ouvrir la page ne déclenche aucune vérification. Le module parcourt toutes les commandes V3 non archivées de ces deux canaux, indépendamment des filtres affichés. Il n'importe pas de nouvelles commandes et ne démarre aucun contrôle périodique.
 
 Chaque commande est relue directement sur sa plateforme. Shopify doit confirmer une date d'annulation ; un remboursement seul ne déclenche rien. Temu doit confirmer le statut 3 et la référence exacte sur la boutique identifiée de la commande.
 
