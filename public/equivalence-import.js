@@ -15,7 +15,11 @@
    const buttons=[...downloads.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);feedback.textContent=path==='shortages'?'Lecture des commandes et des stocks Erplain… Cette vérification peut prendre plusieurs minutes.':'Préparation du modèle…';
    try{
     let result=await api('/api/equivalence-import/'+path);
-    if(result.id){const id=result.id;while(result.status==='checking'){await new Promise(resolve=>setTimeout(resolve,2000));result=await api('/api/equivalence-import/export?id='+encodeURIComponent(id));}if(result.status==='failed')throw Error(result.error);}
+    if(result.id){const id=result.id,startedAt=result.startedAt||Date.now();while(result.status==='checking'){
+     const p=result.progress,elapsed=Math.max(0,Math.floor((Date.now()-startedAt)/1000)),stage={identity:'Vérification Erplain',orders:'Lecture des commandes',alternatives:'Vérification des équivalents',workbook:'Création du fichier Excel'}[p?.phase]||'Préparation';
+     feedback.textContent=stage+(p?' · '+p.processed+' / '+p.total+' commandes examinées · '+p.rows+' ligne(s) en rupture':'')+' · '+elapsed+' s écoulées.'+(p?.updatedAt&&Date.now()-p.updatedAt>15000?' Attente de réponse Erplain ou du quota partagé ; le traitement continue.':'');
+     await new Promise(resolve=>setTimeout(resolve,2000));result=await api('/api/equivalence-import/export?id='+encodeURIComponent(id));
+    }if(result.status==='failed')throw Error(result.error);}
     const bytes=Uint8Array.from(atob(result.file),c=>c.charCodeAt(0));
     const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),link=document.createElement('a');link.href=url;link.download=result.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
     feedback.textContent=path==='shortages'?result.rows+' ligne(s) en rupture exportée(s). '+result.unverified+' commande(s) non vérifiable(s) : consultez Contrôles dans le fichier.':'Modèle téléchargé : remplissez Onglet type puis analysez le fichier.';

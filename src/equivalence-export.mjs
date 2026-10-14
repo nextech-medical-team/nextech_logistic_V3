@@ -25,7 +25,13 @@ export function shortageRows(order){
  }
  return [...rows.values()];
 }
-export async function exportEquivalences(db,api,directory,{template=false}={}){
+export async function readExportOrders(api,orders){
+ const fields='id status line_items{type quantity available on_hand reserved_quantity location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id} paginatorInfo{hasMorePages}}';
+ const query='query V3EquivalenceExportBatch('+orders.map((_,i)=>'$b'+i+':ID!').join(',')+'){'+orders.map((_,i)=>`o${i}:Order(id:$b${i}){${fields}}`).join(' ')+'}';
+ const result=await api.request(query,Object.fromEntries(orders.map((o,i)=>['b'+i,String(o.erp_live.bc.id)])),0,true);
+ return orders.map((_,i)=>({bc:result?.['o'+i],error:result?._v3Errors?.some(e=>!e.path?.length||e.path[0]==='o'+i)?'Réponse Erplain partielle : BC non vérifié':null}));
+}
+export async function exportEquivalences(db,api,directory,{template=false,onProgress=()=>{}}={}){
  const book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Onglet type');
  sheet.addRow(importHeaders);sheet.columns=importHeaders.map((h,i)=>({width:i===0?38:28,style:{numFmt:i<3?'@':'0.######'}}));sheet.views=[{state:'frozen',ySplit:1}];
  const suggestions=book.addWorksheet('Équivalents proposés');
@@ -38,18 +44,28 @@ export async function exportEquivalences(db,api,directory,{template=false}={}){
  if(!template){
   const orders=(await db.query(`SELECT * FROM orders WHERE channel=ANY($1::text[]) AND NOT archived AND NOT simulation AND coalesce(tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit','delivered_simulated') AND coalesce(label_status,'')<>'cancelled' ORDER BY reference,id`,[['amazon','shopify','temu']])).rows;
   const pairs=(await db.query('SELECT sku_a,sku_b,notes FROM product_equivalences WHERE active ORDER BY sku_a,sku_b')).rows;
-  const locationId=await stockChoiceLocation(directory),cache=new Map();await api.verify();
+  const locationId=await stockChoiceLocation(directory),cache=new Map();let processed=0;
+  const progress=phase=>onProgress({phase,total:orders.length,processed,rows:count,unverified});
+  progress('identity');await api.verify();const pending=[];
   for(const o of orders){
    const blocked=suspensionBlock(o);
-   if(blocked||o.partial_mode||o.erp_live?.bl?.id||o.erp_live?.stockDocument?.id){controls.addRow([o.reference,blocked||'Livraison existante ou partielle : traitement par le parcours dédié']);continue;}
-   if(!o.erp_live?.bc?.id){controls.addRow([o.reference,'BC absent : rupture non vérifiable']);unverified++;continue;}
+   if(blocked||o.partial_mode||o.erp_live?.bl?.id||o.erp_live?.stockDocument?.id){controls.addRow([o.reference,blocked||'Livraison existante ou partielle : traitement par le parcours dédié']);processed++;continue;}
+   if(!o.erp_live?.bc?.id){controls.addRow([o.reference,'BC absent : rupture non vérifiable']);unverified++;processed++;continue;}
+   pending.push(o);
+  }
+  // Ten BCs share one quota slot; calls remain sequential and retain the shared limiter.
+  for(let offset=0;offset<pending.length;offset+=10){
+   const batch=pending.slice(offset,offset+10);progress('orders');let snapshots;
+   try{snapshots=await readExportOrders(api,batch);}catch(e){for(const o of batch){controls.addRow([o.reference,'Non vérifié : '+e.message]);unverified++;processed++;}progress('orders');continue;}
+   for(let index=0;index<batch.length;index++){
+   const o=batch[index];
    let missing;
    try{
-    const response=await api.request('query V3EquivalenceExport($id:ID!){Order(id:$id){id status line_items{type quantity available on_hand reserved_quantity location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id} paginatorInfo{hasMorePages}}}}',{id:String(o.erp_live.bc.id)});
-    const bc=response.Order;
+    if(snapshots[index].error)throw Error(snapshots[index].error);
+    const bc=snapshots[index].bc;
     if(String(bc?.id)!==String(o.erp_live.bc.id)||bc.status!=='active'||!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.paginatorInfo?.hasMorePages!==false||bc.shipping_orders.data.length)throw Error('BC ou livraisons à rapprocher');
     missing=shortageRows(bc);
-   }catch(e){controls.addRow([o.reference,'Non vérifié : '+e.message]);unverified++;continue;}
+   }catch(e){controls.addRow([o.reference,'Non vérifié : '+e.message]);unverified++;processed++;progress('orders');continue;}
    for(const r of missing){
     if(++count>1000)throw Error('Plus de 1 000 lignes en rupture : export interrompu sans troncature. Le format d’import est limité à 1 000 lignes.');
     sheet.addRow([o.reference,r.sku,'',r.quantity]);
@@ -58,6 +74,7 @@ export async function exportEquivalences(db,api,directory,{template=false}={}){
     for(const p of alternatives){
      const sku=p.sku_a===r.sku?p.sku_b:p.sku_a;
      if(!cache.has(sku)){
+      progress('alternatives');
       try{const product=await readEquivalentProduct(api,sku,{locationId});cache.set(sku,{...product,at:new Date().toISOString()});}
       catch(e){cache.set(sku,{stockError:e.message,at:new Date().toISOString()});}
      }
@@ -65,7 +82,10 @@ export async function exportEquivalences(db,api,directory,{template=false}={}){
      suggestions.addRow([o.reference,r.sku,r.quantity,sku,product.available??'', [status,p.notes].filter(Boolean).join(' · '),product.at]);
     }
    }
+   processed++;progress('orders');
+   }
   }
+  progress('workbook');
   controls.addRow(['Couverture',`${orders.length} commandes examinées ; ${count} lignes en rupture vérifiées ; ${unverified} commandes non vérifiables. Consulter toutes les exclusions ci-dessus.`]);
  }
  for(const s of book.worksheets){
