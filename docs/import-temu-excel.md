@@ -98,7 +98,9 @@ Une marge nulle, négative ou inconnue ne déclenche aucun achat automatique. Le
 
 ### Fiche client TEMU en production
 
-La création transmet le prénom et le nom du rapport Excel (ou, à défaut, sépare le nom complet reçu), les coordonnées disponibles et deux adresses par défaut, facturation et livraison. Le numéro est obtenu par `GenerateCustomerNumber` dans Erplain puis conservé dans `erp_live.customerNumber` avant la création. Les clients sont créés successivement pour ne pas demander plusieurs fois le même prochain numéro. La reprise après interruption recherche ce numéro ; les anciennes fiches `V3:…` restent reconnues. Ces changements concernent les nouvelles créations et ne modifient pas les fiches déjà enregistrées.
+La création reprend le comportement du 13 octobre : libellé du client, type Individuel/Société et numéro technique stable `V3:<id commande>`. Elle ne demande plus de numéro à `GenerateCustomerNumber` et ne dépend plus de cet appel pour démarrer. Les adresses du BC restent transmises par le parcours BC existant.
+
+Si `erp_live.customerNumber` a déjà été enregistré par la version du 14 octobre, il est conservé pour la création et la recherche de reprise. Les clients et documents déjà enregistrés restent réutilisés. Les protections contre une reprise ambiguë restent actives ; les commandes en erreur doivent repasser par le contrôle de préparation habituel après déploiement.
 
 Les nouveaux BC TEMU (Excel et API) conservent le règlement vendeur TTC. Selon la règle demandée, le taux standard du pays de livraison s’applique aux produits et à la livraison, indépendamment de la taxe de la fiche produit et de celle du rapport. Le code sélectionne la taxe active correspondante dans Erplain. Une taxe absente ou ambiguë, ou un pays non couvert, bloque la création sans taux de secours. Les BC existants ne sont pas réécrits. Le calcul de marge utilise également les montants HT recalculés au taux du pays.
 
