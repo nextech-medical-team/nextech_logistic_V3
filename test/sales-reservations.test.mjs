@@ -106,7 +106,9 @@ test('receipt recovery admits only verified new reservations and sufficient repl
  assert.equal(receiptOrderBlock(o,document),null);assert.equal(plan().status,'blocked');
  document.line_items[0].on_hand=52000;document.line_items[0].available=-52000;assert.equal(plan().status,'blocked');assert.match(plan().reason,/48000 utilisables/);
  document.line_items[0].on_hand=104000;document.line_items[0].available=0;assert.equal(plan().status,'eligible');
- delete o.erp_live.bcReservationPolicy;assert.equal(plan().status,'blocked');
+ // PR146 permits historical BCs to continue through the native worker, which
+ // reconciles their existing stock documents. New marked BCs retain the gates above.
+ delete o.erp_live.bcReservationPolicy;assert.equal(plan().status,'eligible');assert.equal(plan().stockAlreadyApplied,true);
  o.erp_live.bcReservationPolicy='erplain_bc_bl';document.line_items[0].reserved_quantity=0;assert.equal(plan().status,'blocked');
  document.line_items[0].reserved_quantity=100000;o.erp_live.stockCreationAttemptedAt='2026-10-08T00:00:00Z';assert.equal(plan().status,'blocked');
 });
