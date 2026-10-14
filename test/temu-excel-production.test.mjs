@@ -81,6 +81,8 @@ test('same TEMU shipping engine uses published BL without ERP revalidation, quot
  await f.db.query("UPDATE resolution_jobs SET error='Contrôle à reprendre' WHERE order_id='o'");
  await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
  await f.db.query("UPDATE resolution_jobs SET error=null WHERE order_id='o'");
+ // A successful BL retry is newer than the original Excel import job.
+ await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,result,created_at) VALUES('bl-retry','o','resume-erp','complete','{\"erpOnly\":true}',now()+interval '1 second')");
  const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'0.25');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
  assert.equal((await f.read()).resolution_pending_resume,true);
  assert.ok(automaticPreparationHold(await f.read()));
@@ -128,6 +130,8 @@ test('Excel uses the existing automatic worker: only positive quote-matched marg
   await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,0);
   assert.equal((await f.db.query('SELECT result FROM temu_automatic_purchase_checks')).rows[0].result.status,'held');
  }
+ await f.db.query("UPDATE orders SET resolution_pending_resume=true WHERE id='o'");
+ await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,result,created_at) VALUES('bl-retry','o','resume-erp','complete','{\"erpOnly\":true}',now()+interval '1 second')");
  profit=1;await f.db.query('UPDATE temu_automatic_purchase_checks SET next_at=now()');await worker.run();assert.equal(f.bought,1);
  assert.equal((await f.read()).resolution_pending_resume,false);
  const audit=(await f.db.query('SELECT decision FROM temu_automatic_purchase_audit')).rows;assert.equal(audit.length,1);assert.equal(audit[0].decision.profit,1);
