@@ -8,7 +8,11 @@ export async function resolveExcelTemuShop(o,lines,candidates,connectionFailures
  for(const {mallId,api} of candidates){
   let detail;
   try{detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:o.reference});}
-  catch(e){if(e.code==='TEMU_STOPPING')throw e;errors.push(temuShopError(e,'boutique '+mallId+' — lecture de la commande '+o.reference));continue;}
+  catch(e){if(e.code==='TEMU_STOPPING')throw e;
+   // A definitive absence in this shop is expected during multi-shop discovery.
+   // Require both the specific code and explicit provider message.
+   if(String(e.code)==='140020002'&&/\border not found\b/i.test(String(e.message||'')))continue;
+   errors.push(temuShopError(e,'boutique '+mallId+' — lecture de la commande '+o.reference));continue;}
   if(detail?.parentOrderMap?.parentOrderSn!==o.reference)continue;
   verifyExcelTemuDetail(o,lines,detail);
   matches.push({mallId,api,detail});
