@@ -1,0 +1,22 @@
+(()=>{
+ const button=document.createElement('button');button.dataset.view='price-verification';button.textContent='Vérification des prix';
+ const settings=[...document.querySelectorAll('nav .nav-group')].find(el=>el.querySelector('summary')?.textContent==='Paramètres');
+ (settings?.querySelector('div')||document.querySelector('nav')).append(button);
+ const stylesheet=document.createElement('link');stylesheet.rel='stylesheet';stylesheet.href='/price-verification.css?v=20261014-2';document.head.append(stylesheet);
+ addView('price-verification',`<div class="panel padded"><h2>Vérification des prix des BC</h2><p>Compare le total du BC enregistré dans V3 au montant actuel de la plateforme. TEMU : « Montant total estimé du règlement ». Shopify : total actuel de la commande, taxes et livraison comprises. Comparaison au centime, dans la même devise.</p><div class="prices-controls"><label>Plateforme <select id="prices-channel"><option value="shopify">Shopify</option><option value="temu">TEMU</option></select></label><label>Pays <select id="prices-country"></select></label><button id="prices-run" class="primary" disabled>Lancer la vérification</button></div><p class="prices-help">Un pays par vérification · Comparaison au centime · Aucune commande ni aucun prix ne sont modifiés.</p><p id="prices-state" role="status" aria-live="polite"></p><div id="prices-summary" class="prices-summary" hidden></div><div class="table-wrap"><table><thead><tr><th>Commande</th><th>BC</th><th>Total BC V3</th><th>Total plateforme</th><th>Écart</th><th>Résultat</th></tr></thead><tbody id="prices-rows"><tr><td colspan="6" class="prices-empty">Sélectionnez une plateforme et un pays, puis lancez la vérification.</td></tr></tbody></table></div></div>`);
+ let countries=[];const regionNames=new Intl.DisplayNames(['fr'],{type:'region'});
+ const selectCountry=()=>{const select=$('prices-country');select.replaceChildren();for(const row of countries.filter(r=>r.channel===$('prices-channel').value)){const option=document.createElement('option');option.value=row.country;option.textContent=regionNames.of(row.country)+' ('+row.country+')';select.append(option);}$('prices-run').disabled=!select.options.length;if(!select.options.length){const option=document.createElement('option');option.textContent='Aucun pays disponible';select.append(option);}$('prices-state').textContent=select.options[0]?.value==='Aucun pays disponible'?'Aucune commande disponible pour cette plateforme.':'';};
+ button.onclick=async()=>{show('price-verification');$('title').textContent='Vérification des prix';try{countries=(await api('/api/price-verification/options')).countries;selectCountry();}catch(e){$('prices-state').textContent=e.message;}};
+ $('prices-channel').onchange=selectCountry;
+ $('prices-run').onclick=async()=>{
+  const channel=$('prices-channel').value,country=$('prices-country').value;
+  for(const id of ['prices-run','prices-channel','prices-country'])$(id).disabled=true;
+  $('prices-rows').replaceChildren();$('prices-summary').hidden=true;let cursor='',count=0;const counts={same:0,different:0,review:0};
+  try{while(true){$('prices-state').textContent=`Vérification ${channel.toUpperCase()} / ${country} : ${count} commande(s)…`;const response=await api('/api/price-verification/next',{channel,country,cursor});if(response.done)break;cursor=response.cursor;count++;
+   const r=response.result,tr=document.createElement('tr'),money=m=>m?`${Number(m.amount).toFixed(2)} ${m.currency}`:'—';
+   for(const value of [r.reference,r.bcId||'—',money(r.bc),money(r.source),r.difference==null?'—':r.difference.toFixed(2),r.status==='same'?'Même prix':r.status==='different'?"Ce n’est pas le même prix":'À vérifier : '+r.error]){const td=document.createElement('td');td.textContent=value;if(tr.children.length===5){const badge=document.createElement('span');badge.className='price-result price-'+r.status;badge.textContent=value;td.replaceChildren(badge);}tr.append(td);}$('prices-rows').append(tr);
+  }$('prices-state').textContent=`Vérification terminée : ${count} commande(s) · ${channel.toUpperCase()} / ${country}.`;
+  }catch(e){$('prices-state').textContent='Vérification interrompue : '+e.message;}
+  finally{for(const id of ['prices-run','prices-channel','prices-country'])$(id).disabled=false;}
+ };
+})();

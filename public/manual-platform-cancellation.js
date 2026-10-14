@@ -8,9 +8,11 @@
  button.className='primary';content.append(button);
  const report=document.createElement('div');report.id='platform-cancellation-report';report.setAttribute('role','status');report.setAttribute('aria-live','polite');content.append(report);main.append(panel);
  const menu=document.createElement('button');menu.type='button';menu.dataset.view=view;menu.textContent='Annulations Temu / Shopify';menu.id='platform-cancellations-menu';
- const ordersMenu=nav.querySelector('[data-view="orders"]');if(ordersMenu)ordersMenu.after(menu);else nav.append(menu);
+ const settings=[...document.querySelectorAll('nav .nav-group')].find(el=>el.querySelector('summary')?.textContent.trim()==='Paramètres');
+ (settings?.querySelector('div')||nav).append(menu);
+ if(settings)settings.open=true;
  const previousShow=show;show=async function(requested){if(requested!==view)return previousShow(requested);currentView=view;document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!==panel.id);document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));$('title').textContent=heading.textContent;};
- menu.onclick=()=>show(view);
+ menu.onclick=()=>{if(settings)settings.open=true;return show(view);};
  button.onclick=async()=>{
   button.disabled=true;let cursor='',checked=0,cancelled=0;const issues=[];
   const render=()=>{report.replaceChildren();const summary=document.createElement('p');summary.textContent=`${checked} commandes vérifiées · ${cancelled} annulées · ${issues.length} à vérifier`;report.append(summary);for(const issue of issues){const line=document.createElement('p');line.textContent=issue;report.append(line);}};

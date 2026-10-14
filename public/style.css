@@ -238,3 +238,18 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 }
 
 #view-orders #order-rows [data-order-date] :is(span,small){white-space:normal!important;overflow-wrap:anywhere}
+
+/* Missing orders verification */
+
+ #view-missing-orders .missing-toolbar{display:grid;grid-template-columns:minmax(200px,280px) minmax(160px,200px) max-content;align-items:end;gap:16px;margin:24px 0 8px;padding:20px;background:#f5f8f7;border:1px solid #dce6e0;border-radius:10px}
+ #view-missing-orders .missing-toolbar label{display:grid;gap:8px;margin:0;min-width:0}
+ #view-missing-orders .missing-toolbar :is(input,select,button){box-sizing:border-box;width:100%;height:44px;min-height:44px;margin:0;font-size:13px}
+ #view-missing-orders .missing-toolbar button{padding:10px 20px;white-space:nowrap}
+ #view-missing-orders .missing-help{margin:8px 0 20px;font-size:12px}
+ #view-missing-orders :is(#missing-state,#missing-errors):empty{display:none}
+ #view-missing-orders #missing-state{padding:12px 16px;border-radius:8px;background:#edf6f2;color:#294846;overflow-wrap:anywhere}
+ #view-missing-orders #missing-errors{color:#a83b33;overflow-wrap:anywhere}
+ #view-missing-orders table{width:100%;min-width:780px}
+ #view-missing-orders .missing-empty{text-align:center;padding:32px 16px;color:#657976;font-weight:400;background:white}
+ @media(max-width:900px){#view-missing-orders .missing-toolbar{grid-template-columns:1fr 1fr}#view-missing-orders .missing-toolbar button{grid-column:1/-1}}
+ @media(max-width:540px){#view-missing-orders .missing-toolbar{grid-template-columns:1fr;padding:16px}}
