@@ -92,3 +92,23 @@ test('another receipt can be analyzed while a native preparation is waiting',asy
   const second=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId:randomUUID()});await f.service.run();assert.equal((await f.service.status(second.id)).state,'ready');assert.equal((await f.service.status(first)).state,'applying');assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
  }finally{await f.engine.close();}
 });
+
+test('receipt action continues an old native stock hold without a separate finalisation',async()=>{
+ const f=await fixture();try{
+  await f.db.query('UPDATE orders SET resolution_pending_resume=true WHERE id=$1',[f.id]);
+  const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();
+  const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume-erp');assert.equal(f.labelCalls(),0);
+ }finally{await f.engine.close();}
+});
+
+test('receipt preview refreshes related BC individually before showing its BL status',async()=>{
+ const f=await fixture();try{
+  const bl={id:'existing',label:'SHO-EXISTING',status:'ready_to_ship',update_stock:false};
+  f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
+  await f.db.query("UPDATE orders SET resolution_pending_resume=true,erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl:{...bl,status:'make_the_shipment'},stockDocument:{id:'stock',status:'completed'}})]);
+  await f.db.query("INSERT INTO carrier_jobs VALUES($1,'ready','production','[]',null)",[f.id]);await f.db.query('INSERT INTO carrier_documents VALUES($1,0)',[f.id]);
+  const run=await f.start('documents');const state=await f.service.status(run);
+  assert.ok(f.calls.some(q=>q.includes('DocumentRead')));assert.equal(state.plan.rows[0].currentBl.status,'ready_to_ship');assert.match(state.plan.rows[0].reason,/aucune nouvelle génération/);assert.equal(state.plan.rows[0].labels.length,1);
+  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);assert.equal(f.labelCalls(),0);
+ }finally{await f.engine.close();}
+});

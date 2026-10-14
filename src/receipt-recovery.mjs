@@ -39,6 +39,13 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
  let running=false,activeItem=null;
  async function preview(number){
   const receipts=await readReceipt(api,number),orders=await recoveryOrders(db),{bcs,errors}=await readRecoveryBcs(api,orders);
+  // Collection snapshots may contain an older delivery status. Refresh only
+  // receipt-related BCs, without comparing commercial data or mutating ERPLAIN.
+  const candidates=buildReceiptPlan(receipts,orders,bcs,{errors}).rows;
+  for(const row of candidates){const o=orders.find(o=>o.id===row.id);if(!o?.erp_live?.bc?.id)continue;
+   try{bcs.set(String(o.erp_live.bc.id),await readErplainDocuments(api,o.erp_live.bc.id));errors.delete(o.id);}
+   catch(e){errors.set(o.id,'Lecture du document indisponible : '+e.message);if(e.httpStatus===429||e.httpStatus>=500)break;}
+  }
   const plan=buildReceiptPlan(receipts,orders,bcs,{errors});plan.coverage={orders:orders.length,bcs:bcs.size,errors:errors.size,complete:errors.size===0};plan.receiptFingerprint=receiptHash(receipts);
   return plan;
  }
@@ -56,7 +63,8 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
   const byOrder=new Map(snapshot.map(o=>[o.id,o])),byJob=new Map(jobs.map(j=>[j.id,j])),byItem=new Map(items.map(i=>[i.order_id,i]));
   const rows=[];for(const row of run.plan?.rows||[]){const o=byOrder.get(row.id),item=byItem.get(row.id),job=byJob.get(item?.resolution_id)||null;
    const labels=o?snapshotLabelLinks(o):[];
-   rows.push({...row,labels,reason:row.status==='documents'&&!labels.length?'BL déjà disponible · étiquette à obtenir':row.reason,labelError:o?.temu_error||null,currentBl:o?.erp_live?.bl?{id:o.erp_live.bl.id,label:o.erp_live.bl.label,status:o.erp_live.bl.status}:null,item:item?{state:item.state,error:item.error,job}:null});
+   const confirmedBl=row.bls?.find(b=>String(b.id)===String(o?.erp_live?.bl?.id));
+   rows.push({...row,labels,reason:row.status==='documents'?(labels.length?'BL et étiquettes disponibles · aucune nouvelle génération nécessaire':'BL déjà disponible · étiquette à obtenir'):row.reason,labelError:o?.temu_error||null,currentBl:confirmedBl|| (o?.erp_live?.bl?{id:o.erp_live.bl.id,label:o.erp_live.bl.label,status:o.erp_live.bl.status}:null),item:item?{state:item.state,error:item.error,job}:null});
   }
   return {id:run.id,number:run.number,state:run.state,error:run.error,createdAt:run.created_at,updatedAt:run.updated_at,plan:run.plan?{...run.plan,rows}:null};
  }
