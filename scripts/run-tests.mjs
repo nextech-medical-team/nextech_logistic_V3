@@ -28,5 +28,6 @@ groups.push(quotaGroup);
 groups.push(recoveredPreparationGroup);
 groups.push(['--test','test/missing-draft-recovery.test.mjs']);
 groups.push(manualCreatedBlWaitingGroup);
+groups.push(['--test','test/equivalent-preview-recheck.test.mjs']);
 groups.push(['--test','test/manual-legacy-label-retry.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
