@@ -8,8 +8,9 @@ export async function assertMissingDraftIdle(db,o,resolutionId){
  if(busy.length)throw Error('Brouillon BL absent : document transport ou autre traitement présent');
 }
 export async function commitMissingDraftRecovery(tx,o,next,{resolutionId,userEmail='system'}={}){
- const current=(await tx.query('SELECT erp_live FROM orders WHERE id=$1 FOR UPDATE',[o.id])).rows[0];
+ const current=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[o.id])).rows[0];
  if(!isDeepStrictEqual(current?.erp_live,o.erp_live))throw Error('Brouillon BL modifié pendant la lecture : reprise différée');
+ if(current.archived||current.partial_mode||cancellationBlock(current)||['shipped','delivered','in_transit','delivered_simulated'].includes(current.tracking_status))throw Error('Commande modifiée pendant la lecture : reprise différée');
  await assertMissingDraftIdle(tx,o,resolutionId);
  await tx.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(next)]);
  await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'erplain.missing_draft_retired',$2)",[userEmail,JSON.stringify({orderId:o.id,recovery:next.missingDraftRecoveries.at(-1)})]);
