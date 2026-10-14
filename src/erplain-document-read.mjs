@@ -3,6 +3,10 @@ const orderFields='id label external_reference notes dated_at status total curre
 export async function readErplainDocuments(api,id){
  const bc=(await api.request(`query V3DocumentRead($id:ID!){Order(id:$id){${orderFields} shipping_orders(first:100,page:1){data{${documentBlFields}} paginatorInfo{hasMorePages}}}}`,{id:String(id)})).Order;
  if(!bc||String(bc.id)!==String(id))throw Error('BC Erplain introuvable : aucune donnée locale remplacée');
+ return completeShippingOrders(api,bc);
+}
+export async function completeShippingOrders(api,bc){
+ const id=bc.id;
  const seen=new Set();let connection=bc.shipping_orders,bls=[];
  for(let page=1;page<=100;page++){
   if(!Array.isArray(connection?.data)||typeof connection.paginatorInfo?.hasMorePages!=='boolean')throw Error('Erplain · Historique des BL incomplet');
