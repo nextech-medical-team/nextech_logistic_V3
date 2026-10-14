@@ -1,10 +1,18 @@
 import {cancellationBlock} from './erp-transient-policy.mjs';
+import {isDeepStrictEqual} from 'node:util';
 export async function assertMissingDraftIdle(db,o,resolutionId){
  const busy=(await db.query(`SELECT 1 FROM carrier_documents WHERE order_id=$1
  UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1
  UNION ALL SELECT 1 FROM partial_deliveries WHERE order_id=$1
  UNION ALL SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') AND id<>$2`,[o.id,resolutionId])).rows;
  if(busy.length)throw Error('Brouillon BL absent : document transport ou autre traitement présent');
+}
+export async function commitMissingDraftRecovery(tx,o,next,{resolutionId,userEmail='system'}={}){
+ const current=(await tx.query('SELECT erp_live FROM orders WHERE id=$1 FOR UPDATE',[o.id])).rows[0];
+ if(!isDeepStrictEqual(current?.erp_live,o.erp_live))throw Error('Brouillon BL modifié pendant la lecture : reprise différée');
+ await assertMissingDraftIdle(tx,o,resolutionId);
+ await tx.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(next)]);
+ await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'erplain.missing_draft_retired',$2)",[userEmail,JSON.stringify({orderId:o.id,recovery:next.missingDraftRecoveries.at(-1)})]);
 }
 
 // Only retire a local draft pointer before any stock or carrier write. The

@@ -54,7 +54,7 @@ import {correctionCatalog} from './problem-corrections.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 import {assertFullOrderStock} from './stock-gate.mjs';
 import {assertResumeStock} from './resume-stock-policy.mjs';
-import {prepareMissingDraftRecovery,assertMissingDraftIdle} from './missing-draft-recovery.mjs';
+import {prepareMissingDraftRecovery,commitMissingDraftRecovery} from './missing-draft-recovery.mjs';
 import {createProductionCarriers,createTestCarriers} from './carriers-test.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -353,7 +353,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    await assertResumeStock(api,o,r.Order,resumeStockLines);
    const recoveredDraft=await prepareMissingDraftRecovery(db,api,o,{resolutionId:j.id});
    await db.transaction(async tx=>{const e=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];if(e?.status==='processing')throw Error('Traitement Erplain en cours');
-    if(recoveredDraft){const current=(await tx.query('SELECT erp_live FROM orders WHERE id=$1 FOR UPDATE',[o.id])).rows[0];if(JSON.stringify(current?.erp_live)!==JSON.stringify(o.erp_live))throw Error('Brouillon BL modifié pendant la lecture : reprise différée');await assertMissingDraftIdle(tx,o,j.id);await tx.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(recoveredDraft)]);await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'erplain.missing_draft_retired',$2)",[j.user_email||'system',JSON.stringify({orderId:o.id,recovery:recoveredDraft.missingDraftRecoveries.at(-1)})]);}
+    if(recoveredDraft)await commitMissingDraftRecovery(tx,o,recoveredDraft,{resolutionId:j.id,userEmail:j.user_email||'system'});
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
     await tx.query("INSERT INTO erp_live_jobs(order_id,status) VALUES($1,'pending') ON CONFLICT(order_id) DO UPDATE SET status='pending',error=null,updated_at=now()",[o.id]);
     await tx.query("UPDATE resolution_jobs SET status='waiting',stage='Reprise du BL Erplain',result=$2,updated_at=now() WHERE id=$1",[j.id,JSON.stringify({resume:true})]);});return null;

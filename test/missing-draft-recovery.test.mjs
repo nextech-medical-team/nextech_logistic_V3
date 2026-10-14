@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {prepareMissingDraftRecovery} from '../src/missing-draft-recovery.mjs';
+import {prepareMissingDraftRecovery,commitMissingDraftRecovery} from '../src/missing-draft-recovery.mjs';
 function fixture(){
  const order={id:'o1',erp_live:{phase:'publishing_bl',bc:{id:7},bl:{id:9,label:'SHO00744687',status:'unpublished',update_stock:false}}};
  const data={Order:{id:7,status:'active',update_stock:false,shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}},ShippingOrder:null};
@@ -36,3 +36,14 @@ for(const [name,change] of [
  ['prior stock cycle',f=>f.order.erp_live.previousCancelledCycle={}],
  ])test(name+' refuses recovery',async()=>{const f=fixture();change(f);await assert.rejects(f.run());assert.ok(f.order.erp_live.bl);});
 test('HTTP or GraphQL failure leaves local state intact',async()=>{const f=fixture();f.api.request=async()=>{throw Error('429');};await assert.rejects(f.run(),/429/);assert.equal(f.order.erp_live.phase,'publishing_bl');});
+test('atomic persistence: race or new carrier evidence aborts; successful recovery is audited',async()=>{
+ const {PGlite}=await import('@electric-sql/pglite');const engine=new PGlite();
+ try{
+  await engine.exec('CREATE TABLE orders(id text PRIMARY KEY,erp_live jsonb);CREATE TABLE carrier_documents(order_id text);CREATE TABLE carrier_jobs(order_id text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE resolution_jobs(id text,order_id text,status text);CREATE TABLE audit(user_email text,action text,detail jsonb);');
+  const f=fixture(),next=await f.run();await engine.query('INSERT INTO orders VALUES($1,$2)',['o1',JSON.stringify(f.order.erp_live)]);
+  const wrap=db=>({query:(...args)=>db.query(...args)}),run=()=>engine.transaction(tx=>commitMissingDraftRecovery(wrap(tx),f.order,next,{resolutionId:'r1'}));
+  await engine.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{phase}','\"changed\"')");await assert.rejects(run(),/modifié/);assert.equal((await engine.query('SELECT count(*) n FROM audit')).rows[0].n,0);
+  await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify(f.order.erp_live)]);await engine.exec("INSERT INTO carrier_documents VALUES('o1')");await assert.rejects(run(),/document transport/);assert.equal((await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live.phase,'publishing_bl');
+  await engine.exec('DELETE FROM carrier_documents');await run();const saved=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;assert.equal(saved.phase,'bc_created');assert.equal(saved.bl,undefined);assert.equal(saved.missingDraftRecoveries[0].retiredDraft.id,9);assert.equal((await engine.query('SELECT count(*) n FROM audit')).rows[0].n,1);
+ }finally{await engine.close();}
+});
