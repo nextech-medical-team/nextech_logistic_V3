@@ -188,9 +188,13 @@ body{font-size:13px}main input,main select,main button,dialog input,dialog selec
 .resolution-dialog{scroll-padding-top:120px;scroll-padding-bottom:160px}
 
 
-/* Keep order columns readable on small screens; scroll only inside the table. */
+/* Keep every order column inside the available width, with either navigation state. */
 #view-orders .table-wrap{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
-#view-orders table,#view-orders table.orders-with-margins{min-width:1200px!important}
+#view-orders table,#view-orders table.orders-with-margins{width:100%;min-width:0!important;table-layout:fixed}
+#view-orders .order-processing{min-width:0;max-width:100%;overflow-wrap:anywhere}
+#view-orders .orders-with-margins td small{max-width:100%;overflow-wrap:anywhere}
+#view-orders .orders-with-margins td .margin-chip{overflow-wrap:anywhere}
+html{scrollbar-gutter:stable}
 
 /* A cancelled BL stays red even when its order remains active. */
 #view-orders #order-rows td.aligned-status-cell>.erp-status[data-status="cancelled"]{background:#fee2e2!important;color:#991b1b!important;border-color:#dc2626!important}
@@ -211,3 +215,26 @@ body{font-size:13px}main input,main select,main button,dialog input,dialog selec
 /* The Shopify import screen only shows its own import information. */
 main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 #view-import-shopify #import-format-help{display:none!important}
+:where(aside nav) .receipt-navigation{display:block;padding:12px 14px;color:inherit;font-size:14px;text-decoration:none;border-radius:8px}
+:where(aside nav) .receipt-navigation:hover{background:#edf5f5}
+
+/* Compact fixed-size controls must also fit the narrowest column. */
+#view-orders #order-rows td button.refresh-circle.refresh-circle{width:min(32px,100%)!important;min-width:0!important;max-width:100%!important}
+#view-orders .orders-with-margins input[type=checkbox]{width:min(15px,100%);max-width:100%}
+
+#view-orders .orders-with-margins [data-country-margin] .order-country{flex-wrap:wrap;overflow-wrap:anywhere}
+
+#view-orders table.orders-with-margins th[data-column="select"]{width:28px!important}
+
+/* Narrow screens show every field as a labelled block, without horizontal scrolling. */
+@media(max-width:900px){
+ #view-orders table.orders-with-margins,#view-orders .orders-with-margins tbody,#view-orders .orders-with-margins tr{display:block;width:100%}
+ #view-orders .orders-with-margins thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ #view-orders .orders-with-margins td:not(.total-quantity-column){display:block;width:100%!important;padding:10px 12px!important;overflow-wrap:anywhere}
+ #view-orders .orders-with-margins td[data-order-column]::before{content:attr(data-order-column);display:block;font-weight:700;color:#24444e;margin-bottom:6px}
+ #view-orders .orders-with-margins td:first-child::before{content:"Sélection"}
+ #view-orders .orders-with-margins tbody tr{border-bottom:3px solid #cadbd5}
+ #view-orders .orders-with-margins [data-country-margin] .order-country{flex-wrap:wrap}
+}
+
+#view-orders #order-rows [data-order-date] :is(span,small){white-space:normal!important;overflow-wrap:anywhere}

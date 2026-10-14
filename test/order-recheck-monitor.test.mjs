@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {monitoringObservation,localObservationPatch,initializeOrderRecheckMonitor,orderRecheckMonitor,recheckCadence} from '../src/order-recheck-monitor.mjs';
+import {usesRecordedBc,recordedBcFingerprint} from '../src/existing-bc-execution.mjs';
 
 test('local diagnostic writes preserve newer external evidence and independent sweep requests',()=>{
  const old={lastExternalCheck:'2026-10-11T10:00:00Z',auditRequested:true,externalResult:'previous'},fresh={lastExternalCheck:'2026-10-11T11:00:00Z',auditRequested:false,externalResult:'complete'};
@@ -47,8 +48,9 @@ test('commercial platform states do not create a diagnostic or next-step suspens
 
 async function confirmedRead(db,id,concordant=true){
  const order=(await db.query('SELECT * FROM orders WHERE id=$1',[id])).rows[0];
- const comparison={concordant,checkedAt:new Date().toISOString(),mappingFingerprint:await currentMappingFingerprint(db,order)};
- await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bcComparisonRefresh}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(comparison)]);
+ const frozen=usesRecordedBc(order),actual={...order.erp_live.bc,line_items:[{type:'normal',quantity:1,variant:{id:'100',sku:'ACCEPTED-BC'},location:{id:'1'}}]};
+ const comparison={concordant,checkedAt:new Date().toISOString(),mappingFingerprint:frozen?recordedBcFingerprint(actual):await currentMappingFingerprint(db,order),authority:frozen?'recorded_bc':'source'};
+ await db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[id,JSON.stringify({...(frozen?{bc:actual}:{}),bcComparisonRefresh:comparison})]);
  return {comparison};
 }
 
@@ -64,6 +66,22 @@ async function fixture(){
  INSERT INTO lines(id,order_id,source_sku,quantity) VALUES('1','a','X',1),('2','b','X',1);`);
  await initializeOrderRecheckMonitor(db,{afterPublication:true});return db;
 }
+for(const channel of ['temu','amazon','shopify'])test(channel+' recorded BC monitor reads documents without old mapped SKU validation or artificial source progress',async()=>{
+ const db=await fixture();try{
+  await db.query("UPDATE orders SET channel=$1,erp_live='{\"bc\":{\"id\":\"1\"},\"phase\":\"bc_created\"}'",[channel]);await db.query("INSERT INTO mappings VALUES($1,'X','UNRELATED',1,999)",[channel]);let docs=0;
+  const m=orderRecheckMonitor(db,{}, {canResume:()=>false,readProduct:()=>assert.fail('Recorded BC must not be tested against source/global mapping'),readDocuments:async(_db,_api,id)=>{docs++;return confirmedRead(db,id);}});
+  await m.runLocal();await m.runExternal();assert.equal(docs,2);assert.equal((await db.query('SELECT count(*)::int n FROM order_recheck_resources')).rows[0].n,0);
+  const base={channel,issue:'BC · Codes TVA Erplain différents de la source ; produits et quantités identiques',erp_live:{bc:{id:'1'},mappingPreparationFingerprint:'a'.repeat(64)},mapping_lines:[{sku:'OLD',quantity:1}]};
+  const first=monitoringObservation(base,{},1000),next=monitoringObservation({...base,mapping_lines:[{sku:'OTHER',quantity:999}]},first,2000);assert.equal(next.progress,first.progress);assert.equal(next.lastProgress,first.lastProgress);assert.match(next.nextStep,/sans comparaison de plateforme/);
+ }finally{await db.close();}
+});
+test('changed recorded BC document after refresh cannot enqueue an automatic resume',async()=>{
+ const db=await fixture();try{
+  await db.query(`UPDATE orders SET issue='Reprise de preparation',resolution_pending_resume=true,erp_live='{"phase":"bc_created","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
+  const m=orderRecheckMonitor(db,{}, {readProduct:()=>assert.fail('No mapped SKU check'),readDocuments:async(_db,_api,id)=>{const proof=await confirmedRead(db,id);await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bc,line_items,0,quantity}','2') WHERE id=$1",[id]);return proof;}});
+  await m.runLocal();await m.runExternal();assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);
+ }finally{await db.close();}
+});
 test('real PostgreSQL triggers enqueue immediate checks; periodic checks persist and SKU reads are shared across orders and runs',async()=>{
  const db=await fixture();try{
   let reads=0,docs=0,active=0,max=0;
@@ -104,7 +122,7 @@ test('a slow external read never delays local checks; automatic resume respects 
  const db=await fixture();try{
  await db.query(`UPDATE orders SET issue='Reprise historique : BL non cree',erp_live='{"phase":"historical_review","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
  let release,started;const begin=new Promise(r=>started=r),pause=new Promise(r=>release=r);let allow=false;
- const m=orderRecheckMonitor(db,{}, {canResume:()=>allow,readProduct:async()=>{started();await pause;return {usable:true,variant:{sku:'X'},status:'active'};},cacheProduct:async()=>{},readDocuments:async(_db,_api,id)=>confirmedRead(db,id)});
+ const m=orderRecheckMonitor(db,{}, {canResume:()=>allow,readProduct:()=>assert.fail('No source SKU test after recorded BC'),cacheProduct:async()=>{},readDocuments:async(_db,_api,id)=>{started();await pause;return confirmedRead(db,id);}});
  await m.runLocal();const reading=m.runExternal();await begin;
  await db.query("INSERT INTO correction_jobs VALUES('a','complete','{}',null)");await m.runLocal();
  assert.equal((await db.query("SELECT requested=checked ok FROM order_recheck_monitor WHERE order_id='a'")).rows[0].ok,true);
@@ -132,7 +150,7 @@ test('bounded resource batches keep unread SKUs due and eventually cover every o
  await db.query("UPDATE lines SET source_sku='Y' WHERE order_id='b'");await db.query("INSERT INTO orders(id,reference,issue) VALUES('c','C','SKU Erplain introuvable')");await db.query("INSERT INTO lines(id,order_id,source_sku,quantity) VALUES('3','c','Z',1)");
  const reads=[];const m=orderRecheckMonitor(db,{}, {maxSkuReads:2,readProduct:async(api,sku)=>{reads.push(sku);return {usable:false,status:'missing'};},readDocuments:()=>assert.fail('SKU-only problem must not search unrelated documents')});
  await m.runLocal();await m.runExternal();assert.equal(reads.length,2);
- const pending=(await db.query("SELECT order_id,state FROM order_recheck_monitor WHERE state->>'externalResult' LIKE '%partiels%'")).rows;assert.equal(pending.length,1);
+ const pending=(await db.query("SELECT order_id,state FROM order_recheck_monitor WHERE state->>'externalStatus'='partial'")).rows;assert.equal(pending.length,1);assert.match(pending[0].state.externalResult,/budget de lectures SKU/);
  await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second' WHERE order_id=$1",[pending[0].order_id]);await m.runExternal();assert.deepEqual(reads.sort(),['X','Y','Z']);
  }finally{await db.close();}
 });
@@ -177,11 +195,11 @@ for(const scenario of ['pending-existing','pending-no-bc','pending-no-resume','p
  }finally{await db.close();}
 });
 
-test('mapping changed after document refresh cannot enqueue an automatic resume',async()=>{
+test('local source quantities changed after document refresh cannot veto accepted BC resume',async()=>{
  const db=await fixture();try{
  await db.query(`UPDATE orders SET issue='Reprise de preparation',resolution_pending_resume=true,erp_live='{"phase":"bc_created","bc":{"id":"1"},"pricing":{"status":"verified"}}'`);
  const m=orderRecheckMonitor(db,{}, {readProduct:async()=>({usable:true,status:'active',variant:{sku:'X'}}),cacheProduct:async()=>{},readDocuments:async(_db,_api,id)=>{const proof=await confirmedRead(db,id);await db.query('UPDATE lines SET quantity=quantity+1 WHERE order_id=$1',[id]);return proof;}});
- await m.runLocal();await m.runExternal();assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,0);
+ await m.runLocal();await m.runExternal();assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE action='resume-erp'")).rows[0].n,2);
  }finally{await db.close();}
 });
 
@@ -227,7 +245,7 @@ for(const scenario of ['valid','stale','future','changed-mapping','stock-review'
   const m=orderRecheckMonitor(db,{},options);await m.runLocal();await m.runLocal();
   await continuePreparationFromFreshRead(db,'a',options);
   const jobs=(await db.query("SELECT * FROM resolution_jobs WHERE request_id LIKE 'fresh-bc-continuation-%'")).rows;
-  assert.equal(jobs.length,scenario==='valid'?1:0);
+  assert.equal(jobs.length,['valid','changed-mapping'].includes(scenario)?1:0);
   if(jobs.length){assert.equal(jobs[0].action,'resume-erp');assert.equal(jobs[0].result.erpOnly,true);assert.equal(jobs[0].result.existingLabelsPreserved,true);assert.equal(jobs[0].payload.resumeAfter,true);assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='resolution.requested'")).rows[0].n,1);}
   assert.deepEqual((await db.query("SELECT * FROM orders WHERE id='a'")).rows[0],before);
   assert.deepEqual((await db.query("SELECT packages FROM temu_label_jobs WHERE reference='A'")).rows[0].packages,['existing-package']);
@@ -253,10 +271,31 @@ for(const scenario of ['valid','manual','stock-review','stale-stock','mapping-ch
   if(scenario==='suspended')await db.query("UPDATE orders SET suspension='{\"active\":true}' WHERE id='a'");
   const before=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0],labels=(await db.query("SELECT * FROM temu_label_jobs WHERE reference='A'")).rows;
   const options={now:()=>at,canResume:()=>scenario!=='disabled'};const m=orderRecheckMonitor(db,{},options);await m.runLocal();await m.runLocal();await releaseCompletedContinuationForPurchase(db,'a',options);
-  const after=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0];assert.equal(after.resolution_pending_resume,scenario!=='valid');
+  const after=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0];assert.equal(after.resolution_pending_resume,!['valid','mapping-changed','shipment-changed'].includes(scenario));
   assert.deepEqual({...after,resolution_pending_resume:true},before);assert.deepEqual((await db.query("SELECT * FROM temu_label_jobs WHERE reference='A'")).rows,labels);
-  assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='preparation.continuation_completed'")).rows[0].n,scenario==='valid'?1:0);
+  assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='preparation.continuation_completed'")).rows[0].n,['valid','mapping-changed','shipment-changed'].includes(scenario)?1:0);
   if(scenario==='existing-pdf')assert.equal((await db.query("SELECT encode(pdf,'hex') bytes FROM temu_label_documents")).rows[0].bytes,'010203');
   assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE status IN ('queued','running','waiting')")).rows[0].n,0);
  }finally{await db.close();}
+});
+
+test('external document budgets rotate attempts and retain precise incomplete coverage',async()=>{
+ const db=await fixture();try{
+ await db.query("UPDATE orders SET erp_live='{\"bc\":{\"id\":\"1\"}}'");
+ await db.query("INSERT INTO orders(id,reference,issue,erp_live) VALUES('c','C','SKU Erplain introuvable','{\"bc\":{\"id\":\"2\"}}')");
+ await db.query("INSERT INTO lines(id,order_id,source_sku,quantity) VALUES('3','c','X',1)");
+ const documents=[],m=orderRecheckMonitor(db,{}, {maxDocReads:1,readProduct:async()=>({usable:true,status:'active',variant:{sku:'X'}}),cacheProduct:async()=>{},readDocuments:async(_db,_api,id)=>{documents.push(id);return {};},reconcilePreparation:async()=>({})});
+ await m.runLocal();
+ for(let i=0;i<3;i++){await db.query("UPDATE order_recheck_monitor SET next_external=now()-interval '1 second'");await m.runExternal();}
+ assert.deepEqual([...new Set(documents)].sort(),['a','b','c']);
+ const rows=(await db.query('SELECT state FROM order_recheck_monitor')).rows;
+ assert.ok(rows.every(r=>r.state.lastExternalCheck));assert.ok(rows.some(r=>r.state.externalStatus==='partial'&&r.state.externalPending.documents===true));
+ assert.ok(rows.filter(r=>r.state.externalStatus==='partial').every(r=>r.state.externalResult.includes('BC/BL')));
+ }finally{await db.close();}
+});
+
+test('actual carrier stages count as progress while polling timestamps do not',()=>{
+ const now=Date.now(),o={channel:'shopify',label_status:'production_pending',erp_live:{phase:'bl_ready',bc:{id:'bc'},bl:{id:'bl'}},carrier_job:{status:'pending'}};
+ const a=monitoringObservation(o,{},now),b=monitoringObservation({...o,carrier_job:{status:'creating'}},a,now+1000),c=monitoringObservation({...o,carrier_job:{status:'creating',updated_at:new Date(now+5000)}},b,now+5000);
+ assert.match(a.result,/worker/);assert.match(b.result,/cours/);assert.notEqual(a.progress,b.progress);assert.equal(b.progress,c.progress);assert.equal(b.lastProgress,c.lastProgress);
 });

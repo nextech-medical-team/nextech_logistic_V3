@@ -5,7 +5,7 @@ const reason='TEMU · Autorisation API des montants manquante (3000032) · Bouti
 async function fixture(){const db=new PGlite();await db.waitReady;await db.exec(`
 CREATE TABLE orders(id text PRIMARY KEY,reference text,channel text,archived boolean,source_payload jsonb,erp_live jsonb,suspension jsonb,issue text,resolution_pending_resume boolean,processing_priority_at timestamptz,tracking_status text,label_status text,transport_choice text);
 CREATE TABLE erp_live_jobs(order_id text,status text,error text,state_since timestamptz,updated_at timestamptz);
-CREATE TABLE carrier_jobs(order_id text,status text,error text,state_since timestamptz,updated_at timestamptz,carrier text,stock_override jsonb,attempts integer);
+CREATE TABLE carrier_jobs(order_id text,status text,error text,state_since timestamptz,updated_at timestamptz,carrier text,stock_override jsonb,attempts integer,manual_bl_request jsonb,creation_id text);
 CREATE TABLE resolution_jobs(order_id text,status text,error text,state_since timestamptz,updated_at timestamptz,created_at timestamptz,action text,result jsonb,stage text);
 CREATE TABLE temu_label_jobs(reference text,status text,error text,state_since timestamptz,updated_at timestamptz);
 CREATE TABLE temu_sync_jobs(reference text,status text,started_at timestamptz,updated_at timestamptz);

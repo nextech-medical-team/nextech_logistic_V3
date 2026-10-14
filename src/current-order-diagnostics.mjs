@@ -1,3 +1,4 @@
+import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
 import {hasCompleteOrderDocuments} from './complete-order-documents.mjs';
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
@@ -38,7 +39,21 @@ export function paidDeferredBillingDiagnosis(o){
  const matches=typeof o.issue==='string'&&(o.issue===d?.deferredReason||typeof d?.deferredReason==='string'&&o.issue===d.deferredReason.replace(/ ; TEMU · Quota partagé : lecture différée$/,''));
  return d?.kind==='temu_address_masking'&&d.verified===true&&d.deferredBilling===true&&o.invoice_status==='paid'&&matches&&(!d.deferredLabelRead||!!o.temu_job);
 }
+// A past PDF printing refusal is documentary history once the shipment is
+// delivered and registered. Never reopen preparation or fetch a new label for it.
+export function projectTemuPdfArchiveWarning(o){
+ if(o.channel!=='temu'||o.tracking_status!=='delivered'||o.source_payload?.externalLabel?.active!==true)return;
+ const warnings=[];
+ for(const [target,key] of [[o,'issue'],[o,'resolution_error'],[o.erp_live_job,'error'],[o.temu_job,'error'],...(o.resolution_actions||[]).map(j=>[j,'error'])]){
+  const reason=target?.[key];
+  if(typeof reason!=='string'||!/^(?:TEMU\s*[·:]\s*)?(?:Étiquette TEMU déjà achetée\s*:\s*PDF original indisponible|PDF (?:non réimprimable|indisponible))/i.test(reason)||/\b(?:stock|facture|paiement|BC|BL|annulation|préparation)\b/i.test(reason))continue;
+  if(reason.split(';').slice(1).some(part=>!/^conserver cette expédition\.?$/i.test(part.trim())))continue;
+  warnings.push(reason);target[key]=null;
+ }
+ if(warnings.length)o.temu_pdf_archive_note=[...new Set(warnings)].join(' ; ');
+}
 export function projectCurrentDiagnostics(o){
+ projectTemuPdfArchiveWarning(o);
  if(hasCompleteOrderDocuments(o)){
   for(const [target,key] of [[o,'issue'],[o,'resolution_error'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o.pending_equivalent,'error'],...(o.resolution_actions||[]).map(job=>[job,'error']),...(o.sku_lines||[]).map(line=>[line,'catalog_issue'])])if(target)target[key]=null;
   return o;
@@ -70,7 +85,7 @@ export function projectCurrentDiagnostics(o){
  }
  for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error']])if(target)target[key]=currentPlatformModificationReason(o,withoutSharedParcelReason(target[key]));
  const p=o.erp_live?.pricing,s=o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue;
- const proof=o.channel==='temu'&&o.erp_live?.bc?.id&&Number.isFinite(p?.confirmed?.total)&&Number.isFinite(p?.confirmed?.sourceTotal)&&p?.status==='verified'&&!p.error&&p.confirmed?.authority==='erplain'&&p.commercialBasis?.field==='estimatedRevenue'&&s&&p.commercialBasis.sourceEstimatedRevenue&&p.commercialBasis.sourceEstimatedRevenue.amount===s.amount&&p.commercialBasis.sourceEstimatedRevenue.currency===s.currency;
+ const proof=usesRecordedBc(o)?true:o.channel==='temu'&&o.erp_live?.bc?.id&&Number.isFinite(p?.confirmed?.total)&&Number.isFinite(p?.confirmed?.sourceTotal)&&p?.status==='verified'&&!p.error&&p.confirmed?.authority==='erplain'&&p.commercialBasis?.field==='estimatedRevenue'&&s&&p.commercialBasis.sourceEstimatedRevenue&&p.commercialBasis.sourceEstimatedRevenue.amount===s.amount&&p.commercialBasis.sourceEstimatedRevenue.currency===s.currency;
  if(proof){const reason=o.erp_live?.phase==='historical_review'&&o.resolution_pending_resume?'Reprise historique à vérifier : BL non créé':null;for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o,'resolution_error']])if(target&&oldFinanceErrors.includes(target[key]))target[key]=reason;}
  for(const [target,key] of [[o,'issue'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o,'resolution_error']])if(target)target[key]=currentCarrierReason(o,target[key]);
  if(Array.isArray(o.resolution_actions))o.resolution_actions=o.resolution_actions.map(job=>job?{...job,error:currentCarrierReason(o,currentPlatformModificationReason(o,job.error))}:job);

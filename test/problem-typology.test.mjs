@@ -1,3 +1,4 @@
+import {pathToFileURL} from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -45,6 +46,7 @@ async function route(path,query){
  const rows=Array.from({length:120},(_,i)=>({id:String(i),issue:i>=100?'Commande déjà expédiée sur la plateforme':'',label_status:'pending',source_payload:{},sku_lines:[]}));
  let out,sql,statsIds;
  const db={query:async(q,args)=>{if(q.startsWith('SELECT id FROM orders'))return {rows:rows.filter(o=>o.issue).map(o=>({id:o.id}))};sql={q,args};return {rows:structuredClone(rows)};}};
+ db.readTransaction=read=>read(db);
  await execute(path,{method:'GET'},new URL('https://example.test'+path+'?'+query),db,orderQuery,'NULL','NULL',async()=>{},o=>o,{snapshot:async()=>({configured:true})},{status:()=>({})},selectProblemOrders,paginateProblemOrders,currentProblemClassifier,async(_db,_params,ids)=>{statsIds=ids;return {transportStats:[],summary:{total:ids.length}};},async()=>({transportStats:[],summary:{total:120}}),(_res,status,data)=>{assert.equal(status,200);out=data;},{});
  return {out,sql,statsIds};
 }
@@ -100,4 +102,41 @@ test('missing BL validation is not a stock shortage, including stored legacy ove
  }
  const actual=classify({id:'shortage',channel:'temu',erp_live_job:{status:'review',error:'BL bloqué — stock insuffisant : SKU : 1 nécessaires, 0 utilisables, manque 1'}});
  assert.ok(actual.some(p=>p.type==='stock'&&p.label==='Bloqué : stock insuffisant'));
+});
+
+test('suspension and cancelled BC retire all problem labels and fallback without changing data',()=>{
+ const classify=currentProblemClassifier(),reason='BC · Statut modifié : contrôler avant reprise';
+ const inactive=[{id:'suspended',suspension:{active:true,note:'Attente client'}},{id:'cancelled-bc',erp_live:{bc:{id:1926983,status:'cancelled'}}},{id:'confirmed-cancellation',suspension:{erplainCancellation:{status:'complete'}}}].map(o=>({...o,label_status:'simulated',tracking_status:'not_shipped',issue:reason,resolution_error:reason,lines:[]}));
+ for(const o of inactive){const before=JSON.stringify(o);assert.equal(classify(o).length,0);assert.equal(JSON.stringify(o),before);}
+ const active={id:'active',label_status:'simulated',issue:reason,lines:[]};
+ const selected=selectProblemOrders([...inactive,active],['BC · Statut modifié : contrôler avant reprise'],()=>[{label:'BC · Statut modifié : contrôler avant reprise'}],inactive.map(o=>o.id));
+ assert.deepEqual(selected.rows.map(o=>o.id),['active']);assert.equal(selected.problemTypes[0].count,1);
+ assert.equal(selectProblemOrders(inactive,[WITHOUT_DIAGNOSTIC],()=>[],inactive.map(o=>o.id)).total,0);
+ // A single cancelled partial BL must not hide a still-active order/remainder.
+ const partial={id:'partial',erp_live:{bc:{status:'active'},bl:{status:'cancelled'}},label_status:'blocked',issue:'Stock insuffisant',lines:[]};assert.ok(classify(partial).length>0);
+});
+
+test('deferred problems keep their real diagnostics but disappear from active counts and fallback',()=>{
+ const o={id:'deferred',suspension:{problemDeferral:{active:true}},label_status:'blocked',issue:'Stock insuffisant',lines:[]};
+ const before=JSON.stringify(o);assert.ok(currentProblemClassifier()(o).length>0);
+ assert.equal(selectProblemOrders([o],['Bloqué : stock insuffisant'],currentProblemClassifier(),['deferred']).total,0);
+ assert.equal(selectProblemOrders([o],[WITHOUT_DIAGNOSTIC],()=>[],['deferred']).total,0);
+ assert.equal(JSON.stringify(o),before);
+});
+
+test('active problem gate executes before pagination and cannot be bypassed by combined status filters',async()=>{
+ const {activeProblemOrderSql}=await import('../src/order-query.mjs');
+ const {PGlite}=await (process.env.PGLITE_MODULE?import(pathToFileURL(process.env.PGLITE_MODULE).href):import('@electric-sql/pglite'));
+ const db=new PGlite();
+ try{
+  await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,archived boolean DEFAULT false,suspension jsonb DEFAULT '{}',label_status text DEFAULT 'simulated',tracking_status text DEFAULT 'not_shipped',erp_live jsonb DEFAULT '{}');`);
+  const fixtures=[['active',{},{}],['suspended',{active:true},{}],['cancelled-bc',{}, {bc:{status:'cancelled'}}],['confirmed',{erplainCancellation:{status:'complete'}},{}],['review',{erplainCancellation:{status:'review'}},{}],['reactivated',{active:false},{}],['partial',{}, {bc:{status:'active'},bl:{status:'cancelled'}}]];
+  for(const [id,s,erp]of fixtures)await db.query('INSERT INTO orders(id,suspension,erp_live) VALUES($1,$2,$3)',[id,JSON.stringify(s),JSON.stringify(erp)]);
+  await db.exec("INSERT INTO orders(id,label_status) VALUES('cancelled-label','cancelled');INSERT INTO orders(id,tracking_status) VALUES('cancelled-tracking','cancelled');INSERT INTO orders(id,archived) VALUES('archived',true)");
+  const rows=(await db.query('SELECT id FROM orders WHERE '+activeProblemOrderSql+' ORDER BY id')).rows.map(o=>o.id);assert.deepEqual(rows,['active','partial','reactivated','review']);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM orders WHERE '+activeProblemOrderSql)).rows[0].n,4);
+  assert.deepEqual((await db.query('SELECT id FROM orders WHERE '+activeProblemOrderSql+' ORDER BY id LIMIT 2 OFFSET 2')).rows.map(o=>o.id),['reactivated','review']);
+  for(const params of ['status=__problems','status=__problems,__suspended','problem=stock','problem-label=Stock'])assert.ok(orderQuery(new URLSearchParams(params)).where.includes(activeProblemOrderSql));
+  for(const params of ['', 'status=__suspended','search=cancelled-bc'])assert.ok(!orderQuery(new URLSearchParams(params)).where.includes(activeProblemOrderSql));
+ }finally{await db.close();}
 });

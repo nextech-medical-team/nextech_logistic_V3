@@ -87,9 +87,12 @@ export async function findRecordedSubstitution(db,o,b,bc,api){
  const failed=(await db.query("SELECT id,payload,status,error,created_at FROM resolution_jobs WHERE order_id=$1 AND action='replace-equivalent' AND (request_id<>$2 OR payload ? 'substitutionAttempt') AND (payload ? 'substitutionAttempt' OR status='complete' OR error='Frais de livraison modifiés : rapprochement requis' OR error LIKE 'Remplacement historique à rapprocher : %' OR error LIKE 'Remplacement partiel à rapprocher : %') ORDER BY created_at DESC LIMIT 1",[o.id,b.requestId||''])).rows[0];
  const attempt=readSubstitutionAttempt(failed,o);
  if(attempt){
-  if(failed.status!=='review'||!sameRequest(failed.payload,b))throw Error('Rapprocher d’abord le remplacement interrompu enregistré sur ce BC, avant de choisir un autre produit.');
+  // A committed replacement can enter review when subsequent stock/BL checks
+  // fail. Prove that replacement before allowing a different product to change.
+  const nextProduct=attempt.phase==='local_committed'&&failed.payload.sku!==b.sku;
+  if(failed.status!=='review'||!sameRequest(failed.payload,b)&&!nextProduct)throw Error('Rapprocher d’abord le remplacement interrompu enregistré sur ce BC, avant de choisir un autre produit.');
   if(bc.shipping_orders?.paginatorInfo?.hasMorePages!==false||bc.line_items?.some(l=>Number(l.discount)||Number(l.discount_rule_amount)||Number(l.ecotax)||l.type==='normal'&&(l.variant?.active!==true||l.variant?.product?.active!==true)))throw Error('Remplacement interrompu : contenu du BC incomplet ou modifié, rapprochement requis.');
-  const request={...failed.payload,scope:'order'},body={...b,scope:'order'};
+  const request={...failed.payload,scope:'order'},body={...(nextProduct?failed.payload:b),scope:'order'};
   const recovery=recordedSubstitutionPlan(bc,body,{...failed,payload:request,status:'review',error:'Frais de livraison modifiés : rapprochement requis'},{payload:request,status:'complete',result:attempt.plan},o);
   if(!recovery)throw Error('Remplacement interrompu : résultat Erplain non confirmé, aucune seconde écriture autorisée.');
   delete recovery.localCommitted;delete recovery.completionResult;
@@ -98,6 +101,8 @@ export async function findRecordedSubstitution(db,o,b,bc,api){
    if(o.erp_live?.equivalentAttemptId!==attempt.requestId||signature(rows.map(l=>({sku:l.target_sku||l.source_sku,quantity:l.target_quantity??l.quantity})))!==signature(recovery.expected)||!attempt.completionResult)throw Error('Synchronisation locale du remplacement à rapprocher.');
    recovery.localCommitted=true;recovery.completionResult=attempt.completionResult;
   }
+  // Keep the prior preparation diagnosis; only permit a fresh preview here.
+  if(nextProduct)return null;
   return {...recovery,recordedPermanent:attempt.permanent,recordedMappingBefore:attempt.mappingBefore,attemptRecovery:true};
  }
  const historical=String(failed?.error||'').startsWith('Remplacement historique à rapprocher : ');

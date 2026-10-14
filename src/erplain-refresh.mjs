@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {targetedOrderService} from './erplain-targeted-orders.mjs';
 import {initializeManualReview,queueManualReview,manualReviewService} from './erplain-manual-validation.mjs';
 import {manualOrderFields,listManualOrders,manualImportIssue} from './manual-erplain-orders.mjs';
@@ -115,7 +116,7 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
     if(section==='orders'){
      const local=(await db.query('SELECT target_sku sku,target_quantity quantity FROM lines WHERE order_id=$1',[o.id])).rows;
      const sum=ls=>{const m=new Map();for(const l of ls){const sku=l.sku||l.variant?.sku;m.set(sku,(m.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...m].sort());};
-     if(sum(local)!==sum(shippingProductLines(document.line_items)))issues.push('BC Erplain modifié : produits ou quantités différents de V3');
+     if(!usesRecordedBc(o)&&sum(local)!==sum(shippingProductLines(document.line_items)))issues.push('BC Erplain modifié : produits ou quantités différents de V3');
      if(hasLabel&&!same(orderAddress(document.shipping_address,o.recipient),orderAddress({label:o.address.name,address_1:o.address.street,city:o.address.city,postal_code:o.address.postal,country:o.address.country,phone:o.address.phone},o.recipient)))issues.push('Adresse Erplain modifiée : étiquette existante à vérifier');
      if(!hasLabel&&!o.partial_mode&&!issues.length){try{assertFullOrderStock(document.line_items||[]);}catch(e){issues.push(e.message);}}
     }

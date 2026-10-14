@@ -1320,7 +1320,9 @@ function openStockEquivalent(ctx,problem){
 
 
 
- const pending=ctx.order.pending_equivalent;if(pending?.sku===sku){form.elements.scope.value=pending.scope;form.elements.replacementSku.value=pending.replacementSku;form.elements.replaceQuantity.value=pending.replaceQuantity;form.elements.replacementQuantity.value=pending.replacementQuantity;}
+ const pending=ctx.order.pending_equivalent;
+ if(pending?.previewJobId){const abandon=document.createElement('button');abandon.type='button';abandon.textContent='Abandonner l’équivalent';abandon.onclick=async()=>{abandon.disabled=true;try{const result=await d.job(ctx,'abandon-equivalent','stock',{previewJobId:pending.previewJobId});if(result?.abandoned){d.modal.close();await orders();await openCorrection(ctx.order.id);}}catch{}finally{abandon.disabled=false;}};d.body.prepend(abandon);}
+ if(pending?.sku===sku){form.elements.scope.value=pending.scope;form.elements.replacementSku.value=pending.replacementSku;form.elements.replaceQuantity.value=pending.replaceQuantity;form.elements.replacementQuantity.value=pending.replacementQuantity;}
 
 
 
@@ -1486,3 +1488,17 @@ async function openExternalLabel(id){
   }catch(e){form.querySelector('[data-feedback]').textContent=e.message;busy=false;button.disabled=false;}};
  }catch(e){alert(e.message);}
 }
+
+// A BL is sufficient for this explicit label action; preparation diagnostics remain visible.
+function addDirectBlLabelButtons(){
+ for(const row of document.querySelectorAll('#order-rows tr')){
+  const refresh=row.querySelector('[data-erplain-document-kind="bl"]');
+  const status=refresh?.parentElement.querySelector('.erp-status');
+  if(!refresh||!status||['unknown','cancelled'].includes(status.dataset.status)||row.querySelector('[data-direct-bl-label]')||row.querySelector('[data-temu-order],[data-prepare-partial],.pdf-link')||row.classList.contains('order-cancelled'))continue;
+  const resume=row.querySelector('[data-resume-order]');if(!resume)continue;
+  const b=document.createElement('button');b.type='button';b.className='badge';b.dataset.directBlLabel=refresh.dataset.erplainDocumentRefresh;b.textContent='Générer l’étiquette';resume.before(b);
+ }
+}
+new MutationObserver(addDirectBlLabelButtons).observe(document.getElementById('order-rows'),{childList:true});
+addDirectBlLabelButtons();
+document.addEventListener('click',async event=>{const b=event.target.closest?.('[data-direct-bl-label]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();if(b.disabled)return;b.disabled=true;try{const r=await api('/api/carriers/from-bl',{id:b.dataset.directBlLabel});flash(r.status==='ready'?'Étiquette déjà disponible':'Génération de l’étiquette lancée');await orders();}catch(e){flash(e.message,true);b.disabled=false;}},true);

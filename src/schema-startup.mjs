@@ -1,10 +1,20 @@
 import {initializeOperations} from './runtime.mjs';
 import {installEventTriggers} from './live-events.mjs';
 const version='application-20261005-robustness-5';
+const carrierBlRequestVersion='carrier-manual-bl-request-20261013-1';
 export async function initializeAppSchema(db,initializers,{background=false}={}){
  await db.withLocks(['schema'],async()=>{
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',[version])).rows.length){
    await db.transaction(async tx=>{tx.recoverInterrupted=false;await initializeOperations(tx);for(const initialize of initializers)await initialize(tx);await installEventTriggers(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',[version]);});
+  }
+  // Existing installations keep the application marker when new initializers
+  // gain columns. Apply this additive migration without replaying initializers
+  // or changing any queued/creating shipment or external-operation state.
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',[carrierBlRequestVersion])).rows.length){
+   await db.transaction(async tx=>{
+    await tx.exec('ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS manual_bl_request JSONB');
+    await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',[carrierBlRequestVersion]);
+   });
   }
  });
  if(background)await recoverInterruptedJobs(db);

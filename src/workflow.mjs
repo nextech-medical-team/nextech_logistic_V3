@@ -104,7 +104,8 @@ export async function runJobs(db,limit=25,{carriersEnabled=false}={}){
 
             await prepareLabel(tx,o);
 
-            if(carriersEnabled)await tx.query("INSERT INTO carrier_jobs(order_id,carrier,environment) SELECT id,CASE WHEN carrier LIKE 'gls%' THEN 'gls' ELSE carrier END,'production' FROM orders WHERE id=$1 AND channel<>'temu' AND erp_live->'bc'->>'id' IS NOT NULL AND carrier IN ('gls','gls_pharma','gls_shop','gofo') ON CONFLICT DO NOTHING",[o.id]);
+            // Production admission follows in reconcileAutomaticTest, after BL proof.
+            // Do not create a transport job from a local simulation or BC alone.
 
           }
 

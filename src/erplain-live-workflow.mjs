@@ -1,4 +1,7 @@
+import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
+import {retirePostBcCommercialControls} from './post-bc-control-recovery.mjs';
 import {invoiceCustomerType} from './invoice-customer-policy.mjs';
+import {usesRecordedBc,readRecordedBc,recordedBcFingerprint,verifyRecordedOrSourceTotals,withRecordedOrSourceGuard,assertRecordedBc} from './existing-bc-execution.mjs';
 import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
 import {ensureMissingProduct,reconcileCreationAttempt,sourceProductName,readCreationSku,createBlockedMissingProducts,productCreationBlock} from './missing-product-creation.mjs';
@@ -30,7 +33,7 @@ import {publishHistoricalBl,assertHistoricalBlNumber} from './bl-numbering.mjs';
 import {publishIncrementalBc} from './bc-numbering.mjs';
 import {ensureTemuBcPricing,temuBcPricingLoader} from './temu-bc-pricing.mjs';
 import {loadShopifyConfig,shopifyCollector} from './marketplace-collection.mjs';
-import {buildBcPricing,verifyBcPricing,verifySourceCommercialTotals,withSourceCommercialGuard,sourceCurrency} from './bc-pricing.mjs';
+import {buildBcPricing,verifyBcPricing,verifySourceCommercialTotals,sourceCurrency} from './bc-pricing.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
 import {assertBcLines,bcAddresses,preparationBlock,uncertainBc} from './bc-authorization.mjs';
 import {initializePriority,erplainEligible,priorityOrder} from './order-priority.mjs';
@@ -87,7 +90,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     await createBlockedMissingProducts(db,api,{blocked:mutationBlock,bind:v=>bindProduct(db,v),recheck:ids=>recheckOrders(db,ids)});
    }
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.
-   if(!bcOnlyOrderId){await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
+   if(!bcOnlyOrderId){await retirePostBcCommercialControls(db,api);await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
    if(!bcOnlyOrderId){await queueSourceVatReviews(db);await scheduleStockChecks(db);}
    const ids=await db.transaction(async tx=>{
     if(bcOnlyOrderId){
@@ -112,6 +115,8 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of working){try{
  const lines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE order_id=$1',[o.id,o.channel])).rows;
  o.selectedSourceLines=lines;
+ if(!usesRecordedBc(o))await restoreImportBcAmounts(db,o,lines);
+ if(usesRecordedBc(o)&&!o.source_payload?.erplainImported){const execution=await readRecordedBc(api,o);o.items=execution.items;o.erp_live.bc={...o.erp_live.bc,...execution.bc};o.erp_live.pricing=execution.pricing;o.currency=execution.bc.currency;if(execution.bc.status==='unpublished')o.pricing=execution.pricing;await save(o);valid.push(o);continue;}
  if(o.source_payload?.erplainImported){await refreshManualOrder(db,api,o);if(o.source_payload.account!=='live'||!o.erp_live?.bc?.id||!o.erp_live.importedItems?.length)throw Error('Actualiser la commande Erplain avant préparation');o.items=o.erp_live.importedItems;valid.push(o);continue;}
  if(o.erp_live?.equivalentItems){if(!o.erp_live.bc?.id)throw new Error('BC absent pour les équivalents');o.items=o.erp_live.equivalentItems;valid.push(o);continue;}
 
@@ -161,6 +166,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
 
    }));assertBcLines(items);
    o.selectedSourceLines=lines;
+ if(!usesRecordedBc(o))await restoreImportBcAmounts(db,o,lines);
 
 
     o.items=items;o.erp_live=o.erp_live||{};
@@ -185,31 +191,10 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    await api.verify();
    // Recover a persisted BC before deciding whether any creation is needed.
    const missing=working.filter(o=>!o.erp_live.bc);
-   for(const o of missing){const found=await recoverOrder(api,o);if(found){o.erp_live.bc={id:found.id,label:found.label};o.erp_live.phase='bc_created';await save(o);}}
+   for(const o of missing){const found=await recoverOrder(api,o);if(found){o.erp_live.bc={id:found.id,label:found.label};o.erp_live.phase='bc_created';if(usesRecordedBc(o)){const execution=await readRecordedBc(api,o);o.items=execution.items;o.erp_live.bc={...o.erp_live.bc,...execution.bc};o.erp_live.pricing=execution.pricing;if(execution.bc.status==='unpublished')o.pricing=execution.pricing;else delete o.pricing;delete o.selectedProducts;delete o.selectedSourceLines;}await save(o);}}
    for(const o of working)o.documentMetadata=await documentMetadata(o,directory);
-   for(const o of working.filter(o=>o.erp_live.bc?.id)){
-    try{await withShipmentLock(()=>alignMappedBc(api,o,{save,preserveLabels:()=>preserveSubstitutionLabels(db,o.id),guard:async()=>{
-     const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh);if(block)throw Error(block);
-     const rows=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
-     if(JSON.stringify(rows.map(l=>currentMappingLine(l,o.channel)))!==JSON.stringify(o.selectedSourceLines.map(l=>currentMappingLine(l,o.channel))))throw Error('Mapping modifié pendant le contrôle : nouvelle vérification requise');
-    }}));}catch(e){o.failed=true;await fail(o,e);}
-   }
-   working=working.filter(o=>!o.failed);
-   // Correct historical tax-code differences from the current source before
-   // validating commercial totals or creating any missing delivery document.
-   for(const o of working.filter(o=>o.erp_live.bc?.id)){
-    try{await withShipmentLock(()=>alignHistoricalSourceVat(api,o,{save,preserveLabels:()=>preserveSubstitutionLabels(db,o.id),guard:async()=>{
-     const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh);if(block)throw Error(block);
-     if(JSON.stringify(fresh.source_payload?.temuAmounts?.data)!==JSON.stringify(o.source_payload?.temuAmounts?.data))throw Error('TVA source · Source financière modifiée pendant le contrôle');
-     const rows=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
-     if(JSON.stringify(rows.map(l=>currentMappingLine(l,o.channel)))!==JSON.stringify(o.selectedSourceLines.map(l=>currentMappingLine(l,o.channel))))throw Error('TVA source · Mapping modifié pendant le contrôle');
-    }}));}catch(e){o.failed=true;await fail(o,e);}
-   }
-   working=working.filter(o=>!o.failed);
-   // Validate existing BC source amounts before any recovery can create stock.
-   for(const o of working.filter(o=>o.erp_live.bc?.id)){try{const {Order:commercial}=await api.request('query V3SourceBeforeRecovery($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});if(String(commercial?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');const confirmed=verifySourceCommercialTotals(commercial,o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing);o.erp_live.pricing={...o.erp_live.pricing,confirmed,status:'verified',error:null,verifiedAt:new Date().toISOString()};await save(o);}catch(e){o.failed=true;await fail(o,e);}}
-   working=working.filter(o=>!o.failed);
-   for(const o of working.filter(o=>!bcOnlyOrderId&&o.erp_live.phase==='creating_stock'&&!o.erp_live.stockDocument?.id)){try{const stock=await withSourceCommercialGuard(api,o.erp_live.bc.id,o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing,()=>reconcileFullStock(api,o,{allowCreate:canCreateStock(o),allowRecoverMissing:true,onAbsenceConfirmed:absenceProof=>recordStockCreationOutcome(db,o,{absenceProof}),beforeCreate:()=>claimStockCreation(db,o),onCreated:documentId=>recordStockCreationOutcome(db,o,{documentId}),onCreationFailure:error=>recordStockCreationOutcome(db,o,{error})}));if(!stock)throw stockNotFound();o.erp_live.stockDocument=stock;stockCheckConfirmed(o);o.erp_live.phase='bl_created';await save(o);}catch(e){o.failed=true;await fail(o,e);}}
+   // The recorded BC supplies execution lines; no mapping, VAT or price alignment.
+   for(const o of working.filter(o=>!bcOnlyOrderId&&o.erp_live.phase==='creating_stock'&&!o.erp_live.stockDocument?.id)){try{const stock=await withRecordedOrSourceGuard(api,o,()=>o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing,()=>reconcileFullStock(api,o,{allowCreate:canCreateStock(o),allowRecoverMissing:true,onAbsenceConfirmed:absenceProof=>recordStockCreationOutcome(db,o,{absenceProof}),beforeCreate:()=>claimStockCreation(db,o),onCreated:documentId=>recordStockCreationOutcome(db,o,{documentId}),onCreationFailure:error=>recordStockCreationOutcome(db,o,{error})}));if(!stock)throw stockNotFound();o.erp_live.stockDocument=stock;stockCheckConfirmed(o);o.erp_live.phase='bl_created';await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);
    const safe=[];for(const o of working){const block=creationResumeBlock(o);if(block)await fail(o,new Error(block));else safe.push(o);}working=safe;if(!working.length)return;
    await batchMutation(working.filter(o=>!o.erp_live.bc&&!o.erp_live.customer),'creating_customer','customer','CustomerInput','CreateCustomer',o=>({label:erplainCustomerLabel(o),customer_number:'V3:'+o.id,customer_type:invoiceCustomerType({orderId:o.id,channel:o.channel,sourcePayload:o.source_payload}),notes:'Compte V3. Aucun email envoyé.'}),'id label');
@@ -219,19 +204,18 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     return {status:'unpublished',update_stock:false,customer:{id:String(o.erp_live.customer.id)},...o.documentMetadata,currency:o.currency,price_level:{id:String(references.priceLevelId)},dated_at:orderDate(o.source_date),...addresses,tax_type:o.pricing.tax_type,line_items:o.pricing.items,notes:o.channel==='tender'?String(o.source_payload?.notes??''):'Commande '+o.reference,internal_notes:technicalMarker(o)+' Prix source contrôlés avant publication. [V3-PRICING:1]'};
    },'id label');
    working=working.filter(o=>!o.failed);if(!working.length)return;
-   // Publication requires a read-back of actual Erplain totals and taxes.
+   // Number the persisted BC without comparing its commercial fields to a source.
    // Retrying an API failure reuses the same BC; it never creates another one.
    for(const o of working.filter(o=>o.pricing)){
     try{
-     const historical=await readPreservedHistoricalBc(api,o,o.channel==='temu'?temuSellerTotals(o):null);
-     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{datedAt:orderDate(o.source_date),verify:bc=>verifyBcPricing(bc,o.pricing),lock:fn=>withShipmentLock(fn,['erplain-bc-numbering'])});
-     const confirmed=historical?.confirmed||verifyBcPricing(actual,o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
+     const historical=await readPreservedHistoricalBc(api,o,usesRecordedBc(o)?null:o.channel==='temu'?temuSellerTotals(o):null);
+     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{datedAt:orderDate(o.source_date),verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),lock:fn=>withShipmentLock(fn,['erplain-bc-numbering'])});
+     const confirmed=historical?.confirmed||await verifyRecordedOrSourceTotals(api,o,actual,()=>o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
      o.erp_live.pricing={...o.erp_live.pricing,status:'verified',error:null,confirmed,verifiedAt:new Date().toISOString()};await save(o);
     }catch(e){o.failed=true;o.erp_live.pricing={...o.erp_live.pricing,status:'blocked',error:e.message};await save(o);await fail(o,e);}
    }
    working=working.filter(o=>!o.failed);if(!working.length)return;
-   // Common source check also covers existing equivalents and imported Erplain orders.
-   for(const o of working){try{const {Order:commercial}=await api.request('query V3SourceCommercialCheck($id:ID!){Order(id:$id){id total currency{label} line_items{tax_amount}}}',{id:String(o.erp_live.bc.id)});if(String(commercial?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité Erplain différente');const confirmed=verifySourceCommercialTotals(commercial,o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing);o.erp_live.pricing={...o.erp_live.pricing,confirmed,status:'verified',error:null,verifiedAt:new Date().toISOString()};await save(o);}catch(e){o.failed=true;await fail(o,e);}}
+   for(const o of working.filter(usesRecordedBc)){try{if(!o.source_payload?.erplainImported){const execution=await readRecordedBc(api,o);o.items=execution.items;o.erp_live.bc={...o.erp_live.bc,...execution.bc};o.erp_live.pricing=execution.pricing;}delete o.pricing;await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);if(!working.length)return;
    // Reconcile weights only after the BC is available. Missing weight must not
    // prevent an otherwise valid BC, but cannot borrow another variant's cache.
@@ -239,7 +223,13 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     try{
      const check=await api.request('query V3SelectedProductIdentity($id:ID!){Order(id:$id){id line_items{type quantity variant{id sku} location{id}}}}',{id:String(o.erp_live.bc.id)});
      if(String(check.Order?.id)!==String(o.erp_live.bc.id))throw Error('BC · Identité produit non confirmée');
-     const plan=selectedProductWeights(o.selectedSourceLines,o.selectedProducts,shippingProductLines(check.Order.line_items));
+     const physical=shippingProductLines(check.Order.line_items);
+     const weightLines=usesRecordedBc(o)?[...new Set(physical.map(l=>String(l.variant.id)))].map(id=>{
+      const item=physical.find(l=>String(l.variant.id)===id),sku=item.variant.sku||Object.keys(o.selectedProducts).find(k=>String(o.selectedProducts[k].id)===id);
+      const source=o.selectedSourceLines.find(l=>[l.source_sku,l.target_sku,l.mapped_sku].includes(sku));
+      return {...source,target_sku:sku,target_quantity:physical.filter(l=>String(l.variant.id)===id).reduce((n,l)=>n+Number(l.quantity),0)};
+     }):o.selectedSourceLines;
+     const plan=selectedProductWeights(weightLines,o.selectedProducts,physical);
      await cacheSelectedProductWeights(db,o.id,plan);
      const route=await selectedPreparationRouting(db,o.id,plan);
      if(!route.preserved){o.weight_kg=route.weight;if(!route.missing){o.parcel_count=route.parcels;o.carrier=route.carrier;}o.erp_live.labelPreparationFingerprint=null;await save(o);}
@@ -281,7 +271,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
          if(!canCreateStock(o))throw Error('Stock Erplain : sortie non confirmée, aucune nouvelle déduction automatique');
          assertFullOrderStock(o.erp_live.pendingBlIds?.length?o.erp_live.importedItems.map(item=>({...r.Order.line_items.find(l=>String(l.variant?.id)===String(item.variant.id)&&String(l.location?.id)===String(item.location.id)),quantity:item.quantity})):r.Order.line_items);
          o.erp_live.phase='creating_stock';o.erp_live.stockPendingVariants=o.items.map(l=>String(l.variant.id));await save(o);
-         stock=await withSourceCommercialGuard(api,o.erp_live.bc.id,o.erp_live.importedCommercialSource,()=>reconcileFullStock(api,o,{allowCreate:true,beforeCreate:()=>claimStockCreation(db,o),onCreated:documentId=>recordStockCreationOutcome(db,o,{documentId}),onCreationFailure:error=>recordStockCreationOutcome(db,o,{error})}));
+         stock=await withRecordedOrSourceGuard(api,o,()=>o.erp_live.importedCommercialSource,()=>reconcileFullStock(api,o,{allowCreate:true,beforeCreate:()=>claimStockCreation(db,o),onCreated:documentId=>recordStockCreationOutcome(db,o,{documentId}),onCreationFailure:error=>recordStockCreationOutcome(db,o,{error})}));
          if(!stock)throw Error('Stock Erplain : mouvement non confirmé');
         }
         o.erp_live.stockDocument=stock;o.erp_live.phase='bl_created';await save(o);
@@ -304,12 +294,12 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
      if(typeof snapshot.Order.update_stock!=='boolean')throw new Error('Politique de stock du BC non vérifiée');
      {const totals=xs=>{const sums=new Map();for(const l of shippingProductLines(xs)){const key=String(l.variant?.id)+':'+String(l.location?.id);sums.set(key,(sums.get(key)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};if(totals(o.items)!==totals(snapshot.Order.line_items))throw new Error('BC modifié : vérifier les produits et quantités avant BL');}
      const stockOnBc=snapshot.Order.update_stock===true;
-     if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}
+     if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o,{beforeBlPublication:true});}
      else assertFullOrderStock(snapshot.Order.line_items);
      o.erp_live.stockCheckedAt=new Date().toISOString();await save(o);
      if(!o.erp_live.bl)await batchMutation([o],'creating_bl','bl','ShippingOrderFromInput','CreateShippingOrderFrom',v=>({Order:[String(v.erp_live.bc.id)]}),'id label status update_stock');
      if(o.failed)return;
-     if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}
+     if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o,{beforeBlPublication:true});}
      if(o.erp_live.bl.status!=='unpublished'){const numbered=assertHistoricalBlNumber(await publishHistoricalBl(api,o.erp_live.bl.id));o.erp_live.bl={...o.erp_live.bl,...numbered};await save(o);}
      if(o.erp_live.bl.status==='unpublished'){
       if(o.erp_live.bl.update_stock!==false&&!(stockOnBc&&o.erp_live.bl.update_stock===true))throw new Error('Politique de stock BL inattendue : contrôle requis avant publication');
@@ -334,12 +324,10 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     const totals=rows=>{const m=new Map();for(const l of shippingProductLines(rows))m.set(String(l.variant?.id),(m.get(String(l.variant?.id))||0)+Number(l.quantity));return JSON.stringify([...m].sort());};
     if(!actual||!bl||(!o.erp_live.pendingBlIds?.length&&totals(o.items)!==totals(actual.line_items))||totals(o.items)!==totals(bl.line_items)){await fail(o,new Error('Écart BC/BL : références ou quantités à contrôler'));continue;}
     try{const stockOnBc=actual.update_stock===true;if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}const stock=stockOnBc?null:await reconcileFullStock(api,o,{allowCreate:false});o.erp_live.bl=await confirmDeliveryReady(api,{bcId:o.erp_live.bc.id,blId:o.erp_live.bl.id,lines:o.items,stockOnBc,pendingBlScope:Boolean(o.source_payload?.erplainImported&&o.source_payload?.account==='live'&&o.erp_live.pendingBlIds?.length),stockDocument:stock,stockLabel:stock?.label,stockNotes:'LIVE : sortie de stock liée au BL '+bl.label});o.erp_live.stockPendingVariants=[];o.erp_live.phase='bl_ready';await save(o);}catch(e){await fail(o,e);continue;}
-    const mappingProof=mappingSelectionFingerprint(o.selectedSourceLines,o.channel);if(await currentMappingFingerprint(db,o)!==mappingProof){await fail(o,new Error('Mapping modifié pendant la préparation : BC et BL à recontrôler'));continue;}o.erp_live.mappingPreparationFingerprint=mappingProof;
+    const recorded=usesRecordedBc(o),mappingProof=recorded?recordedBcFingerprint({...o.erp_live.bc,line_items:o.items}):mappingSelectionFingerprint(o.selectedSourceLines,o.channel);if(!recorded&&await currentMappingFingerprint(db,o)!==mappingProof){await fail(o,new Error('Mapping modifié pendant la préparation : BC et BL à recontrôler'));continue;}o.erp_live.mappingPreparationFingerprint=mappingProof;if(recorded)o.erp_live.preparationAuthority={kind:'recorded_bc',bcId:String(o.erp_live.bc.id),fingerprint:mappingProof};
     assertHistoricalBlNumber(bl);o.erp_live.bl={...o.erp_live.bl,label:bl.label};o.erp_live.verifiedAt=new Date().toISOString();o.erp_live.labelPreparationFingerprint=await shipmentFingerprint(db,(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0]);await save(o);await db.query("UPDATE orders SET erp_status='live_created' WHERE id=$1",[o.id]);await db.query("UPDATE erp_live_jobs SET status='complete',error=null,updated_at=now() WHERE order_id=$1",[o.id]);
    }
   }catch(e){for(const o of working)await fail(o,e);}finally{running=false;activeBcOnlyOrderId=null;}
  }
  return {run:options=>withShipmentLock(()=>run(options),['erplain-live-workflow']),get running(){return running;}};
 }
-
-

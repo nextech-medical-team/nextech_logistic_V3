@@ -11,8 +11,16 @@ export const orderDateSql=`CASE
  WHEN btrim(source_date) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}$' THEN split_part(btrim(source_date),'/',3)||lpad(split_part(btrim(source_date),'/',2),2,'0')||lpad(split_part(btrim(source_date),'/',1),2,'0')
  WHEN btrim(source_date) ~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{2}$' THEN '20'||split_part(btrim(source_date),'/',3)||lpad(split_part(btrim(source_date),'/',2),2,'0')||lpad(split_part(btrim(source_date),'/',1),2,'0')
  ELSE to_char(received_at AT TIME ZONE 'Europe/Paris','YYYYMMDD') END`;
+// Display-only gate: never alter suspended/cancelled orders or their documents.
+export const activeProblemOrderSql = `(archived IS NOT TRUE
+ AND coalesce(suspension->'problemDeferral'->>'active','false')<>'true'
+ AND coalesce(suspension->>'active','false')<>'true'
+ AND label_status IS DISTINCT FROM 'cancelled'
+ AND tracking_status IS DISTINCT FROM 'cancelled'
+ AND coalesce(erp_live->'bc'->>'status','')<>'cancelled'
+ AND coalesce(suspension->'erplainCancellation'->>'status','')<>'complete')`;
 export function orderQuery(params,orderIds=null){
- const args=[],parts=["archived=false"];if(params.getAll('problem').some(Boolean))parts.push("coalesce(suspension->>'active','false')<>'true'");const add=(sql,value)=>{args.push(value);parts.push(sql.replaceAll('?', '$'+args.length));};
+ const args=[],parts=["archived=false"];if(params.getAll('problem').some(Boolean)||params.getAll('problem-label').some(Boolean)||params.getAll('status').flatMap(v=>v.split(',')).includes('__problems'))parts.push(activeProblemOrderSql);const add=(sql,value)=>{args.push(value);parts.push(sql.replaceAll('?', '$'+args.length));};
  if(orderIds!==null)add('orders.id=ANY(?::text[])',orderIds);
  const terms=searchTerms(params.get('search'));
  if(terms.length){
@@ -38,6 +46,9 @@ export function orderQuery(params,orderIds=null){
   const values=params.getAll(key).flatMap(v=>v.split(',')).filter(Boolean).slice(0,30);
   if(!values.length)continue;
   if(key==='status'&&values.includes('__problems')){const predicate="(NOT "+completeOrderDocumentsSql+" AND archived IS NOT TRUE AND label_status IS DISTINCT FROM 'cancelled' AND tracking_status IS DISTINCT FROM 'cancelled' AND coalesce(suspension->>'active','false')<>'true' AND ("+persistedRecheckProblemSql+" OR "+catalogProblemSql+" OR "+pendingEquivalentProblemSql+" OR "+partiallyAllocatedSql+" OR (label_status IN ('blocked','waiting_catalog') AND NOT ("+awaitingPurchaseSql+" AND ("+currentReasonEmptySql("issue")+") AND NOT EXISTS(SELECT 1 FROM lines l LEFT JOIN mappings m ON m.channel=orders.channel AND m.source_sku=l.source_sku JOIN catalog_results c ON c.sku=coalesce(l.target_sku,m.target_sku,l.source_sku) WHERE l.order_id=orders.id AND coalesce(c.message,'')<>'' AND l.source_payload->>'erplainCorrectedWeightKg' IS NULL) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=orders.id AND r.status='review' AND coalesce(r.error,'')<>''))) OR (carrier IS NULL AND NOT coalesce(partial_mode,false)) OR (erp_status='live_review' AND NOT EXISTS(SELECT 1 FROM erp_live_jobs valid_erp WHERE valid_erp.order_id=orders.id AND valid_erp.status='complete')) OR (SELECT CASE WHEN r.error IS NOT NULL OR NOT coalesce(r.result->'stockIncidentRecheck'->>'status'='resolved',false) THEN r.status ELSE 'diagnostic_resolved' END FROM resolution_jobs r WHERE r.order_id=orders.id ORDER BY r.created_at DESC LIMIT 1)='review' OR EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=orders.id AND c.status IN ('failed','review')) OR EXISTS(SELECT 1 FROM temu_label_jobs t WHERE orders.channel='temu' AND t.reference=orders.reference AND nullif(btrim(t.error),'') IS NOT NULL) OR EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=orders.id AND e.status IN ('failed','review')) OR EXISTS(SELECT 1 FROM partial_deliveries d WHERE d.order_id=orders.id AND d.status IN ('failed','review')) OR EXISTS(SELECT 1 FROM extra_parcels x WHERE x.order_id=orders.id AND x.status IN ('failed','review'))))";const rest=values.filter(v=>v!=='__problems');if(rest.length){args.push(rest);parts.push('('+predicate+' OR '+column+'=ANY($'+args.length+'::text[]))');}else parts.push(predicate);
+  }else if(key==='status'&&values.includes('__deferred')){
+   const clauses=["coalesce(suspension->'problemDeferral'->>'active','false')='true'"],rest=values.filter(v=>v!=='__deferred');
+   if(rest.length){args.push(rest);clauses.push(column+'=ANY($'+args.length+'::text[])');}parts.push('('+clauses.join(' OR ')+')');
   }else if(key==='channel'){
    const ordinary=values.filter(v=>!v.startsWith('amazon_')&&!v.startsWith('shopify_')),amazon=values.filter(v=>['amazon_standard','amazon_prime','amazon_priority','shopify_boutique','shopify_relay'].includes(v)),clauses=[];
    if(ordinary.length){args.push(ordinary);clauses.push('channel=ANY($'+args.length+'::text[])');}

@@ -27,4 +27,4 @@ http.createServer((req,res)=>{const begin=performance.now(),u=new URL(req.url,'h
  }
  const file=path.resolve(root,p==='/'?'index.html':p.slice(1));if(!file.startsWith(root+path.sep)||!fs.existsSync(file)||!fs.statSync(file).isFile())return json({},404);
  res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.svg')?'image/svg+xml':'text/html');res.end(fs.readFileSync(file));
-}).listen(31234,'127.0.0.1',()=>console.log('UI fixture ready'));
+}).listen(Number(process.env.UI_FIXTURE_PORT||31234),'127.0.0.1',()=>console.log('UI fixture ready'));

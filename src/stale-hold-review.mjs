@@ -1,14 +1,15 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {reconcileCancelledTemuIntakes} from './temu-cancelled-intake.mjs';
 import {reconcilePaidTemuStatuses} from './temu-paid-status-reconciliation.mjs';
 import {resumeInitialCustomerCheckpoint} from './temu-customer-checkpoint.mjs';
 import {cancellationBlock} from './erp-transient-policy.mjs';
 const message='Préparation suspendue : validation requise';
-export function staleHoldReviewAllowed(o){return !!o&&o.channel==='temu'&&!o.archived&&!o.partial_mode&&!o.resolution_pending_resume&&!o.issue&&!cancellationBlock(o)&&!Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection')&&!['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status)&&o.erp_live?.phase==='bc_created'&&!!o.erp_live.bc?.id&&!o.erp_live.bl?.id&&!o.erp_live.stockDocument?.id&&!o.erp_live.stockCreationAttemptedAt&&o.erp_live.pricing?.status==='verified';}
+export function staleHoldReviewAllowed(o){return !!o&&o.channel==='temu'&&!o.archived&&!o.partial_mode&&!o.resolution_pending_resume&&!o.issue&&!cancellationBlock(o)&&!Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection')&&!['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status)&&o.erp_live?.phase==='bc_created'&&!!o.erp_live.bc?.id&&!o.erp_live.bl?.id&&!o.erp_live.stockDocument?.id&&!o.erp_live.stockCreationAttemptedAt&&(usesRecordedBc(o)||o.erp_live.pricing?.status==='verified');}
 export async function resumeStaleHoldReviews(db,api){
  await reconcileCancelledTemuIntakes(db);
  await reconcilePaidTemuStatuses(db);
  await resumeInitialCustomerCheckpoint(db,api);
- const rows=(await db.query(`SELECT o.* FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id WHERE e.status='review' AND e.error=$1 AND o.channel='temu' AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume AND coalesce(o.issue,'')='' AND o.erp_live->>'phase'='bc_created' AND o.erp_live->'bc'->>'id' IS NOT NULL AND o.erp_live->'bl'->>'id' IS NULL AND o.erp_live->'stockDocument'->>'id' IS NULL AND o.erp_live->>'stockCreationAttemptedAt' IS NULL AND o.erp_live->'pricing'->>'status'='verified' AND NOT coalesce(o.source_payload ? 'marketplacePendingCorrection',false) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting')) AND NOT EXISTS(SELECT 1 FROM correction_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','applying','checking','waiting')) ORDER BY e.updated_at LIMIT 25`,[message])).rows;
+ const rows=(await db.query(`SELECT o.* FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id WHERE e.status='review' AND e.error=$1 AND o.channel='temu' AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume AND coalesce(o.issue,'')='' AND o.erp_live->>'phase'='bc_created' AND o.erp_live->'bc'->>'id' IS NOT NULL AND o.erp_live->'bl'->>'id' IS NULL AND o.erp_live->'stockDocument'->>'id' IS NULL AND o.erp_live->>'stockCreationAttemptedAt' IS NULL  AND NOT coalesce(o.source_payload ? 'marketplacePendingCorrection',false) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting')) AND NOT EXISTS(SELECT 1 FROM correction_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','applying','checking','waiting')) ORDER BY e.updated_at LIMIT 25`,[message])).rows;
  let count=0;
  for(const o of rows){
   if(!staleHoldReviewAllowed(o))continue;

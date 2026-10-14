@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {randomUUID} from 'node:crypto';
 import {substitution} from '../src/stock-substitution.mjs';
+import {preservedImportAmounts,verifyImportBcAmounts} from '../src/import-bc-commercial.mjs';
 import {initializeEquivalences} from '../src/equivalence-catalog.mjs';
 import {attachSkuSubstitutions} from '../src/sku-substitution-view.mjs';
 import {currentMappingLine} from '../src/current-mapping-line.mjs';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
-test('moteur réel : deux remplacements, aucune reprise avant le dernier, puis préparation remise en file',async()=>{
+for(const scenario of ['batch','stock-review','bc-amounts'])test('moteur réel : '+scenario,async()=>{
+ const stockReview=scenario==='stock-review',preserveBcAmounts=scenario==='bc-amounts';
  const pg=new PGlite();await pg.waitReady;
  try{
  await pg.exec(`
@@ -46,22 +48,53 @@ test('moteur réel : deux remplacements, aucune reprise avant le dernier, puis p
  for(const l of bc.line_items)await db.query("INSERT INTO lines VALUES($1,'o',$1,$2,$3,$2,$3,'{}')",[l.id,l.variant.sku,l.quantity]);
  async function replace(sku,replacementSku,quantity,deferResume,replacementQuantity=quantity){
   const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],b={id:'o',requestId:randomUUID(),sku,replacementSku,replaceQuantity:quantity,replacementQuantity,scope:'order'};
-  const preview=await substitution(db,api,o,b);
+  const preview=await substitution(db,api,o,b,{preserveBcAmounts});
   Object.assign(b,{confirmEquivalent:true,previewFingerprint:preview.previewFingerprint});
   await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status) VALUES($1,'o',$2,'replace-equivalent',$3,'running')",[b.requestId,b.requestId,JSON.stringify(b)]);
-  return substitution(db,api,o,b,{apply:true,deferResume});
+  return substitution(db,api,o,b,{apply:true,deferResume,preserveBcAmounts});
  }
- const first=await replace('A','B',20,true);assert.equal(first.importDeferred,true);assert.equal(writes,1);
- assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,'review');
- assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,true);
- assert.equal((await db.query('SELECT status FROM resolution_jobs')).rows[0].status,'complete');
+ if(preserveBcAmounts){
+  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{pricing,total}','35') WHERE id='o'");
+  const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
+  await assert.doesNotReject(substitution(db,api,o,{id:'o',sku:'A',replacementSku:'B',replaceQuantity:20,replacementQuantity:20,scope:'order'}));
+  assert.equal(writes,0);
+ }
+ const first=await replace('A','B',20,!stockReview);assert.equal(first.importDeferred,!stockReview);assert.equal(writes,1);
+ assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,stockReview?'pending':'review');
+ assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,!stockReview);
+ assert.equal((await db.query('SELECT status FROM resolution_jobs')).rows[0].status,stockReview?'waiting':'complete');
+ if(stockReview){
+  // Reproduce waitingResolutionWorker detecting a stock failure after commit.
+  await db.query("UPDATE resolution_jobs SET status='review',error='Stock insuffisant',stage='Erplain à compléter'");
+  await db.query("UPDATE erp_live_jobs SET status='review',error='Stock insuffisant'");
+  const previewNext=async()=>substitution(db,api,(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],{id:'o',requestId:randomUUID(),sku:'C',replacementSku:'D',replaceQuantity:10,replacementQuantity:20,scope:'order'});
+  const saved=structuredClone(bc);
+  bc.line_items.find(l=>l.variant.sku==='B').quantity=19;
+  await assert.rejects(previewNext(),/rapproché/);bc=saved;
+  await db.query("UPDATE lines SET target_quantity=19 WHERE target_sku='B'");
+  await assert.rejects(previewNext(),/Synchronisation locale/);
+  await db.query("UPDATE lines SET target_quantity=20 WHERE target_sku='B'");
+  const job=(await db.query('SELECT id,payload FROM resolution_jobs')).rows[0];
+  const uncertain=structuredClone(job.payload);uncertain.substitutionAttempt.phase='mutation_started';
+  await db.query('UPDATE resolution_jobs SET payload=$1 WHERE id=$2',[JSON.stringify(uncertain),job.id]);
+  await assert.rejects(previewNext(),/remplacement interrompu/);
+  await db.query('UPDATE resolution_jobs SET payload=$1 WHERE id=$2',[JSON.stringify(job.payload),job.id]);
+  await previewNext();assert.equal(writes,1);
+  assert.equal((await db.query('SELECT status,error FROM resolution_jobs')).rows[0].error,'Stock insuffisant');
+ }
  const last=await replace('C','D',10,false,20);assert.equal(last.importDeferred,false);assert.equal(writes,2);
+ assert.equal(bc.total,30);assert.equal(bc.line_items.reduce((n,l)=>n+Number(l.price)*Number(l.quantity),0),30);
  assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,'pending');
  assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,false);
  const actual=(await db.query('SELECT target_sku,target_quantity FROM lines ORDER BY target_sku')).rows;assert.deepEqual(actual.map(l=>[l.target_sku,Number(l.target_quantity)]),[['B',20],['D',20]]);
  assert.equal((await db.query('SELECT * FROM product_equivalences WHERE active=true')).rows.length,1);
  assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);assert.equal(bc.shipping_orders.data.length,0);
  const state=(await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live;
+ if(preserveBcAmounts){
+  const proof=preservedImportAmounts({erp_live:state});
+  assert.equal(proof.total,30);assert.equal(proof.requestId,state.equivalentAttemptId);
+  assert.equal(verifyImportBcAmounts(bc,proof).total,30);
+ }
  assert.deepEqual(state.documentSource.lines.map(l=>[l.sku,l.quantity]).sort(),[['B',20],['D',20]]);
  const orderRows=[{id:'o',channel:'shopify'}];await attachSkuSubstitutions(db,orderRows);
  const ui=vm.createContext({});vm.runInContext(await readFile(new URL('../public/diagnostics.js',import.meta.url),'utf8'),ui);

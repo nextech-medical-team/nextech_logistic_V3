@@ -1,3 +1,4 @@
+import {initializeReceiptRecovery,receiptRecoveryService} from './receipt-recovery.mjs';
 import {initializeEquivalenceImports,equivalenceImportService} from './equivalence-import.mjs';
 import {initializeTemuCatchup,temuCatchupWorker} from './temu-catchup-worker.mjs';
 import {initializeMovementWatch,movementWatchWorker,movementWatchdog,movementWatchStatus} from './movement-watch.mjs';
@@ -6,6 +7,7 @@ import {suspensionGuardRequired} from './suspension-route-policy.mjs';
 import {initializeOrderRecheckMonitor,orderRecheckMonitor} from './order-recheck-monitor.mjs';
 import {initializeTrackingSync} from './tracking-sync-history.mjs';
 import {trackingSyncService,trackingSyncRoutes} from './tracking-sync-service.mjs';
+import {initializeProblemDeferral,problemDeferralService} from './problem-deferral.mjs';
 import {initializeOrderSuspension,orderSuspensionService} from './order-suspension.mjs';
 import {initializeImportCorrections,importCorrections} from './import-corrections.mjs';
 import {restoreCancelledDeliveryStock} from './cancelled-delivery-stock.mjs';
@@ -17,6 +19,7 @@ import {initializeStockResumeWatch,stockResumeWorker} from './stock-resume-watch
 import {initializeShopifyObservation,shopifyObservationWorker,shopifyObservationRoutes} from './shopify-observation.mjs';
 import {readingService} from './temu-reading.mjs';
 import {initializeEquivalences,equivalenceApi} from './equivalence-catalog.mjs';
+import {stockInformationService} from './stock-information.mjs';
 import {initializeV2Followup,v2Worker,v2Routes} from './v2-followup.mjs';
 import {currentPartialSkuPdf} from './label-sku-copy.mjs';
 import {initializeSkuCopies} from './label-sku-copy.mjs';
@@ -76,6 +79,7 @@ import {orderQuery} from './order-query.mjs';
 import http from 'node:http';
 
 import {initializeCarrierJobs,createCarrierWorkers,queueCarrierLabels} from './carrier-jobs.mjs';
+import {queueLabelFromBl} from './direct-label.mjs';
 
 import {workspaceApi} from './workspace-api.mjs';
 
@@ -112,6 +116,7 @@ db.recoverInterrupted=config.background;
 const releaseLeader=config.background?await db.acquireLeader():async()=>{};
 await initializeAppSchema(db,[initializeCarrierJobs,initializeComments2005,initializeTemuShipping,initializeStocks,initializeErplainLive,initializePartialDeliveries,initializeCorrections,initializeTemuAutomaticPurchase,initializeResolutions,initializeProcurement,initializeLifecycle,initializeErplainRefresh,initializeMarketplaceInbox,initializeLabelDownloads,initializeReadServiceJobs,initializeProcessingClock],{background:config.background});
 await db.withLocks(['schema'],()=>initializeSkuCopies(db));
+await db.withLocks(['schema'],()=>initializeReceiptRecovery(db));
 await db.withLocks(['schema'],()=>initializeEquivalences(db));
 await db.withLocks(['schema'],()=>initializeEquivalenceImports(db));
 await db.withLocks(['schema'],()=>initializeStockResumeWatch(db));
@@ -122,6 +127,8 @@ const importApprovals=importAuthorization(db);
 await db.withLocks(['schema'],()=>initializeImportCorrections(db));
 const importCorrectionService=importCorrections(db,erplainAccount(directory,'source'));
 await db.withLocks(['schema'],()=>initializeOrderSuspension(db));
+await db.withLocks(['schema'],()=>initializeProblemDeferral(db));
+const deferralService=problemDeferralService(db);
 const suspensionService=orderSuspensionService(db,erplainAccount(directory,'live'));
 configureApiBudget(db);configureShipmentLocks(db);const cachedOrderSummary=orderSummaryCache(db);
 await db.withLocks(['schema'],()=>initializeTrackingSync(db));
@@ -146,6 +153,8 @@ let temuService=null;try{const config=JSON.parse(await readFile(path.join(direct
 const corrections=correctionWorker(db,directory);const correctionTimer=backgroundInterval(()=>corrections.run(),1700,'corrections');correctionTimer.unref();
 
 const resolutions=resolutionService(db,directory,{refreshTemuDiagnostic:reference=>temuLocal.diagnose(reference)});const resolutionTimer=backgroundInterval(()=>resolutions.run(),900,'resolutions');resolutionTimer.unref();
+const receiptRecovery=receiptRecoveryService(db,directory,{enabled:()=>runtime.enabled('receipt-recovery')&&!runtime.stopping});
+backgroundInterval(()=>receiptRecovery.run(),1500,'receipt-recovery');
 backgroundInterval(()=>runtime.enabled('resolutions')?resolutions.followWaiting():undefined,1000,'resolutions-followup').unref();
 const equivalenceImports=equivalenceImportService(db,directory);
 backgroundInterval(()=>runtime.enabled('resolutions')?equivalenceImports.run():undefined,1200,'equivalence-imports');
@@ -196,6 +205,7 @@ const partialTimer=backgroundInterval(()=>partialWorker.run(),1500,'partials');p
 
 for(const carrier of ['gls','gofo'])backgroundInterval(async()=>{if(carrierWorkers)await carrierWorkers.run(carrier);},1000,'carrier-'+carrier);
 
+const stockInformation=stockInformationService(db,erplainAccount(directory,'source'),directory);
 const catalog=createCatalogSync(db,directory); const allWeights=fullWeightSync(db,directory),equivalents=equivalentService(db,directory);
 
 await db.query(`UPDATE jobs SET status='pending',available_at=now() WHERE kind='label' AND status='blocked'`);
@@ -256,7 +266,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/stock-information.js','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -330,6 +340,10 @@ const server=http.createServer(async(req,res)=>{
     }
 
 
+    if(p==='/api/problem-deferral'&&req.method==='GET'){json(res,200,await deferralService.context(url.searchParams.get('id')));return;}
+    if(['/api/problem-deferral/defer','/api/problem-deferral/restore'].includes(p)&&req.method==='POST'){
+      permitted(user,operational);const b=await body(req);json(res,200,await deferralService[p.endsWith('/defer')?'defer':'restore'](b,user));return;
+    }
     if(p==='/api/orders/suspension'&&req.method==='GET'){json(res,200,await suspensionService.context(url.searchParams.get('id')));return;}
     if(['/api/orders/suspend','/api/orders/reactivate','/api/orders/cancel-erplain'].includes(p)&&req.method==='POST'){
       permitted(user,operational);const b=await body(req);const method=p.endsWith('/suspend')?'suspend':p.endsWith('/reactivate')?'reactivate':'cancelErplain';json(res,200,await suspensionService[method](b,user));return;
@@ -369,6 +383,7 @@ const server=http.createServer(async(req,res)=>{
       }
     }
     if(p==='/api/margins'&&req.method==='GET'){permitted(user,['admin','manager','operator']);json(res,200,await margins.get());return;}
+    if(p==='/api/carriers/from-bl'&&req.method==='POST'){permitted(user,['admin','manager','operator']);const b=await body(req);json(res,202,await queueLabelFromBl(db,b.id,user));return;}
     if(await labelTools({p,req,res,db,user,body,json,audit,permitted}))return;
     if(await shopifyObservationRoutes({p,url,req,res,db,json,user,permitted}))return;
     if(await v2Routes({p,url,req,res,db,json,user,permitted}))return;
@@ -381,8 +396,10 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/erplain/status/refresh'&&req.method==='POST'){permitted(user,['admin','manager','operator']);const r=await documentStatuses.refresh();await audit(user,'erplain.live.status.read',{});json(res,200,r);return;}
     if(await comments2005Api({p,url,req,res,db,user,body,json,permitted,audit}))return;
     if(await equivalenceImports.routes({p,url,req,res,user,body,json,permitted}))return;
+    if(await receiptRecovery.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await resolutions.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await correctionsApi({p,url,req,res,db,user,body,json,permitted,directory}))return;
+    if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku')));return;}
     if(await equivalenceApi({p,url,req,res,db,user,body,json,permitted,api:erplainAccount(directory,'source'),directory}))return;
     if(await workspaceApi({p,url,req,res,db,user,body,json,permitted,audit,catalog,carrierConfigured:!!carrierWorkers&&!!productionConfig}))return;
 
@@ -457,6 +474,10 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if((p==='/api/orders'||p==='/api/order-problem-types')&&req.method==='GET'){
+      // Reader status uses its own connection; obtain it before reserving the
+      // page transaction so concurrent pages cannot exhaust the pool awaiting it.
+      const connection=await readerJobs.snapshot('catalog',()=>catalog.status());
+      const readOrders=async db=>{
       const catalogOnly=p==='/api/order-problem-types';
       const problemLabels=url.searchParams.getAll('problem-label').filter(Boolean);
       if(problemLabels.length>100||problemLabels.some(label=>label.length>2000))throw Error('Sélection de problèmes invalide');
@@ -473,7 +494,7 @@ const server=http.createServer(async(req,res)=>{
 
       let {rows}=await db.query(`WITH paged AS MATERIALIZED (SELECT id,(SELECT sum(CASE WHEN (l.source_payload->>'mappingScope'='order' OR l.source_payload->>'origin'='erplain_live_equivalent') THEN l.target_quantity WHEN m.source_qty>0 THEN round(l.quantity*m.target_qty/m.source_qty,6) ELSE coalesce(l.target_quantity,l.quantity) END) FROM lines l LEFT JOIN mappings m ON m.channel=orders.channel AND m.source_sku=l.source_sku WHERE l.order_id=orders.id) AS item_quantity FROM orders ${where} ORDER BY ${order} ${scanAll?'':`LIMIT ${pageSize} OFFSET $${args.length+1}`} ) SELECT ${managerSql} AS account_manager,coalesce((SELECT CASE WHEN r.status='review' THEN r.error ELSE null END FROM resolution_jobs r WHERE r.order_id=orders.id ORDER BY r.created_at DESC,id DESC LIMIT 1),(SELECT state->>'result' FROM order_recheck_monitor WHERE order_id=orders.id AND state->>'blocked'='true')) AS resolution_error,(SELECT r.updated_at FROM resolution_jobs r WHERE r.order_id=orders.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS resolution_error_updated_at,resolution_pending_resume,(SELECT json_build_object('id',r.id,'stage',r.stage) FROM resolution_jobs r WHERE r.order_id=orders.id AND r.status IN ('queued','running','waiting') LIMIT 1) AS resolution_active,suspension,archived,CASE WHEN partial_mode THEN ${partialAllocationSql} ELSE '[]'::jsonb END AS partial_allocation,partial_mode,erp_live,id,channel,reference,recipient,address,source_payload,source_date,received_at,label_status,erp_status,tracking_status,invoice_status,weight_kg,parcel_count,carrier,issue,simulation,(SELECT json_agg(source_payload) FROM lines WHERE order_id=orders.id) AS price_sources,(SELECT json_agg(json_build_object('sku',CASE WHEN (l.source_payload->>'mappingScope'='order' OR l.source_payload->>'origin'='erplain_live_equivalent') THEN l.target_sku ELSE coalesce(m.target_sku,l.target_sku,CASE WHEN orders.channel IN ('tender','samples') THEN l.source_sku END) END,'quantity',CASE WHEN (l.source_payload->>'mappingScope'='order' OR l.source_payload->>'origin'='erplain_live_equivalent') THEN l.target_quantity WHEN m.source_qty>0 THEN round(l.quantity*m.target_qty/m.source_qty,6) ELSE coalesce(l.target_quantity,CASE WHEN orders.channel IN ('tender','samples') THEN l.quantity END) END,'source_sku',l.source_sku,'source_quantity',l.quantity,'mapping_exists',m.source_sku IS NOT NULL,'catalog_issue',CASE WHEN l.source_payload->>'erplainCorrectedWeightKg' IS NOT NULL THEN null ELSE c.message END) ORDER BY l.source_line) FROM lines l LEFT JOIN mappings m ON m.channel=orders.channel AND m.source_sku=l.source_sku LEFT JOIN catalog_results c ON c.sku=CASE WHEN (l.source_payload->>'mappingScope'='order' OR l.source_payload->>'origin'='erplain_live_equivalent') THEN l.target_sku ELSE coalesce(m.target_sku,l.target_sku,CASE WHEN orders.channel IN ('tender','samples') THEN l.source_sku END) END WHERE l.order_id=orders.id) AS sku_lines,(SELECT sum(CASE WHEN (l.source_payload->>'mappingScope'='order' OR l.source_payload->>'origin'='erplain_live_equivalent') THEN l.target_quantity WHEN m.source_qty>0 THEN round(l.quantity*m.target_qty/m.source_qty,6) ELSE coalesce(l.target_quantity,l.quantity) END) FROM lines l LEFT JOIN mappings m ON m.channel=orders.channel AND m.source_sku=l.source_sku WHERE l.order_id=orders.id) AS item_quantity,(SELECT count(*) FROM lines WHERE order_id=orders.id) AS line_count,(SELECT json_build_object('status',status,'error',error,'environment',environment,'tracking',tracking,'stock_override',stock_override) FROM carrier_jobs WHERE order_id=orders.id) AS carrier_job,(SELECT json_build_object('status',status,'error',error,'updated_at',updated_at) FROM erp_live_jobs e WHERE e.order_id=orders.id) AS erp_live_job,(SELECT count(*)::int FROM carrier_documents d JOIN carrier_jobs c ON c.order_id=d.order_id WHERE d.order_id=orders.id AND c.status='ready') AS document_count FROM orders WHERE id IN (SELECT id FROM paged) ORDER BY ${order}`,scanAll?args:[...args,(page-1)*pageSize]);
 
-      const diagnosticPage=Date.now();for(let offset=0;offset<rows.length;offset+=200)await orderPageDetails(db,rows.slice(offset,offset+200));const diagnosticDetails=Date.now();
+      for(let offset=0;offset<rows.length;offset+=200)await orderPageDetails(db,rows.slice(offset,offset+200),scanAll?'diagnostics':'all');
       for(const row of rows)projectCurrentDiagnostics(row);
       
 
@@ -491,8 +512,6 @@ const server=http.createServer(async(req,res)=>{
 
       }
 
-      const connection=await readerJobs.snapshot('catalog',()=>catalog.status());
-
       for(const row of rows)if(row.label_status==='waiting_catalog'&&connection.configured&&!connection.running&&!connection.nextRetryAt){row.label_status='weight_pending';row.issue='Poids Erplain non disponible dans V3 ; consulter Connexions pour le dernier résultat. Aucun téléchargement en cours.';}
       if(!connection.configured)for(const row of rows)if(row.label_status==='waiting_catalog'){row.issue='Connexion Erplain à configurer : aucun téléchargement de poids en cours.';row.label_status='connection_missing';}
 
@@ -502,13 +521,17 @@ const server=http.createServer(async(req,res)=>{
         const problemScope=orderQuery(problemParams);
         const problemIds=(await db.query('SELECT id FROM orders '+problemScope.where,problemScope.args)).rows.map(row=>row.id);
         matched=selectProblemOrders(rows,catalogOnly?[]:problemLabels,currentProblemClassifier(),problemIds);
-        if(catalogOnly){json(res,200,{problemTypes:matched.problemTypes,at:new Date().toISOString()});return;}
+        if(catalogOnly)return {problemTypes:matched.problemTypes,at:new Date().toISOString()};
       }
-      const {transportStats,summary}=matched?await orderStatistics(db,scopeParams,matched.rows.map(row=>row.id)):await cachedOrderSummary(scopeParams);
+      const {transportStats,summary}=matched?await orderStatistics(db,scopeParams,matched.rows.map(row=>row.id)):await cachedOrderSummary(scopeParams,db);
       const total=summary.total;
-      if(matched)rows=paginateProblemOrders(matched,page,pageSize).rows;
-      json(res,200,{rows,transportStats,summary,total,page,pages:Math.max(1,Math.ceil(total/pageSize))});return;
-
+      if(matched){
+        rows=paginateProblemOrders(matched,page,pageSize).rows;
+        await orderPageDetails(db,rows,'display');
+      }
+      return {rows,transportStats,summary,total,page,pages:Math.max(1,Math.ceil(total/pageSize))};
+      };
+      json(res,200,await db.readTransaction(readOrders));return;
     }
 
     if(p==='/api/products'&&req.method==='GET'){
@@ -599,7 +622,7 @@ async function shutdown(){if(shuttingDown)return;shuttingDown=true;try{
  const httpClosed=config.http?new Promise(resolve=>{server.close(resolve);server.closeIdleConnections();}):Promise.resolve();
  runtime.beginStop();catalog.stop();await runtime.stop();
  await Promise.all([catalog.wait(),allWeights.wait(),stocks.wait()]);
- while(equivalenceImports.running||stockResume.running||v2Followup.running||erplainRefresh.running||resolutions.running||corrections.running||partialWorker.running||erpWorker.running||carrierWorkers?.active.size||tracking.running||lifecycle.running||temuLocal.running)await new Promise(r=>setTimeout(r,100));
+ while(receiptRecovery.running||equivalenceImports.running||stockResume.running||v2Followup.running||erplainRefresh.running||resolutions.running||corrections.running||partialWorker.running||erpWorker.running||carrierWorkers?.active.size||tracking.running||lifecycle.running||temuLocal.running)await new Promise(r=>setTimeout(r,100));
  while(activeRequests)await new Promise(r=>setTimeout(r,100));server.closeAllConnections();
  await httpClosed;await releaseLeader();await db.close();process.exit(0);
  }catch{console.error('Arrêt incomplet : contrôle des traitements nécessaire');process.exit(1);}}

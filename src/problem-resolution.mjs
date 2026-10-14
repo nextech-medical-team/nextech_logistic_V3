@@ -1,4 +1,7 @@
+import {queueResolutionRequest} from './resolution-request.mjs';
+import {abandonEquivalentPreview} from './abandon-equivalent.mjs';
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {refreshCorrectionStatuses} from './correction-status-check.mjs';
 import {resolveReplacementLines} from './resolution-quantities.mjs';
 import {importedLabelDiagnosticReconciler} from './imported-label-diagnostic.mjs';
@@ -60,7 +63,7 @@ const productTypes=['mapping','missing','duplicate','inactive','weight','weight-
 const actionTypes={
  'manual-temu-pricing':['temu-pricing'],
  'choose-carrier':['routing'],
- 'equivalent-preview':['stock'],'replace-equivalent':['stock'],
+ 'equivalent-preview':['stock'],'replace-equivalent':['stock'],'abandon-equivalent':['stock'],
  'reconcile-bc':['bc'],
  'check-sku':productTypes,'mapping':['mapping','missing'],'select-product':['duplicate'],
  'accept-source-change':['platform'],
@@ -84,11 +87,12 @@ export function validateResolution(b){
  if(b?.action==='refresh')assertRefreshProvider(b.provider);
  if(!actionTypes[b.action]?.includes(b.type))throw Error('Action incompatible avec le problème sélectionné');
  if(typeof b.id!=='string'||!b.id||!/^[a-f0-9-]{36}$/i.test(String(b.requestId)))throw Error('Commande et identifiant de demande requis');
- const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider']}[b.action]||[])];
+ const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'abandon-equivalent':['previewJobId'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider']}[b.action]||[])];
  if(Object.keys(b).some(k=>!allowed.includes(k)))throw Error('La fenêtre ne peut modifier que les informations de ce problème');
  if(['check-sku','weight','select-product','activate-product','create-product'].includes(b.action)&&(!String(b.sku||'').trim()||b.sku.length>199))throw Error('SKU Erplain requis');
  if(b.resumeAfter!==undefined&&typeof b.resumeAfter!=='boolean')throw Error('Option de reprise invalide');
  if(['equivalent-preview','replace-equivalent'].includes(b.action))validateSubstitution(b,b.action==='replace-equivalent');
+ if(b.action==='abandon-equivalent'&&(typeof b.previewJobId!=='string'||!b.previewJobId))throw Error('Identifiant de l’aperçu requis');
  if(b.action==='choose-carrier'&&!['gls','gofo'].includes(b.carrier))throw Error('Choisir GLS ou GOFO');
  if(b.action==='mapping'){normalizeMapping(b);validateMappingScope(b.scope);}
  if(['weight','create-product'].includes(b.action)&&(!Number.isFinite(Number(b.weightKg))||Number(b.weightKg)<=0||Number(b.weightKg)>3000))throw Error('Poids unitaire entre 0 et 3000 kg requis');
@@ -216,6 +220,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    const busy=(await db.query("SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status IN ('pending','creating','awaiting_pdf')",[o.id])).rows.length;
    if(busy)throw Error('Traitement déjà en cours : attendre sa fin avant de modifier les données de la commande');
   }
+  if(j.action==='abandon-equivalent')return abandonEquivalentPreview(db,{orderId:o.id,previewJobId:b.previewJobId,resolutionId:j.id});
   if(['equivalent-preview','replace-equivalent'].includes(j.action)){
    let deferResume=false;
    if(b.importRow){
@@ -224,7 +229,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     deferResume=(await db.query("SELECT 1 FROM equivalence_import_rows WHERE batch_id=$1 AND order_id=$2 AND status='queued'",[imported.batch_id,o.id])).rows.length>0;
     if(deferResume&&(o.partial_mode||o.erp_live?.bc?.update_stock===true))throw Error('Plusieurs remplacements sur une livraison partielle ou un BC historique : rapprochement requis avant reprise');
    }
-   const result=await substitution(db,api,o,b,{apply:j.action==='replace-equivalent',stage,directory,deferResume});
+   const result=await substitution(db,api,o,b,{apply:j.action==='replace-equivalent',stage,directory,deferResume,preserveBcAmounts:!!b.importRow});
    if(j.action==='equivalent-preview'||result.partialRemainder||result.importDeferred)return result;
    await update(j.id,'waiting','Équivalent enregistré · contrôle stock et BL',{...result,equivalent:true});return null;
   }
@@ -329,7 +334,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   }
   if(j.action==='resume-erp'){
    if(o.archived||o.erp_live?.bc?.status==='cancelled')throw Error('Commande archivée ou BC annulé : reprise du BL non autorisée');
-   if(o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
+   if(!usesRecordedBc(o)&&o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
    if(o.partial_mode)throw Error('Utiliser la préparation de la livraison partielle');
    if(!o.erp_live?.bc?.id)throw Error('BC Erplain non créé');
    await stage('Relecture du stock dans Erplain LIVE');await api.verify();
@@ -339,8 +344,8 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    if(r.Order.status!=='active')throw Error('API Erplain · État actif du BC non confirmé');
    const resumeStockLines=resolutionBcLines(o,r.Order);
    if(String(r.Order.id)!==String(o.erp_live.bc.id))throw Error('API Erplain · BC reçu différent du BC demandé');
-   {
-    const desired=await readComparisonLines(db,o);
+   if(!usesRecordedBc(o)){
+    const desired=usesRecordedBc(o)?[]:await readComparisonLines(db,o);
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku,quantity=Number(l.quantity);if(typeof sku!=='string'||!sku.trim()||!Number.isFinite(quantity)||quantity<=0)throw Error('Produits ou quantités du BC non vérifiables : reprise non autorisée');sums.set(sku,(sums.get(sku)||0)+quantity);}return JSON.stringify([...sums].sort());};
     if(total(desired)!==total(resumeStockLines)&&(o.source_payload?.erplainImported||o.erp_live?.bl?.id))throw Error('Commande V3 et livraison existante différentes : vérifier les quantités avant reprise');
    }
@@ -367,10 +372,10 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    const r=await api.request(`query V3ResolutionStock($id:ID!){Order(id:$id){${o.source_payload?.erplainImported?manualOrderFields:'id status line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}'}}}`,{id:String(o.erp_live.bc.id)});
    if(!r.Order?.line_items?.length)throw Error('API Erplain · Stock non reçu : dérogation non autorisée');
    if(['closed','cancelled','completed'].includes(r.Order.status))throw Error('BC clôturé : dérogation non autorisée');
-   const desired=await readComparisonLines(db,o);
+   const desired=usesRecordedBc(o)?[]:await readComparisonLines(db,o);
    const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku;sums.set(sku,(sums.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};
    const stockLines=resolutionBcLines(o,r.Order);
-   if(total(desired)!==total(stockLines))throw Error('Commande V3 et BC différents : vérifier les quantités avant dérogation');
+   if(!usesRecordedBc(o)&&total(desired)!==total(stockLines))throw Error('Commande V3 et BC différents : vérifier les quantités avant dérogation');
    let reason;try{assertFullOrderStock(stockLines);}catch(e){if(!/stock insuffisant/i.test(e.message))throw e;reason=e.message;}
    if(!reason)throw Error('Stock suffisant : utiliser la reprise normale avec création du BL');
    // Keep the normal ERP worker on hold: a forced label is not a preparation order.
@@ -416,7 +421,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    return {message:'Données relues. Les problèmes encore présents restent affichés.',checks:await recheckOrders(db,[o.id])};
   }
   if(j.action==='resume'){
-   if(o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
+   if(!usesRecordedBc(o)&&o.source_payload?.marketplacePendingCorrection)throw Error('Commande modifiée sur la plateforme : vérifier les nouvelles données avant reprise');
    if(o.archived||o.erp_live?.bc?.status==='cancelled'||o.tracking_status==='cancelled')throw Error('Commande archivée ou annulée : reprise non autorisée. Vérifier les documents existants avant toute décision.');
    if(o.source_payload?.erplainImported)await refreshManualOrder(db,api,o);
    if(o.archived||o.erp_live?.bc?.status==='cancelled'||o.tracking_status==='cancelled')throw Error('Commande archivée ou annulée : reprise non autorisée. Vérifier les documents existants avant toute décision.');
@@ -428,11 +433,11 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    if(o.erp_live?.bc?.id){
     await api.verify();const {Order:bc}=await api.request(`query V3ResolutionResumeBC($id:ID!){Order(id:$id){${o.source_payload?.erplainImported?manualOrderFields:'id status line_items{type quantity variant{sku}}'}}}`,{id:String(o.erp_live.bc.id)});
     if(!bc?.line_items)throw Error('API Erplain · Lignes BC non reçues');
-    const desired=await readComparisonLines(db,o);
+    const desired=usesRecordedBc(o)?[]:await readComparisonLines(db,o);
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku;sums.set(sku,(sums.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};
-    if(total(desired)!==total(resolutionBcLines(o,bc)))throw Error('Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette');
+    if(!usesRecordedBc(o)&&total(desired)!==total(resolutionBcLines(o,bc)))throw Error('Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette');
    }
-   const needsPreparationCheck=(!existing||j.result?.regenerateExisting)&&(!o.erp_live?.bl?.id||!o.erp_live?.stockCheckedAt||!o.erp_live?.verifiedAt||o.erp_live?.labelPreparationFingerprint!==await shipmentFingerprint(db,o));
+   const needsPreparationCheck=(!existing||j.result?.regenerateExisting)&&(!o.erp_live?.bl?.id||!o.erp_live?.stockCheckedAt||!o.erp_live?.verifiedAt||(!usesRecordedBc(o)&&o.erp_live?.labelPreparationFingerprint!==await shipmentFingerprint(db,o)));
    await db.transaction(async tx=>{
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
     await tx.query("INSERT INTO erp_live_jobs(order_id,status) VALUES($1,'pending') ON CONFLICT(order_id) DO UPDATE SET status=CASE WHEN erp_live_jobs.status='review' OR erp_live_jobs.status='complete' AND $2 THEN 'pending' ELSE erp_live_jobs.status END,error=CASE WHEN erp_live_jobs.status='review' OR erp_live_jobs.status='complete' AND $2 THEN null ELSE erp_live_jobs.error END",[o.id,needsPreparationCheck]);
@@ -454,9 +459,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    if(p==='/api/resolutions/context'&&req.method==='GET'){json(res,200,await context(db,directory,url.searchParams.get('id')));return true;}
    if(p==='/api/resolutions/job'&&req.method==='GET'){const j=(await db.query('SELECT id,order_id,action,status,stage,result,error,created_at,updated_at,state_since FROM resolution_jobs WHERE id=$1',[url.searchParams.get('id')])).rows[0];if(!j)throw Error('Intervention introuvable');json(res,200,j);return true;}
    if(p!=='/api/resolutions'||req.method!=='POST')return false;
-   permitted(user,['admin','manager']);const b=validateResolution(await body(req));const previous=(await db.query('SELECT * FROM resolution_jobs WHERE request_id=$1',[b.requestId])).rows[0];
-   if(previous){if(JSON.stringify(previous.payload)!==JSON.stringify(b)){const keys=x=>JSON.stringify(Object.entries(x).sort());if(keys(previous.payload)!==keys(b))throw Error('Identifiant déjà utilisé pour une autre intervention');}json(res,202,{id:previous.id});return true;}
-   let id=randomUUID();await db.transaction(async tx=>{if(!(await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows.length)throw Error('Commande introuvable');if((await tx.query("SELECT 1 FROM equivalence_import_rows r JOIN equivalence_imports i ON i.id=r.batch_id WHERE r.order_id=$1 AND i.status='applying'",[b.id])).rows.length)throw Error('Import d’équivalences en cours sur cette commande : attendre son résultat');const active=(await tx.query("SELECT id FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting')",[b.id])).rows[0];if(active){id=active.id;return;}await tx.query('INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$3,$4,$5)',[id,b.id,b.requestId,b.action,JSON.stringify(b)]);await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'resolution.requested',$2)",[user.email,JSON.stringify({id,orderId:b.id,action:b.action,type:b.type,sku:b.sku,account:'Erplain LIVE'})]);});json(res,202,{id});return true;
+   permitted(user,['admin','manager']);const b=validateResolution(await body(req));json(res,202,await queueResolutionRequest(db,b,user));return true;
   },
   async run(){await reconcileCompletedBlResumptions(db);if(running)return;running=true;let j;
    try{

@@ -1,7 +1,5 @@
-name: Publication automatique V3
+name: Déployer V3 manuellement
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,6 +9,7 @@ concurrency:
 jobs:
   verify:
     name: Préparation publication V3
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -41,7 +40,7 @@ jobs:
           path: publication-packet.json
   deploy:
     name: Publication V3 (Section 7)
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 60

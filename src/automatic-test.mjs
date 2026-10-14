@@ -1,3 +1,4 @@
+import {queueCarrierLabels} from './carrier-jobs.mjs';
 import {retireTestCarrierJobs} from './retire-test-carriers.mjs';
 import {randomUUID} from 'node:crypto';
 import {bcAllowedSql} from './bc-authorization.mjs';
@@ -10,11 +11,25 @@ export async function reconcileAutomaticTest(db){
  await db.query(`INSERT INTO erp_live_jobs(order_id) SELECT o.id FROM orders o WHERE (${bcAllowedSql}) AND (o.erp_live->'bc'->>'id' IS NULL OR (o.resolution_pending_resume=false AND o.partial_mode=false)) ON CONFLICT DO NOTHING`);
  await db.query(`WITH retry AS (UPDATE erp_live_jobs e SET status='pending',error=null,updated_at=now() FROM orders o WHERE e.order_id=o.id AND e.status='review' AND (${bcAllowedSql}) AND o.erp_live->'bc'->>'id' IS NULL AND coalesce(o.erp_live->>'bcAuditVersion','')<>'separation-v1' AND e.error ~* '(interrompu|incertain|informations transport manquantes|création à vérifier)' RETURNING e.order_id) UPDATE orders SET erp_live=erp_live||'{"bcAuditVersion":"separation-v1"}'::jsonb WHERE id IN (SELECT order_id FROM retry)`);
  // Labels follow verified stock, quantities and BL.
- await db.query(`INSERT INTO carrier_jobs(order_id,carrier,environment)
- SELECT id,CASE WHEN carrier LIKE 'gls%' THEN 'gls' ELSE carrier END,'production' FROM orders
- WHERE resolution_pending_resume=false AND partial_mode=false AND reference NOT LIKE 'DEMO-%' AND (${validatedDeliverySql})
- AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=orders.id AND c.status IN ('queued','applying','checking','waiting')) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=orders.id AND r.status IN ('queued','running','waiting')) AND label_status='simulated' AND weight_kg>0 AND carrier IN ('gls','gls_pharma','gofo')
- ON CONFLICT DO NOTHING`);
+ await admitPreparedCarrierLabels(db);
+}
+
+export async function admitPreparedCarrierLabels(db){
+ const candidates=(await db.query(`SELECT id FROM orders
+ WHERE NOT archived AND channel<>'temu' AND partial_mode=false AND reference NOT LIKE 'DEMO-%'
+ AND (${validatedDeliverySql}) AND label_status IN ('pending','simulated') AND weight_kg>0
+ AND carrier IN ('gls','gls_pharma','gls_shop','gofo')
+ AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=orders.id)
+ AND NOT EXISTS(SELECT 1 FROM order_recheck_monitor m WHERE m.order_id=orders.id
+  AND (m.state->'carrierAdmission'->>'checkedAt')::timestamptz>now()-interval '1 minute')
+ ORDER BY processing_priority_at ASC NULLS LAST,id LIMIT 100`)).rows;
+ let queued=0;
+ for(const o of candidates){
+  await db.query('INSERT INTO order_recheck_monitor(order_id) VALUES($1) ON CONFLICT DO NOTHING',[o.id]);
+  try{queued+=await queueCarrierLabels(db,[o.id],{automatic:true});}
+  catch(e){await db.query("UPDATE order_recheck_monitor SET next_check=now(),requested=requested+1,state=state||$2::jsonb WHERE order_id=$1",[o.id,JSON.stringify({carrierAdmission:{status:'held',reason:e.message,checkedAt:new Date().toISOString()}})]);}
+ }
+ return queued;
 }
 
 // A read-only Erplain synchronization holds preparation. Resume through the

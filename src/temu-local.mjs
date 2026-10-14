@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {resolveExcelTemuShop} from './temu-excel-shop.mjs';
 import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
 import {verifyExcelTemuDetail} from './temu-excel-identity.mjs';
@@ -20,7 +21,7 @@ import {loadShopVault} from './temu-shop-vault.mjs';
 import {connectTemuShops,loadTemuShopConfig} from './temu-shop-clients.mjs';
 export function buyerCancellationPending(detail){const flags=[...(detail?.parentOrderMap?.parentOrderLabel||[]),...(detail?.orderList||[]).flatMap(l=>l.orderLabel||[])];return flags.some(f=>f==='pending_buyer_cancellation'||f?.name==='pending_buyer_cancellation'&&[1,'1',true].includes(f.value));}
 export function directError(e){return String(e?.message||e).includes('NOT_IN_IP_WHITE_LIST')?'TEMU · IP non autorisée (5000003 — NOT_IN_IP_WHITE_LIST)':String(e?.message||e).slice(0,450);}
-export async function localTemuRows(db){return (await db.query(`SELECT o.id,o.reference,o.recipient,o.address->>'country' country,o.tracking_status,o.erp_live,o.source_payload->'temuDirect' direct,e.status erp_job_status,e.error erp_error,j.status,j.error,j.result,j.plan,j.packages,(SELECT coalesce(json_agg(json_build_object('source_sku',l.source_sku,'target_sku',coalesce(nullif(l.target_sku,''),m.target_sku)) ORDER BY l.source_line),'[]'::json) FROM lines l LEFT JOIN mappings m ON m.channel='temu' AND m.source_sku=l.source_sku WHERE l.order_id=o.id) sku_lines,(SELECT json_agg(package ORDER BY package) FROM temu_label_documents d WHERE d.reference=o.reference AND j.result->>'source'='temu_direct' AND j.packages ? d.package) documents FROM orders o LEFT JOIN temu_label_jobs j ON j.reference=o.reference LEFT JOIN erp_live_jobs e ON e.order_id=o.id WHERE o.channel='temu' AND NOT o.archived ORDER BY o.source_date DESC,o.reference`)).rows;}
+export async function localTemuRows(db){return (await db.query(`SELECT o.id,o.reference,o.recipient,o.address->>'country' country,o.tracking_status,o.erp_live,o.source_payload->'temuDirect' direct,e.status erp_job_status,e.error erp_error,j.status,j.error,j.result,j.plan,j.packages,(SELECT coalesce(json_agg(json_build_object('source_sku',l.source_sku,'target_sku',coalesce(nullif(l.target_sku,''),m.target_sku)) ORDER BY l.source_line),'[]'::json) FROM lines l LEFT JOIN mappings m ON m.channel='temu' AND m.source_sku=l.source_sku WHERE l.order_id=o.id) sku_lines,(SELECT json_agg(package ORDER BY package) FROM temu_label_documents d WHERE d.reference=o.reference AND j.packages ? d.package) documents FROM orders o LEFT JOIN temu_label_jobs j ON j.reference=o.reference LEFT JOIN erp_live_jobs e ON e.order_id=o.id WHERE o.channel='temu' AND NOT o.archived ORDER BY o.source_date DESC,o.reference`)).rows;}
 export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loadShopVault,configLoader=()=>loadTemuShopConfig(directory)}={}){
  let running=false,clients=new Map(),services=new Map(),allShopsConnected=false,countryByMall=new Map(),connectedAt=0,connectionErrors=new Map(),connections=new Map();
  async function connect(country){const key=country||'ALL';if(connections.has(key))return connections.get(key);const pending=connectShops(country);connections.set(key,pending);try{return await pending;}finally{connections.delete(key);}}
@@ -54,7 +55,7 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
   try{
    const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});
    if(detail.parentOrderMap?.parentOrderSn!==reference||!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('TEMU · Identité ou articles de commande incohérents');
-   if(isTemuExcel(o)){const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[o.id])).rows;verifyExcelTemuDetail(o,lines,detail);verifiedExcelCommercial(o,lines);}
+   if(isTemuExcel(o)){const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[o.id])).rows;verifyExcelTemuDetail(o,lines,detail);if(!usesRecordedBc(o))verifiedExcelCommercial(o,lines);}
    const now=new Date().toISOString(),direct={source:'temu_direct',state:'verified',verifiedAt:now,status:Number(detail.parentOrderMap.parentOrderStatus)};
    await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({temuDirect:direct,temuOrderDetail:detail})]);
    await observeTemuCancellation(db,o,detail);

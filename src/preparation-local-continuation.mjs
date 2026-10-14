@@ -1,3 +1,4 @@
+import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {currentMappingFingerprint} from './current-mapping-line.mjs';
@@ -7,7 +8,7 @@ import {suspensionBlock} from './order-suspension.mjs';
 
 export function freshContinuationProof(o,now=Date.now()){
  const p=o?.erp_live,r=p?.bcComparisonRefresh,t=Date.parse(r?.checkedAt);
- return !!(o&&!o.archived&&!o.simulation&&!o.partial_mode&&!o.issue&&!o.resolution_pending_resume&&!suspensionBlock(o)&&!o.source_payload?.erplainValidationHold&&!o.source_payload?.visibilityHold&&!o.source_payload?.marketplacePendingCorrection&&p?.phase==='bc_created'&&p.bc?.status==='active'&&p.bc.id&&!p.bl?.id&&!p.stockDocument?.id&&!p.stockCreationAttemptedAt&&p.pricing?.status==='verified'&&!p.pricing.error&&r?.readOnly===true&&r.preparationNotStarted===true&&String(r.bcId)===String(p.bc.id)&&r.comparison?.scope==='full'&&r.comparison.different===false&&Array.isArray(r.errors)&&r.errors.length===0&&!r.identityUnconfirmed&&/^[a-f0-9]{64}$/.test(r.mappingFingerprint||'')&&Number.isFinite(t)&&t<=now&&now-t<=15*60000);
+ return !!(o&&!o.archived&&!o.simulation&&!o.partial_mode&&!o.issue&&!o.resolution_pending_resume&&!suspensionBlock(o)&&!o.source_payload?.erplainValidationHold&&!o.source_payload?.visibilityHold&&!o.source_payload?.marketplacePendingCorrection&&p?.phase==='bc_created'&&p.bc?.status==='active'&&p.bc.id&&!p.bl?.id&&!p.stockDocument?.id&&!p.stockCreationAttemptedAt&&(usesRecordedBc(o)||p.pricing?.status==='verified')&&(usesRecordedBc(o)||!p.pricing?.error)&&r?.readOnly===true&&r.preparationNotStarted===true&&String(r.bcId)===String(p.bc.id)&&r.comparison?.scope==='full'&&r.comparison.different===false&&Array.isArray(r.errors)&&r.errors.length===0&&!r.identityUnconfirmed&&/^[a-f0-9]{64}$/.test(r.mappingFingerprint||'')&&Number.isFinite(t)&&t<=now&&now-t<=15*60000);
 }
 // A completed read is already evidence; waiting for another external batch must
 // not strand the preparation. This only queues the existing guarded ERP worker.
@@ -23,7 +24,7 @@ export async function continuePreparationFromFreshRead(db,orderId,{enabled=()=>t
   await tx.query('SELECT id FROM lines WHERE order_id=$1 FOR SHARE',[orderId]);
   await tx.query('SELECT source_sku FROM mappings WHERE channel=$2 AND source_sku IN (SELECT source_sku FROM lines WHERE order_id=$1) FOR SHARE',[orderId,o.channel]);
   const proof=o.erp_live.bcComparisonRefresh;
-  if(await currentMappingFingerprint(tx,o)!==proof.mappingFingerprint||!enabled()||!canResume())return {queued:false};
+  if((!usesRecordedBc(o)&&await currentMappingFingerprint(tx,o)!==proof.mappingFingerprint)||!enabled()||!canResume())return {queued:false};
   const requestId='fresh-bc-continuation-'+createHash('sha256').update(JSON.stringify([orderId,proof.bcId,proof.checkedAt,proof.mappingFingerprint])).digest('hex'),id=randomUUID();
   const result={erpOnly:true,existingLabelsPreserved:true,automaticRecheck:true,afterFreshComparison:true,checkedAt:proof.checkedAt,mappingFingerprint:proof.mappingFingerprint};
   const queued=await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,result) SELECT $1,$2,$3,'resume-erp',$4,$5 WHERE NOT EXISTS(SELECT 1 FROM resolution_jobs WHERE order_id=$2 AND status IN ('pending','queued','running','waiting','processing')) ON CONFLICT DO NOTHING RETURNING id",[id,orderId,requestId,JSON.stringify({id:orderId,requestId,action:'resume-erp',type:'stock',resumeAfter:true}),JSON.stringify(result)]);
@@ -35,7 +36,7 @@ export async function continuePreparationFromFreshRead(db,orderId,{enabled=()=>t
 
 export function completedContinuationForPurchase(o,now=Date.now()){
  const p=o?.erp_live;
- return !!(o?.channel==='temu'&&o.resolution_pending_resume&&!o.archived&&!o.simulation&&!o.partial_mode&&!o.issue&&!suspensionBlock(o)&&!o.source_payload?.erplainValidationHold&&!o.source_payload?.visibilityHold&&!o.source_payload?.marketplacePendingCorrection&&p?.phase==='bl_ready'&&p.bc?.status==='active'&&p.bl?.id&&p.bl.status==='ready_to_ship'&&p.pricing?.status==='verified'&&!p.pricing.error&&p.stockDocument?.id&&p.stockDocument.status==='completed'&&p.stockDocument.update_stock===true&&[p.verifiedAt,p.stockCheckedAt].every(v=>Number.isFinite(Date.parse(v))&&Date.parse(v)<=now&&now-Date.parse(v)<=15*60000));
+ return !!(o?.channel==='temu'&&o.resolution_pending_resume&&!o.archived&&!o.simulation&&!o.partial_mode&&!o.issue&&!suspensionBlock(o)&&!o.source_payload?.erplainValidationHold&&!o.source_payload?.visibilityHold&&!o.source_payload?.marketplacePendingCorrection&&p?.phase==='bl_ready'&&p.bc?.status==='active'&&p.bl?.id&&p.bl.status==='ready_to_ship'&&(usesRecordedBc(o)||p.pricing?.status==='verified')&&(usesRecordedBc(o)||!p.pricing?.error)&&p.stockDocument?.id&&p.stockDocument.status==='completed'&&p.stockDocument.update_stock===true&&[p.verifiedAt,p.stockCheckedAt].every(v=>Number.isFinite(Date.parse(v))&&Date.parse(v)<=now&&now-Date.parse(v)<=15*60000));
 }
 export async function releaseCompletedContinuationForPurchase(db,orderId,{enabled=()=>true,canResume=()=>true,now=()=>Date.now()}={}){
  if(!enabled()||!canResume())return {updated:false};
@@ -53,7 +54,7 @@ export async function releaseCompletedContinuationForPurchase(db,orderId,{enable
   if(!label||!['ready','to_buy'].includes(label.status)||label.error||label.attempt_id||!Array.isArray(label.packages)||label.packages.length||(await tx.query('SELECT 1 FROM temu_label_documents WHERE reference=$1 LIMIT 1',[o.reference])).rows.length||(await tx.query('SELECT 1 FROM carrier_jobs WHERE order_id=$1 LIMIT 1',[orderId])).rows.length)return {updated:false};
   await tx.query('SELECT id FROM lines WHERE order_id=$1 FOR SHARE',[orderId]);
   await tx.query('SELECT source_sku FROM mappings WHERE channel=$2 AND source_sku IN (SELECT source_sku FROM lines WHERE order_id=$1) FOR SHARE',[orderId,o.channel]);
-  if(!o.erp_live.mappingPreparationFingerprint||await currentMappingFingerprint(tx,o)!==o.erp_live.mappingPreparationFingerprint)return {updated:false};
+  if(!o.erp_live.mappingPreparationFingerprint||(!usesRecordedBc(o)&&await currentMappingFingerprint(tx,o)!==o.erp_live.mappingPreparationFingerprint))return {updated:false};
   try{await assertLabelStockGate(tx,o);}catch{return {updated:false};}
   if(!enabled()||!canResume())return {updated:false};
   await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[orderId]);

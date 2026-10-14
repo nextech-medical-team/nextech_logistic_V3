@@ -100,7 +100,9 @@ test('same TEMU shipping engine requires validated production BL, quotes 0.25 kg
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,created_at) VALUES('later','o','refresh','queued',now()+interval '1 minute')");
  await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/préparation à terminer/);assert.equal(f.bought,0);
  await f.db.query("DELETE FROM resolution_jobs WHERE id='later'");
- f.detail.orderList[0].quantity=4;await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/quantités/);assert.equal(f.bought,0);f.detail.orderList[0].quantity=5;
+ await f.db.query("UPDATE lines SET quantity=99 WHERE order_id='o'");
+ await f.db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{pricing}','{\"status\":\"blocked\",\"error\":\"BC · Base fiscale des prix Erplain différente ou absente\"}') WHERE id='o'");
+ f.detail.orderList[0].quantity=4; // Read current provider information without comparing commercial quantities after BC creation.
  const result=await shipping.buy(reference,plan.id,plan.amount);assert.equal(result.status,'complete');assert.equal(f.bought,1);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
 });
 
@@ -162,9 +164,13 @@ test('Excel replacement keeps original TEMU identity and prices, and recovers th
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,error,result,created_at) VALUES('equivalent','o','replace-equivalent','review',$1,'{\"erpOnly\":true}',now()+interval '1 second')",[temuLabelPolicyMessage]);
  const current=await f.lines(),o=await f.read();
  assert.doesNotThrow(()=>verifyExcelTemuDetail(o,current,f.detail));assert.equal(verifiedExcelCommercial(o,current).total,84.05);
- f.detail.orderList[0].quantity=6;assert.throws(()=>verifyExcelTemuDetail(o,current,f.detail),/quantités/);f.detail.orderList[0].quantity=5;
+ const beforeBc={...o,erp_live:{...o.erp_live,bc:null}};
+ f.detail.orderList[0].quantity=6;
+ assert.doesNotThrow(()=>verifyExcelTemuDetail(o,current,f.detail)); // Recorded BC remains the execution authority.
+ assert.throws(()=>verifyExcelTemuDetail(beforeBc,current,f.detail),/quantités/);f.detail.orderList[0].quantity=5;
+ assert.throws(()=>verifyExcelTemuDetail(o,current,{...f.detail,parentOrderMap:{parentOrderSn:'OTHER'}}),/Identité/);
  const modified=structuredClone(o);modified.erp_live.equivalentOriginalLines[0].quantity=6;assert.throws(()=>verifiedExcelCommercial(modified,current),/modifiés/);
- for(const invalid of [null,[],[{}]])assert.throws(()=>verifyExcelTemuDetail({...o,erp_live:{...o.erp_live,equivalentOriginalLines:invalid}},current,f.detail),/origine/);
+ for(const invalid of [null,[],[{}]])assert.throws(()=>verifyExcelTemuDetail({...beforeBc,erp_live:{...beforeBc.erp_live,equivalentOriginalLines:invalid}},current,f.detail),/origine/);
  const job={id:'equivalent',order_id:'o',action:'replace-equivalent'};
  assert.equal((await advanceEquivalentLabel(f.db,job,{repair:true})).state,'temu_ready');
  assert.equal((await f.db.query("SELECT status,error FROM resolution_jobs WHERE id='equivalent'")).rows[0].status,'complete');
