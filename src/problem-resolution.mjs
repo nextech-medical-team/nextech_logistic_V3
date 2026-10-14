@@ -54,6 +54,7 @@ import {correctionCatalog} from './problem-corrections.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 import {assertFullOrderStock} from './stock-gate.mjs';
 import {assertResumeStock} from './resume-stock-policy.mjs';
+import {prepareMissingDraftRecovery,commitMissingDraftRecovery} from './missing-draft-recovery.mjs';
 import {createProductionCarriers,createTestCarriers} from './carriers-test.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -350,7 +351,9 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     if(total(desired)!==total(resumeStockLines)&&(o.source_payload?.erplainImported||o.erp_live?.bl?.id))throw Error('Commande V3 et livraison existante différentes : vérifier les quantités avant reprise');
    }
    await assertResumeStock(api,o,r.Order,resumeStockLines);
+   const recoveredDraft=await prepareMissingDraftRecovery(db,api,o,{resolutionId:j.id});
    await db.transaction(async tx=>{const e=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];if(e?.status==='processing')throw Error('Traitement Erplain en cours');
+    if(recoveredDraft)await commitMissingDraftRecovery(tx,o,recoveredDraft,{resolutionId:j.id,userEmail:j.user_email||'system'});
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
     await tx.query("INSERT INTO erp_live_jobs(order_id,status) VALUES($1,'pending') ON CONFLICT(order_id) DO UPDATE SET status='pending',error=null,updated_at=now()",[o.id]);
     await tx.query("UPDATE resolution_jobs SET status='waiting',stage='Reprise du BL Erplain',result=$2,updated_at=now() WHERE id=$1",[j.id,JSON.stringify({resume:true})]);});return null;

@@ -1,4 +1,5 @@
 import {usesRecordedBc} from './existing-bc-execution.mjs';
+import {recoveredPreparationIssue} from './recovered-preparation-issue.mjs';
 import {completeShippingOrders} from './erplain-document-read.mjs';
 import {erplainWeightKg} from './erplain-readonly.mjs';
 import {importedLabelMissingFields} from './erplain-label-required.mjs';
@@ -72,7 +73,7 @@ export async function synchronizeRecoveredOrder(db,o,d){
    state.bl=scope.pending[0];
   }
   delete state.stockCheckedAt;delete state.verifiedAt;delete state.labelPreparationFingerprint;
-  await db.query("UPDATE orders SET erp_live=$2::jsonb,issue='Commande Erplain validée : choisir le circuit de préparation',resolution_pending_resume=true WHERE id=$1",[o.id,JSON.stringify(state)]);
+  await db.query("UPDATE orders SET erp_live=$2::jsonb,issue=$3,resolution_pending_resume=true WHERE id=$1",[o.id,JSON.stringify(state),recoveredPreparationIssue(o,state)]);
   for(const line of local){const chosen=scope.lines.find(l=>String(l.id)===String(line.source_line));if(chosen)line.target_quantity=chosen.quantity;}
   for(let i=local.length-1;i>=0;i--)if(!keep.includes(String(local[i].source_line)))local.splice(i,1);
  }
