@@ -45,7 +45,7 @@ export async function queueCarrierLabels(db,ids,{automatic=false}={}){
    if(o.source_payload?.visibilityHold||o.source_payload?.historicalShipments?.length||o.source_payload?.externalLabel?.active)throw Error('Expédition ou suspension existante à rapprocher');
    const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1 FOR SHARE',[id])).rows[0];
    assertPreparedLabelOrder(o,e);
-   if(!o.erp_live.bc?.id)throw Error('Identité du BC non vérifiée');
+   if(!hasCreatedBl(o)&&!o.erp_live.bc?.id)throw Error('Identité du BC non vérifiée');
    if(!['gls','gls_pharma','gls_shop','gofo'].includes(o.carrier))throw Error('Transporteur non déterminé');
    if(o.resolution_pending_resume&&!hasCreatedBl(o)){
     const r=actions[0];

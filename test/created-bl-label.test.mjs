@@ -10,6 +10,8 @@ for(const status of ['pending','make_the_shipment','in_preparation','ready_to_sh
  assert.equal(hasCreatedBl(o),true);
  await assertLabelStockGate({query:()=>assert.fail('SQL gate after BL')},o);
  assert.doesNotThrow(()=>assertPreparedLabelOrder(o,{status:'review',error:'Stock incohérent'}));
+ assert.doesNotThrow(()=>assertPreparedLabelOrder({...o,erp_live:{bl:o.erp_live.bl}},{status:'review'}));
+ assert.throws(()=>assertPreparedLabelOrder({...o,duplicate_of:'original'}),/doublon/i);
  assert.throws(()=>assertPreparedLabelOrder({...o,suspension:{active:true}}),/suspend/i);
  assert.throws(()=>assertPreparedLabelOrder({...o,tracking_status:'cancelled'}),/annul/i);
 });
