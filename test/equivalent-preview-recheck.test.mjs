@@ -60,10 +60,12 @@ test('suspensions, shipping, partials, other choices and provider failures remai
 
 test('recheck badge keeps the current stock problem and the chosen replacement visible',()=>{
  const ctx=vm.createContext({});vm.runInContext(fs.readFileSync(new URL('../public/compact-problems.js',import.meta.url),'utf8'),ctx);
- const order={sku_lines:[{sku:'A',quantity:96}],erp_live_job:{status:'review',error:'BL bloqué — stock insuffisant : A : 96 nécessaires, 63 utilisables, manque 33'},pending_equivalent:{sku:'A',replacementSku:'B',replaceQuantity:96,replacementQuantity:96,error:equivalentPreviewRecheckMessage,recheckRequired:true}};
+ const order={sku_lines:[{sku:'A',quantity:96}],resolution_error:interruptedPreviewErrors[0],erp_live_job:{status:'review',error:'BL bloqué — stock insuffisant : A : 96 nécessaires, 63 utilisables, manque 33'},pending_equivalent:{sku:'A',replacementSku:'B',replaceQuantity:96,replacementQuantity:96,error:equivalentPreviewRecheckMessage,recheckRequired:true,previousError:interruptedPreviewErrors[0]}};
  const problems=ctx.compactProblems(order);
  assert.ok(problems.some(p=>p.type==='equivalent-pending'&&p.label==='Vérifier le remplacement'));
  assert.ok(problems.some(p=>p.type==='stock'&&p.sku==='A'));
+ assert.ok(!problems.some(p=>p.detail===interruptedPreviewErrors[0]));
+ assert.equal(order.resolution_error,interruptedPreviewErrors[0]);
  assert.equal(order.pending_equivalent.replacementSku,'B');
  order.pending_equivalent.error='Produit de remplacement [B] : stock insuffisant. Quantité totale nécessaire : 96 unités ; stock disponible : 13 unités ; quantité manquante : 83 unités.';
  assert.ok(ctx.compactProblems(order).some(p=>p.type==='stock'&&p.sku==='B'&&p.detail.includes('83')));

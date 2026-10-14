@@ -96,6 +96,7 @@ function compactProblems(order){
  if(!out.length&&!temuAwaitingPurchase&&['blocked','waiting_catalog','review','failed'].includes(order.carrier_job?.status||order.label_status))add(order.resolution_pending_resume&&!order.resolution_active?{type:'unknown',label:'Reprise à demander',sku:'',detail:'Des corrections sont enregistrées et la reprise de la préparation reste à demander. Consultez les documents et les diagnostics actuels avant toute reprise ; cet état ne confirme pas que tous les blocages sont résolus.',provider:'Erplain'}:compactProblem(''));
  // Historical job errors do not invalidate a mapping present on the current lines.
  const visible=out.filter(p=>{
+  if(pendingLine&&pending.recheckRequired&&p.detail===pending.previousError)return false;
   if(!p.sku&&(p.type==='weight'||p.type==='stock'&&new Set(lines.map(l=>l.sku||l.mapped_sku||l.source_sku).filter(Boolean)).size===1)&&out.some(x=>x.type===p.type&&x.sku&&x.label===p.label))return false;
   if(pendingLine&&!pending.recheckRequired&&p.sku===pending.sku&&Number(pending.replaceQuantity)>=Number(pendingLine.quantity)&&Number(pendingLine.quantity)>0&&['weight','weight-unit','stock','missing','inactive','duplicate'].includes(p.type))return false;
   if(pendingLine&&!p.sku&&p.detail===pending.error)return false;
