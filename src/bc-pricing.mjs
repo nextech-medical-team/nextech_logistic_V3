@@ -24,6 +24,9 @@ function taxCode(rate,codes){
 export function rateFromTax(net,tax,codes,country,context={}){
  if(tax===0)return 0;
  const rates=[...new Set(codes.flatMap(c=>c.active!==false&&c.tax_rates?.length===1?[Number(c.tax_rates[0].rate)]:[]))];
+ const exact=rates.filter(r=>cents(net*r/100)===cents(tax));
+ if(context.preferExactRate&&exact.length===1)return exact[0];
+ if(context.preferExactRate&&exact.length>1)throw Error('BC · Taux de TVA source à préciser');
  const hits=rates.filter(r=>Math.abs(cents(net*r/100)-cents(tax))<=1);
  if(hits.length>1&&['FR','FRA','FRANCE'].includes(String(country||'').trim().toUpperCase())&&hits.includes(20))return 20;
  if(hits.length===1)return hits[0];
@@ -31,11 +34,11 @@ export function rateFromTax(net,tax,codes,country,context={}){
  const candidates=rates.filter(r=>Number.isFinite(r)&&r>=0&&acceptedMonetaryDifference(cents(net*r/100)/100,tax,context)).map(r=>({r,gap:Math.abs(cents(net*r/100)-cents(tax))})).sort((a,b)=>a.gap-b.gap);
  if(!candidates.length||candidates[1]?.gap===candidates[0].gap)throw Error('BC · Taux de TVA source à préciser');return candidates[0].r;
 }
-export function buildBcPricing(order,lines,products,codes,{eurExchangeRate}={}){
+export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,preferExactRate=false}={}){
  if(isTemuExcel(order)){
   const amounts=excelAmounts(lines,{country:order.address?.country});
   const source=lines.map((l,i)=>{const r=amounts.rows[i];return {...l,source_payload:{itemprice:cents(r.net+r.tax)/100,itemtax:r.tax,shippingprice:cents(r.shipping+r.shippingTax)/100,shippingtax:r.shippingTax}};});
-  const pricing=buildBcPricing({...order,channel:'amazon',erp_live:{},source_payload:{currency:amounts.currency}},source,products,codes,{eurExchangeRate});
+  const pricing=buildBcPricing({...order,channel:'amazon',erp_live:{},source_payload:{currency:amounts.currency}},source,products,codes,{eurExchangeRate,preferExactRate:true});
   pricing.tax_type='inclusive';
   pricing.items=pricing.items.map((item,i)=>({...item,...(item.type==='shipping_cost'?{description:item.description.replace('Livraison Amazon','Livraison TEMU')}:{}),price:pricing.lineAmounts[i].gross/Number(item.quantity)}));
   pricing.lineAmounts=pricing.lineAmounts.map((item,i)=>({...item,unitPrice:pricing.items[i].price,basis:'gross'}));
@@ -107,7 +110,7 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate}={}){
   // A cancelled/reimported one-line equivalent retains the original Amazon totals.
   const originalLines=order.erp_live?.equivalentOriginalLines||order.erp_live?.previousCancelledCycle?.equivalentOriginalLines;
   const pricingRows=lines.map(l=>l.source_payload?.origin==='erplain_live_equivalent'&&lines.length===1&&originalLines?.length===1?originalLines[0].source_payload:l.source_payload||{});
-  const taxContext={currency,eurExchangeRate,total:pricingRows.reduce((sum,r)=>sum+amount(r.itemprice,'Prix Amazon')+amount(r.shippingprice,'Livraison Amazon'),0)};
+  const taxContext={currency,eurExchangeRate,preferExactRate,total:pricingRows.reduce((sum,r)=>sum+amount(r.itemprice,'Prix Amazon')+amount(r.shippingprice,'Livraison Amazon'),0)};
   lines.forEach((l,i)=>{const r=l.source_payload?.origin==='erplain_live_equivalent'&&lines.length===1&&originalLines?.length===1?originalLines[0].source_payload:(l.source_payload||{}),gross=amount(r?.itemprice,'Prix Amazon · '+l.source_sku),tax=amount(r?.itemtax,'TVA Amazon · '+l.source_sku);
    if(optional(r.itempromotiondiscount,'Remise Amazon')||optional(r.shippromotiondiscount,'Remise livraison Amazon'))throw Error('Amazon · Ventilation TVA des remises à vérifier');
    add(products[i],gross,tax,rateFromTax(gross-tax,tax,codes,order.address?.country,taxContext),l.source_sku,'gross');

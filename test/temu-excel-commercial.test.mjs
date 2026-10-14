@@ -41,3 +41,19 @@ test('TEMU sale price is a line total even when multiple units are purchased',()
  const discounted={...line({'Prix de vente (hors taxes)':'30,35€','Total du prix de vente après réductions (hors taxes)':'21,24€','Réduction de la part du vendeur':'9,11€'}),quantity:5};assert.equal(excelAmounts([discounted]).rows[0].net,21.24);
  assert.throws(()=>excelAmounts([{...l,source_payload:{excel:{...l.source_payload.excel,'Total du prix de vente après réductions (hors taxes)':'336,25€'}}}]),/incohérents/);
 });
+
+
+test('Excel SK shipping chooses the exact rounded source tax instead of a one-cent neighbour',async()=>{
+ const {buildBcPricing,rateFromTax}=await import('../src/bc-pricing.mjs');
+ const codes=[5,5.5,20,21,23].map(rate=>({id:String(rate),active:true,tax_rates:[{rate}]}));
+ const order={channel:'temu',address:{country:'SK'},source_payload:{origin:'temu_excel'}};
+ const lines=[{source_line:'item',source_sku:'SKU',quantity:1,source_payload:{excel:{'Prix de vente (hors taxes)':'23,52 €','Total du prix de vente après réductions (hors taxes)':'23,52 €','Taxe sur les produits':'1,18 €',"Total de l'expédition (hors taxes)":'2,34 €',"Taxe d'expédition":'0,12 €'}}}];
+ const pricing=buildBcPricing(order,lines,[{variant:{id:'variant'},quantity:8}],codes);
+ assert.equal(pricing.total,27.16);assert.equal(pricing.tax,1.3);
+ assert.ok(pricing.items.every(item=>item.tax_codes.length===1&&item.tax_codes[0].id==='5'));
+ assert.equal(rateFromTax(2.34,.12,codes,'SK',{preferExactRate:true}),5);
+ // A true rounded tie is still ambiguous; the country does not invent a rate.
+ assert.throws(()=>rateFromTax(2.34,.12,[...codes,{id:'5.1',active:true,tax_rates:[{rate:5.1}]}],'SK',{preferExactRate:true}),/préciser/);
+ // Existing non-Excel behaviour is preserved.
+ assert.throws(()=>rateFromTax(2.34,.12,codes,'SK'),/préciser/);
+});
