@@ -27,6 +27,18 @@ test('rupture réelle, réservations, regroupement et quantité entière',()=>{
  assert.deepEqual(shortageRows({line_items:[line(6,10),line(6,10)]}),[{sku:'001',quantity:12}]);
  assert.throws(()=>shortageRows({line_items:[{...line(1),available:null}]}),/vérifiable/);
 });
+test('le périmètre transmis est conservé et un autre filtre ne rejoint pas le mauvais export',async()=>{
+ const directory=await mkdtemp(path.join(tmpdir(),'equivalence-filter-route-'));let release;const held=new Promise(resolve=>release=resolve);let captured;
+ try{
+  await writeFile(path.join(directory,'live-workflow-references.json'),JSON.stringify({companyId:100174,locationId:1}));
+  const service=equivalenceImportService({async query(sql){assert.match(sql,/product_equivalences/);return {rows:[]};}},directory,{api:{async verify(){await held;}},readScope:async params=>{captured=params;return {rows:[],total:0,summary:{blocked:0}};}});
+  let response;const ctx={req:{method:'GET'},res:{},user:{email:'a@test'},permitted(){},json(res,status,data){response=data;}};
+  await service.routes({...ctx,p:'/api/equivalence-import/shortages',url:new URL('http://local/?country=FR&page=2')});const id=response.id;
+  await service.routes({...ctx,p:'/api/equivalence-import/shortages',url:new URL('http://local/?country=FR&page=3')});assert.equal(response.id,id);
+  await assert.rejects(()=>service.routes({...ctx,p:'/api/equivalence-import/shortages',url:new URL('http://local/?country=DE')}),/autre périmètre/);assert.equal(captured.get('country'),'FR');assert.equal(captured.has('page'),false);release();
+  for(let i=0;i<200;i++){await new Promise(resolve=>setTimeout(resolve,10));await service.routes({...ctx,p:'/api/equivalence-import/export',url:new URL('http://local/?id='+id)});if(response.status!=='checking')break;}assert.equal(response.status,'complete');assert.equal(response.scopeTotal,0);assert.equal(response.scopeBlocked,0);
+ }finally{release();await rm(directory,{recursive:true,force:true});}
+});
 test('export complet, équivalence réciproque, choix humain et panne explicite',async()=>{
  const directory=await mkdtemp(path.join(tmpdir(),'equivalence-export-'));
  try{
@@ -55,4 +67,16 @@ test('modèle vierge, identifiants texte, compatible import après saisie',async
  const result=await exportEquivalences({query(){throw Error('DB interdite');}},{verify(){throw Error('API interdite');}},'',{template:true});
  const book=new ExcelJS.Workbook();await book.xlsx.load(Buffer.from(result.file,'base64'));const s=book.getWorksheet('Onglet type');assert.equal(s.rowCount,1);s.addRow(['00042','001','002',10]);
  const parsed=await parseEquivalenceFile(Buffer.from(await book.xlsx.writeBuffer()).toString('base64'));assert.equal(parsed[0].reference,'00042');assert.equal(parsed[0].sku,'001');assert.equal(parsed[0].replacementQuantity,10);
+});
+test('119 commandes du filtre / 110 à compléter : aucune omission historique, AO ou partielle',async()=>{
+ const directory=await mkdtemp(path.join(tmpdir(),'equivalence-scope-'));
+ try{
+  await writeFile(path.join(directory,'live-workflow-references.json'),JSON.stringify({companyId:100174,locationId:1}));
+  const rows=Array.from({length:119},(_,i)=>({id:String(i),reference:'SCOPE-'+i,channel:i>=94?'tender':'amazon',simulation:i>=35,partial_mode:i>=84&&i<92,tracking_status:'not_shipped',stockDiagnostics:[{type:'stock',sku:'001',label:'Bloqué : stock insuffisant',detail:'Stock insuffisant : 001'}],erp_live:{bc:{id:String(i+1)},...(i>=92&&i<94?{bl:{id:'BL'+i}}:{})}}));let bcReads=0;
+  const db={async query(sql){assert.match(sql,/product_equivalences/,'Le périmètre fourni doit être utilisé sans requête globale indépendante');return {rows:[{sku_a:'001',sku_b:'002'}]};}};
+  const api={async verify(){},async request(q,vars){if(q.includes('V3EquivalenceExportBatch'))return Object.fromEntries(Object.entries(vars).map(([key,id])=>{bcReads++;return ['o'+key.slice(1),{id,status:'active',line_items:[line(2)],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}}];}));return {Variants:{data:[{id:'2',sku:'002',active:true,track_inventory:true,product:{active:true},stock_levels:{data:[{location:{id:'1'},available:500,on_hand:500}],paginatorInfo:{hasMorePages:false}}}],paginatorInfo:{hasMorePages:false}}};}};
+  const scope={rows,total:119,summary:{blocked:110}};const result=await exportEquivalences(db,api,directory,{scope});assert.equal(result.scopeTotal,119);assert.equal(result.scopeBlocked,110);assert.equal(result.rows,84);assert.equal(bcReads,84);
+  const book=new ExcelJS.Workbook();await book.xlsx.load(Buffer.from(result.file,'base64'));const coverage=book.getWorksheet('Commandes du filtre');assert.equal(coverage.rowCount,120);const refs=new Set();coverage.eachRow((r,n)=>{if(n>1)refs.add(r.getCell(1).value);});assert.equal(refs.size,119);assert.equal(book.getWorksheet('Onglet type').rowCount,85);assert.equal(book.getWorksheet('Équivalents proposés').rowCount,120);assert.equal(book.getWorksheet('Diagnostics stock').rowCount,120);assert.match(book.getWorksheet('Diagnostics stock').getCell('E120').value,/002/);assert.ok([...refs].includes('SCOPE-118'));
+  await assert.rejects(()=>exportEquivalences(db,api,directory,{scope:{...scope,total:120}}),/Périmètre incomplet/);
+ }finally{await rm(directory,{recursive:true,force:true});}
 });
