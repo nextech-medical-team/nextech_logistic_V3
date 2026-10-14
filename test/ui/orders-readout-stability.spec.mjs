@@ -16,3 +16,12 @@ test('unrendered source metadata does not replace visible rows or stock and proc
  for(let i=0;i<5;i++)await page.evaluate(()=>refreshOrdersQuietly());expect(await page.evaluate(()=>removedOriginal)).toBe(0);expect(await page.evaluate(()=>originalProcessing===originalRow.querySelector('.order-processing'))).toBe(true);expect(await page.evaluate(()=>originalStock===originalRow.querySelector('[data-stock-information]'))).toBe(true);await expect(page.locator('[data-processing-details="A"]')).toHaveAttribute('aria-expanded','true');await expect(page.locator('[data-id="A"]')).toBeChecked();expect(f.errors).toEqual([]);
  await page.screenshot({path:'../stable-1440.png',fullPage:false});await page.setViewportSize({width:390,height:1000});await page.screenshot({path:'../stable-390.png',fullPage:false});
 });
+
+for(const fails of [false,true])test('changed visible rows never paint without their processing block; read failure '+fails,async({page})=>{
+ const f=await fixture(page);
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:[{...order('A'),recipient:'Destinataire actualisé'},order('B')],total:2,page:1,pages:1,summary:{total:2},transportStats:[]}}));
+ await page.route('**/api/orders/processing',async r=>{await new Promise(resolve=>setTimeout(resolve,250));await r.fulfill(fails?{status:503,json:{error:'Lecture temporairement indisponible'}}:{json:{at:new Date().toISOString(),rows:['A','B'].map(id=>({id,stage:'Préparation à corriger',state:'blocked',since:'2026-10-13T10:00:00Z',reason:'Stock insuffisant',canPrioritize:true}))}});});
+ const observed=await page.evaluate(async()=>{let running=true;const frames=[];function sample(){const row=document.querySelector('[data-detail="A"]').closest('tr');frames.push({processing:!!row.querySelector('.order-processing'),height:row.getBoundingClientRect().height});if(running)requestAnimationFrame(sample);}requestAnimationFrame(sample);await refreshOrdersQuietly();await new Promise(resolve=>setTimeout(resolve,350));running=false;return frames;});
+ expect(observed.length).toBeGreaterThan(0);expect(observed.every(frame=>frame.processing)).toBe(true);await expect(page.locator('#order-rows')).toContainText('Destinataire actualisé');
+ if(fails)await expect(page.locator('.processing-position').first()).toContainText('non confirmé');expect(f.errors).toEqual([]);
+});

@@ -161,13 +161,16 @@ async function orders(){
 
  // Fetch every asynchronous row enrichment before touching the visible table.
 
- const [partial,capacity,diagnostics]=await Promise.all([
+ const [partial,capacity,diagnostics,processing]=await Promise.all([
 
  packet?.partial||(ids.length?api('/api/partial/visible',{ids}):Promise.resolve({rows:[]})),
 
  api('/api/erplain/live-capacity').catch(e=>({error:e.message})),
 
- packet?.diagnostics||(ids.length?api('/api/erplain-refresh/diagnostics?ids='+encodeURIComponent(ids.join(','))):Promise.resolve({rows:[]}))
+ packet?.diagnostics||(ids.length?api('/api/erplain-refresh/diagnostics?ids='+encodeURIComponent(ids.join(','))):Promise.resolve({rows:[]})),
+
+ // Keep the current table visible until its processing blocks are ready too.
+ ids.length&&window.V3OrderProcessing?window.V3OrderProcessing.read(ids).catch(error=>({ids,error:error.message})):null
 
  ]);
 
@@ -177,7 +180,7 @@ async function orders(){
  const previousRowVersions=typeof orderRowVersions==='function'?orderRowVersions(lastOrdersSnapshot?JSON.parse(lastOrdersSnapshot):null,lastPartialSnapshot?JSON.parse(lastPartialSnapshot):[],orderRenderData?.diagnostics):new Map();
  const nextRowVersions=typeof orderRowVersions==='function'?orderRowVersions(r,partial.rows,diagnostics):new Map();
  partialVisibleOrders=new Map(r.rows.map(o=>[o.id,o]));
- orderRenderData={version:requestVersion,partial,capacity,diagnostics};
+ orderRenderData={version:requestVersion,partial,capacity,diagnostics,processing};
 
  if(requestVersion!==orderRequestVersion||(document.querySelector('[data-inline-editing]')||orderRowTextSelectionBlocksRefresh()))return;const referenceSelection=selectedOrderReference();lastOrdersQuery=params.toString();lastOrdersSnapshot=ordersSnapshot(r);if(!r.rows.length)lastPartialSnapshot='[]';pages=r.pages;if(typeof renderTransportStats==='function')renderTransportStats(r.transportStats||[],r.summary);for(const o of r.rows)orderManagers.set(o.id,o.account_manager||o.channel);
 

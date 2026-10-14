@@ -1,7 +1,7 @@
 (()=>{
  const body=document.getElementById('order-rows');if(!body)return;
  let busy=false,refreshTimer,latest=new Map(),latestObservedAt=null;
- const expandedOrders=new Set();let detailsSequence=0;
+ const expandedOrders=new Set();let detailsSequence=0,readRevision=0,acceptedRevision=0;
  const setText=(el,value)=>{if(el.textContent!==value)el.textContent=value;};
  function elapsed(since){
   if(!since||!Number.isFinite(new Date(since).getTime()))return 'Début non disponible';
@@ -66,11 +66,20 @@
    setText(button,r.priority?'★ Prioritaire · retirer':'☆ Rendre prioritaire');
   }
  }
+ async function read(ids){const revision=++readRevision;return {...await api('/api/orders/processing',{ids}),ids,revision};}
+ function showReadFailure(){for(const box of body.querySelectorAll('.order-processing')){setText(box.querySelector('.processing-position'),'Connexion interrompue · état actuel non confirmé');const clock=box.querySelector('.processing-elapsed');clock.dataset.since='';setText(clock,'Durée non actualisée · dernier état conservé');}for(const button of body.querySelectorAll('.processing-priority'))button.disabled=true;}
+ function acceptSnapshot(result){
+  if(!result||JSON.stringify(result.ids)!==JSON.stringify(rowIds()))return;
+  if(!result.error&&result.revision>=acceptedRevision){acceptedRevision=result.revision;latest=new Map(result.rows.map(r=>[r.id,r]));latestObservedAt=result.at;}
+  // Populate replacement rows before the browser can paint their empty state.
+  paint();if(result.error)showReadFailure();clearTimeout(refreshTimer);
+ }
+ window.V3OrderProcessing={read,acceptSnapshot};
  async function refresh(){
   if(busy||typeof currentView==='undefined'||currentView!=='orders'||document.hidden)return;
   const ids=rowIds();if(!ids.length)return;busy=true;
-  try{const result=await api('/api/orders/processing',{ids});if(JSON.stringify(ids)!==JSON.stringify(rowIds()))return;latest=new Map(result.rows.map(r=>[r.id,r]));latestObservedAt=result.at;paint();}
-  catch{for(const box of body.querySelectorAll('.order-processing')){setText(box.querySelector('.processing-position'),'Connexion interrompue · état actuel non confirmé');const clock=box.querySelector('.processing-elapsed');clock.dataset.since='';setText(clock,'Durée non actualisée · dernier état conservé');}for(const button of body.querySelectorAll('.processing-priority'))button.disabled=true;}
+  try{acceptSnapshot(await read(ids));}
+  catch{showReadFailure();}
   finally{busy=false;}
  }
  body.addEventListener('click',async event=>{
@@ -82,7 +91,7 @@
   catch(e){flash(e.message,true);}finally{button.disabled=false;}
  });
  // Only new rows trigger a fetch. Updating the progress text never rebuilds the table.
- new MutationObserver(records=>{if(records.some(r=>r.target===body)){clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,200);}}).observe(body,{childList:true});
+ new MutationObserver(records=>{if(records.some(r=>r.target===body)&&!orderRenderData?.processing){clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,200);}}).observe(body,{childList:true});
  setInterval(refresh,5000);
  setInterval(()=>{if(document.hidden)return;for(const clock of body.querySelectorAll('.processing-elapsed[data-since]'))if(clock.dataset.since)setText(clock,durationText(clock.dataset.state,clock.dataset.since));},1000);
  refresh();

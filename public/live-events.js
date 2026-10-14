@@ -36,6 +36,7 @@ function orderRowVersions(snapshot,partial,diagnostics){
   for(const row of [...body.rows]){const key=rowKey(row),old=oldRows.get(key);if(key&&old&&old!==row&&old.cells.length===row.cells.length&&oldVersions.get(key)===nextVersions.get(key))row.replaceWith(old);}
   const headings=[...body.closest('table').tHead.rows[0].cells].map(cell=>cell.textContent.replace(/[↕↗]/g,'').trim());
   for(const row of body.rows)for(const [index,cell] of [...row.cells].entries()){if(headings[index]&&cell.dataset.orderColumn!==headings[index])cell.dataset.orderColumn=headings[index];}
+  window.V3OrderProcessing?.acceptSnapshot(orderRenderData.processing);
   restoreSelectedOrderReference(referenceSelection);
  };
 })();
