@@ -83,10 +83,20 @@ function orderRowVersions(snapshot,partial,diagnostics){
     if(heading.classList.contains('total-quantity-column'))continue;
     const position=String(++column);if(cell.style.gridColumn!==position)cell.style.gridColumn=position;
    }
-   for(const control of row.querySelectorAll('button.link-button')){
-    const text=control.textContent.trim();if(!control.title)control.title=text;
-    const short=text==='Actualiser le BC Erplain'?'↻ BC':text==='Actualiser les BL Erplain'?'↻ BL':text==='Remplacer un produit'?'Produit':text==='Choisir un autre transporteur'?'Transport':text==='Enregistrer une étiquette externe'?'Étiquette externe':text==='Vérifier les étiquettes existantes'?'Étiquettes':null;
-    if(short){control.dataset.compactLabel=short;control.setAttribute('aria-label',text);}
+   for(const control of row.querySelectorAll('button.link-button,a.link-button[data-problem-deferral-id]')){
+    if(control.classList.contains('order-icon-action'))continue;
+    const text=control.textContent.trim();let icon='';
+    const documentKind=control.dataset.erplainDocumentKind;
+    if(documentKind)icon='<path d="M15 3H6v18h13V7l-4-4Zm0 0v5h4"/><path d="M9 12a4 4 0 0 1 6-1m1-2v3h-3M15 17a4 4 0 0 1-6 0"/><text x="12" y="21" text-anchor="middle" stroke="none" fill="currentColor" font-size="5">'+(documentKind==='bc'?'BC':'BL')+'</text>';
+    else if(/transporteur/i.test(text))icon='<path d="M2 7h12v10H2zM14 10h4l4 4v3h-8M5 7V4h8"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>';
+    else if(/étiquette|étiquettes/i.test(text))icon='<path d="M3 3h9l9 9-9 9-9-9Z"/><circle cx="8" cy="8" r="1"/>'+(/externe/i.test(text)?'<path d="M12 15V9m-3 3 3-3 3 3"/>':'<path d="m10 14 2 2 5-5"/>');
+    else if(/Remplacer un produit/i.test(text))icon='<path d="m4 7 8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7M12 11v10M2 12h5m-2-2 2 2-2 2M22 12h-5m2-2-2 2 2 2"/>';
+    else if(/suspend|Réactiver/i.test(text))icon='<circle cx="12" cy="12" r="9"/><path d="M9 8v8m6-8v8"/>';
+    else if(/Différer|report|Remettre en actif/i.test(text))icon='<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 3"/>';
+    else if(/Vérifier le BC/i.test(text))icon='<path d="M5 3h10l4 4v14H5zM15 3v5h4M8 14l3 3 5-6"/>';
+    if(!icon){if(!control.title)control.title=text;continue;}
+    control.title=text+(control.title&&control.title!==text?' — '+control.title:'');control.setAttribute('aria-label',text);control.classList.add('order-icon-action');delete control.dataset.compactLabel;
+    control.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+icon+'</svg><span class="order-action-name">'+esc(text)+'</span>';
    }
    const key=reference.hasAttribute('data-delivery-detail')?'delivery:'+row.querySelector('[data-delivery-select]').dataset.deliverySelect:'order:'+reference.dataset.detail;
    let button=row.querySelector('[data-order-more-info]');
@@ -99,6 +109,6 @@ function orderRowVersions(snapshot,partial,diagnostics){
   }
  }
  // Content updates cannot resize a collapsed row. Restore deliberate expansion after row replacement.
- new MutationObserver(records=>{if(records.some(r=>r.target===body||r.target.nodeName==='TR'))layout();}).observe(table,{childList:true,subtree:true});
+ new MutationObserver(records=>{if(records.some(r=>r.target===body||r.target.nodeName==='TR'||[...r.addedNodes].some(n=>n.nodeType===1&&n.matches?.('button.link-button,a.link-button[data-problem-deferral-id]'))))layout();}).observe(table,{childList:true,subtree:true});
  layout();
 })();

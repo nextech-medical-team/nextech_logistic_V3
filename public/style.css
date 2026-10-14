@@ -345,3 +345,10 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 #view-orders #order-rows tr.order-row-expanded td small{font-size:12px!important;line-height:1.5}
 #view-orders #order-rows tr.order-row-expanded td .link-button{font-size:13px!important}
 #view-orders .orders-fixed-layout tr.order-row-expanded td[data-order-column]::before{font-size:12px;letter-spacing:.015em}
+
+/* Explicit action icons keep full accessible names and native hover/focus descriptions. */
+#view-orders #order-rows td :is(button,a).order-icon-action{display:inline-flex!important;vertical-align:middle;align-items:center;justify-content:center;position:relative;width:34px!important;min-width:34px!important;max-width:34px!important;height:34px!important;min-height:34px!important;padding:6px!important;margin:4px 3px 4px 0!important;border:1px solid #b9d3cb;border-radius:6px;background:#eef6f3;color:#155349;font-size:12px!important;line-height:1!important;cursor:pointer}
+#view-orders #order-rows td .order-icon-action svg{display:block;flex:none;width:21px;height:21px;pointer-events:none}
+#view-orders #order-rows .order-action-name{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip-path:inset(50%);white-space:nowrap!important;border:0!important}
+#view-orders #order-rows .order-icon-action:hover{background:#dceee7}
+#view-orders #order-rows .order-icon-action:focus-visible{outline:3px solid #27917d;outline-offset:2px}
