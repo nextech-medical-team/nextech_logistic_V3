@@ -6,15 +6,8 @@ export async function completedExcelPreparation(db,o){
  const id=o.source_payload?.temuExcelPreparation?.jobId;
  if(!id)return false;
  const jobs=(await db.query('SELECT id,action,status,error,result FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC,id DESC',[o.id])).rows;
- const originalIndex=jobs.findIndex(j=>j.id===id);
- if(originalIndex<0)return false;
- const complete=j=>j.status==='complete'&&!j.error&&j.result?.erpOnly===true&&!j.result?.readOnly&&!j.result?.partialRemainder;
- const original=jobs[originalIndex];
- if(original.action!=='resume'||!complete(original))return false;
- // A completed BL-only retry does not invalidate the original Excel import.
- // Any unrelated intervening correction still needs its own admission policy.
- if(!jobs.slice(0,originalIndex).every(j=>j.action==='resume-erp'&&j.result?.resume===true&&complete(j)))return false;
- return jobs.every(j=>!['pending','queued','running','waiting','processing','review'].includes(j.status));
+ const j=jobs[0];
+ return !!(j?.id===id&&j.action==='resume'&&j.status==='complete'&&!j.error&&j.result?.erpOnly===true&&!j.result?.readOnly&&!j.result?.partialRemainder&&jobs.every(r=>!['pending','queued','running','waiting','processing','review'].includes(r.status)));
 }
 
 // Release only the completed Excel import's hold, not an unrelated correction.
