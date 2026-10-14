@@ -73,3 +73,10 @@ test('missing or cancelled BLs and TEMU never enter the new direct-label path',a
 test('document-only refresh remains a separate decision and does not buy an unsolicited label',async()=>{
  const f=fixture({action:'refresh'});await f.worker.run();assert.equal(f.queued,0);assert.equal(f.job.status,'waiting');
 });
+
+for(const attempts of [2,10,99])test('manual waiting resume ignores preflight attempt counter '+attempts,async()=>{
+ for(const proof of [{failure_phase:'preflight',creation_started_at:null},{error:'BC modifié depuis sa préparation : recontrôle requis'}]){
+ const f=fixture({carrier:{status:'failed',attempts,result:null,reference:null,tracking:[],...proof}});
+ await f.worker.run();await f.worker.run();assert.equal(f.queued,1);assert.equal(f.job.status,'waiting',f.job.error);
+ }
+});

@@ -4,14 +4,7 @@ import {advanceEquivalentLabel,assertPreparedLabelOrder} from './equivalent-auto
 import {hasCreatedBl} from './created-bl-label.mjs';
 import {regenerateProductionLabels} from './label-regeneration.mjs';
 
-function failedBeforeCarrierSend(job){
- if(job?.status!=='failed'||job.result||job.reference||!Array.isArray(job.tracking)||job.tracking.length||job.creation_started_at)return false;
- if(job.failure_phase==='preflight')return true;
- if(job.failure_phase)return false;
- // This legacy guard throws locally, before the adapter/creation POST. An
- // unrelated legacy failure without durable provenance is never replayed.
- return job.attempts===0||job.attempts===1&&job.error==='BC modifié depuis sa préparation : recontrôle requis';
-}
+import {canRetryFailedCarrier} from './carrier-attempt-proof.mjs';
 
 // Only local status reconciliation and native queueing; no remote API calls.
 
@@ -86,7 +79,7 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
      if(!j.result?.labelRequested){
       const existing=(await db.query('SELECT * FROM carrier_jobs WHERE order_id=$1',[o.id])).rows[0];
-      if(manualCreatedBlLabel&&existing?.status==='failed'&&!failedBeforeCarrierSend(existing))throw Error('Création transport à vérifier : aucune preuve de refus avant envoi');
+      if(manualCreatedBlLabel&&existing?.status==='failed'&&!await canRetryFailedCarrier(db,existing))throw Error('Création transport à vérifier : aucune preuve de refus avant envoi');
       if(manualCreatedBlLabel&&(!existing||['failed','review'].includes(existing.status))&&(await db.query('SELECT 1 FROM carrier_documents WHERE order_id=$1 LIMIT 1',[o.id])).rows.length)throw Error('Création transport à vérifier : conserver le PDF existant');
       if(existing&&(['ready','pending','creating','awaiting_pdf','review'].includes(existing.status)||existing.result||existing.reference||existing.tracking?.length)){
        if(['failed','review'].includes(existing.status))throw Error('Création transport à vérifier : aucune recréation automatique');
