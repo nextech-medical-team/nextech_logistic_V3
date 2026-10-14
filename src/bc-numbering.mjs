@@ -1,4 +1,4 @@
-const fields='id label status update_stock total tax_type currency{label} line_items{type quantity reserved_quantity shipped_quantity variant{id track_inventory} tax_codes{id} price tax_amount ecotax discount discount_rule_amount}';
+const fields='id label status update_stock total tax_type currency{label} line_items{type quantity reserved_quantity shipped_quantity variant{id sku track_inventory} tax_codes{id} price tax_amount ecotax discount discount_rule_amount}';
 export function assertPublishedBcReservation(bc,stockPolicy){
  if(typeof stockPolicy!=='boolean'||bc?.update_stock!==stockPolicy)throw Error('BC · Politique de stock publiée non confirmée');
  if(!stockPolicy)return; // Existing documents retain their immutable legacy policy.
@@ -8,7 +8,7 @@ export function assertPublishedBcReservation(bc,stockPolicy){
   if(typeof l.variant?.track_inventory!=='boolean')throw Error('BC · Suivi du stock produit non vérifié');
   if(!l.variant.track_inventory)continue;
   const numeric=v=>['number','string'].includes(typeof v)&&String(v).trim()!==''&&Number.isFinite(Number(v))&&Number(v)>=0;
-  if(![l.quantity,l.reserved_quantity,l.shipped_quantity].every(numeric)||Number(l.quantity)<=0||Number(l.shipped_quantity)>Number(l.quantity)||Math.abs(Number(l.reserved_quantity)+Number(l.shipped_quantity)-Number(l.quantity))>1e-6)throw Error('BC · Quantités réservées non confirmées');
+  if(![l.quantity,l.reserved_quantity,l.shipped_quantity].every(numeric)||Number(l.quantity)<=0||Number(l.shipped_quantity)>Number(l.quantity)||Math.abs(Number(l.reserved_quantity)+Number(l.shipped_quantity)-Number(l.quantity))>1e-6)throw Error('BC · Quantités réservées non confirmées · SKU '+(l.variant.sku||l.variant.id||'inconnu')+' : commandées '+l.quantity+', réservées '+(l.reserved_quantity??'non reçues')+', expédiées '+(l.shipped_quantity??'non reçues'));
  }
 }
 export async function nextBcNumber(api,datedAt){

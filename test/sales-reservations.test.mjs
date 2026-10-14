@@ -112,3 +112,10 @@ test('receipt recovery admits only verified new reservations and sufficient repl
  o.erp_live.bcReservationPolicy='erplain_bc_bl';document.line_items[0].reserved_quantity=0;assert.equal(plan().status,'blocked');
  document.line_items[0].reserved_quantity=100000;o.erp_live.stockCreationAttemptedAt='2026-10-08T00:00:00Z';assert.equal(plan().status,'blocked');
 });
+
+ test('reservation failure reports provider quantities instead of implying a stock shortage',()=>{
+  const document={...bc(),line_items:[{...line(),quantity:100,reserved_quantity:0,shipped_quantity:0,variant:{...line().variant,sku:'491930'}}]};
+  assert.throws(()=>assertPublishedBcReservation(document,true),/SKU 491930 : commandées 100, réservées 0, expédiées 0/);
+  document.line_items[0].reserved_quantity=null;
+  assert.throws(()=>assertPublishedBcReservation(document,true),/réservées non reçues/);
+ });

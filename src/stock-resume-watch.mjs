@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {assertFullOrderStock} from './stock-gate.mjs';
+import {assertFullOrderStock,assertStockResolved,isStockLockMessage} from './stock-gate.mjs';
 import {cancellationBlock} from './erp-transient-policy.mjs';
 import {shipmentFingerprint} from './label-stock-gate.mjs';
 import {erplainAccount} from './erplain-accounts.mjs';
@@ -9,7 +9,7 @@ export const stockCandidateSql=`SELECT o.*,e.error stock_error,e.updated_at erp_
  (SELECT action FROM resolution_jobs r WHERE r.order_id=o.id ORDER BY created_at DESC LIMIT 1) latest_action,
  (SELECT status FROM resolution_jobs r WHERE r.order_id=o.id ORDER BY created_at DESC LIMIT 1) latest_status
  FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id LEFT JOIN carrier_jobs c ON c.order_id=o.id
- WHERE e.status='review' AND (e.error LIKE 'BL bloqué%stock insuffisant%' OR e.error='En attente de stock : BC disponible, préparation du BL suspendue')
+ WHERE e.status='review' AND (e.error LIKE 'BL bloqué%stock insuffisant%' OR e.error='En attente de stock : BC disponible, préparation du BL suspendue' OR e.error='Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison' OR e.error LIKE 'Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison · %')
  AND NOT o.archived AND NOT o.partial_mode AND o.erp_live->'bc'->>'status'='active'
  AND o.erp_live->>'phase'='bc_created' AND o.erp_live->'bl'->>'id' IS NULL
  AND o.erp_live->'stockDocument'->>'id' IS NULL
@@ -34,7 +34,9 @@ export function verifiedStock(snapshot,bcId){
 const fields='id status update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id} paginatorInfo{hasMorePages}}';
 export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'source'),enabled=()=>true}={}){
  let running=false;
- async function record(id,error){await db.query(`INSERT INTO stock_resume_watch(order_id,checked_at,next_at,failures,outcome,last_error) VALUES($1,now(),now()+interval '5 minutes',$3,$4,$2) ON CONFLICT(order_id) DO UPDATE SET checked_at=now(),next_at=now()+make_interval(mins=>CASE WHEN $3=0 THEN 5 ELSE least(60,5*power(2,least(4,stock_resume_watch.failures))::int) END),failures=CASE WHEN $3=0 THEN 0 ELSE stock_resume_watch.failures+1 END,outcome=$4,last_error=$2`,[id,error||null,error&&!/stock insuffisant/i.test(error)?1:0,error?'waiting':'queued']);}
+ async function record(id,error){const lock=isStockLockMessage(error);await db.query(`INSERT INTO stock_resume_watch(order_id,checked_at,next_at,failures,outcome,last_error) VALUES($1,now(),now()+interval '5 minutes',$3,$4,$2) ON CONFLICT(order_id) DO UPDATE SET checked_at=now(),next_at=now()+make_interval(mins=>CASE WHEN $3=0 THEN 5 ELSE least(60,5*power(2,least(4,stock_resume_watch.failures))::int) END),failures=CASE WHEN $3=0 THEN 0 ELSE stock_resume_watch.failures+1 END,outcome=$4,last_error=$2`,[id,error||null,error&&!lock&&!/stock insuffisant/i.test(error)?1:0,lock?'waiting_reconciliation':error?'waiting':'queued']);
+  if(lock)await db.query("UPDATE erp_live_jobs SET error=$2 WHERE order_id=$1 AND status='review' AND (error=$3 OR error LIKE $4)",[id,error,'Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison','Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison · %']);
+ }
  async function enqueue(o,fingerprint){return db.transaction(async tx=>{
   const fresh=(await tx.query(stockCandidateSql+' AND o.id=$1 FOR UPDATE OF o,e',[o.id])).rows[0];
   if(!fresh||!enabled()||!candidateAllowed(fresh)||String(fresh.erp_updated_at)!==String(o.erp_updated_at)||String(fresh.erp_live.bc.id)!==String(o.erp_live.bc.id))return false;
@@ -62,6 +64,7 @@ export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'so
     for(let i=0;i<batch.length;i++){const o=batch[i];try{
      if(!enabled())break;
      verifiedStock(result['b'+i],o.erp_live.bc.id);
+     await assertStockResolved(db,result['b'+i].line_items.filter(l=>l.variant).map(l=>l.variant.id),{orderId:o.id});
      if(o.resolution_pending_resume&&o.stock_override.fingerprint!==fingerprints[i])throw Error('Préparation modifiée depuis l’étiquette forcée : validation manuelle requise');
      const queued=await enqueue(o,fingerprints[i]);await record(o.id,queued?null:'Commande modifiée ou déjà traitée : relecture différée');
     }catch(e){await record(o.id,e.message);}}
