@@ -20,7 +20,7 @@ async function fixture(){
 test('existing BL bypasses preparation despite fiscal/quantity/stock proof absent; two clicks create once',async()=>{
  const {e,db,erp,job}=await fixture();try{
  await Promise.all([queueLabelFromBl(db,'o',{email:'operator'}),queueLabelFromBl(db,'o',{email:'operator'})]);
- let posts=0;const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async()=>{posts++;const j=await job();assert(j.creation_started_at);return {reference:'R',tracking:['T']};},gofoLabel:async()=>Buffer.from('%PDF-1.4 test').toString('base64')}});
+ let posts=0;const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async(_o,{beforeCreate})=>{await beforeCreate();posts++;const j=await job();assert(j.creation_started_at);return {reference:'R',tracking:['T']};},gofoLabel:async()=>Buffer.from('%PDF-1.4 test').toString('base64')}});
  await workers.run('gofo');await workers.run('gofo');assert.equal(posts,1);assert.equal((await job()).status,'ready');
  assert.equal((await db.query('SELECT count(*)::int n FROM carrier_documents')).rows[0].n,1);
  assert.deepEqual((await db.query("SELECT erp_live FROM orders WHERE id='o'")).rows[0].erp_live,erp);
@@ -38,7 +38,7 @@ test('worker preflight failure remains safely resumable after diagnostic rewrite
 test('ambiguous provider call cannot be resent even if its message changes to validation',async()=>{
  const {e,db,job}=await fixture();try{
  await queueLabelFromBl(db,'o',{email:'operator'});let posts=0;
- await createCarrierWorkers(db,null,{clients:{gofoCreate:async()=>{posts++;const err=Error('timeout');err.uncertain=true;throw err;}}}).run('gofo');
+ await createCarrierWorkers(db,null,{clients:{gofoCreate:async(_o,{beforeCreate})=>{await beforeCreate();posts++;const err=Error('timeout');err.uncertain=true;throw err;}}}).run('gofo');
  assert.equal((await job()).status,'review');assert.equal((await job()).failure_phase,'provider');assert((await job()).creation_started_at);
  await db.query("UPDATE carrier_jobs SET status='failed',error='Préparation modifiée depuis le BL' WHERE order_id='o'");
  await assert.rejects(queueLabelFromBl(db,'o',{email:'operator'}),/incertaine/);assert.equal(posts,1);
@@ -47,7 +47,7 @@ test('ambiguous provider call cannot be resent even if its message changes to va
 test('PDF retrieval retry retains shipment and never repeats its creation',async()=>{
  const {e,db,job}=await fixture();try{
  await queueLabelFromBl(db,'o',{email:'operator'});let posts=0,pdfs=0;
- const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async()=>{posts++;return {reference:'R',tracking:['T']};},gofoLabel:async()=>{if(++pdfs===1)throw Error('PDF temporarily unavailable');return Buffer.from('%PDF-1.4 test').toString('base64');}}});
+ const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async(_o,{beforeCreate})=>{await beforeCreate();posts++;return {reference:'R',tracking:['T']};},gofoLabel:async()=>{if(++pdfs===1)throw Error('PDF temporarily unavailable');return Buffer.from('%PDF-1.4 test').toString('base64');}}});
  await workers.run('gofo');assert.equal((await job()).status,'awaiting_pdf');
  await db.query("UPDATE carrier_jobs SET updated_at=now()-interval '1 minute' WHERE order_id='o'");await workers.run('gofo');
  assert.equal((await job()).status,'ready');assert.equal(posts,1);assert.equal(pdfs,2);
@@ -56,7 +56,7 @@ test('PDF retrieval retry retains shipment and never repeats its creation',async
 test('explicit GOFO zone rejection permits existing GLS fallback with the same request',async()=>{
  const {e,db,job}=await fixture();try{
  await queueLabelFromBl(db,'o',{email:'operator'});const creationId=(await job()).creation_id;let gofo=0,gls=0;
- const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async()=>{gofo++;const err=Error('postal code not in service');err.zoneRejected=true;throw err;},gls:async()=>{gls++;return {reference:'R',tracking:['T'],documents:[Buffer.from('%PDF-1.4 test').toString('base64')]};}}});
+ const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async(_o,{beforeCreate})=>{await beforeCreate();gofo++;const err=Error('postal code not in service');err.zoneRejected=true;throw err;},gls:async(_o,{beforeCreate})=>{await beforeCreate();gls++;return {reference:'R',tracking:['T'],documents:[Buffer.from('%PDF-1.4 test').toString('base64')]};}}});
  await workers.run('gofo');assert.equal((await job()).creation_started_at,null);assert.equal((await job()).carrier,'gls');await workers.run('gls');assert.equal((await job()).status,'ready');assert.equal((await job()).creation_id,creationId);assert.equal(gofo,1);assert.equal(gls,1);
  }finally{await e.close();}
 });
@@ -78,5 +78,12 @@ test('historical generic failure with the original audit is admitted once withou
  const r=await Promise.all([queueLabelFromBl(db,'o',{email:'operator'}),queueLabelFromBl(db,'o',{email:'operator'})]);
  assert.equal(r.filter(x=>!x.existing).length,1);assert.equal((await job()).status,'pending');
  assert.deepEqual((await db.query("SELECT detail FROM audit WHERE action='carrier.prevalidation_diagnostic_revalidated'")).rows[0].detail,detail);
+ }finally{await e.close();}
+});
+test('a pending row with a persisted creation marker never replays its POST',async()=>{
+ const {e,db,job}=await fixture();try{
+ await queueLabelFromBl(db,'o',{email:'operator'});await db.query("UPDATE carrier_jobs SET creation_started_at=now() WHERE order_id='o'");
+ await createCarrierWorkers(db,null,{clients:{gofoCreate:()=>assert.fail('replayed POST')}}).run('gofo');
+ assert.equal((await job()).status,'review');assert.equal((await job()).failure_phase,'provider');assert((await job()).creation_started_at);
  }finally{await e.close();}
 });

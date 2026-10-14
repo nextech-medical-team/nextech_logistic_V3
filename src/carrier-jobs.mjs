@@ -88,6 +88,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
     o.glsInternational={...(await loadRouting(db)).international,...o.source_payload?.glsInternationalOverride};
     o.lines=(await db.query('SELECT source_sku,target_sku,quantity,target_quantity FROM lines WHERE order_id=$1 ORDER BY source_line',[o.id])).rows;
     if(!result){
+     if(creationStarted){const error=Error('Création transporteur déjà engagée : rapprocher son résultat');error.uncertain=true;throw error;}
      assertDirectCarrierAllowed(o,carrier);
      if(o.channel==='temu')assertTemuManualLabel((await db.query('SELECT status FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0]);
      if(job.environment!=='production')throw new Error('Création TEST désactivée : reprendre la commande en production');
@@ -113,8 +114,8 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
      // No database transaction is held during a network call.
      if(job.environment==='production')o.duplicate_of=o.id;
      const shipment={...o,id:job.creation_id||o.id};
-     await markCarrierCreationStarted(db,o.id);creationStarted=true;
-     result=carrier==='gls'?await selectedClient.gls(shipment,{onParcel:async partial=>{await db.query("UPDATE carrier_jobs SET result=$2,tracking=$3,updated_at=now() WHERE order_id=$1",[o.id,JSON.stringify(partial),JSON.stringify(partial.tracking)]);}}):await selectedClient.gofoCreate(shipment);
+     const beforeCreate=async()=>{if(!creationStarted){await markCarrierCreationStarted(db,o.id);creationStarted=true;}};
+     result=carrier==='gls'?await selectedClient.gls(shipment,{beforeCreate,onParcel:async partial=>{await db.query("UPDATE carrier_jobs SET result=$2,tracking=$3,updated_at=now() WHERE order_id=$1",[o.id,JSON.stringify(partial),JSON.stringify(partial.tracking)]);}}):await selectedClient.gofoCreate(shipment,{beforeCreate});
      await db.query(`UPDATE carrier_jobs SET result=$2,reference=$3,tracking=$4,status='awaiting_pdf',updated_at=now() WHERE order_id=$1`,[o.id,JSON.stringify(result),result.reference,JSON.stringify(result.tracking)]);
     }
     const documents=carrier==='gofo'?[await selectedClient.gofoLabel(result.reference)]:result.documents;
@@ -135,7 +136,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
      });return;
     }
     const status=result?(carrier==='gofo'&&job.attempts+1<5?'awaiting_pdf':'review'):(e.uncertain?'review':'failed');
-    await recordCarrierFailure(db,job.order_id,{status,error:e.message,creationStarted,hasResult:!!result});
+    await recordCarrierFailure(db,job.order_id,{status,error:e.message,creationStarted:creationStarted||e.uncertain===true,hasResult:!!result});
    }
   }finally{active.delete(carrier);}
  }
