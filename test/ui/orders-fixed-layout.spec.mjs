@@ -26,7 +26,7 @@ test('arrow preserves expansion across a changed row and treats partial deliveri
  await page.setViewportSize({width:1440,height:1000});const f=await fixture(page);const main=page.locator('[data-detail="A"]').locator('xpath=ancestor::tr');
  await expect(main.locator('[data-order-more-info]')).toHaveAttribute('aria-expanded','false');await expect(main.locator('[data-order-more-info]')).toHaveText('▾');
  const widths=await main.locator('td').evaluateAll(cells=>cells.map(c=>c.getBoundingClientRect().width));await main.locator('[data-order-more-info]').focus();await page.keyboard.press('Enter');
- await expect(main.locator('[data-order-more-info]')).toHaveAttribute('aria-expanded','true');await expect(main.getByText('Suspendre la commande',{exact:true})).toBeVisible();await expect(main.getByText('Différer le problème',{exact:true})).toBeVisible();
+ await expect(main.locator('[data-order-more-info]')).toHaveAttribute('aria-expanded','true');await expect(main.getByRole('button',{name:'Suspendre la commande',exact:true})).toBeVisible();await expect(main.getByRole('button',{name:'Différer le problème',exact:true})).toBeVisible();
  f.change();f.partial();await page.evaluate(()=>refreshOrdersQuietly());await expect(main.locator('[data-order-more-info]')).toHaveAttribute('aria-expanded','true');
  expect(await main.locator('td[data-fixed-column=label]').evaluate(c=>c.getBoundingClientRect().width)).toBeGreaterThan(200);
  const partial=page.locator('[data-delivery-select="P"]').locator('xpath=ancestor::tr');await expect(partial.locator('[data-order-more-info]')).toHaveAttribute('aria-expanded','false');await partial.locator('[data-order-more-info]').click();await expect(partial.locator('[data-order-more-info]')).toHaveAttribute('aria-expanded','true');
