@@ -15,6 +15,7 @@ async function fixture(t){
  await db.exec(`ALTER TABLE orders ADD COLUMN erp_live jsonb NOT NULL DEFAULT '{}',ADD COLUMN weight_kg numeric,ADD COLUMN transport_choice text,ADD COLUMN partial_mode boolean DEFAULT false;
  ALTER TABLE lines ADD COLUMN target_sku text,ADD COLUMN target_quantity numeric;
  CREATE TABLE erp_live_jobs(order_id text,status text,error text);
+ CREATE TABLE correction_jobs(id text,order_id text,status text);
  CREATE TABLE resolution_jobs(id text,order_id text,request_id text,action text,payload jsonb,result jsonb,status text DEFAULT 'queued',stage text DEFAULT 'En attente',error text,created_at timestamptz DEFAULT now());`);
  await initializeTemuShipping(db);
  await db.query("INSERT INTO orders(id,channel,reference,recipient,address,source_date,source_payload,suspension,tracking_status,resolution_pending_resume) VALUES('o','temu',$1,'Client fictif',$2,'2026-10-12',$3,$4,'not_shipped',true)",[reference,JSON.stringify({name:'Client fictif',country:'HR',street:'Rue fictive',postal:'10000',city:'Ville'}),JSON.stringify({origin:'temu_excel',manualPreparationRequired:true}),JSON.stringify({active:true,note:excelImportHold,version:'initial'})]);
@@ -159,7 +160,7 @@ test('dedicated Excel preparation rejects customer holds and every recorded Erpl
 test('Excel uses the existing automatic worker: only positive quote-matched margin buys once and records its audit',async t=>{
  const {initializeTemuAutomaticPurchase,temuAutomaticPurchaseWorker}=await import('../src/temu-automatic-purchase.mjs');
  const f=await fixture(t);await f.service.prepare(await f.input(),user);
- await f.db.exec("ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false;CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE extra_parcels(order_id text);");
+ await f.db.exec("ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false;CREATE TABLE IF NOT EXISTS correction_jobs(id text,order_id text,status text);CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE extra_parcels(order_id text);");
  await initializeTemuAutomaticPurchase(f.db);
  const at=new Date().toISOString(),fingerprint=await shipmentFingerprint(f.db,await f.read());
  await f.db.query("UPDATE orders SET erp_live=$1 WHERE id='o'",[JSON.stringify({phase:'bl_ready',pricing:{status:'verified'},bc:{id:'bc',status:'active'},bl:{id:'bl',status:'ready_to_ship'},stockDocument:{id:'stock'},verifiedAt:at,stockCheckedAt:at,labelPreparationFingerprint:fingerprint,documentSource:{checkedAt:at,stockHolds:[]}})]);
@@ -216,4 +217,25 @@ test('Excel replacement keeps original TEMU identity and prices, and recovers th
  const plan=await temuShipping(f.db,f.api).prepare(reference);assert.equal(plan.amount,2.5);assert.equal(f.bought,0);
  assert.equal((await f.lines())[0].source_sku,'EQUIVALENT');
  assert.equal((await advanceEquivalentLabel(f.db,job,{repair:true})).state,'temu_ready');assert.equal(f.bought,0);
+});
+
+test('published BL permits manual label despite legacy import flags and obsolete reservation review',async t=>{
+ const f=await fixture(t);await f.service.prepare(await f.input(),user);
+ const oldError='BC · Quantités réservées non confirmées';
+ await f.db.query("UPDATE orders SET erp_live=$1,issue=$2,resolution_pending_resume=true WHERE id='o'",[JSON.stringify({bc:{id:'bc',status:'active'},bl:{id:'bl',status:'ready_to_ship'}}),oldError]);
+ await f.db.query("UPDATE resolution_jobs SET status='review',error=$1 WHERE order_id='o'",[oldError]);
+ const shipping=temuShipping(f.db,f.api);
+ const plan=await shipping.prepare(reference);assert.equal(f.bought,0);
+ await f.db.query("INSERT INTO correction_jobs VALUES('correction','o','checking')");
+ await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/correction ou reprise en cours/);
+ assert.equal(f.bought,0);
+ await f.db.query("DELETE FROM correction_jobs WHERE id='correction'");
+ await f.db.query("UPDATE orders SET suspension='{\"active\":true,\"note\":\"Stop\"}' WHERE id='o'");
+ await assert.rejects(shipping.buy(reference,plan.id,plan.amount));assert.equal(f.bought,0);
+ await f.db.query("UPDATE orders SET suspension='{}' WHERE id='o'");
+ const renewed=await shipping.prepare(reference);
+ const result=await shipping.buy(reference,renewed.id,renewed.amount);
+ assert.equal(result.status,'complete');assert.equal(f.bought,1);
+ await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
+ const stored=await f.read();assert.equal(stored.issue,oldError);assert.equal(stored.erp_live.bl.id,'bl');
 });
