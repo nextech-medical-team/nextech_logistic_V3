@@ -1,3 +1,4 @@
+import {hasCreatedBl} from './created-bl-label.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {resolveExcelTemuShop} from './temu-excel-shop.mjs';
 import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
@@ -32,7 +33,7 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
   if(!country){allShopsConnected=true;connectedAt=Date.now();services.clear();}
  }
  async function context(reference){const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(!o)throw Error('Commande TEMU absente de V3');let mall=String(o.source_payload.mallId||'');
-  if(!mall&&isTemuExcel(o)&&o.source_payload.temuExcelPreparation){
+  if(!mall&&isTemuExcel(o)&&(o.source_payload.temuExcelPreparation||hasCreatedBl(o)&&o.erp_live?.bc?.id)){
    const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[o.id])).rows;
    const resolved=await resolveExcelShop(o,lines);mall=String(resolved.mallId);
    const linkage={mallId:mall,sourceShop:mall,temuShopVerifiedAt:new Date().toISOString(),temuShopWarnings:resolved.shopWarnings||[]};
@@ -59,7 +60,7 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
  }
  async function refresh(reference,options={}){const result=await refreshRead(reference,options);if(!result.deferred)await db.query("UPDATE orders SET source_payload=source_payload-'temuReadDeferred' WHERE channel='temu' AND reference=$1 AND source_payload ? 'temuReadDeferred'",[reference]);return result;}
  async function refreshRead(reference,{forceQuote=false,channel}={}){
-  const held=(await db.query("SELECT source_payload,issue FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(held?.source_payload?.origin==='temu_excel'&&!held.source_payload.temuExcelPreparation)return {reference,status:'unverified',error:'Excel TEMU : relancez la préparation depuis Imports'};if(held?.source_payload?.visibilityHold)return {reference,status:'api_error',error:held.issue};
+  const held=(await db.query("SELECT source_payload,issue,erp_live FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(held?.source_payload?.origin==='temu_excel'&&!held.source_payload.temuExcelPreparation&&!(hasCreatedBl(held)&&held.erp_live?.bc?.id))return {reference,status:'unverified',error:'Excel TEMU : relancez la préparation depuis Imports'};if(held?.source_payload?.visibilityHold)return {reference,status:'api_error',error:held.issue};
   let ctx;try{ctx=await context(reference);}catch(e){const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(!o)throw e;return fail(o,e);}const {o,api,service}=ctx;
   try{
    const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:reference});
