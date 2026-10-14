@@ -1,0 +1,61 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {waitingResolutionWorker} from '../src/resolution-waiting.mjs';
+
+function fixture({erpStatus='pending',orderPatch={},carrier=null,action='choose-carrier',documents=0}={}){
+ const o={id:'o',reference:'ORDER',channel:'erplain',carrier:'gofo',address:{country:'FR'},source_payload:{},archived:false,partial_mode:false,tracking_status:'not_shipped',resolution_pending_resume:false,erp_live:{bc:{id:'bc',status:'active'},bl:{id:'bl',status:'ready_to_ship'}},...orderPatch};
+ const erp={status:erpStatus,error:erpStatus==='review'?'Observation ERP distincte':null};
+ const job={id:'j',order_id:'o',action,status:'waiting',payload:{action,carrier:'gofo'},result:{erpOnly:false,labelRequested:false}};
+ let c=carrier,queued=0;const writes=[];
+ const db={transaction:fn=>fn(db),query:async(q,p=[])=>{
+  if(q.startsWith('SELECT r.* FROM resolution_jobs'))return {rows:job.status==='waiting'?[structuredClone(job)]:[]};
+  if(q==='SELECT * FROM orders WHERE id=$1')return {rows:[structuredClone(o)]};
+  if(q.includes('SELECT * FROM erp_live_jobs')||q==='SELECT status,error FROM erp_live_jobs WHERE order_id=$1')return {rows:[erp]};
+  if(q.startsWith('SELECT status,result,tracking,reference FROM carrier_jobs')||q==='SELECT status,error FROM carrier_jobs WHERE order_id=$1')return {rows:c?[structuredClone(c)]:[]};
+  if(q==='SELECT order_id,result FROM resolution_jobs WHERE id=$1')return {rows:[structuredClone(job)]};
+  if(q==='SELECT 1 FROM carrier_documents WHERE order_id=$1 LIMIT 1')return {rows:documents?[{exists:1}]:[]};
+  if(q.startsWith('UPDATE')||q.startsWith('INSERT')||q.startsWith('DELETE'))writes.push(q);
+  if(q.startsWith('UPDATE resolution_jobs SET status=$2')){job.status=p[1];job.stage=p[2];if(p[3])job.result=JSON.parse(p[3]);job.error=p[4];}
+  return {rows:[]};
+ }};
+ const worker=waitingResolutionWorker(db,{regenerate:async (_db,options)=>{queued++;assert.deepEqual(options.ids,['o']);assert.equal(options.batchId,'resolution-j');c={status:'pending',reference:null,result:null,tracking:[]};return {queued:1,skipped:[]};}});
+ return {worker,o,erp,job,writes,get queued(){return queued;},setCarrier(value){c=value;}};
+}
+test('an explicitly chosen GOFO label on an existing BL no longer waits for ERP completion or stock timestamps',async()=>{
+ for(const status of ['pending','processing','review']){
+  const f=fixture({erpStatus:status}),before=JSON.stringify(f.o.erp_live);
+  await f.worker.run();await f.worker.run();
+  assert.equal(f.queued,1);assert.equal(f.job.status,'waiting',f.job.error);assert.equal(f.job.result.labelRequested,true);
+  assert.equal(JSON.stringify(f.o.erp_live),before);assert.equal(f.erp.status,status);
+  assert.ok(!f.writes.some(q=>/UPDATE (orders|erp_live_jobs)|stock|BL/.test(q)));
+ }
+});
+test('existing creation is followed without a second request; its ready result completes despite pending ERP',async()=>{
+ const f=fixture();await f.worker.run();
+ f.setCarrier({status:'creating',reference:null,tracking:[]});await f.worker.run();assert.equal(f.queued,1);
+ f.setCarrier({status:'ready',reference:'GOFO',tracking:['TRACK']});f.o.label_status='production_ready';await f.worker.run();
+ assert.equal(f.queued,1);assert.equal(f.job.status,'complete',f.job.error);assert.equal(f.erp.status,'pending');
+ assert.match(f.job.result.message,/BL déjà créé/);
+});
+test('failed carrier results, tracking and references never cause a new creation',async()=>{
+ for(const carrier of [{status:'failed',result:{reference:'GOFO'},tracking:[]},{status:'failed',result:null,tracking:['TRACK']},{status:'failed',result:null,reference:'GOFO',tracking:[]},{status:'review',result:null,tracking:[]}]){
+  const f=fixture({carrier});await f.worker.run();assert.equal(f.queued,0);assert.equal(f.job.status,'review');assert.match(f.job.error,/Création transport à vérifier/);
+ }
+});
+test('a persisted carrier PDF without a ready job is preserved instead of replaced',async()=>{
+ const f=fixture({documents:1,carrier:{status:'failed',result:null,tracking:[]}});await f.worker.run();
+ assert.equal(f.queued,0);assert.equal(f.job.status,'review');assert.match(f.job.error,/Création transport à vérifier/);
+});
+test('suspension, cancellation, duplicate, shipped and partial orders stay protected',async()=>{
+ for(const orderPatch of [{suspension:{active:true,note:'Pause'}},{tracking_status:'cancelled'},{duplicate_of:'other'},{tracking_status:'shipped'},{partial_mode:true},{archived:true}]){
+  const f=fixture({orderPatch});await f.worker.run();assert.equal(f.queued,0);assert.equal(f.job.status,'review');
+ }
+});
+test('missing or cancelled BLs and TEMU never enter the new direct-label path',async()=>{
+ for(const orderPatch of [{erp_live:{}},{erp_live:{bl:{id:'bl',status:'cancelled'}}},{channel:'temu'}]){
+  const f=fixture({orderPatch});await f.worker.run();assert.equal(f.queued,0);
+ }
+});
+test('document-only refresh remains a separate decision and does not buy an unsolicited label',async()=>{
+ const f=fixture({action:'refresh'});await f.worker.run();assert.equal(f.queued,0);assert.equal(f.job.status,'waiting');
+});
