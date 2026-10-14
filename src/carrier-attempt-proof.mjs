@@ -51,6 +51,8 @@ export async function canRetryFailedCarrier(db,job,{manualRequest=false}={}){
  if(manualRequest&&job.attempts===1&&[
   'Mapping modifié avant création : recontrôle requis',
   'Mapping modifié depuis la validation du BL : recontrôle requis',
+  'Appels d’offres · Client et destinataire dépassent les trois lignes GLS : vérifier avant création',
+  'Appels d’offres · Noms et complément d’adresse trop longs pour les trois lignes GLS',
   'BC modifié depuis sa préparation : recontrôle requis'
  ].includes(job.error))return true;
  // Existing unambiguous validation errors and jobs never attempted keep their policy.
