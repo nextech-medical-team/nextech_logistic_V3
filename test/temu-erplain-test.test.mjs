@@ -12,12 +12,12 @@ test('production identity blocks all mutations, redirects forbidden',async()=>{
 async function fixture(t,{stock=10,ambiguous=false,uncertain=false,notApplied=false}={}){
  const directory=await mkdtemp(path.join(os.tmpdir(),'temu-erplain-test-'));t.after(()=>rm(directory,{recursive:true,force:true}));
  const calls=[];const order={id:'a',reference:'PO-test',channel:'temu',source_payload:{origin:'temu_excel'},recipient:'Test',address:{street:'1 rue Test',city:'Paris',postal:'75001',country:'FR'}};
- const lines=[{source_line:'line',source_sku:'SKU',quantity:2,source_payload:{excel:{'Prix de vente (hors taxes)':'10€','Total du prix de vente après réductions (hors taxes)':'10€','Taxe sur les produits':'2€',"Total de l’expédition (hors taxes)":'0€',"Taxe d’expédition":'0€'}}}];
+ const lines=[{source_line:'line',source_sku:'SKU',quantity:2,source_payload:{excel:{'Prix de vente (hors taxes)':'10€','Total du prix de base après réduction':'10€','Total du prix de vente après réductions (hors taxes)':'10€','Taxe sur les produits':'2€',"Total de l’expédition (hors taxes)":'0€',"Taxe d’expédition":'0€'}}}];
  const db={query:async sql=>({rows:sql.includes('FROM lines')?lines:[order]})};
  const items=[{variant:{id:'v',sku:'SKU',track_inventory:true},location:{id:'l'},id:'li',type:'normal',quantity:2,price:6,tax_amount:2,tax_codes:[{id:'tax'}],discount:null,discount_rule_amount:null,ecotax:null,reserved_quantity:2,available:stock-2,on_hand:stock}];
  const company={id:101406,currency:{id:'c',label:'EUR'},default_location:{id:'l'}};
  const api={verify:async()=>company,read:async(q)=>{
-  if(q.includes('LocalTestSku'))return {Variants:{data:ambiguous?[]:[{id:'v',sku:'SKU',active:true,product:{active:true}}]}};
+  if(q.includes('LocalTestSku'))return {Variants:{data:ambiguous?[]:[{id:'v',sku:'SKU',active:true,tax_codes:[{id:'tax'}],product:{active:true}}]}};
   if(q.includes('LocalTestTaxes'))return {TaxCodes:{data:[{id:'tax',active:true,tax_rates:[{rate:20}]}]}};
   if(q.includes('LocalFindCustomer'))return {Customers:{data:[]}};
   if(q.includes('LocalTestBeforePublish'))return {ShippingOrder:{id:'bl',status:'unpublished',update_stock:false,orders:{data:[{id:'bc'}]},line_items:items}};
@@ -68,7 +68,7 @@ test('unknown SKU can be corrected after restart when no document or uncertain m
  const f=await fixture(t,{ambiguous:true});
  const failed=await f.service.create(f.input);assert.match(failed.results[0].error,/absent ou ambigu/);assert.equal(f.calls.length,0);
  const previousRead=f.api.read;
- f.api.read=async(q,v)=>q.includes('LocalTestSku')?{Variants:{data:[{id:'v',sku:'CORRECTED',active:true,product:{active:true}}]}}:previousRead(q,v);
+ f.api.read=async(q,v)=>q.includes('LocalTestSku')?{Variants:{data:[{id:'v',sku:'CORRECTED',active:true,tax_codes:[{id:'tax'}],product:{active:true}}]}}:previousRead(q,v);
  const result=await f.reopen().create({orders:[{id:'a',lines:[{source_line:'line',sku:'CORRECTED',quantity:2}]}]});
  assert.equal(result.results[0].complete,true);assert.equal(f.calls.length,4);
  assert.equal(f.calls[1].v.input.line_items[0].description,'CORRECTED');

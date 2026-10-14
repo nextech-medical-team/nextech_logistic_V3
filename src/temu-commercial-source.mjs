@@ -1,8 +1,9 @@
+import {temuDestinationVat} from './temu-destination-vat.mjs';
 import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
 import {temuCountryAmounts} from './temu-country-vat.mjs';
 import {acceptedMonetaryDifference,monetaryPolicy} from './monetary-policy.mjs';
 import {temuActiveAmounts} from './temu-active-amounts.mjs';
-export const temuSellerPolicy='temu-estimatedRevenue-only-20261007';
+export const temuSellerPolicy='temu-estimatedRevenue-destination-vat-20261014';
 // Seller revenue is the sole commercial total. Customer retail/payment fields
 // never enter this projection. API source records remain immutable.
 export function temuCommercialSource(order,fallback){
@@ -10,19 +11,18 @@ export function temuCommercialSource(order,fallback){
  if(api?.parentOrderMap?.parentOrderSn!==order.reference || !/^[A-Z]{3}$/.test(revenue?.currency||'')
  || revenue?.amount==null || String(revenue.amount).trim()==='' || !Number.isSafeInteger(Number(revenue.amount)) || Number(revenue.amount)<0)
   throw Error('TEMU · Revenu vendeur estimé (estimatedRevenue) absent ou invalide dans l’API');
+ const destination=temuDestinationVat(order);
  const raw=temuActiveAmounts(order,api),p=raw.parentOrderMap,currency=revenue.currency,target=Number(revenue.amount);
  if(!Array.isArray(raw.orderList)||!raw.orderList.length)throw Error('TEMU · Détail du revenu vendeur absent');
  const read=(v,label)=>{if(v?.currency!==currency||v.amount==null||String(v.amount).trim()===''||!Number.isSafeInteger(Number(v.amount))||Number(v.amount)<0)throw Error('TEMU · Montant vendeur invalide : '+label);return Number(v.amount);};
- const rate=(v,label)=>{if(v==null||String(v).trim()===''||!Number.isFinite(Number(v))||Number(v)<0||Number(v)>100000000)throw Error('TEMU · Taux TVA absent : '+label);return Number(v);};
  const equal=(a,b)=>acceptedMonetaryDifference(a/100,b/100,{currency,total:target/100});
  const data=structuredClone(raw),parts=[];let base=0,ship=0,tax=0;
  for(const l of data.orderList){
   if(!Number.isSafeInteger(Number(l.quantity))||Number(l.quantity)<=0)throw Error('TEMU · Quantité financière invalide');
   const b=read(l.basePrice,'produit'),t=read(l.productTaxAmount,'TVA produit'),s=read(l.shipAmountTotalTaxIncl,'livraison'),st=read(l.shipTaxAmount,'TVA livraison');
   if(st>s)throw Error('TEMU · TVA livraison supérieure au montant');
-  const override=fallback?.v3VatPolicy?fallback.orderList.find(x=>String(x.orderSn)===String(l.orderSn)):null;
-  parts.push({line:l,kind:'product',net:b,tax:t,rate:rate(override?.productTaxRate??l.productTaxRate,'produit')});
-  parts.push({line:l,kind:'shipping',net:s-st,tax:st,rate:s||st?rate(override?.shipTaxRate??l.shipTaxRate,'livraison'):0});
+  parts.push({line:l,kind:'product',net:b,tax:t,rate:destination.rate*1000000});
+  parts.push({line:l,kind:'shipping',net:s-st,tax:st,rate:destination.rate*1000000});
   base+=b;ship+=s-st;tax+=t+st;
  }
  if(!equal(base,read(p.basePriceTotal,'total produits'))||!equal(ship,read(p.shippingAmountTotal,'total livraison')))throw Error('TEMU · Détail vendeur différent des totaux');
@@ -43,8 +43,8 @@ export function temuCommercialSource(order,fallback){
  }
  data.parentOrderMap={...p,estimatedRevenue:structuredClone(revenue),basePriceTotal:m(sellerBase),shippingAmountTotal:m(sellerShipping),taxTotal:m(sellerTax),taxTotalAfterDiscount:m(sellerTax)};
  if(fallback?.v3VatPolicy)data.v3VatPolicy=structuredClone(fallback.v3VatPolicy);
- data.v3CommercialBasis={source:'temu_estimated_revenue',field:'estimatedRevenue',version:temuSellerPolicy,policy:monetaryPolicy,sourceEstimatedRevenue:structuredClone(revenue),sourceTaxAfterDiscount:p.taxTotalAfterDiscount,vatBasis:'seller_gross_at_source_rates',roundingAdjustment:target-sum};
+ data.v3CommercialBasis={source:'temu_estimated_revenue',field:'estimatedRevenue',version:temuSellerPolicy,policy:monetaryPolicy,sourceEstimatedRevenue:structuredClone(revenue),sourceTaxAfterDiscount:p.taxTotalAfterDiscount,destinationVat:destination,vatBasis:'seller_gross_at_source_rates',roundingAdjustment:target-sum};
  return data;
 }
 
-export function temuSellerTotals(order){if(isTemuExcel(order)){const s=verifiedExcelCommercial(order);return {...order.erp_live?.pricing,total:s.total,tax:s.tax,currency:s.currency,commercialBasis:{source:'temu_excel',fingerprint:s.fingerprint}};}const d=temuCommercialSource(order,temuCountryAmounts(order)),p=d.parentOrderMap;return {...order.erp_live?.pricing,total:Number(p.estimatedRevenue.amount)/100,tax:Number(p.taxTotalAfterDiscount.amount)/100,currency:p.estimatedRevenue.currency,commercialBasis:d.v3CommercialBasis};}
+export function temuSellerTotals(order){if(isTemuExcel(order)){const s=verifiedExcelCommercial(order);return {...order.erp_live?.pricing,total:s.total,tax:order.erp_live?.pricing?.taxPolicy===temuDestinationVat(order).policy?order.erp_live.pricing.tax:s.tax,currency:s.currency,commercialBasis:{source:'temu_excel',fingerprint:s.fingerprint}};}const d=temuCommercialSource(order,temuCountryAmounts(order)),p=d.parentOrderMap;return {...order.erp_live?.pricing,total:Number(p.estimatedRevenue.amount)/100,tax:Number(p.taxTotalAfterDiscount.amount)/100,currency:p.estimatedRevenue.currency,commercialBasis:d.v3CommercialBasis};}

@@ -1,3 +1,4 @@
+import {missingOrdersVerification} from './missing-orders-verification.mjs';
 import {initializeReceiptRecovery,receiptRecoveryService} from './receipt-recovery.mjs';
 import {initializeEquivalenceImports,equivalenceImportService} from './equivalence-import.mjs';
 import {initializeTemuCatchup,temuCatchupWorker} from './temu-catchup-worker.mjs';
@@ -142,6 +143,7 @@ const statusSync=trackingSyncService(db,process.env.CREDENTIALS_DIR||directory,{
 backgroundInterval(()=>statusSync.run(),1000,'tracking-sync');
 const v2Followup=v2Worker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>v2Followup.run(),10000,'v2-followup');
 const temuReading=readingService(db,directory);
+const verifyMissingOrders=missingOrdersVerification(db,directory);
 const shopifyObservation=shopifyObservationWorker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>shopifyObservation.run(),10000,'shopify-observation');
 const events=liveEvents(db,{authenticate});if(config.http)await events.start();
 
@@ -266,7 +268,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/stock-information.js','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/missing-orders-verification.js','/stock-information.js','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -385,6 +387,7 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/margins'&&req.method==='GET'){permitted(user,['admin','manager','operator']);json(res,200,await margins.get());return;}
     if(p==='/api/carriers/from-bl'&&req.method==='POST'){permitted(user,['admin','manager','operator']);const b=await body(req);json(res,202,await queueLabelFromBl(db,b.id,user));return;}
     if(await labelTools({p,req,res,db,user,body,json,audit,permitted}))return;
+    if(await verifyMissingOrders({p,req,res,user,permitted,body,json}))return;
     if(await shopifyObservationRoutes({p,url,req,res,db,json,user,permitted}))return;
     if(await v2Routes({p,url,req,res,db,json,user,permitted}))return;
     if(await temuRoutes({p,url,req,res,db,service:temuService,local:temuLocal,sync:temuSync,user,json,body,permitted,audit}))return;
