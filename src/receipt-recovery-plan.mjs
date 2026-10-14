@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {suspensionBlock} from './order-suspension.mjs';
+import {assertPublishedBcReservation} from './bc-numbering.mjs';
 
 export const receiptHash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const numeric=v=>(typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v));
@@ -47,7 +48,12 @@ export function receiptOrderBlock(o,bc){
  if(o.busy)return 'Traitement déjà en cours : attendre son résultat';
  if(o.resolution_pending_resume)return 'Préparation suspendue : finalisation dédiée requise';
  if([o.erp_live?.mappingAlignmentAttempt,o.erp_live?.sourceVatAttempt,o.erp_live?.stockCreationOutcome].some(a=>a?.status==='uncertain')||o.erp_live?.documentSource?.stockHolds?.length)return 'Écriture ou mouvement de stock à rapprocher';
- if(o.erp_live?.stockDocument?.id||bc.update_stock!==false)return 'Débit de stock existant : rapprochement requis';
+ if(o.erp_live?.stockDocument?.id||o.erp_live?.stockCreationAttemptedAt)return 'Débit de stock existant : rapprochement requis';
+ if(bc.update_stock!==false){
+  if(bc.update_stock!==true||o.erp_live?.bcReservationPolicy!=='erplain_bc_bl')return 'Débit de stock existant : rapprochement requis';
+  try{assertPublishedBcReservation(bc,true);}catch{return 'Réservation de la commande non confirmée : rapprochement requis';}
+  if(bc.line_items.some(l=>l.variant?.track_inventory!==false&&l.variant&&Number(l.shipped_quantity)!==0))return 'Débit de stock existant : rapprochement requis';
+ }
  if(!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.paginatorInfo?.hasMorePages!==false)return 'Historique des BL incomplet';
  const bls=bc.shipping_orders.data;
  if(o.erp_live?.bl?.id||bls.length)return 'BL existant : rapprochement requis, aucune recréation';

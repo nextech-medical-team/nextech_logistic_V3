@@ -8,6 +8,7 @@ import {assertResumeStock} from '../src/resume-stock-policy.mjs';
 import {evaluateStockIncident} from '../src/stock-incident-recheck.mjs';
 import {confirmDeliveryReady} from '../src/bl-ready.mjs';
 import {partialLines,validatePartial} from '../src/partial-deliveries.mjs';
+import {buildReceiptPlan,receiptOrderBlock} from '../src/receipt-recovery-plan.mjs';
 
 const line=()=>({id:'10',type:'normal',quantity:100000,price:.037,reserved_quantity:100000,shipped_quantity:0,on_hand:-8000,available:-112000,variant:{id:'642345',sku:'RNBM10001',track_inventory:true},location:{id:'100934'}});
 const bc=()=>({id:'1934803',label:'C00014930',created_at:'2026-10-08 10:00:00',status:'active',update_stock:true,line_items:[line()],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}});
@@ -98,3 +99,14 @@ test('partial finalization reads every BL ledger and never creates a separate st
 });
 
 test('recorded recovery preserves new reservation intent and never reclassifies it as legacy',()=>{const o=order();o.erp_live.bcReservationPolicy='erplain_bc_bl';assert.throws(()=>assertNewBcStockPolicy(o,{update_stock:false}),/rapprochement/);assert.throws(()=>assertNewBcStockPolicy(o,{}),/rapprochement/);assert.doesNotThrow(()=>assertNewBcStockPolicy(o,{update_stock:true}));assert.doesNotThrow(()=>assertNewBcStockPolicy(order(),{update_stock:false}));});
+test('receipt recovery admits only verified new reservations and sufficient replenishment',()=>{
+ const o=order();o.erp_live.bcReservationPolicy='erplain_bc_bl';const document=bc();
+ const receipt={id:'receipt',label:'PRP1',status:'completed',update_stock:true,line_items:[line()]};
+ const plan=()=>buildReceiptPlan([receipt],[o],new Map([[document.id,document]])).rows[0];
+ assert.equal(receiptOrderBlock(o,document),null);assert.equal(plan().status,'blocked');
+ document.line_items[0].on_hand=52000;document.line_items[0].available=-52000;assert.equal(plan().status,'blocked');assert.match(plan().reason,/48000 utilisables/);
+ document.line_items[0].on_hand=104000;document.line_items[0].available=0;assert.equal(plan().status,'eligible');
+ delete o.erp_live.bcReservationPolicy;assert.equal(plan().status,'blocked');
+ o.erp_live.bcReservationPolicy='erplain_bc_bl';document.line_items[0].reserved_quantity=0;assert.equal(plan().status,'blocked');
+ document.line_items[0].reserved_quantity=100000;o.erp_live.stockCreationAttemptedAt='2026-10-08T00:00:00Z';assert.equal(plan().status,'blocked');
+});
