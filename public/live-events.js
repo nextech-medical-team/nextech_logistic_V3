@@ -6,7 +6,11 @@ function orderRowVersions(snapshot,partial,diagnostics){
  const result=new Map(),groups=new Map();
  for(const d of partial||[]){if(!groups.has(d.order_id))groups.set(d.order_id,[]);groups.get(d.order_id).push(d);result.set('delivery:'+d.id,JSON.stringify(d));}
  const issues=new Map((diagnostics?.rows||[]).map(o=>[o.id,o]));
- for(const o of snapshot?.rows||[])result.set('order:'+o.id,JSON.stringify([{...o,updated_at:undefined},groups.get(o.id)||[],issues.get(o.id)||null]));
+ for(const o of snapshot?.rows||[]){
+ result.set('order:'+o.id,JSON.stringify([{...o,updated_at:undefined},groups.get(o.id)||[],issues.get(o.id)||null]));
+ // Diagnostics are not rendered in the orders table; displayed statuses come from o.
+ result.set('supplement:'+o.id,JSON.stringify(groups.get(o.id)||[]));
+ }
  return result;
 }
 (()=>{
@@ -32,6 +36,7 @@ function orderRowVersions(snapshot,partial,diagnostics){
   for(const row of [...body.rows]){const key=rowKey(row),old=oldRows.get(key);if(key&&old&&old!==row&&old.cells.length===row.cells.length&&oldVersions.get(key)===nextVersions.get(key))row.replaceWith(old);}
   const headings=[...body.closest('table').tHead.rows[0].cells].map(cell=>cell.textContent.replace(/[↕↗]/g,'').trim());
   for(const row of body.rows)for(const [index,cell] of [...row.cells].entries()){if(headings[index]&&cell.dataset.orderColumn!==headings[index])cell.dataset.orderColumn=headings[index];}
+  window.V3OrderProcessing?.acceptSnapshot(orderRenderData.processing);
   restoreSelectedOrderReference(referenceSelection);
  };
 })();

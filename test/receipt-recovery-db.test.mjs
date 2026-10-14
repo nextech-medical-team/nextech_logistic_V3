@@ -42,6 +42,23 @@ test('durable receipt preview, native resume, labels, finished result and duplic
   const r=await f.service.status(run);assert.equal(r.state,'finished');assert.equal(r.plan.rows[0].item.state,'complete');assert.equal(r.plan.rows[0].labels.length,1);assert.match(r.plan.rows[0].labels[0].url,/carriers\/documents/);assert.equal(r.plan.rows[0].currentBl.label,bl.label);
  }finally{await f.engine.close();}
 });
+test('a new reserved BC enters native receipt recovery without any ERP mutation or extra reservation',async()=>{
+ const f=await fixture();try{
+  await f.db.query("UPDATE orders SET erp_live=erp_live||'{\"bcReservationPolicy\":\"erplain_bc_bl\"}'::jsonb WHERE id=$1",[f.id]);
+  f.change({...f.actual(),update_stock:true,line_items:f.actual().line_items.map(l=>({...l,reserved_quantity:1,shipped_quantity:0,available:0}))});
+  const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();
+  const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume-erp');assert.equal(f.actual().line_items[0].reserved_quantity,1);assert.equal(f.actual().line_items[0].on_hand,1);assert.equal(f.labelCalls(),0);assert.ok(f.calls.every(q=>q.startsWith('query ')));
+ }finally{await f.engine.close();}
+});
+test('receipt execution refuses a reservation lost after preview',async()=>{
+ const f=await fixture();try{
+  await f.db.query("UPDATE orders SET erp_live=erp_live||'{\"bcReservationPolicy\":\"erplain_bc_bl\"}'::jsonb WHERE id=$1",[f.id]);
+  f.change({...f.actual(),update_stock:true,line_items:f.actual().line_items.map(l=>({...l,reserved_quantity:1,shipped_quantity:0,available:0}))});
+  const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);
+  f.change({...f.actual(),line_items:f.actual().line_items.map(l=>({...l,reserved_quantity:0}))});await f.service.run();
+  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);assert.match((await f.service.status(run)).plan.rows[0].item.error,/Réservation/);assert.equal(f.labelCalls(),0);
+ }finally{await f.engine.close();}
+});
 test('TEMU never buys or falls back to a direct carrier, returns supplier refusal',async()=>{
  const f=await fixture('temu');try{
   const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();
@@ -90,5 +107,25 @@ for(const channel of ['amazon','temu'])test(`${channel}: existing ready BL obtai
 test('another receipt can be analyzed while a native preparation is waiting',async()=>{
  const f=await fixture();try{const first=await f.start();await f.service.submit({id:first,ids:[f.id]},f.user);await f.service.run();
   const second=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId:randomUUID()});await f.service.run();assert.equal((await f.service.status(second.id)).state,'ready');assert.equal((await f.service.status(first)).state,'applying');assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
+ }finally{await f.engine.close();}
+});
+
+test('receipt action continues an old native stock hold without a separate finalisation',async()=>{
+ const f=await fixture();try{
+  await f.db.query('UPDATE orders SET resolution_pending_resume=true WHERE id=$1',[f.id]);
+  const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();
+  const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume-erp');assert.equal(f.labelCalls(),0);
+ }finally{await f.engine.close();}
+});
+
+test('receipt preview refreshes related BC individually before showing its BL status',async()=>{
+ const f=await fixture();try{
+  const bl={id:'existing',label:'SHO-EXISTING',status:'ready_to_ship',update_stock:false};
+  f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
+  await f.db.query("UPDATE orders SET resolution_pending_resume=true,erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl:{...bl,status:'make_the_shipment'},stockDocument:{id:'stock',status:'completed'}})]);
+  await f.db.query("INSERT INTO carrier_jobs VALUES($1,'ready','production','[]',null)",[f.id]);await f.db.query('INSERT INTO carrier_documents VALUES($1,0)',[f.id]);
+  const run=await f.start('documents');const state=await f.service.status(run);
+  assert.ok(f.calls.some(q=>q.includes('DocumentRead')));assert.equal(state.plan.rows[0].currentBl.status,'ready_to_ship');assert.match(state.plan.rows[0].reason,/aucune nouvelle génération/);assert.equal(state.plan.rows[0].labels.length,1);
+  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);assert.equal(f.labelCalls(),0);
  }finally{await f.engine.close();}
 });

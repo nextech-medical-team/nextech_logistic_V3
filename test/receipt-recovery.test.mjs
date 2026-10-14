@@ -24,8 +24,8 @@ test('physical stock is the upper bound even with reservation and negative avail
 test('negative availability reduces usable own reservations',()=>{const o=order(),l={...line(8,-5),on_hand:10,reserved_quantity:10};assert.equal(plan([o],[bc(o,[l])]).rows[0].status,'blocked');});
 test('shortage of another product consumes no receipt units in the simulation',()=>{const a=order('a'),b=order('b'),p=plan([a,b],[bc(a,[line(),line(1,0,'OTHER','99')]),bc(b)]);assert.equal(p.rows[0].status,'blocked');assert.equal(p.rows[1].status,'eligible');});
 test('duplicate BC lines are aggregated before stock allocation',()=>{const o=order();assert.equal(plan([o],[bc(o,[line(),line()])]).rows[0].status,'blocked');});
-for(const [name,extra] of Object.entries({suspended:{suspension:{active:true,note:'Hold'}},cancelled:{tracking_status:'cancelled'},partial:{partial_mode:true},historical:{erp_live:{bc:{id:'bo'},phase:'bc_created',stockDocument:{id:'debit'}}},uncertain:{erp_live:{bc:{id:'bo'},mappingAlignmentAttempt:{status:'uncertain'}}},busy:{busy:true},held:{resolution_pending_resume:true}}))test(`${name}: no automatic resume`,()=>{const o={...order(),...extra};assert.equal(plan([o],[bc(o)]).rows[0].status,'blocked');});
-test('existing and cancelled BLs are never recreated',()=>{const o=order();for(const status of ['cancelled','unpublished','in_preparation']){const b=bc(o);b.shipping_orders.data=[{id:'bl',status}];assert.equal(plan([o],[b]).rows[0].status,'blocked');}});
+for(const [name,extra] of Object.entries({suspended:{suspension:{active:true,note:'Hold'}},cancelled:{tracking_status:'cancelled'},partial:{partial_mode:true},uncertain:{erp_live:{bc:{id:'bo'},mappingAlignmentAttempt:{status:'uncertain'}}},busy:{busy:true}}))test(`${name}: no automatic resume`,()=>{const o={...order(),...extra};assert.equal(plan([o],[bc(o)]).rows[0].status,'blocked');});
+test('existing and cancelled BLs are never recreated',()=>{const o=order();for(const status of ['cancelled','in_preparation']){const b=bc(o);b.shipping_orders.data=[{id:'bl',status}];assert.equal(plan([o],[b]).rows[0].status,'blocked');}});
 test('finished BL is listed as an existing document rather than another stock demand',()=>{const o=order();o.erp_live.bl={id:'bl'};const b=bc(o,[line(1,0)]);b.shipping_orders.data=[{id:'bl',label:'SHO1',status:'ready_to_ship'}];assert.equal(plan([o],[b]).rows[0].status,'documents');});
 test('missing BC remains visible through mapped SKU but cannot be executed',()=>{const o={...order(),erp_live:{},skus:['33 421 13B']};const p=plan([o],[]);assert.equal(p.rows.length,1);assert.equal(p.rows[0].status,'blocked');});
 test('commercial price/TVA/source quantities do not influence receipt readiness or fingerprint',()=>{const o=order(),b=bc(o),changed={...b,tax_type:'other',total:999,line_items:b.line_items.map(l=>({...l,price:123,tax_amount:null}))};assert.equal(plan([o],[changed]).rows[0].status,'eligible');assert.equal(recoveryFingerprint(o,b),recoveryFingerprint({...o,source_payload:{temuAmounts:{bad:true}},lines:[{quantity:999}]},changed));assert.notEqual(recoveryFingerprint(o,b),recoveryFingerprint(o,bc(o,[line(2)])));});
@@ -40,3 +40,19 @@ test('quota or provider outage stops the scan and keeps every unread order unver
  const r=await readRecoveryBcs({request:async()=>{calls++;const e=Error('Erplain HTTP 429');e.httpStatus=429;throw e;}},orders);
  assert.equal(calls,1);assert.equal(r.errors.size,201);assert.equal(r.bcs.size,0);
 });
+
+
+test('native continuation marker is not a human suspension',()=>{const o={...order(),resolution_pending_resume:true};assert.equal(plan([o],[bc(o)]).rows[0].status,'eligible');});
+test('existing completed stock debit is reused without consuming stock a second time',()=>{const o=order('a');o.erp_live.stockDocument={id:'debit',status:'completed'};const next=order('b');const p=plan([o,next],[bc(o,[line(5,1)]),bc(next)]);assert.equal(p.rows[0].status,'eligible');assert.equal(p.rows[0].stockAlreadyApplied,true);assert.equal(p.rows[1].status,'eligible');});
+test('BC stock policy true routes to native continuation rather than a new stock allocation',()=>{const o=order(),b={...bc(o,[line(1,0)]),update_stock:true};const p=plan([o],[b]);assert.equal(p.rows[0].status,'eligible');assert.equal(p.rows[0].stockAlreadyApplied,true);});
+
+test('new BC reservation remains subject to physical stock and FIFO on receipt continuation',()=>{
+ const a=order('a'),b=order('b');for(const o of [a,b])o.erp_live.bcReservationPolicy='erplain_bc_bl';
+ const reserved=o=>({...bc(o,[{...line(1,0),on_hand:1,reserved_quantity:1,shipped_quantity:0}]),update_stock:true});
+ const result=plan([a,b],[reserved(a),reserved(b)]);
+ assert.equal(result.rows[0].stockAlreadyApplied,false);assert.equal(result.rows[0].status,'eligible');assert.equal(result.rows[1].status,'blocked');
+ const absent=reserved(a);absent.line_items[0].on_hand=0;assert.equal(plan([a],[absent]).rows[0].status,'blocked');
+ const lost=reserved(a);lost.line_items[0].reserved_quantity=0;assert.match(plan([a],[lost]).rows[0].reason,/Réservation/);
+ const changed=reserved(a);changed.update_stock=false;assert.match(plan([a],[changed]).rows[0].reason,/Réservation/);
+});
+test('known existing pending BL is continued, never requested as a new BL',()=>{const o=order();o.erp_live.bl={id:'bl'};const b=bc(o);b.shipping_orders.data=[{id:'bl',status:'pending'}];const p=plan([o],[b]);assert.equal(p.rows[0].status,'eligible');assert.equal(p.rows[0].bls[0].id,'bl');});

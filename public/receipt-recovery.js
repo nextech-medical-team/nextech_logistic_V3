@@ -7,9 +7,9 @@
  function error(e){$('receipt-error').textContent=e.message;$('receipt-error').hidden=false;}
  async function api(path,body){const r=await fetch(path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});if(r.status===401)throw Error('Session expirée : connectez-vous depuis la page V3 puis revenez aux réceptions.');const j=await r.json();if(!r.ok)throw Error(j.error||'Demande indisponible');return j;}
  const selectable=r=>r.status==='eligible'||r.status==='documents'&&r.canLabel&&!r.labels?.length;
- function selection(){const eligible=current?.state==='ready'&&current.plan?.coverage?.complete&&['admin','manager'].includes(user?.role);$('receipt-execute').disabled=!eligible||selected.size===0||busy;$('receipt-select-all').disabled=!eligible;$('receipt-execute').textContent=selected.size?'Traiter '+selected.size+' commande'+(selected.size>1?'s':''):'Préparer les commandes sélectionnées';}
+ function selection(){const eligible=current?.state==='ready'&&current.plan?.coverage?.complete&&['admin','manager'].includes(user?.role);$('receipt-execute').disabled=!eligible||selected.size===0||busy;$('receipt-select-all').disabled=!eligible||!current.plan.rows.some(selectable);$('receipt-execute').textContent=selected.size?'Traiter '+selected.size+' commande'+(selected.size>1?'s':''):'Préparer les commandes sélectionnées';}
  function render(r){
-  const changed=current?.id!==r.id;current=r;if(changed)selected.clear();$('receipt-message').textContent=states[r.state]||r.state;$('receipt-results').hidden=!r.plan;
+  const changed=current?.id!==r.id;current=r;if(changed)selected.clear();for(const id of selected)if(!r.plan?.rows.some(row=>row.id===id&&selectable(row)))selected.delete(id);$('receipt-message').textContent=states[r.state]||r.state;$('receipt-results').hidden=!r.plan;
   if(r.error)error(Error(r.error));if(!r.plan){selection();return;}
   $('receipt-title').textContent='Réception '+r.plan.receipts.map(x=>x.label).join(', ');$('receipt-date').textContent='Stock vérifié le '+date(r.plan.checkedAt)+' · '+r.plan.coverage.orders+' commandes examinées';
   $('receipt-metrics').replaceChildren(...[['matched','Commandes concernées'],['eligible','Admissibles'],['blocked','À traiter'],['documents','Documents existants']].map(([k,t])=>{const e=node('div',undefined,'metric');e.append(node('strong',String(r.plan.counts[k])),node('span',t));return e;}));
@@ -24,7 +24,7 @@
    cards.push(card);
   }
   $('receipt-orders').replaceChildren(...cards);$('receipt-empty').hidden=cards.length!==0;$('receipt-select-all').checked=selected.size>0&&selected.size===r.plan.rows.filter(selectable).length;
-  $('receipt-execution-note').textContent=r.plan.coverage.complete?'Les quantités sont réparties par priorité puis par ancienneté. Le stock est relu avant chaque reprise.':'Lecture incomplète : '+r.plan.coverage.errors+' commande(s) non vérifiée(s). Relancez l’analyse avant tout traitement.';
+  $('receipt-execution-note').textContent=r.plan.coverage.complete?(r.plan.rows.some(selectable)?'Les quantités sont réparties par priorité puis par ancienneté. Les documents existants sont réutilisés.':'Aucune commande à préparer : téléchargez les étiquettes déjà disponibles ; les éventuels blocages sont précisés sur chaque commande.'):'Lecture incomplète : '+r.plan.coverage.errors+' commande(s) non vérifiée(s). Relancez l’analyse avant tout traitement.';
   selection();
  }
  async function load(id){if(busy)return;busy=true;try{$('receipt-error').hidden=true;render(await api('/api/receipts/recovery/status?id='+encodeURIComponent(id)));}catch(e){error(e);}finally{busy=false;selection();clearTimeout(timer);if(current&&['queued','reading','applying'].includes(current.state))timer=setTimeout(()=>load(current.id),2500);}}

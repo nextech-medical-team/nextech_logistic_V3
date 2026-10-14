@@ -41,15 +41,24 @@ const server=readFileSync(new URL('../src/server.mjs',import.meta.url),'utf8');
 const start=server.indexOf("    if((p==='/api/orders'||p==='/api/order-problem-types')");
 const end=server.indexOf("    if(p==='/api/products'",start);
 const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
-const execute=new AsyncFunction('p','req','url','db','orderQuery','managerSql','partialAllocationSql','orderPageDetails','projectCurrentDiagnostics','readerJobs','catalog','selectProblemOrders','paginateProblemOrders','currentProblemClassifier','orderStatistics','cachedOrderSummary','json','res',server.slice(start,end));
-async function route(path,query){
+const execute=new AsyncFunction('p','req','url','db','orderQuery','managerSql','partialAllocationSql','orderPageDetails','projectCurrentDiagnostics','readerJobs','catalog','selectProblemOrders','paginateProblemOrders','currentProblemClassifier','orderStatistics','cachedOrderSummary','json','res','readOrdersPage',server.slice(start,end));
+const readerSource=readFileSync(new URL('../src/order-list-reader.mjs',import.meta.url),'utf8');
+const readerBody=readerSource.slice(readerSource.indexOf('export async function readOrdersPage')+'export '.length);
+async function route(path,query,{all=false}={}){
  const rows=Array.from({length:120},(_,i)=>({id:String(i),issue:i>=100?'Commande déjà expédiée sur la plateforme':'',label_status:'pending',source_payload:{},sku_lines:[]}));
  let out,sql,statsIds;
  const db={query:async(q,args)=>{if(q.startsWith('SELECT id FROM orders'))return {rows:rows.filter(o=>o.issue).map(o=>({id:o.id}))};sql={q,args};return {rows:structuredClone(rows)};}};
  db.readTransaction=read=>read(db);
- await execute(path,{method:'GET'},new URL('https://example.test'+path+'?'+query),db,orderQuery,'NULL','NULL',async()=>{},o=>o,{snapshot:async()=>({configured:true})},{status:()=>({})},selectProblemOrders,paginateProblemOrders,currentProblemClassifier,async(_db,_params,ids)=>{statsIds=ids;return {transportStats:[],summary:{total:ids.length}};},async()=>({transportStats:[],summary:{total:120}}),(_res,status,data)=>{assert.equal(status,200);out=data;},{});
+ const statistics=async(_db,_params,ids)=>{statsIds=ids;return {transportStats:[],summary:{total:ids.length}};},cached=async()=>({transportStats:[],summary:{total:120}});
+ const dependencies={orderQuery,managerSql:'NULL',partialAllocationSql:'NULL',orderPageDetails:async()=>{},projectCurrentDiagnostics:o=>o,selectProblemOrders,paginateProblemOrders,currentProblemClassifier,orderStatistics:statistics};
+ const reader=new Function(...Object.keys(dependencies),readerBody+';return readOrdersPage;')(...Object.values(dependencies));
+ await execute(path,{method:'GET'},new URL('https://example.test'+path+'?'+query),db,orderQuery,'NULL','NULL',async()=>{},o=>o,{snapshot:async()=>({configured:true})},{status:()=>({})},selectProblemOrders,paginateProblemOrders,currentProblemClassifier,statistics,cached,(_res,status,data)=>{assert.equal(status,200);out=data;},{},(db,options)=>reader(db,{...options,all}));
  return {out,sql,statsIds};
 }
+test('shared export reader retains every filtered order beyond the displayed page',async()=>{
+ const query='problem-label=Commande+d%C3%A9j%C3%A0+exp%C3%A9di%C3%A9e+sur+la+plateforme&page=2&pageSize=50';
+ const displayed=await route('/api/orders',query),exported=await route('/api/orders',query,{all:true});assert.equal(displayed.out.rows.length,0);assert.equal(exported.out.rows.length,20);assert.equal(exported.out.total,displayed.out.total);assert.deepEqual(exported.statsIds,displayed.statsIds);
+});
 test('integrated GET filters all pages and restricts statistics to same orders',async()=>{
  const {out,sql,statsIds}=await route('/api/orders','problem-label=Commande+d%C3%A9j%C3%A0+exp%C3%A9di%C3%A9e+sur+la+plateforme&page=2&pageSize=50');
  assert.equal(out.total,20);assert.equal(out.rows.length,0);assert.equal(statsIds.length,20);assert.equal(sql.args.length,0);assert.ok(!sql.q.includes('LIMIT 50'));

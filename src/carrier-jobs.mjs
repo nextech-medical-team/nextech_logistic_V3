@@ -1,15 +1,12 @@
-import {currentMappingFingerprint} from './current-mapping-line.mjs';
 import {usesRecordedBc,recordedBcFingerprint} from './existing-bc-execution.mjs';
-
-async function preparationMappingMatches(db,o){
- const proof=o.erp_live?.mappingPreparationFingerprint;
- if(!proof)return false;
- const authority=o.erp_live.preparationAuthority;
- if(usesRecordedBc(o)&&authority?.kind==='recorded_bc'){
-  if(String(authority.bcId)!==String(o.erp_live.bc.id)||authority.fingerprint!==proof)return false;
-  try{return recordedBcFingerprint(o.erp_live.bc)===proof;}catch{return false;}
- }
- return await currentMappingFingerprint(db,o)===proof;
+function assertRecordedPreparationUnchanged(o){
+ const authority=o.erp_live?.preparationAuthority;
+ // A changed global mapping or an absent legacy fingerprint never vetoes a label.
+ // When a recorded BC proof exists, keep the newer protection against changing
+ // that very document after preparation and before carrier creation.
+ if(!usesRecordedBc(o)||authority?.kind!=='recorded_bc')return;
+ let same=false;try{same=String(authority.bcId)===String(o.erp_live.bc.id)&&authority.fingerprint===recordedBcFingerprint(o.erp_live.bc);}catch{}
+ if(!same)throw Error('BC modifié depuis sa préparation : recontrôle requis');
 }
 import {randomUUID} from 'node:crypto';
 import {currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
@@ -53,8 +50,8 @@ export async function queueCarrierLabels(db,ids,{automatic=false}={}){
     if(r?.status!=='complete'||r.error||r.result?.partialRemainder||!(r.result?.erpOnly||r.result?.equivalent))throw Error('Préparation suspendue : terminer sa validation');
    }
    await tx.query('SELECT id FROM lines WHERE order_id=$1 ORDER BY id FOR SHARE',[id]);
-   await tx.query('SELECT source_sku FROM mappings WHERE channel=$2 AND source_sku IN (SELECT source_sku FROM lines WHERE order_id=$1) FOR SHARE',[id,o.channel]);
-   if(!await preparationMappingMatches(tx,o))throw Error('Mapping modifié depuis la validation du BL : recontrôle requis');
+   // The recorded BC owns this preparation; later global mappings cannot veto its label.
+   assertRecordedPreparationUnchanged(o);
    await assertLabelStockGate(tx,o);
    if((await tx.query('SELECT document_index FROM carrier_documents WHERE order_id=$1 LIMIT 1',[id])).rows.length)throw Error('Étiquette existante à rapprocher');
    if((await tx.query('SELECT id FROM carrier_label_history WHERE order_id=$1 LIMIT 1',[id])).rows.length)throw Error('Historique transporteur à rapprocher');
@@ -98,7 +95,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
       const e=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[o.id])).rows[0];
       if(!job.stock_override){
        assertPreparedLabelOrder(o,e);
-       if(!await preparationMappingMatches(db,o))throw Error('Mapping modifié avant création : recontrôle requis');
+       assertRecordedPreparationUnchanged(o);
       }
       await assertLabelStockGate(db,o,job.stock_override);
      }

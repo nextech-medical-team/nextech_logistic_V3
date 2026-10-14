@@ -32,6 +32,7 @@ let orderRequestVersion=0;
 
 let preparedOrderResponse=null,orderRenderData=null;
 let preservedOrderRows=new Set();
+const orderRowMarkup=new WeakMap();
 // Reconcile before connecting new rows: unchanged rows never leave the document.
 function commitOrderRows(html,previous,next){
  const body=$('order-rows'),draft=document.createElement('tbody');draft.innerHTML=html;
@@ -39,7 +40,12 @@ function commitOrderRows(html,previous,next){
  const deliveries=new Map();for(const row of body.rows){const id=row.querySelector('[data-delivery-detail]')?.dataset.deliveryDetail;if(id){if(!deliveries.has(id))deliveries.set(id,[]);deliveries.get(id).push(row);}}
  preservedOrderRows=new Set();const wanted=[];
  for(const row of [...draft.rows]){const id=row.querySelector('[data-detail]')?.dataset.detail,existing=old.get(id);
-  if(id&&existing&&next.has('order:'+id)&&previous.get('order:'+id)===next.get('order:'+id)){preservedOrderRows.add(id);const checkbox=existing.querySelector('[data-id]');if(checkbox)checkbox.checked=selected.has(id);const partialRows=deliveries.get(id)||[];for(const delivery of partialRows){const choice=delivery.querySelector('[data-delivery-select]');if(choice)choice.checked=selectedDeliveries.has(choice.dataset.deliverySelect);}wanted.push(existing,...partialRows);}else wanted.push(row);
+  // Source metadata may change while every displayed field stays identical.
+  // Compare the generated base markup as well, before asynchronous decorations.
+  const template=row.cloneNode(true);template.querySelector('[data-id]')?.removeAttribute('checked');
+  const markup=template.innerHTML,sameDisplay=existing&&orderRowMarkup.get(existing)===markup&&previous.get('supplement:'+id)===next.get('supplement:'+id);
+  orderRowMarkup.set(row,markup);
+  if(id&&existing&&next.has('order:'+id)&&(previous.get('order:'+id)===next.get('order:'+id)||sameDisplay)){orderRowMarkup.set(existing,markup);preservedOrderRows.add(id);const checkbox=existing.querySelector('[data-id]');if(checkbox)checkbox.checked=selected.has(id);const partialRows=deliveries.get(id)||[];for(const delivery of partialRows){const choice=delivery.querySelector('[data-delivery-select]');if(choice)choice.checked=selectedDeliveries.has(choice.dataset.deliverySelect);}wanted.push(existing,...partialRows);}else wanted.push(row);
  }
  const retained=new Set(wanted);for(const row of [...body.rows])if(!retained.has(row))row.remove();
  let cursor=body.firstElementChild;for(const row of wanted){if(row===cursor)cursor=cursor.nextElementSibling;else body.insertBefore(row,cursor);}
@@ -155,13 +161,16 @@ async function orders(){
 
  // Fetch every asynchronous row enrichment before touching the visible table.
 
- const [partial,capacity,diagnostics]=await Promise.all([
+ const [partial,capacity,diagnostics,processing]=await Promise.all([
 
  packet?.partial||(ids.length?api('/api/partial/visible',{ids}):Promise.resolve({rows:[]})),
 
  api('/api/erplain/live-capacity').catch(e=>({error:e.message})),
 
- packet?.diagnostics||(ids.length?api('/api/erplain-refresh/diagnostics?ids='+encodeURIComponent(ids.join(','))):Promise.resolve({rows:[]}))
+ packet?.diagnostics||(ids.length?api('/api/erplain-refresh/diagnostics?ids='+encodeURIComponent(ids.join(','))):Promise.resolve({rows:[]})),
+
+ // Keep the current table visible until its processing blocks are ready too.
+ ids.length&&window.V3OrderProcessing?window.V3OrderProcessing.read(ids).catch(error=>({ids,error:error.message})):null
 
  ]);
 
@@ -171,7 +180,7 @@ async function orders(){
  const previousRowVersions=typeof orderRowVersions==='function'?orderRowVersions(lastOrdersSnapshot?JSON.parse(lastOrdersSnapshot):null,lastPartialSnapshot?JSON.parse(lastPartialSnapshot):[],orderRenderData?.diagnostics):new Map();
  const nextRowVersions=typeof orderRowVersions==='function'?orderRowVersions(r,partial.rows,diagnostics):new Map();
  partialVisibleOrders=new Map(r.rows.map(o=>[o.id,o]));
- orderRenderData={version:requestVersion,partial,capacity,diagnostics};
+ orderRenderData={version:requestVersion,partial,capacity,diagnostics,processing};
 
  if(requestVersion!==orderRequestVersion||(document.querySelector('[data-inline-editing]')||orderRowTextSelectionBlocksRefresh()))return;const referenceSelection=selectedOrderReference();lastOrdersQuery=params.toString();lastOrdersSnapshot=ordersSnapshot(r);if(!r.rows.length)lastPartialSnapshot='[]';pages=r.pages;if(typeof renderTransportStats==='function')renderTransportStats(r.transportStats||[],r.summary);for(const o of r.rows)orderManagers.set(o.id,o.account_manager||o.channel);
 

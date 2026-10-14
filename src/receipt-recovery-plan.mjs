@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {suspensionBlock} from './order-suspension.mjs';
+import {assertPublishedBcReservation} from './bc-numbering.mjs';
 
 export const receiptHash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const numeric=v=>(typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v));
@@ -45,13 +46,20 @@ export function receiptOrderBlock(o,bc){
  if(bc.status!=='active')return 'BC '+bc.status+' : aucune nouvelle préparation';
  if(o.partial_mode||o.hasPartial)return 'Livraison partielle : vérifier le reliquat dans le parcours dédié';
  if(o.busy)return 'Traitement déjà en cours : attendre son résultat';
- if(o.resolution_pending_resume)return 'Préparation suspendue : finalisation dédiée requise';
+ // This is a native continuation marker, not a human suspension. The receipt
+ // action itself authorizes that continuation through the existing worker.
  if([o.erp_live?.mappingAlignmentAttempt,o.erp_live?.sourceVatAttempt,o.erp_live?.stockCreationOutcome].some(a=>a?.status==='uncertain')||o.erp_live?.documentSource?.stockHolds?.length)return 'Écriture ou mouvement de stock à rapprocher';
- if(o.erp_live?.stockDocument?.id||bc.update_stock!==false)return 'Débit de stock existant : rapprochement requis';
+ if(typeof bc.update_stock!=='boolean')return 'Politique de stock du BC non reçue';
+ if(o.erp_live?.bcReservationPolicy==='erplain_bc_bl'){
+  if(o.erp_live?.stockDocument?.id||o.erp_live?.stockCreationAttemptedAt)return 'Débit de stock séparé : rapprochement requis';
+  try{assertPublishedBcReservation(bc,true);}catch{return 'Réservation de la commande non confirmée : rapprochement requis';}
+ }
  if(!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.paginatorInfo?.hasMorePages!==false)return 'Historique des BL incomplet';
  const bls=bc.shipping_orders.data;
- if(o.erp_live?.bl?.id||bls.length)return 'BL existant : rapprochement requis, aucune recréation';
- if(['creating_bc','creating_customer','creating_stock','creating_bl','publishing_bl','finalizing_bl'].includes(o.erp_live?.phase))return 'Préparation interrompue : rapprocher le résultat';
+ if(bls.some(b=>b.status==='in_preparation'))return 'BL en préparation : passage à prêt à livrer interdit par la consigne utilisateur';
+ // Existing documents are handed back to the native idempotent worker. Never
+ // require a separate commercial comparison or manual reconciliation here.
+ if(bls.length>1||bls.some(b=>b.status==='cancelled')||o.erp_live?.bl?.id&&!bls.some(b=>String(b.id)===String(o.erp_live.bl.id)))return 'Document annulé, multiple ou non retrouvé : aucune recréation automatique';
  return null;
 }
 export function buildReceiptPlan(receipts,orders,bcs,{errors=new Map()}={}){
@@ -63,16 +71,18 @@ export function buildReceiptPlan(receipts,orders,bcs,{errors=new Map()}={}){
   if(!associated)continue;
   const active=(bc?.shipping_orders?.data||[]).filter(l=>!['cancelled','unpublished'].includes(l.status));
   const done=active.length===1&&finished.has(active[0].status)&&String(active[0].id)===String(o.erp_live?.bl?.id);
+  // New BCs reserve availability; they still need physical stock at receipt
+  // continuation. Legacy debit reconciliation remains the native worker's job.
   const reason=errors.get(o.id)||invalid||(!needs.some(l=>keys.has(l.key))&&bc?'SKU reçu sur une autre variante ou dans un autre emplacement':null)||receiptOrderBlock(o,bc);
-  const row={id:o.id,reference:o.reference,channel:o.channel,bc:bc?.label||o.erp_live?.bc?.label||null,bls:(bc?.shipping_orders?.data||[]).map(l=>({id:l.id,label:l.label,status:l.status})),fingerprint:bc?recoveryFingerprint(o,bc):null,needs,status:done?'documents':reason?'blocked':'eligible',reason:done?'BL déjà disponible : étiquettes existantes à récupérer':reason,labels:o.labels||[],labelError:o.labelError||null};
+  const row={id:o.id,reference:o.reference,channel:o.channel,bc:bc?.label||o.erp_live?.bc?.label||null,bls:(bc?.shipping_orders?.data||[]).map(l=>({id:l.id,label:l.label,status:l.status})),fingerprint:bc?recoveryFingerprint(o,bc):null,needs,stockAlreadyApplied:(bc?.update_stock===true&&o.erp_live?.bcReservationPolicy!=='erplain_bc_bl')||o.erp_live?.stockDocument?.status==='completed',status:done?'documents':reason?'blocked':'eligible',reason:done?'BL déjà disponible : étiquettes existantes à récupérer':reason,labels:o.labels||[],labelError:o.labelError||null};
   row.canLabel=done&&active[0].status==='ready_to_ship'&&bc.status==='active'&&!suspensionBlock(o)&&!o.archived&&!o.partial_mode&&!o.hasPartial&&!o.busy&&!o.source_payload?.visibilityHold&&!o.source_payload?.erplainValidationHold&&!['cancelled','shipped','in_transit','delivered','delivered_simulated'].includes(o.tracking_status)&&o.label_status!=='cancelled'&&!['creating_stock','creating_bl','publishing_bl','finalizing_bl'].includes(o.erp_live?.phase)&&![o.erp_live?.mappingAlignmentAttempt,o.erp_live?.sourceVatAttempt,o.erp_live?.stockCreationOutcome].some(a=>a?.status==='uncertain');
   rows.push(row);
-  if(row.status==='eligible')for(const l of needs.filter(l=>l.tracked)){
+  if(row.status==='eligible'&&!row.stockAlreadyApplied)for(const l of needs.filter(l=>l.tracked)){
    budget.set(l.key,Math.min(budget.get(l.key)??Infinity,Math.max(0,l.available),Math.max(0,l.onHand)));
    physical.set(l.key,Math.min(physical.get(l.key)??Infinity,Math.max(0,l.onHand)));
   }
  }
- for(const row of rows.filter(r=>r.status==='eligible')){
+ for(const row of rows.filter(r=>r.status==='eligible'&&!r.stockAlreadyApplied)){
   const owned=l=>Math.max(0,l.reserved+Math.min(0,l.available));
   const shortages=row.needs.filter(l=>l.tracked&&(l.quantity>Math.min(physical.get(l.key),owned(l)+(budget.get(l.key)||0))+1e-6));
   if(shortages.length){row.status='blocked';row.reason='Stock insuffisant après répartition : '+shortages.map(l=>l.sku+' ('+l.quantity+' nécessaires, '+Math.min(physical.get(l.key),owned(l)+(budget.get(l.key)||0))+' utilisables)').join(' ; ');continue;}
