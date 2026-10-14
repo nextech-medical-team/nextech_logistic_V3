@@ -9,7 +9,7 @@ export async function installCarrierAttemptProof(db){
 function noCreationEvidence(job){return !job.result&&!job.reference&&Array.isArray(job.tracking)&&job.tracking.length===0;}
 export function provesImportedFieldsPreflight(job,audit){
  const d=audit?.detail,p=d?.proof;
- return job.status==='failed'&&job.attempts===1&&noCreationEvidence(job)
+ return job.status==='failed'&&noCreationEvidence(job)
  &&d?.orderId===job.order_id&&d.currentError===job.error
  &&/^Erplain LIVE · (Informations obligatoires manquantes :|Numéro de téléphone invalide : corriger avant création de l’étiquette$)/.test(d.previousError||'')
  &&p?.readOnly===true&&p.businessActionAuthorized===false&&d.businessWrites===0&&d.labelPurchased===false
@@ -17,9 +17,9 @@ export function provesImportedFieldsPreflight(job,audit){
 }
 export function provesLegacyPreflight(job,audit){
  const d=audit?.detail,p=d?.proof;
- // The audited first-generation worker incremented attempts before local validation.
- // No later attempt/creation identifier may reuse that old evidence.
- return job.status==='failed'&&job.attempts===1&&job.creation_id==null&&noCreationEvidence(job)
+ // Attempts include local validation failures and are not evidence of a provider call.
+ // Match the immutable audit to this exact job version; a later update cannot reuse it.
+ return job.status==='failed'&&job.creation_id==null&&noCreationEvidence(job)
  &&d?.orderId===job.order_id&&d.currentError===job.error&&localValidation.test(d.previousError||'')
  &&p?.readOnly===true&&p.verified===true&&p.businessActionAuthorized===false
  &&d.businessWrites===0&&d.labelPurchased===false
@@ -34,7 +34,6 @@ export async function canRetryFailedCarrier(db,job){
  if(job.failure_phase)return false;
  // Existing unambiguous validation errors and jobs never attempted keep their policy.
  if(job.attempts===0||localValidation.test(job.error||''))return true;
- if(job.attempts!==1)return false;
  const {rows}=await db.query(`SELECT detail,created_at FROM audit
  WHERE action IN ('carrier.prevalidation_diagnostic_revalidated','carrier.imported_fields_diagnostic_revalidated') AND detail->>'orderId'=$1
  ORDER BY created_at DESC LIMIT 1`,[job.order_id]);

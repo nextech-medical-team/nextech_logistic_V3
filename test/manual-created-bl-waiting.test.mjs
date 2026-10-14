@@ -11,7 +11,7 @@ function fixture({erpStatus='pending',orderPatch={},carrier=null,action='choose-
   if(q.startsWith('SELECT r.* FROM resolution_jobs'))return {rows:job.status==='waiting'?[structuredClone(job)]:[]};
   if(q==='SELECT * FROM orders WHERE id=$1')return {rows:[structuredClone(o)]};
   if(q.includes('SELECT * FROM erp_live_jobs')||q==='SELECT status,error FROM erp_live_jobs WHERE order_id=$1')return {rows:[erp]};
-  if(q.startsWith('SELECT status,result,tracking,reference FROM carrier_jobs')||q==='SELECT status,error FROM carrier_jobs WHERE order_id=$1')return {rows:c?[structuredClone(c)]:[]};
+  if(q==='SELECT * FROM carrier_jobs WHERE order_id=$1'||q==='SELECT status,error FROM carrier_jobs WHERE order_id=$1')return {rows:c?[structuredClone(c)]:[]};
   if(q==='SELECT order_id,result FROM resolution_jobs WHERE id=$1')return {rows:[structuredClone(job)]};
   if(q==='SELECT 1 FROM carrier_documents WHERE order_id=$1 LIMIT 1')return {rows:documents?[{exists:1}]:[]};
   if(q.startsWith('UPDATE')||q.startsWith('INSERT')||q.startsWith('DELETE'))writes.push(q);
@@ -43,8 +43,22 @@ test('failed carrier results, tracking and references never cause a new creation
  }
 });
 test('a persisted carrier PDF without a ready job is preserved instead of replaced',async()=>{
- const f=fixture({documents:1,carrier:{status:'failed',result:null,tracking:[]}});await f.worker.run();
+ const f=fixture({documents:1,carrier:{status:'failed',failure_phase:'preflight',creation_started_at:null,result:null,tracking:[]}});await f.worker.run();
  assert.equal(f.queued,0);assert.equal(f.job.status,'review');assert.match(f.job.error,/Création transport à vérifier/);
+});
+test('only proven preflight failures or the exact local legacy BC guard are admitted',async()=>{
+ for(const carrier of [{status:'failed',failure_phase:'preflight',creation_started_at:null,attempts:1,result:null,tracking:[]},{status:'failed',error:'BC modifié depuis sa préparation : recontrôle requis',attempts:1,result:null,tracking:[]},{status:'failed',attempts:0,result:null,tracking:[]}]){
+  const f=fixture({carrier});await f.worker.run();await f.worker.run();assert.equal(f.queued,1);assert.equal(f.job.status,'waiting',f.job.error);
+ }
+});
+test('a creation marker, provider failure or unknown legacy failure always prevents a new POST',async()=>{
+ for(const carrier of [{status:'failed',failure_phase:'preflight',creation_started_at:'2026-10-14T10:00:00Z',attempts:1,result:null,tracking:[]},{status:'failed',failure_phase:'provider',attempts:0,result:null,tracking:[]},{status:'failed',error:'Network timeout',attempts:1,result:null,tracking:[]}]){
+  const f=fixture({carrier});await f.worker.run();assert.equal(f.queued,0);assert.equal(f.job.status,'review');
+ }
+});
+test('a partial persisted PDF is followed on its existing creation without replacement',async()=>{
+ const f=fixture({documents:1,carrier:{status:'awaiting_pdf',result:{reference:'GOFO'},reference:'GOFO',tracking:['TRACK']}});await f.worker.run();
+ assert.equal(f.queued,0);assert.equal(f.job.status,'waiting');assert.equal(f.job.result.labelRequested,true);
 });
 test('suspension, cancellation, duplicate, shipped and partial orders stay protected',async()=>{
  for(const orderPatch of [{suspension:{active:true,note:'Pause'}},{tracking_status:'cancelled'},{duplicate_of:'other'},{tracking_status:'shipped'},{partial_mode:true},{archived:true}]){
@@ -58,4 +72,11 @@ test('missing or cancelled BLs and TEMU never enter the new direct-label path',a
 });
 test('document-only refresh remains a separate decision and does not buy an unsolicited label',async()=>{
  const f=fixture({action:'refresh'});await f.worker.run();assert.equal(f.queued,0);assert.equal(f.job.status,'waiting');
+});
+
+for(const attempts of [2,10,99])test('manual waiting resume ignores preflight attempt counter '+attempts,async()=>{
+ for(const proof of [{failure_phase:'preflight',creation_started_at:null},{error:'BC modifié depuis sa préparation : recontrôle requis'}]){
+ const f=fixture({carrier:{status:'failed',attempts,result:null,reference:null,tracking:[],...proof}});
+ await f.worker.run();await f.worker.run();assert.equal(f.queued,1);assert.equal(f.job.status,'waiting',f.job.error);
+ }
 });
