@@ -14,8 +14,8 @@ export async function initializeEquivalenceImports(db){
  CREATE INDEX IF NOT EXISTS equivalence_import_rows_status ON equivalence_import_rows(status,batch_id,line);`);
  if(db.recoverInterrupted!==false)await db.query("UPDATE equivalence_import_rows SET status='blocked',error='Traitement interrompu : rapprocher le BC et la demande avant toute reprise.' WHERE status='starting'");
 }
-export function equivalenceImportService(db,directory,{api=erplainAccount(directory,'live'),preview=substitution}={}){
- let running=false,exporting=false;const exports=new Map();
+export function equivalenceImportService(db,directory,{api=erplainAccount(directory,'live'),preview=substitution,readScope=null}={}){
+ let running=false,exporting=false,activeExportId=null;const exports=new Map();
  async function rows(id){return (await db.query('SELECT * FROM equivalence_import_rows WHERE batch_id=$1 ORDER BY line',[id])).rows;}
  async function read(id){
   const batch=(await db.query('SELECT * FROM equivalence_imports WHERE id=$1',[id])).rows[0];if(!batch)throw Error('Import introuvable');
@@ -100,15 +100,17 @@ export function equivalenceImportService(db,directory,{api=erplainAccount(direct
    if(req.method==='GET'&&p==='/api/equivalence-import/export'){
     const item=exports.get(url.searchParams.get('id'));
     if(!item||item.owner!==user.email||item.expires<Date.now())throw Error('Export expiré ou introuvable : recommencer le téléchargement');
-    json(res,200,item.error?{status:'failed',error:item.error}:item.result?{status:'complete',...item.result}:{status:'checking'});return true;
+    json(res,200,item.error?{status:'failed',error:item.error}:item.result?{status:'complete',...item.result}:{status:'checking',progress:item.progress,startedAt:item.startedAt});return true;
    }
    if(req.method==='GET'&&p==='/api/equivalence-import/shortages'){
-    if(exporting)throw Error('Un export est déjà en cours : attendre sa fin');
+    const params=new URLSearchParams(url?.searchParams);params.delete('page');params.delete('pageSize');params.sort();const scopeKey=params.toString();
+    if(exporting){const active=exports.get(activeExportId);if(active?.owner===user.email&&active.scopeKey===scopeKey){json(res,200,{id:activeExportId,status:'checking',progress:active.progress,startedAt:active.startedAt});return true;}throw Error('Un export d’un autre périmètre est déjà en cours : attendre sa fin');}
     for(const [id,item] of exports)if(item.expires<Date.now())exports.delete(id);
     if(exports.size>=10)throw Error('Trop d’exports récents : attendre leur expiration');
-    exporting=true;const id=randomUUID(),item={owner:user.email,expires:Date.now()+30*60*1000};exports.set(id,item);
-    exportEquivalences(db,api,directory).then(result=>{item.result=result;},e=>{item.error=e.message;}).finally(()=>{exporting=false;item.expires=Date.now()+30*60*1000;});
-    json(res,200,{id,status:'checking'});return true;
+    exporting=true;const id=randomUUID(),item={owner:user.email,scopeKey,startedAt:Date.now(),expires:Date.now()+30*60*1000};exports.set(id,item);activeExportId=id;
+    const execute=async()=>{const scope=readScope?await readScope(params):null;return exportEquivalences(db,api,directory,{scope,onProgress:progress=>{item.progress={...progress,updatedAt:Date.now()};item.expires=Date.now()+30*60*1000;}});};
+    execute().then(result=>{item.result=result;},e=>{item.error=e.message;}).finally(()=>{exporting=false;activeExportId=null;item.expires=Date.now()+30*60*1000;});
+    json(res,200,{id,status:'checking',startedAt:item.startedAt,progress:item.progress});return true;
    }
    if(req.method==='GET'&&p==='/api/equivalence-import/template'){
     if(exporting)throw Error('Un export est déjà en cours : attendre sa fin');

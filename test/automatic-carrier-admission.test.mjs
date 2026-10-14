@@ -31,6 +31,23 @@ async function order(db,id,carrier='gls',channel='shopify'){
 }
 const count=async(db,sql)=>Number((await db.query(sql)).rows[0].n);
 
+test('recorded BC labels ignore missing or changed mappings at admission and again before GOFO creation',async()=>{
+ const db=await fixture();try{
+  for(const id of ['manual-missing','auto-changed'])await order(db,id,'gofo','amazon');
+  await db.query("UPDATE orders SET erp_live=erp_live-'mappingPreparationFingerprint' WHERE id='manual-missing'");
+  await db.query("INSERT INTO mappings VALUES('amazon','SKU','LATER-MAPPING',1,20)");
+  const manual=(await db.query("SELECT * FROM orders WHERE id='manual-missing'")).rows[0];
+  assert.equal(await queueCarrierLabels(db,['manual-missing']),1);
+  assert.equal(await admitPreparedCarrierLabels(db),1);
+  await db.query("UPDATE mappings SET target_sku='EVEN-LATER',target_qty=99");
+  let posts=0;const clients={gofoCreate:async o=>{posts++;assert.equal(o.lines[0].target_sku,'SKU');assert.equal(Number(o.lines[0].target_quantity),1);return {reference:'ref-'+posts,tracking:['track-'+posts]};},gofoLabel:async()=>Buffer.from('%PDF-1.4 test').toString('base64')};
+  const worker=createCarrierWorkers(db,null,{clients});await worker.run('gofo');await worker.run('gofo');await worker.run('gofo');
+  assert.equal(posts,2);assert.equal(await count(db,"SELECT count(*) n FROM carrier_jobs WHERE status='ready'"),2);assert.equal(await count(db,'SELECT count(*) n FROM carrier_documents'),2);
+  const after=(await db.query("SELECT * FROM orders WHERE id='manual-missing'")).rows[0];assert.deepEqual(after.erp_live,manual.erp_live);
+  assert.equal(await queueCarrierLabels(db,['manual-missing','auto-changed']),0);
+ }finally{await db.close();}
+});
+
 test('existing automatic admission resumes Boutique and Relais plus all direct carriers; repeat and restart never duplicate',async()=>{
  const db=await fixture();try{
  for(const [id,c,ch] of [['boutique','gls','shopify'],['relais','gls_shop','shopify'],['gofo','gofo','amazon'],['pharma','gls_pharma','tender']])await order(db,id,c,ch);

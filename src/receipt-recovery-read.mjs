@@ -27,7 +27,7 @@ export async function readReceipt(api,value){
 }
 export async function readRecoveryBcs(api,orders){
  const ids=[...new Set(orders.map(o=>String(o.erp_live?.bc?.id||'')).filter(Boolean))],bcs=new Map(),errors=new Map();
- const fields='id label status update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}';
+ const fields='id label status update_stock line_items{type quantity reserved_quantity shipped_quantity available on_hand location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}';
  for(let start=0;start<ids.length;start+=100){
   const batch=ids.slice(start,start+100);
   try{

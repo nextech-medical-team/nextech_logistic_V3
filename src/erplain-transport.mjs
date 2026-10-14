@@ -12,10 +12,17 @@ export function erplainRetryDelay(response,attempt=0,now=Date.now()){
  if(raw){requested=/^\d+(?:\.\d+)?$/.test(raw)?Number(raw)*1000:Date.parse(raw)-now;}
  return Math.max(Number.isFinite(requested)?requested:0,Math.min(900000,60000*2**Math.min(attempt,4)));
 }
+export const erplainQuotaWaitMs=15000;
 export async function erplainFetch(config,url,buildOptions,{fetchImpl=fetch,readOnly=false,slot=apiAcquireSlot,defer=apiDefer}={}){
  const key=erplainBudgetKey(config);
  for(let attempt=0;;attempt++){
-  await slot(key,1600);
+  try{await slot(key,1600,{fair:true,maxWaitMs:erplainQuotaWaitMs});}
+  catch(error){
+   if(error?.code!=='source_budget_deferred')throw error;
+   // Admission failed before fetch: no provider request was sent. Release the
+   // order worker rather than hold processing and shipment locks indefinitely.
+   throw Object.assign(Error('Erplain HTTP 429 · attente du quota partagé différée, aucune requête envoyée'),{code:'erplain_budget_deferred',httpStatus:429,erplainReadOnly:readOnly,erplainRequestNotSent:true,retryAfter:Math.max(1,Number(error.retryAfter)||1)});
+  }
   // Build the timeout after waiting, so a shared pause cannot expire it.
   let response=await fetchImpl(url,buildOptions());
   // A GraphQL rejection can use HTTP 200. Only a complete, explicit rejection
