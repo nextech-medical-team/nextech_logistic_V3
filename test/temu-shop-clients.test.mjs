@@ -156,3 +156,26 @@ test('unavailable vault application is recorded while another shop can confirm t
  assert.equal(result.mallId,'owner');assert.match(result.shopWarnings[0].message,/boutique BE/);
  await assert.rejects(resolveExcelTemuShop(order,orderLines,[],connected.unavailableApplications),/boutique BE/);
 });
+test('Excel without a shop binds only on later TEMU access; refusal leaves BC preparation intact',async()=>{
+ const stored={...order,id:'excel',channel:'temu',source_payload:{origin:'temu_excel',temuExcelPreparation:{jobId:'prepared'}}};
+ let refused=true,writes=0;
+ const db={query:async(sql,args)=>{
+  if(sql.startsWith('SELECT * FROM lines'))return {rows:orderLines};
+  if(sql.startsWith('UPDATE orders')){writes++;stored.source_payload={...stored.source_payload,...JSON.parse(args[1])};return {rows:[]};}
+  return {rows:[stored]};
+ }};
+ const local=temuLocalService(db,'/unused',{
+  configLoader:async()=>config,shopLoader:async()=>[],apiFactory:()=>({read:async method=>{
+   if(refused)throw unavailable();
+   if(method==='bg.open.accesstoken.info.get')return {mallId:'owner'};
+   if(method==='bg.order.detail.v2.get')return orderDetail;
+   if(method==='bg.logistics.shipment.v2.get')return {shipmentInfoDTO:[]};
+   throw Error(method);
+  }})
+ });
+ await assert.rejects(local.diagnose(order.reference),/abnormal/);
+ assert.equal(writes,0);assert.equal(stored.source_payload.temuExcelPreparation.jobId,'prepared');
+ refused=false;const result=await local.diagnose(order.reference);
+ assert.equal(result.errors.length,0);assert.equal(stored.source_payload.mallId,'owner');assert.equal(writes,1);
+ assert.equal(stored.source_payload.temuDirect,undefined); // Shop binding alone is not purchase authorization.
+});

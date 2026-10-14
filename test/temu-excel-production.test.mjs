@@ -40,44 +40,21 @@ test('production validation is explicit, atomic and idempotent; queues the exist
  await assert.rejects(f.service.prepare({...b,confirmPreparation:false},user),/Confirmez/);
  const results=await Promise.all([f.service.prepare({...b,mallId:"untrusted-browser-value"},user),f.service.prepare(b,user)]);assert.equal(results.filter(r=>r.replayed).length,1);
  const resumed=await f.service.preview(reference);assert.equal((await f.service.prepare({...b,fingerprint:resumed.fingerprint},user)).replayed,true);
- const o=await f.read();assert.equal(o.suspension.active,false);assert.equal(o.source_payload.mallId,'123');assert.equal(o.resolution_pending_resume,true);assert.equal(o.source_payload.temuExcelCommercial.total,84.05);
+ const o=await f.read();assert.equal(o.suspension.active,false);assert.equal(o.source_payload.mallId,undefined);assert.equal(o.source_payload.temuDirect.state,'unverified');assert.equal(f.calls.length,0);assert.equal(o.resolution_pending_resume,true);assert.equal(o.source_payload.temuExcelCommercial.total,84.05);
  const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.ok(automaticPreparationHold(o));
 });
-test('SKU, quantity, reference, cancellation and stale preview cannot release the import hold',async t=>{
- const f=await fixture(t),b=await f.input(),original=structuredClone(f.detail);
- for(const change of [d=>d.orderList[0].quantity=6,d=>d.orderList[0].productList[0].extCode='OTHER',d=>d.parentOrderMap.parentOrderSn='OTHER',d=>d.parentOrderMap.parentOrderStatus=3]){
-  Object.assign(f.detail,structuredClone(original));change(f.detail);await assert.rejects(f.service.prepare(b,user));assert.equal((await f.read()).suspension.active,true);
- }
- Object.assign(f.detail,original);await f.db.query("UPDATE orders SET issue='Blocage indépendant' WHERE id='o'");await assert.rejects(f.service.prepare(await f.input(),user),/Blocage/);assert.equal((await f.read()).issue,'Blocage indépendant');await f.db.query("UPDATE orders SET issue=null WHERE id='o'");await f.db.query("UPDATE orders SET recipient='Autre client' WHERE id='o'");await assert.rejects(f.service.prepare(b,user),/modifiée/);assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
-});
-test('automatic discovery holds missing, ambiguous and unreadable orders then retries without duplicate jobs',async t=>{
- const f=await fixture(t),input=await f.input(),owner={mallId:'123',api:f.api};
- const absent={mallId:'empty',api:{read:async()=>({parentOrderMap:{},orderList:[]})}};
- for(const candidates of [[],[absent],[owner,{...owner,mallId:'other'}],[owner,{mallId:'failed',api:{read:async()=>{throw Error('quota API');}}}]]){
-  f.candidates.splice(0,f.candidates.length,...candidates);
-  await assert.rejects(f.service.prepare(input,user),/Aucune boutique|introuvable|ambigu|quota/);
-  assert.equal((await f.read()).suspension.active,true);
-  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
-  assert.equal(f.bought,0);
- }
- f.candidates.splice(0,f.candidates.length,absent,owner);
- await f.service.prepare(input,user);
- assert.equal((await f.read()).source_payload.mallId,'123');
- const before=f.calls.length;
- assert.equal((await f.service.prepare(input,user)).replayed,true);
- assert.equal(f.calls.length,before);
- assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
- assert.equal(f.bought,0);
-});
-test('confirmed shop can queue preparation while retaining another application refusal',async t=>{
+test('Excel preparation works without TEMU access and preserves stale-preview and independent holds',async t=>{
  const f=await fixture(t),input=await f.input();
- f.candidates.unshift({mallId:'unavailable',api:{read:async()=>{throw Object.assign(Error('The application information query is abnormal'),{code:'4000000'});}}});
- const result=await f.service.prepare(input,user);
- assert.equal(result.shopWarnings.length,1);assert.match(result.message,/accès TEMU indisponible/);
- assert.equal((await f.read()).source_payload.temuExcelPreparation.shopWarnings[0].code,'4000000');
+ f.candidates.splice(0,f.candidates.length,{mallId:'failed',api:{read:async()=>{throw Error('TEMU unavailable');}}});
+ await f.db.query("UPDATE orders SET issue='Blocage indépendant' WHERE id='o'");
+ await assert.rejects(f.service.prepare(input,user),/Blocage/);
+ await f.db.query("UPDATE orders SET issue=null,recipient='Autre client' WHERE id='o'");
+ await assert.rejects(f.service.prepare(input,user),/modifiée/);
+ const result=await f.service.prepare(await f.input(),user);
+ assert.ok(result.jobId);assert.equal(f.calls.length,0);assert.equal(f.bought,0);
+ const o=await f.read();assert.equal(o.source_payload.mallId,undefined);assert.equal(o.source_payload.temuDirect.state,'unverified');
+ assert.equal(o.source_payload.temuExcelPreparation.source,'excel');
  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
- assert.equal(f.bought,0);
- assert.equal((await f.service.prepare(input,user)).replayed,true);
 });
 test('production worker uses Excel source totals and shared pricing, without API amounts or double multiplication',async t=>{
  const f=await fixture(t);await f.service.prepare(await f.input(),user);const o=await f.read(),lines=await f.lines();
@@ -142,6 +119,7 @@ test('Excel uses the existing automatic worker: only positive quote-matched marg
  await f.db.query("INSERT INTO erp_live_jobs VALUES('o','complete',null)");
  await f.db.query("UPDATE resolution_jobs SET status='complete',result='{\"erpOnly\":true}' WHERE order_id='o'");
  await f.db.query("INSERT INTO temu_label_jobs(reference,status) VALUES($1,'to_buy')",[reference]);
+ await f.db.query("UPDATE orders SET source_payload=jsonb_set(source_payload,'{temuDirect,state}','\"verified\"') WHERE id='o'");
  let profit=null;
  const shipping=temuShipping(f.db,f.api),local={amounts:async()=>({source:'temu_excel'}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
  const margins={get:async()=>({calculatedAt:new Date().toISOString(),rows:[{reference,status:profit===null?'incomplete':profit>0?'positive':'negative',profit,shipping:2.5/1.2,shippingSource:'Devis TEMU final',issues:[]}]})};
