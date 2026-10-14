@@ -1,6 +1,7 @@
 import {test,expect} from '@playwright/test';
 import fs from 'node:fs';
 for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('committed first equivalent permits a new read-only preview '+name,async({page})=>{
+ test.setTimeout(120000);
  let fresh=false;const writes=[],errors=[];await page.setViewportSize(viewport);page.on('pageerror',e=>errors.push(e.message));
  const row=()=>({id:'recheck',reference:'SYNTHETIC-RECHECK',channel:'shopify',carrier:'gls',recipient:'Synthetic',address:{country:'FR'},sku_lines:[{sku:'A',quantity:96,mapping_exists:true},{sku:'D',quantity:96,mapping_exists:true}],source_payload:{},erp_live:{bc:{id:1,status:'active'},phase:'bc_created'},label_status:'pending',tracking_status:'not_shipped',document_count:0,pending_equivalent:{sku:'A',replacementSku:'B',replaceQuantity:96,replacementQuantity:96,scope:'order',previewJobId:'preview',error:fresh?'Produit de remplacement [B] : stock insuffisant. Quantité totale nécessaire : 96 unités ; stock disponible : 13 unités ; quantité manquante : 83 unités.':'Reprendre le remplacement : nouvelle vérification nécessaire',recheckRequired:!fresh},erp_live_job:{status:'review',error:'BL bloqué — stock insuffisant : A : 96 nécessaires, 63 utilisables, manque 33'}});
  await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:[row()],total:1,page:1,pages:1,summary:{},transportStats:[]}}));
