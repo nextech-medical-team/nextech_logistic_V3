@@ -26,7 +26,7 @@ import {resumeAcceptedCommercialReviews} from './commercial-tolerance-recovery.m
 import {scheduleStockChecks,stockCheckFailure,stockNotFound,stockCheckConfirmed,closeStockChecks} from './stock-auto-reconciliation.mjs';
 import {claimStockCreation,canCreateStock,recordStockCreationOutcome,stockFailureMessage} from './stock-creation-claim.mjs';
 import {refreshManualOrder} from './manual-erplain-orders.mjs';
-import {erplainCustomerInput,ensureErplainCustomerNumber} from './erplain-customer-input.mjs';
+import {erplainCustomerInput} from './erplain-customer-input.mjs';
 import {reconcileFullStock} from './stock-cycle.mjs';
 import {publishHistoricalBl,assertHistoricalBlNumber} from './bl-numbering.mjs';
 import {publishIncrementalBc} from './bc-numbering.mjs';
@@ -204,7 +204,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    working=working.filter(o=>!o.failed);
    const safe=[];for(const o of working){const block=creationResumeBlock(o);if(block)await fail(o,new Error(block));else safe.push(o);}working=safe;if(!working.length)return;
    for(const o of working.filter(o=>!o.erp_live.bc&&!o.erp_live.customer)){
-    try{const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id});if(block)throw Error(block);await ensureErplainCustomerNumber(api,o,save);await batchMutation([o],'creating_customer','customer','CustomerInput','CreateCustomer',erplainCustomerInput,'id label customer_number');}
+    try{const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id});if(block)throw Error(block);await batchMutation([o],'creating_customer','customer','CustomerInput','CreateCustomer',erplainCustomerInput,'id label customer_number');}
     catch(e){o.failed=true;await fail(o,e);}
    }
    working=working.filter(o=>!o.failed);
