@@ -1,6 +1,7 @@
 // Technical creation provenance, independent of the displayed diagnostic.
 // A BL is the business prerequisite; only duplicate/uncertain writes need proof.
-const localValidation=/^(BC modifié depuis sa préparation : recontrôle requis$|Mapping modifié avant création : recontrôle requis$|Mapping modifié depuis la validation du BL : recontrôle requis$|Préparation modifiée depuis|Validation de la préparation|Étiquette bloquée : contrôle du stock)/;
+const localValidation=/^(BC modifié depuis sa préparation : recontrôle requis$|Préparation modifiée depuis|Validation de la préparation|Étiquette bloquée : contrôle du stock)/;
+const retiredMapping=/^(Mapping modifié avant création : recontrôle requis|Mapping modifié depuis la validation du BL : recontrôle requis)$/;
 export async function installCarrierAttemptProof(db){
  await db.exec(`ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS creation_started_at TIMESTAMPTZ;
  ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS failure_phase TEXT;
@@ -32,7 +33,7 @@ export function provesLegacyPreflight(job,audit){
  // Attempts include local validation failures and are not evidence of a provider call.
  // Match the immutable audit to this exact job version; a later update cannot reuse it.
  return job.status==='failed'&&job.creation_id==null&&noCreationEvidence(job)
- &&d?.orderId===job.order_id&&d.currentError===job.error&&localValidation.test(d.previousError||'')
+ &&d?.orderId===job.order_id&&d.currentError===job.error&&(localValidation.test(d.previousError||'')||retiredMapping.test(d.previousError||''))
  &&p?.readOnly===true&&p.verified===true&&p.businessActionAuthorized===false
  &&d.businessWrites===0&&d.labelPurchased===false
  &&p.previousFailureAt===d.previousUpdatedAt
@@ -49,6 +50,7 @@ export async function canRetryFailedCarrier(db,job,{manualRequest=false}={}){
  // Only a fresh human request may retry this first, locally rejected attempt.
  if(manualRequest&&job.attempts===1&&[
   'Mapping modifié avant création : recontrôle requis',
+  'Mapping modifié depuis la validation du BL : recontrôle requis',
   'BC modifié depuis sa préparation : recontrôle requis'
  ].includes(job.error))return true;
  // Existing unambiguous validation errors and jobs never attempted keep their policy.
@@ -59,11 +61,11 @@ export async function canRetryFailedCarrier(db,job,{manualRequest=false}={}){
  ORDER BY created_at DESC`,[job.order_id,job.updated_at]);
  return rows.some(a=>provesLegacyPreflight(job,a)||provesImportedFieldsPreflight(job,a)||provesClearedImportedPreflight(job,a));
 }
-export async function hasUncertainCarrierHistory(db,id){
+export async function hasUncertainCarrierHistory(db,id,{manualRequest=false}={}){
  const {rows}=await db.query(`SELECT h.id,h.job,
  EXISTS(SELECT 1 FROM carrier_label_history_documents d WHERE d.history_id=h.id) AS documents
  FROM carrier_label_history h WHERE h.order_id=$1 FOR SHARE`,[id]);
- for(const h of rows)if(h.documents||!await canRetryFailedCarrier(db,h.job))return true;
+ for(const h of rows)if(h.documents||!await canRetryFailedCarrier(db,h.job,{manualRequest}))return true;
  return false;
 }
 export async function markCarrierCreationStarted(db,id){

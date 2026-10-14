@@ -22,7 +22,7 @@ test('legacy recorded-BC fingerprint rejection is known preflight even with assi
 const fieldJob={...job,creation_id:'old-field-attempt',error:'Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.'};
 for(const error of ['Mapping modifié avant création : recontrôle requis','Mapping modifié depuis la validation du BL : recontrôle requis'])test('retired mapping preflight can resume without mapping or BC reads: '+error,async()=>{
  const db={query:()=>assert.fail('no new business checks')};
- const failed={...job,error,creation_id:'reserved',attempts:4};
+ const failed={...job,error,creation_id:'reserved',attempts:4,failure_phase:'preflight',creation_started_at:null};
  assert.equal(await canRetryFailedCarrier(db,failed),true);
  for(const patch of [{creation_started_at:'2026-10-14T00:00:00Z'},{failure_phase:'provider'},{result:{reference:'R'}},{reference:'R'},{tracking:['T']}])assert.equal(await canRetryFailedCarrier(db,{...failed,...patch}),false);
 });
