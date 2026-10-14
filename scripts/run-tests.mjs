@@ -5,4 +5,5 @@ groups.at(-1).push('test/abandon-equivalent.test.mjs');
 groups.at(-1).push('test/abandon-tracking-preservation.test.mjs');
 groups.at(-1).push('test/stock-information.test.mjs','test/equivalence-export.test.mjs');
 groups.at(-1).push('test/temu-pdf-archive.test.mjs');
+groups.at(-1).push('test/erplain-customer-input.test.mjs','test/temu-destination-vat.test.mjs');
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

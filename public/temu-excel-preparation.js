@@ -18,7 +18,7 @@
   busy=true;b.disabled=true;get('[data-message]').textContent='Vérification des montants Excel avant préparation…';get('[data-preview]').innerHTML='';
   try{
    const p=await api('/api/temu/excel/preview?'+new URLSearchParams({reference:b.dataset.verify}));
-   const box=get('[data-preview]');box.innerHTML=`<h3>${esc(p.reference)}</h3><p>${p.lines.map(l=>esc(l.sku)+' × '+l.quantity).join(' ; ')}</p><p>Total BC : ${p.commercial.total.toFixed(2)} ${esc(p.commercial.currency)} · TVA : ${p.commercial.tax.toFixed(2)}</p><p>Cette action vérifie les articles auprès de TEMU et lance la préparation réelle des BC/BL dans Erplain. Les correspondances SKU et le stock suivent les contrôles habituels.</p><label><input type="checkbox" data-consent> Je confirme la préparation de cette commande.</label><button data-start disabled>Lancer les BC/BL dans Erplain</button>`;
+   const box=get('[data-preview]');box.innerHTML=`<h3>${esc(p.reference)}</h3><p>${p.lines.map(l=>esc(l.sku)+' × '+l.quantity).join(' ; ')}</p><p>Total BC : ${p.commercial.total.toFixed(2)} ${esc(p.commercial.currency)} · Taxes du rapport TEMU : ${p.commercial.tax.toFixed(2)}</p><p>La TVA du BC sera calculée avec la taxe Erplain correspondant au pays de livraison. Cette action vérifie les articles auprès de TEMU et lance la préparation réelle des BC/BL dans Erplain. Les correspondances SKU et le stock suivent les contrôles habituels.</p><label><input type="checkbox" data-consent> Je confirme la préparation de cette commande.</label><button data-start disabled>Lancer les BC/BL dans Erplain</button>`;
    const ready=()=>box.querySelector('[data-start]').disabled=busy||!box.querySelector('[data-consent]').checked;
    box.onchange=ready;
    box.querySelector('[data-start]').onclick=async()=>{
