@@ -22,6 +22,12 @@ export function recordedBcItems(bc){
 export function recordedBcFingerprint(bc){
  return createHash('sha256').update(JSON.stringify({bcId:String(bc.id),items:recordedBcItems(bc).map(l=>[l.variant.id,l.location.id,l.quantity]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))})).digest('hex');
 }
+
+// This proof describes the complete recorded BC, even when preparation uses
+// only the lines of a remaining BL. Keep shipment-scope proofs separate.
+export function recordedBcPreparationAuthority(bc){
+ return {kind:'recorded_bc',bcId:String(bc.id),fingerprint:recordedBcFingerprint(bc)};
+}
 export function recordedBcPricing(order,bc,options){
  assertRecordedBc(order,bc,options);
  const number=v=>v!=null&&v!==''&&typeof v!=='boolean'&&Number.isFinite(Number(v))?Number(v):null;
