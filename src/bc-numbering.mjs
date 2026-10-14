@@ -1,15 +1,28 @@
-const fields='id label status update_stock total tax_type currency{label} line_items{type quantity reserved_quantity shipped_quantity variant{id track_inventory} tax_codes{id} price tax_amount ecotax discount discount_rule_amount}';
+const fields='id label status update_stock available_for_shipping need_reorder reserved_quantity committed_quantity shipped_quantity total tax_type currency{label} line_items{type quantity reserved_quantity shipped_quantity variant{id track_inventory} tax_codes{id} price tax_amount ecotax discount discount_rule_amount}';
+const numeric=v=>['number','string'].includes(typeof v)&&String(v).trim()!==''&&Number.isFinite(Number(v))&&Number(v)>=0;
+export function confirmsDocumentReservation(bc){
+ const normal=bc.line_items?.filter(l=>l.type==='normal')||[];
+ if(bc.status!=='active'||bc.update_stock!==true||bc.available_for_shipping!==true||bc.need_reorder!==false||!normal.length)return false;
+ // The ERP document counters include committed stock; a line's reserved_quantity
+ // alone can be zero even when the ERP confirms the whole order can ship.
+ if(normal.some(l=>l.variant?.track_inventory!==true||!numeric(l.quantity)||Number(l.quantity)<=0))return false;
+ if(![bc.reserved_quantity,bc.committed_quantity,bc.shipped_quantity].every(numeric))return false;
+ const quantity=normal.reduce((sum,l)=>sum+Number(l.quantity),0);
+ return Math.abs(Number(bc.reserved_quantity)+Number(bc.committed_quantity)+Number(bc.shipped_quantity)-quantity)<=1e-6;
+}
 export function assertPublishedBcReservation(bc,stockPolicy){
  if(typeof stockPolicy!=='boolean'||bc?.update_stock!==stockPolicy)throw Error('BC · Politique de stock publiée non confirmée');
  if(!stockPolicy)return; // Existing documents retain their immutable legacy policy.
  if(!Array.isArray(bc.line_items)||!bc.line_items.length)throw Error('BC · Réservations non reçues');
+ let inconsistent=false;
  for(const l of bc.line_items){
   if(l.type!=='normal')continue;
   if(typeof l.variant?.track_inventory!=='boolean')throw Error('BC · Suivi du stock produit non vérifié');
   if(!l.variant.track_inventory)continue;
-  const numeric=v=>['number','string'].includes(typeof v)&&String(v).trim()!==''&&Number.isFinite(Number(v))&&Number(v)>=0;
-  if(![l.quantity,l.reserved_quantity,l.shipped_quantity].every(numeric)||Number(l.quantity)<=0||Number(l.shipped_quantity)>Number(l.quantity)||Math.abs(Number(l.reserved_quantity)+Number(l.shipped_quantity)-Number(l.quantity))>1e-6)throw Error('BC · Quantités réservées non confirmées');
+  if(!numeric(l.quantity)||Number(l.quantity)<=0||!numeric(l.shipped_quantity)||Number(l.shipped_quantity)>Number(l.quantity))throw Error('BC · Quantités réservées non confirmées');
+  if(!numeric(l.reserved_quantity)||Math.abs(Number(l.reserved_quantity)+Number(l.shipped_quantity)-Number(l.quantity))>1e-6)inconsistent=true;
  }
+ if(inconsistent&&!confirmsDocumentReservation(bc))throw Error('BC · Quantités réservées non confirmées');
 }
 export async function nextBcNumber(api,datedAt){
  const {DocumentNumberingContext:c}=await api.request('query V3BcNumber($date:String){DocumentNumberingContext(document_type:"order",dated_at:$date){preview manual_override_allowed_effective}}',{date:datedAt});
