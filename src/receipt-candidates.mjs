@@ -16,7 +16,7 @@ export function receiptCandidates(receipts,orders,{includeUnknown=true}={}){
 export function receiptWork(row,order){
  const shipped=['shipped','in_transit','delivered','delivered_simulated','cancelled'];
  const bl=row.currentBl||(row.bls?.length===1?row.bls[0]:null);
- if(order?.archived||shipped.includes(order?.tracking_status)||shipped.includes(bl?.status)||bl?.status==='completed')return 'history';
+ if(order?.archived||shipped.includes(order?.tracking_status)||!order?.partial_mode&&(shipped.includes(bl?.status)||bl?.status==='completed'))return 'history';
  if(row.labels?.length)return 'available';
  if(row.item?.state==='complete')return 'available';
  if(row.status==='eligible'||row.canLabel)return 'action';
