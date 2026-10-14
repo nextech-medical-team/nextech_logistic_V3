@@ -93,8 +93,8 @@ test('preview and execution permissions, ID binding, freshness and one execution
 test('failed native preparation remains blocked and never submits a label',async()=>{
  const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();await f.db.query("UPDATE resolution_jobs SET status='review',error='Stock changed'");await f.service.run();assert.equal(f.labelCalls(),0);assert.equal((await f.service.status(run)).plan.rows[0].item.error,'Stock changed');}finally{await f.engine.close();}
 });
-test('in_preparation is never finalized by the receipt module',async()=>{
- const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();const bl={id:'bl',status:'in_preparation'};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);await f.service.run();assert.match((await f.service.status(run)).plan.rows[0].item.error,/in_preparation/);assert.equal(f.labelCalls(),0);assert.ok(f.calls.every(q=>q.startsWith('query ')));}finally{await f.engine.close();}
+test('label continuation never finalizes an in_preparation BL or rereads BC after creation',async()=>{
+ const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();const bl={id:'bl',status:'in_preparation'};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);await f.service.run();assert.equal((await f.service.status(run)).plan.rows[0].item.state,'label_pending');assert.equal(f.labelCalls(),1);assert.equal((await f.db.query('SELECT erp_live FROM orders')).rows[0].erp_live.bl.status,'in_preparation');assert.ok(f.calls.every(q=>q.startsWith('query ')));}finally{await f.engine.close();}
 });
 for(const channel of ['amazon','temu'])test(`${channel}: existing ready BL obtains label without another ERP resume`,async()=>{
  const f=await fixture(channel);try{
@@ -106,7 +106,7 @@ for(const channel of ['amazon','temu'])test(`${channel}: existing ready BL obtai
 });
 test('another receipt can be analyzed while a native preparation is waiting',async()=>{
  const f=await fixture();try{const first=await f.start();await f.service.submit({id:first,ids:[f.id]},f.user);await f.service.run();
-  const second=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId:randomUUID()});await f.service.run();assert.equal((await f.service.status(second.id)).state,'ready');assert.equal((await f.service.status(first)).state,'applying');assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
+  const duplicate=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId:randomUUID()});assert.equal(duplicate.id,first);assert.equal(duplicate.existing,true);const second=await f.route('/api/receipts/recovery/preview',{number:'PRP00000245',requestId:randomUUID()});await f.service.run();assert.equal((await f.service.status(second.id)).state,'ready');assert.equal((await f.service.status(first)).state,'applying');assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
  }finally{await f.engine.close();}
 });
 
