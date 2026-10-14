@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {prepareMissingDraftRecovery,commitMissingDraftRecovery} from '../src/missing-draft-recovery.mjs';
+import {recordTransientFailure} from '../src/erplain-transient-recovery.mjs';
 function fixture(){
  const order={id:'o1',erp_live:{phase:'publishing_bl',bc:{id:7},bl:{id:9,label:'SHO00744687',status:'unpublished',update_stock:false}}};
  const data={Order:{id:7,status:'active',update_stock:false,shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}},ShippingOrder:null};
@@ -36,6 +37,7 @@ for(const [name,change] of [
  ['prior stock cycle',f=>f.order.erp_live.previousCancelledCycle={}],
  ])test(name+' refuses recovery',async()=>{const f=fixture();change(f);await assert.rejects(f.run());assert.ok(f.order.erp_live.bl);});
 test('HTTP or GraphQL failure leaves local state intact',async()=>{const f=fixture();f.api.request=async()=>{throw Error('429');};await assert.rejects(f.run(),/429/);assert.equal(f.order.erp_live.phase,'publishing_bl');});
+test('repeated failures retain original error and update the current retry diagnosis',async()=>{const f=fixture();await recordTransientFailure(f.db,f.order,'Erplain HTTP 503',{});await recordTransientFailure(f.db,f.order,'Erplain HTTP 429',{httpStatus:429,erplainReadOnly:true,retryAfter:60});assert.equal(f.order.erp_live.transientRecovery.originalError,'Erplain HTTP 503');assert.equal(f.order.erp_live.transientRecovery.lastError,'Erplain HTTP 429');assert.equal(f.order.erp_live.transientRecovery.readRateLimited,true);});
 test('atomic persistence: race or new carrier evidence aborts; successful recovery is audited',async()=>{
  const {PGlite}=await import('@electric-sql/pglite');const engine=new PGlite();
  try{
