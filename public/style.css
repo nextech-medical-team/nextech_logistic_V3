@@ -340,3 +340,8 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 
 #view-orders #order-rows tr:not(.order-row-expanded) td button[data-compact-label]{font-size:0!important;border:1px solid #b9d3cb;border-radius:5px;background:#f1f7f5;min-height:28px;padding:4px!important}
 #view-orders #order-rows tr:not(.order-row-expanded) td button[data-compact-label]::after{content:attr(data-compact-label);font-size:11px;line-height:1.3}
+
+#view-orders table.orders-fixed-layout.orders-with-margins tbody tr.order-row-expanded>td:not(.total-quantity-column){font-size:14px!important;line-height:1.5}
+#view-orders #order-rows tr.order-row-expanded td small{font-size:12px!important;line-height:1.5}
+#view-orders #order-rows tr.order-row-expanded td .link-button{font-size:13px!important}
+#view-orders .orders-fixed-layout tr.order-row-expanded td[data-order-column]::before{font-size:12px;letter-spacing:.015em}
