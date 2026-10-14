@@ -5,7 +5,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {initializeReceiptRecovery,receiptRecoveryService} from '../src/receipt-recovery.mjs';
 import {queueResolutionRequest} from '../src/resolution-request.mjs';
 
-async function fixture(channel='amazon'){
+async function fixture(channel='amazon',temu=undefined){
  const engine=new PGlite();await engine.waitReady;const wrap=e=>({exec:s=>e.exec(s),query:(s,p=[])=>e.query(s,p)}),db={...wrap(engine),transaction:fn=>engine.transaction(tx=>fn(wrap(tx)))};
  await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,reference text,channel text,archived boolean DEFAULT false,erp_live jsonb DEFAULT '{}',suspension jsonb DEFAULT '{}',source_payload jsonb DEFAULT '{}',received_at timestamptz DEFAULT now(),processing_priority_at timestamptz,tracking_status text DEFAULT 'not_shipped',label_status text DEFAULT 'pending',partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,address jsonb DEFAULT '{}',carrier text,weight_kg numeric,parcel_count int);
  CREATE TABLE lines(order_id text,source_sku text,target_sku text); CREATE TABLE mappings(channel text,source_sku text,target_sku text);
@@ -22,7 +22,7 @@ async function fixture(channel='amazon'){
  let actual={id:'1925605',label:'C00014132',status:'active',update_stock:false,line_items:[line],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}},labelCalls=0;
  await db.query('INSERT INTO orders(id,reference,channel,erp_live) VALUES($1,$2,$3,$4)',[id,'SYNTHETIC',channel,JSON.stringify({bc:{id:'1925605',label:'C00014132'},phase:'bc_created',pricing:{status:'blocked',tax_type:'exclusive',total:999}})]);
  const calls=[],api={verify:async()=>{},request:async(q)=>{calls.push(q);assert.match(q,/^query /);if(q.includes('ReceiptByLabel'))return {PurchaseReceipts:{data:[receipt],paginatorInfo:{hasMorePages:false}}};if(q.includes('ReceiptOrderStock'))return {Orders:{data:[actual],paginatorInfo:{hasMorePages:false}}};if(q.includes('DocumentRead'))return {Order:actual};throw Error('Unexpected '+q);}};
- const service=receiptRecoveryService(db,'unused',{api,queueLabel:async()=>{labelCalls++;await db.query("INSERT INTO carrier_jobs VALUES($1,'pending','production','[]',null)",[id]);return {id,status:'pending'};}});
+ const service=receiptRecoveryService(db,'unused',{api,temu,queueLabel:async()=>{labelCalls++;await db.query("INSERT INTO carrier_jobs VALUES($1,'pending','production','[]',null)",[id]);return {id,status:'pending'};}});
  const user={role:'admin',email:'synthetic@example.test'},permitted=(u,roles)=>{if(!roles.includes(u.role))throw Error('Forbidden');};
  async function route(path,body,role='admin'){
   let result;await service.routes({p:path,url:new URL('http://localhost'+path),req:{method:'POST'},res:{},user:{...user,role},body:async()=>body,json:(_r,status,value)=>{result={status,...value};},permitted});return result;
@@ -93,8 +93,8 @@ test('preview and execution permissions, ID binding, freshness and one execution
 test('failed native preparation remains blocked and never submits a label',async()=>{
  const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();await f.db.query("UPDATE resolution_jobs SET status='review',error='Stock changed'");await f.service.run();assert.equal(f.labelCalls(),0);assert.equal((await f.service.status(run)).plan.rows[0].item.error,'Stock changed');}finally{await f.engine.close();}
 });
-test('in_preparation is never finalized by the receipt module',async()=>{
- const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();const bl={id:'bl',status:'in_preparation'};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);await f.service.run();assert.match((await f.service.status(run)).plan.rows[0].item.error,/in_preparation/);assert.equal(f.labelCalls(),0);assert.ok(f.calls.every(q=>q.startsWith('query ')));}finally{await f.engine.close();}
+test('label continuation never finalizes an in_preparation BL or rereads BC after creation',async()=>{
+ const f=await fixture();try{const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();const bl={id:'bl',status:'in_preparation'};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);await f.service.run();assert.equal((await f.service.status(run)).plan.rows[0].item.state,'label_pending');assert.equal(f.labelCalls(),1);assert.equal((await f.db.query('SELECT erp_live FROM orders')).rows[0].erp_live.bl.status,'in_preparation');assert.ok(f.calls.every(q=>q.startsWith('query ')));}finally{await f.engine.close();}
 });
 for(const channel of ['amazon','temu'])test(`${channel}: existing ready BL obtains label without another ERP resume`,async()=>{
  const f=await fixture(channel);try{
@@ -106,7 +106,29 @@ for(const channel of ['amazon','temu'])test(`${channel}: existing ready BL obtai
 });
 test('another receipt can be analyzed while a native preparation is waiting',async()=>{
  const f=await fixture();try{const first=await f.start();await f.service.submit({id:first,ids:[f.id]},f.user);await f.service.run();
-  const second=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId:randomUUID()});await f.service.run();assert.equal((await f.service.status(second.id)).state,'ready');assert.equal((await f.service.status(first)).state,'applying');assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
+  const duplicate=await f.route('/api/receipts/recovery/preview',{number:f.receipt.label,requestId:randomUUID()});assert.equal(duplicate.id,first);assert.equal(duplicate.existing,true);const second=await f.route('/api/receipts/recovery/preview',{number:'PRP00000245',requestId:randomUUID()});await f.service.run();assert.equal((await f.service.status(second.id)).state,'ready');assert.equal((await f.service.status(first)).state,'applying');assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);
+ }finally{await f.engine.close();}
+});
+
+test('created BL label action ignores inactive BC, invalid stock and preview fingerprints without rereading ERP',async()=>{
+ const f=await fixture();try{
+  const bl={id:'existing',label:'SHO-EXISTING',status:'in_preparation'};
+  f.change({...f.actual(),status:'completed',line_items:f.actual().line_items.map(l=>({...l,on_hand:null,available:null})),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
+  await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);
+  const run=await f.start('documents'),before=f.calls.length;await f.db.query("UPDATE receipt_recovery_runs SET plan=jsonb_set(plan,'{coverage,complete}','false'::jsonb),updated_at=now()-interval '2 days' WHERE id=$1",[run]);await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();
+  assert.equal(f.calls.length,before);assert.equal(f.labelCalls(),1);assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+  assert.equal((await f.db.query('SELECT erp_live FROM orders')).rows[0].erp_live.bl.status,'in_preparation');
+ }finally{await f.engine.close();}
+});
+
+test('receipt TEMU label purchase uses the native quote and requires explicit tariff confirmation',async()=>{
+ const calls=[],f=await fixture('temu',{prepare:async ref=>{calls.push('quote');return {id:'QUOTE',amount:2.67,currency:'EUR'};},buy:async(ref,id,amount)=>{assert.equal(id,'QUOTE');assert.equal(amount,2.67);calls.push('buy');return {status:'pending'};}});
+ try{
+  const bl={id:'existing',label:'SHO-EXISTING',status:'ready_to_ship'};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);const run=await f.start('documents');
+  await assert.rejects(()=>f.route('/api/receipts/recovery/temu/quote',{id:run,orderId:f.id},'operator'),/Forbidden/);
+  const q=await f.route('/api/receipts/recovery/temu/quote',{id:run,orderId:f.id});assert.equal(q.amount,2.67);
+  await assert.rejects(()=>f.route('/api/receipts/recovery/temu/buy',{id:run,orderId:f.id,planId:q.planId,amount:q.amount}),/Confirmation/);assert.deepEqual(calls,['quote']);
+  await f.route('/api/receipts/recovery/temu/buy',{id:run,orderId:f.id,planId:q.planId,amount:q.amount,confirmPurchase:true});assert.deepEqual(calls,['quote','buy']);assert.equal(f.labelCalls(),0);
  }finally{await f.engine.close();}
 });
 
