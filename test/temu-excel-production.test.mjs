@@ -64,7 +64,7 @@ test('production worker uses Excel source totals and shared pricing, without API
  assert.equal(temuSellerTotals(o).total,84.05);verifySourceCommercialTotals({total:84.05,currency:{label:'EUR'},line_items:[{tax_amount:16.8}]},temuSellerTotals(o));
  lines[0].quantity=10;await assert.rejects(ensureTemuBcPricing(f.db,o,lines,()=>assert.fail('No API amount request')),/modifiés/);
 });
-test('same TEMU shipping engine requires validated production BL, quotes 0.25 kg/latest slot, and buys once',async t=>{
+test('same TEMU shipping engine uses published BL without ERP revalidation, quotes 0.25 kg/latest slot, and buys once',async t=>{
  const f=await fixture(t);await f.service.prepare(await f.input(),user);const shipping=temuShipping(f.db,f.api);
  await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
  await f.db.query("UPDATE orders SET resolution_pending_resume=false,weight_kg=5 WHERE id='o'");
@@ -76,7 +76,7 @@ test('same TEMU shipping engine requires validated production BL, quotes 0.25 kg
  await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
  await f.db.query("UPDATE resolution_jobs SET status='complete',result='{\"erpOnly\":true}' WHERE order_id='o'");
  await f.db.query("UPDATE erp_live_jobs SET status='review' WHERE order_id='o'");
- await assert.rejects(shipping.prepare(reference),/BL validé/);
+ await assert.doesNotReject(shipping.prepare(reference));assert.equal(f.bought,0);
  await f.db.query("UPDATE erp_live_jobs SET status='complete' WHERE order_id='o'");
  await f.db.query("UPDATE resolution_jobs SET error='Contrôle à reprendre' WHERE order_id='o'");
  await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
