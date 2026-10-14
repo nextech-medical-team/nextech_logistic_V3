@@ -32,6 +32,7 @@ let orderRequestVersion=0;
 
 let preparedOrderResponse=null,orderRenderData=null;
 let preservedOrderRows=new Set();
+const orderRowMarkup=new WeakMap();
 // Reconcile before connecting new rows: unchanged rows never leave the document.
 function commitOrderRows(html,previous,next){
  const body=$('order-rows'),draft=document.createElement('tbody');draft.innerHTML=html;
@@ -39,7 +40,12 @@ function commitOrderRows(html,previous,next){
  const deliveries=new Map();for(const row of body.rows){const id=row.querySelector('[data-delivery-detail]')?.dataset.deliveryDetail;if(id){if(!deliveries.has(id))deliveries.set(id,[]);deliveries.get(id).push(row);}}
  preservedOrderRows=new Set();const wanted=[];
  for(const row of [...draft.rows]){const id=row.querySelector('[data-detail]')?.dataset.detail,existing=old.get(id);
-  if(id&&existing&&next.has('order:'+id)&&previous.get('order:'+id)===next.get('order:'+id)){preservedOrderRows.add(id);const checkbox=existing.querySelector('[data-id]');if(checkbox)checkbox.checked=selected.has(id);const partialRows=deliveries.get(id)||[];for(const delivery of partialRows){const choice=delivery.querySelector('[data-delivery-select]');if(choice)choice.checked=selectedDeliveries.has(choice.dataset.deliverySelect);}wanted.push(existing,...partialRows);}else wanted.push(row);
+  // Source metadata may change while every displayed field stays identical.
+  // Compare the generated base markup as well, before asynchronous decorations.
+  const template=row.cloneNode(true);template.querySelector('[data-id]')?.removeAttribute('checked');
+  const markup=template.innerHTML,sameDisplay=existing&&orderRowMarkup.get(existing)===markup&&previous.get('supplement:'+id)===next.get('supplement:'+id);
+  orderRowMarkup.set(row,markup);
+  if(id&&existing&&next.has('order:'+id)&&(previous.get('order:'+id)===next.get('order:'+id)||sameDisplay)){orderRowMarkup.set(existing,markup);preservedOrderRows.add(id);const checkbox=existing.querySelector('[data-id]');if(checkbox)checkbox.checked=selected.has(id);const partialRows=deliveries.get(id)||[];for(const delivery of partialRows){const choice=delivery.querySelector('[data-delivery-select]');if(choice)choice.checked=selectedDeliveries.has(choice.dataset.deliverySelect);}wanted.push(existing,...partialRows);}else wanted.push(row);
  }
  const retained=new Set(wanted);for(const row of [...body.rows])if(!retained.has(row))row.remove();
  let cursor=body.firstElementChild;for(const row of wanted){if(row===cursor)cursor=cursor.nextElementSibling;else body.insertBefore(row,cursor);}
