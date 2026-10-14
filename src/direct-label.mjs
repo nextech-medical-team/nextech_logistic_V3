@@ -19,7 +19,7 @@ export async function queueLabelFromBl(db,id,user){
   assertBlLabelRequest(o);
   const job=(await tx.query('SELECT * FROM carrier_jobs WHERE order_id=$1 FOR UPDATE',[id])).rows[0];
   if(job&&['ready','pending','creating','awaiting_pdf'].includes(job.status))return {id,status:job.status,existing:true};
-  if(job&&!await canRetryFailedCarrier(tx,job))throw Error('Création existante ou incertaine : rapprocher son résultat');
+  if(job&&!await canRetryFailedCarrier(tx,job,{manualRequest:true}))throw Error('Création existante ou incertaine : rapprocher son résultat');
   for(const table of ['carrier_documents','carrier_label_history','extra_parcels']){
    if((await tx.query(`SELECT 1 FROM ${table} WHERE order_id=$1 LIMIT 1`,[id])).rows.length)throw Error('Étiquette ou colis existant à conserver');
   }

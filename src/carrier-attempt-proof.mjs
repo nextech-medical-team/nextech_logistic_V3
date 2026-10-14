@@ -20,10 +20,17 @@ export function provesLegacyPreflight(job,audit){
  &&Date.parse(p.previousFailureAt)<Date.parse(p.validationAt)
  &&new Date(job.updated_at).getTime()===new Date(audit.created_at).getTime();
 }
-export async function canRetryFailedCarrier(db,job){
+export async function canRetryFailedCarrier(db,job,{manualRequest=false}={}){
  if(job?.status!=='failed'||!noCreationEvidence(job)||job.creation_started_at)return false;
  if(job.failure_phase==='preflight')return job.creation_started_at===null;
  if(job.failure_phase)return false;
+ // These exact legacy messages were thrown before entering the carrier client.
+ // A creation UUID was allocated at queueing, not evidence of a provider POST.
+ // Only a fresh human request may retry this first, locally rejected attempt.
+ if(manualRequest&&job.attempts===1&&[
+  'Mapping modifié avant création : recontrôle requis',
+  'BC modifié depuis sa préparation : recontrôle requis'
+ ].includes(job.error))return true;
  // Existing unambiguous validation errors and jobs never attempted keep their policy.
  if(job.attempts===0||localValidation.test(job.error||''))return true;
  if(job.attempts!==1||job.creation_id!=null)return false;
