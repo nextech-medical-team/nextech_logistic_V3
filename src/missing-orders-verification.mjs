@@ -19,9 +19,11 @@ export function missingOrdersVerification(db,directory,{shopify=shopifyObservati
   permitted(user,['admin','manager']);const b=await body(req);
   for(const [id,s] of runs)if(s.expires<now()&&!s.busy)runs.delete(id);
   if(!b.runId){
-   const days=Number(b.days??28);if(!Number.isInteger(days)||days<2||days>60)throw Error('Période requise : 2 à 60 jours');
+   const platform=b.platform??'all';if(!['shopify','temu','all'].includes(platform))throw Error('Plateforme invalide');
+   const days=Number(b.days??60);if(!Number.isInteger(days)||days<2||days>60)throw Error('Période requise : 2 à 60 jours');
+   const minimumAgeHours=Number(b.minimumAgeHours??24);if(!Number.isInteger(minimumAgeHours)||minimumAgeHours<24||minimumAgeHours>720)throw Error('Ancienneté requise : 24 à 720 heures');
    if(runs.size>=20)throw Error('Trop de vérifications en cours');
-   const id=randomUUID(),at=now();runs.set(id,{owner:user.id,start:new Date(at-days*86400000).toISOString(),end:new Date(at-86400000).toISOString(),checkedAt:new Date(at).toISOString(),expires:at+3600000,phase:'shopify',cursor:null,seen:new Set(),checked:0,rows:[],errors:[],sources:[],index:0});
+   const id=randomUUID(),at=now();runs.set(id,{owner:user.id,platform,minimumAgeHours,start:new Date(at-days*86400000).toISOString(),end:new Date(at-minimumAgeHours*3600000).toISOString(),checkedAt:new Date(at).toISOString(),expires:at+3600000,phase:platform==='temu'?'connect-temu':'shopify',cursor:null,seen:new Set(),checked:0,rows:[],errors:[],sources:[],index:0});
    json(res,200,{runId:id,done:false});return true;
   }
   const s=runs.get(b.runId);if(!s||s.owner!==user.id)throw Error('Vérification expirée ou inaccessible');
@@ -35,7 +37,7 @@ export function missingOrdersVerification(db,directory,{shopify=shopifyObservati
      rows=page.nodes.map(n=>{if(!n.id||!n.name||!Number.isFinite(Date.parse(n.createdAt)))throw Error('Identité ou date Shopify absente');return {channel:'shopify',shop,reference:n.name,date:n.createdAt,country:n.shippingAddress?.countryCodeV2||'',status:n.displayFulfillmentStatus||''};});
      const next=page.pageInfo.hasNextPage?page.pageInfo.endCursor:null;
      if(page.pageInfo.hasNextPage&&(!next||s.seen.has(next)||!rows.length))throw Error('Pagination Shopify interrompue');
-     if(next)s.seen.add(next);s.cursor=next;if(!next)s.phase='connect-temu';
+     if(next)s.seen.add(next);s.cursor=next;if(!next)s.phase=s.platform==='shopify'?'done':'connect-temu';
     }else if(s.phase==='connect-temu'){
      const connection=await connect();s.sources=[...connection.clients].map(([shop,api])=>({shop,api,country:connection.countryByMall.get(shop)||''}));
      for(const [country] of connection.connectionErrors)s.errors.push('TEMU '+country+' : connexion impossible');
@@ -51,12 +53,12 @@ export function missingOrdersVerification(db,directory,{shopify=shopifyObservati
    }catch(e){
     s.errors.push((s.phase==='shopify'?'Shopify':s.phase==='temu'?'TEMU boutique '+s.sources[s.index]?.shop:'TEMU')+' : lecture incomplète ('+String(e.code||'API indisponible')+')');
     rows=[];
-    if(s.phase==='shopify')s.phase='connect-temu';else if(s.phase==='temu'){s.index++;s.cursor=1;s.total=null;s.seen.clear();if(s.index>=s.sources.length)s.phase='done';}else s.phase='done';
+    if(s.phase==='shopify')s.phase=s.platform==='shopify'?'done':'connect-temu';else if(s.phase==='temu'){s.index++;s.cursor=1;s.total=null;s.seen.clear();if(s.index>=s.sources.length)s.phase='done';}else s.phase='done';
    }
    s.rows.push(...await missingFromV3(db,rows,s.start,s.end));s.checked+=rows.length;s.expires=now()+3600000;
    // Recheck the report against V3 as concurrent imports may have completed during the scan.
    s.rows=await missingFromV3(db,s.rows,s.start,s.end);
-   json(res,200,{runId:b.runId,done:s.phase==='done',complete:s.phase==='done'&&!s.errors.length,start:s.start,end:s.end,checkedAt:s.checkedAt,checked:s.checked,rows:s.rows,errors:s.errors});
+   json(res,200,{runId:b.runId,minimumAgeHours:s.minimumAgeHours,done:s.phase==='done',complete:s.phase==='done'&&!s.errors.length,start:s.start,end:s.end,checkedAt:s.checkedAt,checked:s.checked,rows:s.rows,errors:s.errors});
   }finally{s.busy=false;}
   return true;
  };

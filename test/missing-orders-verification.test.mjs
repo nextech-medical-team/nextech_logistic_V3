@@ -2,6 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {missingFromV3,missingOrdersVerification} from '../src/missing-orders-verification.mjs';
 
+test('rejects minimum ages below 24 hours before reading platforms',async()=>{
+ const service=missingOrdersVerification({},'unused',{shopify:{read:async()=>assert.fail('Unexpected API read')}});
+ for(const minimumAgeHours of [0,1,22,23,23.9])await assert.rejects(()=>service({p:'/api/missing-orders/verify',req:{method:'POST'},user:{id:'u'},permitted:()=>{},body:async()=>({platform:'shopify',minimumAgeHours}),json:()=>assert.fail('Unexpected run')}),/24 à 720/);
+});
+
+for(const hours of [undefined,48])test(`minimum age cutoff uses ${hours??24} hours`,async()=>{
+ const at=Date.parse('2026-10-14T12:00:00Z');let result;
+ const service=missingOrdersVerification({query:async()=>({rows:[]})},'unused',{now:()=>at,shopify:{read:async()=>({shop:'test.myshopify.com',data:{orders:{nodes:[],pageInfo:{hasNextPage:false}}}})}});
+ const request=async b=>service({p:'/api/missing-orders/verify',req:{method:'POST'},user:{id:'u'},permitted:()=>{},body:async()=>b,json:(_r,_s,data)=>result=data});
+ await request({platform:'shopify',minimumAgeHours:hours});await request({runId:result.runId});
+ assert.equal(result.minimumAgeHours,hours??24);assert.equal(Date.parse(result.end),at-(hours??24)*3600000);assert.equal(Date.parse(result.start),at-60*86400000);
+});
+
+for(const platform of ['shopify','temu'])test(`selection ${platform} only calls the selected platform`,async()=>{
+ let shopifyCalls=0,temuConnections=0,temuCalls=0,result;
+ const service=missingOrdersVerification({query:async()=>({rows:[]})},'unused',{
+  shopify:{read:async()=>{shopifyCalls++;return {shop:'test.myshopify.com',data:{orders:{nodes:[],pageInfo:{hasNextPage:false}}}};}},
+  connect:async()=>{temuConnections++;return {clients:new Map(['FR','JP'].map(country=>[country,{read:async()=>{temuCalls++;return {totalItemNum:0,pageItems:[]};}}])),countryByMall:new Map(),connectionErrors:new Map()};}
+ });
+ const request=async b=>service({p:'/api/missing-orders/verify',req:{method:'POST'},user:{id:'u'},permitted:()=>{},body:async()=>b,json:(_r,_s,data)=>result=data});
+ await request({platform,days:28});const runId=result.runId;
+ for(let i=0;i<5&&!result.done;i++)await request({runId});
+ assert.equal(result.complete,true);assert.equal(shopifyCalls,platform==='shopify'?1:0);assert.equal(temuConnections,platform==='temu'?1:0);assert.equal(temuCalls,platform==='temu'?2:0);
+});
+
 test('strict 24h cutoff, source references and channel matching include archived V3 orders',async()=>{
  const db={query:async(sql)=>{assert.match(sql,/SELECT/);assert.doesNotMatch(sql,/archived\s*=/);return {rows:[{channel:'shopify',reference:'local',source_reference:'#1'},{channel:'temu',reference:'#2'}]};}};
  const rows=['#1','#2','#3','#4'].map((reference,i)=>({channel:'shopify',reference,date:i===3?'2026-10-13T12:00:00Z':'2026-10-12T12:00:00Z'}));
