@@ -13,6 +13,7 @@ groups.at(-1).push('test/erplain-live-recovery.test.mjs');
 groups.at(-1).push('test/manual-platform-cancellation.test.mjs');
 groups.at(-1).push('test/manual-platform-cancellation-ui.test.mjs');
 groups.at(-1).push('test/missing-orders-verification.test.mjs');
+groups.at(-1).push('test/erplain-global-lock-removal.test.mjs');
 groups.push(quotaGroup);
 groups.push(recoveredPreparationGroup);
 groups.push(['--test','test/missing-draft-recovery.test.mjs']);
