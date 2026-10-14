@@ -55,10 +55,10 @@ export function testDocuments({db,api,directory}){
      s={...s,fingerprint,companyId:TEST_COMPANY,reference:o.reference,complete:false};
      const items=[];
      for(const l of choices){
-      const {Variants:v}=await api.read('query LocalTestSku($where:QueryVariantsWhereWhereConditions){Variants(first:100,where:$where){data{id sku active product{active}} paginatorInfo{hasMorePages}}}',{where:{column:'SKU',operator:'EQ',value:l.sku}});
+      const {Variants:v}=await api.read('query LocalTestSku($where:QueryVariantsWhereWhereConditions){Variants(first:100,where:$where){data{id sku active tax_codes{id} product{active}} paginatorInfo{hasMorePages}}}',{where:{column:'SKU',operator:'EQ',value:l.sku}});
       const hits=v?.data?.filter(v=>v.sku===l.sku&&v.active!==false&&v.product?.active!==false)||[];
       if(v?.paginatorInfo?.hasMorePages||hits.length!==1)throw Error('SKU TEST absent ou ambigu : '+l.sku+'. Renseignez le SKU Erplain et la quantité correspondante.');
-      items.push({variant:{id:String(hits[0].id)},location:{id:String(company.default_location.id)},quantity:l.quantity,price:0,tax_codes:[],description:l.sku});
+      items.push({variant:{id:String(hits[0].id)},location:{id:String(company.default_location.id)},quantity:l.quantity,price:0,tax_codes:hits[0].tax_codes,description:l.sku});
      }
      const amounts=excelAmounts(lines,{country:o.address.country});
      const {TaxCodes:taxes}=await api.read('query LocalTestTaxes {TaxCodes(first:100){data{id label active tax_rates{rate}} paginatorInfo{hasMorePages}}}');

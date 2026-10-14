@@ -1,3 +1,4 @@
+import {temuDestinationVat} from './temu-destination-vat.mjs';
 import {isTemuExcel,excelAmounts} from './temu-excel-commercial.mjs';
 import {acceptedMonetaryDifference} from './monetary-policy.mjs';
 export {acceptedMonetaryDifference} from './monetary-policy.mjs';
@@ -37,12 +38,21 @@ export function rateFromTax(net,tax,codes,country,context={}){
 export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,preferExactRate=false}={}){
  if(isTemuExcel(order)){
   const amounts=excelAmounts(lines,{country:order.address?.country});
-  const source=lines.map((l,i)=>{const r=amounts.rows[i];return {...l,source_payload:{itemprice:cents(r.net+r.tax)/100,itemtax:r.tax,shippingprice:cents(r.shipping+r.shippingTax)/100,shippingtax:r.shippingTax}};});
-  const pricing=buildBcPricing({...order,channel:'amazon',erp_live:{},source_payload:{currency:amounts.currency}},source,products,codes,{eurExchangeRate,preferExactRate:true});
-  pricing.tax_type='inclusive';
-  pricing.items=pricing.items.map((item,i)=>({...item,...(item.type==='shipping_cost'?{description:item.description.replace('Livraison Amazon','Livraison TEMU')}:{}),price:pricing.lineAmounts[i].gross/Number(item.quantity)}));
-  pricing.lineAmounts=pricing.lineAmounts.map((item,i)=>({...item,unitPrice:pricing.items[i].price,basis:'gross'}));
-  return {...pricing,source:'temu_excel',commercialBasis:{source:'temu_excel'},excel:amounts};
+  if(!lines.length||lines.length!==products.length)throw Error('BC · Lignes de prix incomplètes');
+  const items=[],lineAmounts=[];
+  const append=(product,gross,taxCodes,rate)=>{
+   const quantity=Number(product.quantity);if(!Number.isFinite(quantity)||quantity<=0)throw Error('BC · Quantité du prix invalide');
+   const tax=cents(gross*rate/(100+rate))/100,price=gross/quantity;
+   items.push({...product,price,tax_codes:taxCodes,apply_discount_rules:false});
+   lineAmounts.push({type:product.type||'normal',variantId:String(product.variant?.id||''),quantity,taxCodes:taxCodes.map(t=>String(t.id)).sort(),unitPrice:price,gross,tax,rate,basis:'gross',grossDecimal:decimalTotal(gross,1),grossCalculation:{unit:gross,quantity:1,discounts:[],additions:[]}});
+  };
+  products.forEach((product,i)=>{
+   const {rate}=temuDestinationVat(order),taxCodes=taxCode(rate,codes),r=amounts.rows[i];
+   append(product,cents(r.net+r.tax)/100,taxCodes,rate);
+   const shipping=cents(r.shipping+r.shippingTax)/100;
+   if(shipping)append({type:'shipping_cost',description:'Livraison TEMU · '+lines[i].source_sku,quantity:1},shipping,taxCodes,rate);
+  });
+  return {version:2,currency:amounts.currency,eurExchangeRate,tax_type:'inclusive',total:amounts.total,sourceLinesTotal:amounts.total,tax:cents(lineAmounts.reduce((sum,l)=>sum+l.tax,0))/100,items,lineAmounts,source:'temu_excel',taxPolicy:temuDestinationVat(order).policy,commercialBasis:{source:'temu_excel'},excel:amounts};
  }
  if(!lines.length||lines.length!==products.length)throw Error('BC · Lignes de prix incomplètes');
  if([...lines,...products].some(l=>!decimalNumber(l?.quantity)||Number(l.quantity)<=0))throw Error('BC · Quantité du prix source absente ou invalide');
@@ -131,7 +141,7 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
  }else throw Error('BC · Source des prix non configurée : '+order.channel);
  const total=cents(entries.reduce((s,e)=>s+e.gross,0))/100,tax=cents(entries.reduce((s,e)=>s+e.tax,0))/100;
  if(expected!==undefined&&!acceptedBcTotal({total},{total:expected,currency,eurExchangeRate}))throw Error('BC · Total source incohérent : détail '+total.toFixed(2)+' / attendu '+expected.toFixed(2)+' '+currency);
- return {version:2,currency,eurExchangeRate,tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:temuFixedVat(order)!==null?(order.source_payload?.temuManualPricing?.vatRate!==undefined?'temu_manual_vat':'temu_country_25'):'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:e.item.tax_codes.map(t=>String(t.id)).sort(),unitPrice:e.item.price,gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
+ return {version:2,currency,eurExchangeRate,tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:e.item.tax_codes.map(t=>String(t.id)).sort(),unitPrice:e.item.price,gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
 }
 // User-authorized OR policy: strictly below EUR 0.50 or 5% of order total.
 // Currency rates retain Erplain's quote: foreign units per default EUR.
