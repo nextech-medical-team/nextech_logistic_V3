@@ -1,6 +1,6 @@
 // Technical creation provenance, independent of the displayed diagnostic.
 // A BL is the business prerequisite; only duplicate/uncertain writes need proof.
-const localValidation=/^(BC modifié depuis sa préparation : recontrôle requis$|Préparation modifiée depuis|Validation de la préparation|Étiquette bloquée : contrôle du stock)/;
+const localValidation=/^(BC modifié depuis sa préparation : recontrôle requis$|Mapping modifié avant création : recontrôle requis$|Mapping modifié depuis la validation du BL : recontrôle requis$|Préparation modifiée depuis|Validation de la préparation|Étiquette bloquée : contrôle du stock)/;
 export async function installCarrierAttemptProof(db){
  await db.exec(`ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS creation_started_at TIMESTAMPTZ;
  ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS failure_phase TEXT;
