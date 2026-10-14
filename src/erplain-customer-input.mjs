@@ -20,8 +20,10 @@ export function erplainCustomerInput(o){
 }
 export async function ensureErplainCustomerNumber(api,o,save){
  if(o.channel!=='temu'||o.erp_live?.customerNumber)return;
- const result=await api.request('mutation V3CustomerNumber {GenerateCustomerNumber}',{},0,true);
+ // This scalar is a prerequisite, not a batch mutation with usable partial data.
+ // Preserve GraphQL errors instead of replacing them with a missing-number error.
+ const result=await api.request('mutation V3CustomerNumber {GenerateCustomerNumber}');
  const value=result?.GenerateCustomerNumber;
- if(!['string','number'].includes(typeof value)||!clean(value)||clean(value).startsWith('V3:'))throw Error('Client TEMU : numéro Erplain non reçu');
+ if(!['string','number'].includes(typeof value)||typeof value==='number'&&!Number.isFinite(value)||!clean(value)||clean(value).startsWith('V3:'))throw Error('Client TEMU : numéro Erplain non reçu — GenerateCustomerNumber n’a renvoyé aucun numéro utilisable. Vérifiez la génération des numéros clients et les droits de cet accès dans Erplain avant de reprendre.');
  o.erp_live.customerNumber=clean(value);await save(o);
 }
