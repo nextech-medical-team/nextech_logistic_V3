@@ -1,6 +1,5 @@
 import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
 import {retirePostBcCommercialControls} from './post-bc-control-recovery.mjs';
-import {invoiceCustomerType} from './invoice-customer-policy.mjs';
 import {usesRecordedBc,readRecordedBc,recordedBcFingerprint,verifyRecordedOrSourceTotals,withRecordedOrSourceGuard,assertRecordedBc} from './existing-bc-execution.mjs';
 import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
@@ -27,7 +26,7 @@ import {resumeAcceptedCommercialReviews} from './commercial-tolerance-recovery.m
 import {scheduleStockChecks,stockCheckFailure,stockNotFound,stockCheckConfirmed,closeStockChecks} from './stock-auto-reconciliation.mjs';
 import {claimStockCreation,canCreateStock,recordStockCreationOutcome,stockFailureMessage} from './stock-creation-claim.mjs';
 import {refreshManualOrder} from './manual-erplain-orders.mjs';
-import {erplainCustomerLabel} from './customer-identity.mjs';
+import {erplainCustomerInput,ensureErplainCustomerNumber} from './erplain-customer-input.mjs';
 import {reconcileFullStock} from './stock-cycle.mjs';
 import {publishHistoricalBl,assertHistoricalBlNumber} from './bl-numbering.mjs';
 import {publishIncrementalBc} from './bc-numbering.mjs';
@@ -162,7 +161,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     o.selectedProducts??={};o.selectedProducts[sku]=product;
 
 
-    return {location:{id:String(references.locationId)},variant:{id:String(target.targetVariantId)},quantity,price:0,description:sku};
+    return {location:{id:String(references.locationId)},variant:{id:String(target.targetVariantId)},quantity,price:0,tax_codes:product.tax_codes,description:sku};
 
    }));assertBcLines(items);
    o.selectedSourceLines=lines;
@@ -197,7 +196,10 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of working.filter(o=>!bcOnlyOrderId&&o.erp_live.phase==='creating_stock'&&!o.erp_live.stockDocument?.id)){try{const stock=await withRecordedOrSourceGuard(api,o,()=>o.channel==='temu'?temuSellerTotals(o):o.source_payload?.erplainImported?o.erp_live.importedCommercialSource:o.pricing||o.erp_live.pricing,()=>reconcileFullStock(api,o,{allowCreate:canCreateStock(o),allowRecoverMissing:true,onAbsenceConfirmed:absenceProof=>recordStockCreationOutcome(db,o,{absenceProof}),beforeCreate:()=>claimStockCreation(db,o),onCreated:documentId=>recordStockCreationOutcome(db,o,{documentId}),onCreationFailure:error=>recordStockCreationOutcome(db,o,{error})}));if(!stock)throw stockNotFound();o.erp_live.stockDocument=stock;stockCheckConfirmed(o);o.erp_live.phase='bl_created';await save(o);}catch(e){o.failed=true;await fail(o,e);}}
    working=working.filter(o=>!o.failed);
    const safe=[];for(const o of working){const block=creationResumeBlock(o);if(block)await fail(o,new Error(block));else safe.push(o);}working=safe;if(!working.length)return;
-   await batchMutation(working.filter(o=>!o.erp_live.bc&&!o.erp_live.customer),'creating_customer','customer','CustomerInput','CreateCustomer',o=>({label:erplainCustomerLabel(o),customer_number:'V3:'+o.id,customer_type:invoiceCustomerType({orderId:o.id,channel:o.channel,sourcePayload:o.source_payload}),notes:'Compte V3. Aucun email envoyé.'}),'id label');
+   for(const o of working.filter(o=>!o.erp_live.bc&&!o.erp_live.customer)){
+    try{const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id});if(block)throw Error(block);await ensureErplainCustomerNumber(api,o,save);await batchMutation([o],'creating_customer','customer','CustomerInput','CreateCustomer',erplainCustomerInput,'id label customer_number');}
+    catch(e){o.failed=true;await fail(o,e);}
+   }
    working=working.filter(o=>!o.failed);
    await batchMutation(working.filter(o=>!o.erp_live.bc),'creating_bc','bc','OrderInput','CreateOrder',o=>{
     const addresses=bcAddresses(o.address);

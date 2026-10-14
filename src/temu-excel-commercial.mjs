@@ -16,11 +16,11 @@ export function excelMoney(raw,label,{optional=false,country}={}){
 export function excelAmounts(lines,{country}={}){
  let currency=null;const rows=lines.map(l=>{
   const r=columns(l);const money=(name,optional=false)=>{const m=excelMoney(r[norm(name)],name,{optional,country});if(m.currency){if(currency&&currency!==m.currency)throw Error('Excel : devises différentes');currency=m.currency;}return m.amount;};
-  const net=money('Total du prix de vente après réductions (hors taxes)'),tax=money('Taxe sur les produits'),shipping=money("Total de l'expédition (hors taxes)"),shippingTax=money("Taxe d'expédition"),beforeDiscount=money('Prix de vente (hors taxes)');
+  const net=money('Total du prix de base après réduction'),tax=money('Taxe sur les produits'),shipping=money("Total de l'expédition (hors taxes)"),shippingTax=money("Taxe d'expédition");
   const sellerDiscount=money('Réduction de la part du vendeur',true),temuDiscount=money('Réduction de la part de Temu',true),refund=money('Remboursement des produits',true);
   if(refund)throw Error('Excel : remboursement à rapprocher avant création');
-  // TEMU exports this field as a line total, already including the quantity.
-  if(Math.abs(cents(beforeDiscount-sellerDiscount-temuDiscount)-cents(net))>1)throw Error('Excel : total de ligne avant réductions, réductions et total net incohérents — '+l.source_sku);
+  // Seller base is a line total after discounts, already including quantity.
+  // Retail prices and buyer payment must never substitute for seller proceeds.
   return {net,tax,shipping,shippingTax,sellerDiscount,temuDiscount};
  });
  if(!currency)throw Error('Excel : devise absente');
