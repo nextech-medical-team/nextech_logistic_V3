@@ -23,7 +23,7 @@
   for(const info of watched)if(!info.isConnected){visible.unobserve(info);watched.delete(info);}
   for(const button of root.querySelectorAll('.compact-problem[data-problem-type="stock"]')){
    const sku=button.dataset.problemSku;if(!sku)continue;
-   const row=button.closest('tr'),index=root.closest('table').querySelector('th[data-column="sku"]')?.cellIndex,cell=row?.cells[index];
+   const row=button.closest('tr'),cell=row?.querySelector('td[data-fixed-column="sku"]');
    if(cell&&![...cell.querySelectorAll('[data-stock-preview]')].some(n=>n.dataset.stockInformation===sku)){
     const summary=document.createElement('small');summary.dataset.stockInformation=sku;summary.dataset.stockPreview='';summary.setAttribute('aria-live','polite');summary.textContent=sku+' · À venir : lecture en cours…';cell.prepend(summary);
     const prior=cache.get(sku);if(prior?.until>Date.now())show(summary,prior.data);else{watched.add(summary);visible.observe(summary);}
