@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {canRetryFailedCarrier,provesLegacyPreflight,markCarrierCreationStarted} from '../src/carrier-attempt-proof.mjs';
+import {canRetryFailedCarrier,provesLegacyPreflight,markCarrierCreationStarted,hasUncertainCarrierHistory,provesImportedFieldsPreflight} from '../src/carrier-attempt-proof.mjs';
 import {createProductionCarriers} from '../src/carriers-test.mjs';
 const job={order_id:'order',status:'failed',attempts:1,creation_id:null,result:null,reference:null,tracking:[],error:'Échec antérieur revalidé',updated_at:'2026-10-10T03:12:00.528Z'};
 const audit={created_at:job.updated_at,detail:{orderId:'order',currentError:job.error,previousError:'Préparation modifiée depuis la validation du BL : recontrôler',businessWrites:0,labelPurchased:false,previousUpdatedAt:'2026-10-09T11:48:53.733Z',proof:{previousFailureAt:'2026-10-09T11:48:53.733Z',validationAt:'2026-10-09T15:35:49.486Z',readOnly:true,verified:true,businessActionAuthorized:false}}};
@@ -12,6 +12,29 @@ test('legacy generic diagnostic uses immutable audit provenance rather than busi
 for(const [name,patch] of Object.entries({laterAttempt:{attempts:2},newCreation:{creation_id:'new'},result:{result:{}},reference:{reference:'existing'},tracking:{tracking:['T']},missingTracking:{tracking:undefined},laterUpdate:{updated_at:'2026-10-11T00:00:00Z'}}))test('legacy evidence rejects '+name,()=>assert.equal(provesLegacyPreflight({...job,...patch},audit),false));
 for(const [name,patch] of Object.entries({wrongOrder:{orderId:'other'},wrongError:{currentError:'different'},providerError:{previousError:'Timeout'},providerWrites:{businessWrites:1},labelPurchased:{labelPurchased:true},wrongPriorTime:{previousUpdatedAt:'invalid'}}))test('audit rejects '+name,()=>assert.equal(provesLegacyPreflight(job,{...audit,detail:{...audit.detail,...patch}}),false));
 test('no audit proof never permits generic legacy failures',async()=>assert.equal(await canRetryFailedCarrier({query:async()=>({rows:[]})},job),false));
+test('legacy recorded-BC fingerprint rejection is known preflight even with assigned creation id',async()=>{
+ const failed={...job,error:'BC modifié depuis sa préparation : recontrôle requis',creation_id:'legacy-assigned'};
+ const db={query:()=>assert.fail('no additional business or provider read')};
+ assert.equal(await canRetryFailedCarrier(db,failed),true);
+ assert.equal(await canRetryFailedCarrier(db,{...failed,creation_started_at:'2026-10-14T00:00:00Z'}),false);
+ assert.equal(await canRetryFailedCarrier(db,{...failed,result:{reference:'R'}}),false);
+});
+const fieldJob={...job,creation_id:'old-field-attempt',error:'Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.'};
+const fieldAudit={created_at:job.updated_at,detail:{orderId:'order',currentError:fieldJob.error,previousError:'Erplain LIVE · Numéro de téléphone invalide : corriger avant création de l’étiquette',businessWrites:0,labelPurchased:false,proof:{readOnly:true,businessActionAuthorized:false}}};
+test('archived imported field validation failure is proven preflight by matching audit',()=>assert(provesImportedFieldsPreflight(fieldJob,fieldAudit)));
+test('known preflight archive without PDF does not veto a new manual label',async()=>{
+ const db={query:async sql=>sql.startsWith('SELECT h.id')?{rows:[{job:fieldJob,documents:false}]}:{rows:[fieldAudit]}};
+ assert.equal(await hasUncertainCarrierHistory(db,'order'),false);
+});
+for(const patch of [{documents:true},{job:{...fieldJob,status:'ready'}},{job:{...fieldJob,result:{reference:'R'}}},{job:{...fieldJob,tracking:['T']}},{job:{...fieldJob,creation_started_at:'2026-10-14T00:00:00Z'}}])test('archive creation evidence retained '+JSON.stringify(patch),async()=>{
+ const db={query:async sql=>sql.startsWith('SELECT h.id')?{rows:[{job:fieldJob,documents:false,...patch}]}:{rows:[fieldAudit]}};
+ assert.equal(await hasUncertainCarrierHistory(db,'order'),true);
+});
+test('unproven archive and stale field audit remain protected',async()=>{
+ const db={query:async sql=>sql.startsWith('SELECT h.id')?{rows:[{job:fieldJob,documents:false}]}:{rows:[]}};
+ assert.equal(await hasUncertainCarrierHistory(db,'order'),true);
+ assert.equal(provesImportedFieldsPreflight(fieldJob,{...fieldAudit,created_at:'2026-10-11T00:00:00Z'}),false);
+});
 test('persisted preflight failure survives any translated or rewritten message',async()=>{
  assert(await canRetryFailedCarrier({query:()=>assert.fail('no business queries')},{...job,failure_phase:'preflight',creation_started_at:null,creation_id:'attempt'}));
 });
