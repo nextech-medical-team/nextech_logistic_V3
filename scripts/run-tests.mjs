@@ -29,6 +29,7 @@ groups.push(quotaGroup);
 groups.push(recoveredPreparationGroup);
 groups.push(['--test','test/missing-draft-recovery.test.mjs']);
 groups.push(manualCreatedBlWaitingGroup);
+groups.push(['--test','test/equivalent-preview-recheck.test.mjs']);
 groups.push(['--test','test/manual-legacy-label-retry.test.mjs']);
 groups.push(['--test','test/temu-excel-purchase-admission.test.mjs']);
 groups.at(-1).push('test/source-product-name.test.mjs');

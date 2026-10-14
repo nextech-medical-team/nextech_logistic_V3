@@ -1,3 +1,4 @@
+import {committedPreviewNeedsRecheck,interruptedPreviewErrors,equivalentPreviewRecheckMessage} from './equivalent-preview-recheck.mjs';
 export async function attachEquivalentDiagnostics(db,orders){
  if(!orders.length)return;
  const jobs=(await db.query(`SELECT DISTINCT ON (j.order_id) j.id,j.order_id,j.created_at,j.action,j.status,j.payload,j.result,j.error,EXISTS(SELECT 1 FROM resolution_jobs c WHERE c.order_id=j.order_id AND c.created_at>j.created_at AND c.status='complete' AND c.action IN ('weight','select-product','activate-product','create-product') AND c.payload->>'sku'=j.payload->>'replacementSku') product_corrected FROM resolution_jobs j WHERE j.order_id=ANY($1::text[]) AND j.action IN ('equivalent-preview','replace-equivalent') AND NOT EXISTS(SELECT 1 FROM resolution_jobs done WHERE done.order_id=j.order_id AND (done.created_at,done.id)>(j.created_at,j.id) AND done.status='complete' AND done.error IS NULL AND done.action IN ('resume-erp','resume','replace-equivalent') AND NOT coalesce(done.result->>'partialRemainder'='true',false)) ORDER BY j.order_id,j.created_at DESC,j.id DESC`,[orders.map(o=>o.id)])).rows;
@@ -7,4 +8,13 @@ export async function attachEquivalentDiagnostics(db,orders){
  const corrected=j=>{const w=weights.find(w=>w.sku===weightSku(j));return !!w&&Number(w.weight_kg)>0&&Number.isFinite(Number(w.weight_kg))&&w.product?.active===true&&w.product?.product?.active===true&&!w.message&&Number.isFinite(Date.parse(w.verified_at))&&Number.isFinite(Date.parse(j.created_at))&&Date.parse(w.verified_at)>Date.parse(j.created_at);};
  const byId=new Map(jobs.map(j=>[j.order_id,j]));
  for(const o of orders){const j=byId.get(o.id);o.pending_equivalent=(j?.status==='review'||j?.status==='complete'&&j.action==='equivalent-preview'&&j.result?.previewFingerprint)&&j.payload?.replacementSku?{...j.payload,previewJobId:j.id,error:j.status==='complete'?'Produit équivalent vérifié : confirmer le remplacement':corrected(j)?'Reprendre le remplacement après correction du poids : nouvelle vérification nécessaire':j.product_corrected?'Produit équivalent vérifié : confirmer le remplacement':j.error}:null;}
+ const candidates=orders.filter(o=>{const j=byId.get(o.id);return j?.action==='equivalent-preview'&&j.status==='review'&&interruptedPreviewErrors.includes(j.error);});
+ if(!candidates.length)return;
+ const ids=candidates.map(o=>o.id);
+ const recorded=(await db.query("SELECT DISTINCT ON (order_id) id,order_id,payload,status,error FROM resolution_jobs WHERE order_id=ANY($1::text[]) AND action='replace-equivalent' ORDER BY order_id,created_at DESC,id DESC",[ids])).rows;
+ const lines=(await db.query('SELECT * FROM lines WHERE order_id=ANY($1::text[])',[ids])).rows;
+ const prior=new Map(recorded.map(j=>[j.order_id,j]));
+ for(const o of candidates)if(o.pending_equivalent&&committedPreviewNeedsRecheck(o,byId.get(o.id),prior.get(o.id),lines.filter(l=>l.order_id===o.id))){
+  o.pending_equivalent={...o.pending_equivalent,error:equivalentPreviewRecheckMessage,previousError:o.pending_equivalent.error,recheckRequired:true};
+ }
 }
