@@ -20,6 +20,12 @@ test('legacy recorded-BC fingerprint rejection is known preflight even with assi
  assert.equal(await canRetryFailedCarrier(db,{...failed,result:{reference:'R'}}),false);
 });
 const fieldJob={...job,creation_id:'old-field-attempt',error:'Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.'};
+for(const error of ['Mapping modifié avant création : recontrôle requis','Mapping modifié depuis la validation du BL : recontrôle requis'])test('retired mapping preflight can resume without mapping or BC reads: '+error,async()=>{
+ const db={query:()=>assert.fail('no new business checks')};
+ const failed={...job,error,creation_id:'reserved',attempts:4,failure_phase:'preflight',creation_started_at:null};
+ assert.equal(await canRetryFailedCarrier(db,failed),true);
+ for(const patch of [{creation_started_at:'2026-10-14T00:00:00Z'},{failure_phase:'provider'},{result:{reference:'R'}},{reference:'R'},{tracking:['T']}])assert.equal(await canRetryFailedCarrier(db,{...failed,...patch}),false);
+});
 const fieldAudit={created_at:job.updated_at,detail:{orderId:'order',currentError:fieldJob.error,previousError:'Erplain LIVE · Numéro de téléphone invalide : corriger avant création de l’étiquette',businessWrites:0,labelPurchased:false,proof:{readOnly:true,businessActionAuthorized:false}}};
 test('archived imported field validation failure is proven preflight by matching audit',()=>assert(provesImportedFieldsPreflight(fieldJob,fieldAudit)));
 test('known preflight archive without PDF does not veto a new manual label',async()=>{

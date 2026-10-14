@@ -23,7 +23,7 @@ export async function queueLabelFromBl(db,id,user){
   for(const table of ['carrier_documents','extra_parcels']){
    if((await tx.query(`SELECT 1 FROM ${table} WHERE order_id=$1 LIMIT 1`,[id])).rows.length)throw Error('Étiquette ou colis existant à conserver');
   }
-  if(await hasUncertainCarrierHistory(tx,id))throw Error('Étiquette ou création incertaine dans l’historique : rapprocher son résultat');
+  if(await hasUncertainCarrierHistory(tx,id,{manualRequest:true}))throw Error('Étiquette ou création incertaine dans l’historique : rapprocher son résultat');
   if((await tx.query("SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') LIMIT 1",[id])).rows.length)throw Error('Modification en cours : attendre sa fin');
   const request={blId:String(o.erp_live.bl.id),creationId:randomUUID(),requestedBy:user.email,at:new Date().toISOString()};
   await tx.query("INSERT INTO carrier_jobs(order_id,carrier,status,environment,creation_id,manual_bl_request) VALUES($1,$2,'pending','production',$3,$4) ON CONFLICT(order_id) DO UPDATE SET carrier=excluded.carrier,status='pending',environment='production',creation_id=excluded.creation_id,manual_bl_request=excluded.manual_bl_request,attempts=0,error=null,failure_phase=null,creation_started_at=null,updated_at=now()",[id,o.carrier.startsWith('gls')?'gls':'gofo',request.creationId,JSON.stringify(request)]);
