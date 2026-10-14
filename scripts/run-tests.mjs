@@ -30,4 +30,6 @@ groups.push(recoveredPreparationGroup);
 groups.push(['--test','test/missing-draft-recovery.test.mjs']);
 groups.push(manualCreatedBlWaitingGroup);
 groups.push(['--test','test/manual-legacy-label-retry.test.mjs']);
+groups.push(['--test','test/temu-excel-purchase-admission.test.mjs']);
+groups.at(-1).push('test/source-product-name.test.mjs');
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

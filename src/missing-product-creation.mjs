@@ -3,9 +3,12 @@ const selection='id sku active weight_amount weight_unit track_inventory variant
 export const creationTable=`CREATE TABLE IF NOT EXISTS erplain_product_creation_attempts(sku TEXT PRIMARY KEY,status TEXT NOT NULL,product_id TEXT,variant_id TEXT,error TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
 export function sourceProductName(line){
  const p=line?.source_payload;if(!p||typeof p!=='object')return '';
- const values=Object.fromEntries(Object.entries(p).map(([k,v])=>[k.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''),v]));
- for(const key of ['productname','goodsname','itemname','name','title','produits','nomproduit','designation','libelle']){
-  if(typeof values[key]==='string'&&values[key].trim())return values[key].trim().replace(/\s+/g,' ').slice(0,250);
+ for(const source of [p,p.excel]){
+  if(!source||typeof source!=='object'||Array.isArray(source))continue;
+  const values=Object.fromEntries(Object.entries(source).map(([k,v])=>[k.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,''),v]));
+  for(const key of ['productname','goodsname','itemname','name','title','produits','nomproduit','nomduproduit','nomduproduitparcommandeduclient','designation','libelle']){
+   if(typeof values[key]==='string'&&values[key].trim())return values[key].trim().replace(/\s+/g,' ').slice(0,250);
+  }
  }
  return '';
 }
