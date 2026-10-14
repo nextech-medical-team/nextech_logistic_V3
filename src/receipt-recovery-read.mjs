@@ -1,4 +1,5 @@
 import {validateReceiptNumber,receiptLines} from './receipt-recovery-plan.mjs';
+import {receiptCandidates} from './receipt-candidates.mjs';
 import {readErplainDocuments} from './erplain-document-read.mjs';
 
 const fields='id label status update_stock line_items{type quantity variant{id sku} location{id label}}';
@@ -44,4 +45,51 @@ export async function readRecoveryBcs(api,orders){
   }
  }
  return {bcs,errors};
+}
+
+// Ask Erplain's own current product index across every V3 BC, including those
+// whose local snapshot/mapping has an old SKU. Only the returned documents and
+// local disagreements need a stock/document read. No commercial comparison.
+export async function readReceiptRelatedBcs(api,orders,receipts){
+ const received=receiptLines(receipts),ids=[...new Set(orders.map(o=>String(o.erp_live?.bc?.id||'')).filter(Boolean))],bcs=new Map();
+ const fields='id label status update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}';
+ try{
+  for(let start=0;start<ids.length;start+=2000){
+   const batch=ids.slice(start,start+2000),where={AND:[{column:'ID',operator:'IN',value:batch},{OR:[{column:'VARIANT_ID',operator:'EXISTS',value:[...new Set(received.map(l=>l.variantId))]},{column:'VARIANT_SKU',operator:'IN',value:[...new Set(received.map(l=>l.sku))]}]}]};
+   for(let page=1;page<=100;page++){
+    const result=await api.request(`query V3ReceiptRelatedStock($where:QueryOrdersWhereWhereConditions,$page:Int!){Orders(first:100,page:$page,orderBy:[{column:ID,order:ASC}],where:$where){data{${fields}} paginatorInfo{hasMorePages}}}`,{where,page});
+    const connection=pageData(result.Orders);
+    for(let bc of connection.data){const id=String(bc?.id);if(!batch.includes(id)||bcs.has(id))throw Error('Identité ou pagination BC non confirmée');if(bc.shipping_orders?.paginatorInfo?.hasMorePages)bc=await readErplainDocuments(api,id);bcs.set(id,bc);}
+    if(!connection.paginatorInfo.hasMorePages)break;
+    if(!connection.data.length||page===100)throw Error('Recherche des BC reçus incomplète');
+   }
+  }
+ }catch(e){
+  if(e.httpStatus===429||e.httpStatus>=500||/timeout|network|fetch failed|ETIMEDOUT|ECONN/i.test(e.message))return {bcs,errors:new Map(orders.filter(o=>o.erp_live?.bc?.id).map(o=>[o.id,'Recherche ERPLAIN incomplète : '+e.message])),mode:'provider-filter-incomplete'};
+  // Older/provider schemas can refuse a product filter. Exhaustive fallback,
+  // rather than pretending the local index proves provider completeness.
+  return {...await readRecoveryBcs(api,orders),mode:'exhaustive-fallback'};
+ }
+ const local=receiptCandidates(receipts,orders,{includeUnknown:false}).filter(o=>o.erp_live?.bc?.id&&!bcs.has(String(o.erp_live.bc.id)));
+ const extra=await readRecoveryBcs(api,local);for(const [id,bc] of extra.bcs)bcs.set(id,bc);
+ return {bcs,errors:extra.errors,mode:'provider-product-filter'};
+}
+
+export async function refreshReceiptBcs(api,orders,bcs,errors,onProgress=async()=>{}){
+ const ids=[...new Set(orders.map(o=>String(o.erp_live?.bc?.id||'')).filter(Boolean))];
+ const fields='id label status update_stock shipping_orders(first:10){data{id label status update_stock} paginatorInfo{hasMorePages}}';
+ const mark=(id,e)=>{for(const o of orders.filter(o=>String(o.erp_live?.bc?.id)===id)){if(e)errors.set(o.id,'Lecture du document indisponible : '+e.message);else errors.delete(o.id);}};
+ for(let start=0;start<ids.length;start+=8){
+  const batch=ids.slice(start,start+8),variables=Object.fromEntries(batch.map((id,i)=>['id'+i,id]));
+  try{
+   const result=await api.request(`query V3ReceiptDocumentBatch(${batch.map((_,i)=>'$id'+i+':ID!').join(',')}){${batch.map((_,i)=>'r'+i+':Order(id:$id'+i+'){'+fields+'}').join(' ')}}`,variables);
+   for(let i=0;i<batch.length;i++){let bc=result['r'+i];if(String(bc?.id)!==batch[i])throw Error('Document individuel non confirmé');if(bc.shipping_orders?.paginatorInfo?.hasMorePages||!Array.isArray(bcs.get(batch[i])?.line_items))bc=await readErplainDocuments(api,batch[i]);else bc={...bcs.get(batch[i]),...bc};bcs.set(batch[i],bc);mark(batch[i],null);}
+  }catch(e){
+   if(e.httpStatus===429||e.httpStatus>=500){for(const id of ids.slice(start))mark(id,e);return;}
+   // A provider may impose a lower alias complexity cap. Keep individual reads
+   // as the compatibility path, never accept stale collection delivery states.
+   for(const id of batch){try{bcs.set(id,await readErplainDocuments(api,id));mark(id,null);}catch(error){mark(id,error);if(error.httpStatus===429||error.httpStatus>=500){for(const rest of ids.slice(start))mark(rest,error);return;}}}
+  }
+  await onProgress({phase:'documents',done:Math.min(start+8,ids.length),total:ids.length,message:'BL vérifiés : '+Math.min(start+8,ids.length)+' / '+ids.length});
+ }
 }

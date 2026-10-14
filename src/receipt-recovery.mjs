@@ -4,16 +4,18 @@ import {randomUUID} from 'node:crypto';
 import {erplainAccount} from './erplain-accounts.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 import {readErplainDocuments} from './erplain-document-read.mjs';
-import {readReceipt,readRecoveryBcs} from './receipt-recovery-read.mjs';
+import {readReceipt,readReceiptRelatedBcs,refreshReceiptBcs} from './receipt-recovery-read.mjs';
 import {validateReceiptNumber,receiptHash,buildReceiptPlan,receiptOrderBlock,recoveryFingerprint} from './receipt-recovery-plan.mjs';
 import {queueResolutionRequest} from './resolution-request.mjs';
 import {queueLabelFromBl} from './direct-label.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
+import {temuLocalService} from './temu-local.mjs';
 
 export async function initializeReceiptRecovery(db){
  await db.exec(`CREATE TABLE IF NOT EXISTS receipt_recovery_runs(id text PRIMARY KEY,request_id text UNIQUE NOT NULL,number text NOT NULL,state text NOT NULL DEFAULT 'queued',plan jsonb,error text,selection jsonb,created_by text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now());
  CREATE UNIQUE INDEX IF NOT EXISTS receipt_recovery_one_execution ON receipt_recovery_runs((1)) WHERE state='applying';
  CREATE TABLE IF NOT EXISTS receipt_recovery_items(run_id text NOT NULL REFERENCES receipt_recovery_runs(id),order_id text NOT NULL REFERENCES orders(id),request_id text NOT NULL UNIQUE,state text NOT NULL DEFAULT 'selected',resolution_id text,error text,updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(run_id,order_id));`);
+ await db.exec("ALTER TABLE receipt_recovery_runs ADD COLUMN IF NOT EXISTS progress jsonb DEFAULT '{}'");
  await initializeReceiptWarehouse(db);
 }
 const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
@@ -38,19 +40,18 @@ function snapshotLabelLinks(o){
   ...(o.partial_documents||[]).map(d=>({name:'Étiquette livraison partielle',url:'/api/partial/documents/'+encodeURIComponent(d.delivery_id)+'/'+d.document_index}))
  ];
 }
-export function receiptRecoveryService(db,directory,{api=erplainAccount(directory,'source'),queueResolution=queueResolutionRequest,queueLabel=queueLabelFromBl,enabled=()=>true}={}){
+export function receiptRecoveryService(db,directory,{api=erplainAccount(directory,'source'),queueResolution=queueResolutionRequest,queueLabel=queueLabelFromBl,enabled=()=>true,temu=temuLocalService(db,directory)}={}){
  const warehouse=receiptWarehouseExports(db,directory);
  let running=false,activeItem=null;
- async function preview(number){
-  const receipts=await readReceipt(api,number),allOrders=await recoveryOrders(db),orders=receiptCandidates(receipts,allOrders),{bcs,errors}=await readRecoveryBcs(api,orders);
+ async function preview(number,onProgress=async()=>{}){
+  await onProgress({phase:'receipt',message:'Lecture de la réception Erplain'});
+  const receipts=await readReceipt(api,number),allOrders=await recoveryOrders(db),{bcs,errors,mode}=await readReceiptRelatedBcs(api,allOrders,receipts),localIds=new Set(receiptCandidates(receipts,allOrders,{includeUnknown:false}).map(o=>o.id)),orders=allOrders.filter(o=>bcs.has(String(o.erp_live?.bc?.id))||localIds.has(o.id)||errors.has(o.id));
   // Collection snapshots may contain an older delivery status. Refresh only
   // receipt-related BCs, without comparing commercial data or mutating ERPLAIN.
   const candidates=buildReceiptPlan(receipts,orders,bcs,{errors}).rows;
-  for(const row of candidates){const o=orders.find(o=>o.id===row.id);if(!o?.erp_live?.bc?.id)continue;
-   try{bcs.set(String(o.erp_live.bc.id),await readErplainDocuments(api,o.erp_live.bc.id));errors.delete(o.id);}
-   catch(e){errors.set(o.id,'Lecture du document indisponible : '+e.message);if(e.httpStatus===429||e.httpStatus>=500)break;}
-  }
-  const plan=buildReceiptPlan(receipts,orders,bcs,{errors});plan.coverage={orders:allOrders.length,candidates:orders.length,bcs:bcs.size,errors:errors.size,complete:errors.size===0,mode:'sku-candidates-with-unknown-fallback'};plan.receiptFingerprint=receiptHash(receipts);
+  await onProgress({phase:'documents',done:0,total:candidates.length,message:candidates.length+' commandes concernées : vérification des BL'});
+  const candidateIds=new Set(candidates.map(o=>o.id));if(!errors.size)await refreshReceiptBcs(api,orders.filter(o=>candidateIds.has(o.id)),bcs,errors,onProgress);
+  const plan=buildReceiptPlan(receipts,orders,bcs,{errors});plan.coverage={orders:allOrders.length,candidates:orders.length,bcs:bcs.size,errors:errors.size,complete:errors.size===0,mode};plan.receiptFingerprint=receiptHash(receipts);
   return plan;
  }
  async function itemState(run,id,state,error=null,resolutionId=null){await db.query('UPDATE receipt_recovery_items SET state=$3,error=$4,resolution_id=coalesce($5,resolution_id),updated_at=now() WHERE run_id=$1 AND order_id=$2',[run,id,state,error,resolutionId]);}
@@ -58,7 +59,7 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
   const run=(await db.query('SELECT * FROM receipt_recovery_runs WHERE id=$1',[id])).rows[0];if(!run)throw Error('Analyse de réception introuvable');
   const items=(await db.query('SELECT * FROM receipt_recovery_items WHERE run_id=$1 ORDER BY updated_at,order_id',[id])).rows;
   const ids=(run.plan?.rows||[]).map(r=>r.id);
-  const snapshot=(await db.query(`SELECT o.id,o.reference,o.channel,o.archived,o.tracking_status,o.erp_live,t.error AS temu_error,
+  const snapshot=(await db.query(`SELECT o.id,o.reference,o.channel,o.archived,o.tracking_status,o.label_status,o.suspension,o.partial_mode,o.erp_live,EXISTS(SELECT 1 FROM resolution_jobs active WHERE active.order_id=o.id AND active.status IN ('queued','running','waiting')) AS label_busy,t.error AS temu_error,
    (SELECT jsonb_agg(jsonb_build_object('document_index',d.document_index,'tracking',c.tracking) ORDER BY d.document_index) FROM carrier_documents d JOIN carrier_jobs c ON c.order_id=d.order_id WHERE d.order_id=o.id AND c.environment='production' AND c.status='ready') AS carrier_documents,
    (SELECT jsonb_agg(jsonb_build_object('package',d.package) ORDER BY d.package) FROM temu_label_documents d WHERE d.reference=o.reference) AS temu_documents,
    (SELECT jsonb_agg(jsonb_build_object('delivery_id',d.delivery_id,'document_index',d.document_index)) FROM partial_documents d JOIN partial_deliveries p ON p.id=d.delivery_id WHERE p.order_id=o.id AND p.status NOT IN ('cancelled','review')) AS partial_documents
@@ -68,21 +69,26 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
   const rows=[];for(const row of run.plan?.rows||[]){const o=byOrder.get(row.id),item=byItem.get(row.id),job=byJob.get(item?.resolution_id)||null;
    const labels=o?snapshotLabelLinks(o):[];
    const confirmedBl=row.bls?.find(b=>String(b.id)===String(o?.erp_live?.bl?.id));
-   rows.push({...row,labels,reason:row.status==='documents'?(labels.length?'BL et étiquettes disponibles · aucune nouvelle génération nécessaire':'BL déjà disponible · étiquette à obtenir'):row.reason,labelError:o?.temu_error||null,currentBl:confirmedBl|| (o?.erp_live?.bl?{id:o.erp_live.bl.id,label:o.erp_live.bl.label,status:o.erp_live.bl.status}:null),item:item?{state:item.state,error:item.error,job}:null});
+   const currentBl=confirmedBl||o?.erp_live?.bl;
+   const canLabel=!!(currentBl?.id&&currentBl.status!=='cancelled'&&o?.erp_live?.bl?.status!=='cancelled'&&!labels.length&&!suspensionBlock(o)&&!o?.archived&&!o?.partial_mode&&!o?.label_busy&&!['cancelled','shipped','in_transit','delivered','delivered_simulated'].includes(o?.tracking_status)&&o?.label_status!=='cancelled'&&!['shipped','delivered','completed'].includes(currentBl.status));
+   rows.push({...row,canLabel,...(canLabel?{status:'documents',action:'label'}:{}),labels,reason:row.status==='documents'?(labels.length?'BL et étiquettes disponibles · aucune nouvelle génération nécessaire':'BL déjà disponible · étiquette à obtenir'):row.reason,labelError:o?.temu_error||null,currentBl:confirmedBl|| (o?.erp_live?.bl?{id:o.erp_live.bl.id,label:o.erp_live.bl.label,status:o.erp_live.bl.status}:null),item:item?{state:item.state,error:item.error,job}:null});
   }
-  for(const row of rows)row.work=receiptWork(row,byOrder.get(row.id));
-  return {id:run.id,number:run.number,state:run.state,error:run.error,createdAt:run.created_at,updatedAt:run.updated_at,plan:run.plan?{...run.plan,rows}:null};
+  for(const row of rows){row.work=receiptWork(row,byOrder.get(row.id));if(row.work==='available'&&row.labels.length)row.reason='BL et étiquettes disponibles · état du BL conservé, aucune nouvelle génération nécessaire';}
+  return {id:run.id,number:run.number,state:run.state,error:run.error,progress:run.progress,createdAt:run.created_at,updatedAt:run.updated_at,plan:run.plan?{...run.plan,rows}:null};
  }
  async function submit({id,ids},user){
   if(!uuid(id)||!Array.isArray(ids)||!ids.length||ids.length>100||ids.some(x=>!uuid(x))||new Set(ids).size!==ids.length)throw Error('Sélectionner de 1 à 100 commandes distinctes');
+  const displayed=await status(id);
   return db.transaction(async tx=>{
    const r=(await tx.query('SELECT * FROM receipt_recovery_runs WHERE id=$1 FOR UPDATE',[id])).rows[0];if(!r)throw Error('Analyse introuvable');
    const selection=[...ids].sort();if(r.selection){if(JSON.stringify(r.selection)!==JSON.stringify(selection))throw Error('Cette analyse a déjà été lancée avec une autre sélection');return {id,state:r.state,existing:true};}
-   if(r.state!=='ready'||!r.plan?.coverage?.complete||Date.now()-Date.parse(r.updated_at)>30*60*1000)throw Error('Relancer une analyse complète et récente avant le traitement');
-   if(ids.some(id=>!r.plan.rows.some(row=>row.id===id&&(row.status==='eligible'||row.status==='documents'&&row.canLabel))))throw Error('La sélection contient une commande non admissible');
+   const labelOnly=ids.every(id=>displayed.plan?.rows.some(row=>row.id===id&&row.action==='label'));
+   if(r.state!=='ready'||!labelOnly&&(!r.plan?.coverage?.complete||Date.now()-Date.parse(r.updated_at)>30*60*1000))throw Error('Relancer une analyse complète et récente avant le traitement');
+   if(ids.some(id=>!displayed.plan.rows.some(row=>row.id===id&&(row.status==='eligible'||row.status==='documents'&&row.canLabel))))throw Error('La sélection contient une commande non admissible');
    if((await tx.query("SELECT id FROM receipt_recovery_runs WHERE state='applying'")).rows.length)throw Error('Une autre réception est en traitement : attendre son résultat');
    for(const orderId of ids)await tx.query('INSERT INTO receipt_recovery_items(run_id,order_id,request_id) VALUES($1,$2,$3)',[id,orderId,randomUUID()]);
-   await tx.query("UPDATE receipt_recovery_runs SET state='applying',selection=$2,updated_at=now() WHERE id=$1",[id,JSON.stringify(selection)]);
+   const plan={...r.plan,rows:r.plan.rows.map(row=>{const live=displayed.plan.rows.find(x=>x.id===row.id);return ids.includes(row.id)&&live?.action==='label'?{...row,action:'label'}:row;})};
+   await tx.query("UPDATE receipt_recovery_runs SET state='applying',selection=$2,plan=$3,updated_at=now() WHERE id=$1",[id,JSON.stringify(selection),JSON.stringify(plan)]);
    await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'receipt.recovery.requested',$2)",[user.email,JSON.stringify({runId:id,number:r.number,ids:selection})]);return {id,state:'applying'};
   });
  }
@@ -93,7 +99,7 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
   if(suspensionBlock(o)){await itemState(run.id,o.id,'blocked',suspensionBlock(o));return;}
   if(item.state==='selected'){
    const original=run.plan.rows.find(r=>r.id===o.id);
-   if(original?.status==='documents'&&original.canLabel){
+   if(original?.action==='label'||original?.status==='documents'&&original.canLabel){
     if(['cancelled','shipped','in_transit','delivered'].includes(o.tracking_status)||o.label_status==='cancelled')throw Error('Commande annulée ou déjà expédiée');
     if((await recoveryLabels(db,o)).length){await itemState(run.id,o.id,'complete');return;}
     if(o.channel==='temu'){const t=(await db.query('SELECT error FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0];await itemState(run.id,o.id,'label_action_required',t?.error||'Obtenir l’étiquette dans le parcours TEMU.');return;}
@@ -136,7 +142,7 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
    try{
     run=(await db.query("SELECT * FROM receipt_recovery_runs WHERE state IN ('queued','reading','applying') ORDER BY CASE WHEN state='reading' THEN 0 WHEN state='queued' THEN 1 ELSE 2 END,created_at LIMIT 1")).rows[0];if(!run){await warehouse.advance();return;}
    if(run.state==='applying'){activeItem=null;try{await advance(run);}catch(e){if(activeItem)await itemState(run.id,activeItem,'blocked',e.message);else throw e;}return;}
-    await db.query("UPDATE receipt_recovery_runs SET state='reading',updated_at=now() WHERE id=$1",[run.id]);const plan=await preview(run.number);
+    await db.query("UPDATE receipt_recovery_runs SET state='reading',updated_at=now() WHERE id=$1",[run.id]);const plan=await preview(run.number,progress=>db.query('UPDATE receipt_recovery_runs SET progress=$2,updated_at=now() WHERE id=$1',[run.id,JSON.stringify(progress)]));
     await db.query("UPDATE receipt_recovery_runs SET state='ready',plan=$2,error=null,updated_at=now() WHERE id=$1",[run.id,JSON.stringify(plan)]);
    }catch(e){if(run)await db.query("UPDATE receipt_recovery_runs SET state='failed',error=$2,updated_at=now() WHERE id=$1",[run.id,e.message]);}finally{running=false;}
   },
@@ -144,6 +150,14 @@ export function receiptRecoveryService(db,directory,{api=erplainAccount(director
    if(await warehouse.routes({p,url,req,res,user,body,json,permitted}))return true;
    if(!p.startsWith('/api/receipts/recovery'))return false;
    permitted(user,['admin','manager','operator']);
+   if(['/api/receipts/recovery/temu/quote','/api/receipts/recovery/temu/buy'].includes(p)&&req.method==='POST'){
+    permitted(user,['admin','manager']);const b=await body(req),run=await status(b.id),row=run.plan?.rows.find(row=>row.id===b.orderId);
+    if(!row||row.channel!=='temu'||!row.canLabel||row.labels.length)throw Error('Aucune étiquette TEMU à créer pour cette commande');
+    if(p.endsWith('/quote')){const plan=await temu.prepare(row.reference);json(res,200,{reference:row.reference,planId:plan.id,amount:plan.amount,currency:plan.currency});return true;}
+    if(b.confirmPurchase!==true)throw Error('Confirmation du tarif TEMU requise');
+    await db.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'temu.purchase.requested',$2)",[user.email,JSON.stringify({reference:row.reference,planId:b.planId,amount:b.amount,source:'receipt_recovery',runId:b.id})]);
+    const result=await temu.buy(row.reference,b.planId,b.amount);json(res,200,result);return true;
+   }
    if(p==='/api/receipts/recovery'&&req.method==='GET'){json(res,200,{rows:(await db.query('SELECT id,number,state,error,created_at FROM receipt_recovery_runs ORDER BY created_at DESC LIMIT 20')).rows});return true;}
    if(p==='/api/receipts/recovery/status'&&req.method==='GET'){json(res,200,await status(url.searchParams.get('id')));return true;}
    if(p==='/api/receipts/recovery/preview'&&req.method==='POST'){
