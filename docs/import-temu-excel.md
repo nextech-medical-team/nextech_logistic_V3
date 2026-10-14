@@ -107,3 +107,7 @@ Les nouveaux BC TEMU (Excel et API) conservent le règlement vendeur TTC. Selon 
 Taux vérifiés le 14 octobre 2026 : AT 20, BE 21, BG 20, CY 19, CZ 21, DE 19, DK 25, EE 24, GR 24, ES 21, FI 25,5, FR 20, HR 25, HU 27, IE 23, IT 22, LT 21, LU 17, LV 21, MT 18, NL 21, PL 23, PT 23, RO 21, SE 25, SI 22, SK 23, GB 20, CH 8,1, NO 25 (%). Ce tableau implémente la règle standard demandée, sans détermination des taux réduits par produit ni des régimes territoriaux particuliers.
 
 Sources : [Union européenne](https://europa.eu/youreurope/business/finance-and-tax/vat/vat-rules-rates/index_en.htm), [Royaume-Uni](https://www.gov.uk/vat-rates), [Suisse](https://www.estv.admin.ch/en/vat-rates-switzerland), [Norvège](https://www.skatteetaten.no/satser/merverdiavgift/).
+
+### Achat après reprise du BL
+
+Une préparation Excel initiale terminée reste reconnue après une ou plusieurs opérations `resume-erp` terminées avec `resume: true` et `erpOnly: true`. Une reprise encore en cours, en erreur, en lecture seule ou partielle ne débloque pas l’achat. Les corrections intermédiaires d’un autre type restent soumises à leur propre validation. Le contrôle BL/stock existant est toujours appliqué avant de lever l’attente et avant l’achat. Cette correction ne termine pas une tâche Erplain bloquée et ne déclenche pas de nouvel achat à elle seule.
