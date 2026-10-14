@@ -1,7 +1,7 @@
 import {reconcileStockIncident} from './stock-incident-recheck.mjs';
 import {reconcileRefreshedBcDiagnostics,assertRefreshedBcDocument,documentReadVersion} from './bc-comparison-refresh.mjs';
 import {synchronizeRecoveredOrder} from './erplain-targeted-orders.mjs';
-import {pendingScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
+import {recoveryScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
 import {readErplainDocuments,assertDocumentIdle} from './erplain-document-read.mjs';
 import {refreshPartialFromErplain,syncedSelection,stockMismatch} from './partial-erplain-sync.mjs';
 const active=b=>!['cancelled','unpublished'].includes(b.status);
@@ -29,7 +29,7 @@ export async function refreshErplainDocuments(db,api,id){
   const r=await refreshPartialFromErplain(nested,api,id,{document:bc,identityVerified:true});
   const comparison=await reconcileRefreshedBcDiagnostics(tx,id,bc);return {...r,comparison,notFound:false};
  });
- const pending=o.source_payload?.erplainImported?recoveredPendingScope(bc,o):null;const visible=pending?.scoped?scopeSnapshot(bc,pending):bc;const source=documentSource(visible),known=visible.shipping_orders.data.find(b=>String(b.id)===String(o.erp_live?.bl?.id)),current=known||(visible.shipping_orders.data.filter(active).length===1?visible.shipping_orders.data.find(active):visible.shipping_orders.data.length===1?visible.shipping_orders.data[0]:null);
+ let pending=null;if(o.source_payload?.erplainImported){try{pending=recoveredPendingScope(bc,o);}catch{pending=recoveryScope(bc);}} const visible=pending?.scoped?scopeSnapshot(bc,pending):bc;const source=documentSource(pending?.scoped?{...visible,shipping_orders:{...visible.shipping_orders,data:pending.pending}}:visible),known=visible.shipping_orders.data.find(b=>String(b.id)===String(o.erp_live?.bl?.id)),current=known||(visible.shipping_orders.data.filter(active).length===1?visible.shipping_orders.data.find(active):visible.shipping_orders.data.length===1?visible.shipping_orders.data[0]:null);
  if(pending?.scoped)source.lines=pending.lines.map(l=>({lineId:String(l.id),sku:l.variant.sku,quantity:Number(l.quantity)}));
  if(o.erp_live?.bl?.id&&!known)throw Error('BL enregistré dans V3 absent du BC Erplain : rapprochement requis, aucune donnée remplacée');
  let stock=o.erp_live?.stockDocument;

@@ -1,7 +1,8 @@
 import {usesRecordedBc} from './existing-bc-execution.mjs';
+import {completeShippingOrders} from './erplain-document-read.mjs';
 import {erplainWeightKg} from './erplain-readonly.mjs';
 import {importedLabelMissingFields} from './erplain-label-required.mjs';
-import {pendingScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
+import {recoveryScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
 import {manualOrderFields,manualImportIssue} from './manual-erplain-orders.mjs';
 import {manualReviewHash,queueManualReview} from './erplain-manual-validation.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
@@ -18,9 +19,9 @@ export function assertDocumentRead(d,id){
  if(d.shipping_orders.data.some(b=>!b.id||!b.status))throw Error('API Erplain · Identité ou statut des BL incomplets');
 }
 export function documentIssues(d,existingOrder=null){
- const admission=[],preparation=[],issue=manualImportIssue(d);let scope;try{scope=existingOrder?recoveredPendingScope(d,existingOrder):pendingScope(d);}catch(e){admission.push(e.message);scope={lines:[],pending:[],scoped:false};}const lines=scope.lines;
+ const admission=[],preparation=[],issue=manualImportIssue(d);let scope;try{scope=existingOrder?recoveredPendingScope(d,existingOrder):recoveryScope(d);}catch(e){preparation.push(e.message);scope=recoveryScope(d);}if(scope.preparationIssue)preparation.push(scope.preparationIssue);const lines=scope.lines;
  const selectedIssue=scope.scoped?manualImportIssue({...d,line_items:scope.lines}):issue;if(selectedIssue)admission.push(selectedIssue);
- if(d.status!=='active')admission.push('BC Erplain '+d.status+' : admission bloquée');
+ if(d.status!=='active')preparation.push('BC Erplain '+d.status+' : activer le BC avant préparation');
  if(!d.customer?.id)admission.push('Client Erplain absent');
  if(!d.currency?.label||d.total==null||!Number.isFinite(Number(d.total))||d.line_items?.some(l=>l.tax_amount==null||!Number.isFinite(Number(l.tax_amount))))admission.push('Montants, taxes ou devise Erplain incomplets');
  const seen=new Map();
@@ -99,7 +100,7 @@ export async function synchronizeRecoveredOrder(db,o,d){
  return [...new Set(messages)];
 }
 export function targetedOrderService(db,api){
- async function read(id){await api.verify();const {Order:d}=await api.request(`query V3TargetedRead($id:ID!){Order(id:$id){${manualOrderFields}}}`,{id:String(id)});assertDocumentRead(d,id);return d;}
+ async function read(id){await api.verify();const {Order:d}=await api.request(`query V3TargetedRead($id:ID!){Order(id:$id){${manualOrderFields}}}`,{id:String(id)});if(d&&String(d.id)===String(id))await completeShippingOrders(api,d);assertDocumentRead(d,id);return d;}
  async function preview(id){
   const d=await read(id);
   return withShipmentLock(()=>db.transaction(async tx=>{
