@@ -9,7 +9,7 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/^Préparation Erplain en attente ou en cours$/.test(text))return result('preparation-pending',text,'');
  if(["Échec d’étiquette antérieur, suivi d’une revalidation BC/BL. Aucune relance effectuée.","Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.","Appels d’offres · GLS Pharma obligatoire : actualiser la préparation selon les règles transporteurs"].includes(text))return result('preparation',text,'');
  if(/TEMU/i.test(text)&&/3000032|prix et TVA|Prix et frais de livraison|Données financières|Prix API à récupérer/i.test(text))return result('temu-pricing','TEMU · Prix à renseigner','');
- if(/^Reprendre le remplacement après correction/.test(text))return result('equivalent-pending','Vérifier le remplacement');
+ if(/^Reprendre le remplacement après correction/.test(text)||text==='Reprendre le remplacement : nouvelle vérification nécessaire')return result('equivalent-pending','Vérifier le remplacement');
  if(/^Produit équivalent vérifié/.test(text))return result('equivalent-pending','Confirmer le remplacement');
  if(/^Produit (?:équivalent|restant) \[[^\]]+\] : Poids vérifié, remplacement à confirmer$/.test(text))return result('equivalent-pending','Confirmer le remplacement');
  if(/Commande (modifiée|annulée|déjà expédiée)/i.test(text))return result('platform',/annulée/i.test(text)?'Commande annulée sur la plateforme':/déjà expédiée/i.test(text)?'Commande déjà expédiée sur la plateforme':'Commande modifiée sur la plateforme','');
@@ -96,8 +96,9 @@ function compactProblems(order){
  if(!out.length&&!temuAwaitingPurchase&&['blocked','waiting_catalog','review','failed'].includes(order.carrier_job?.status||order.label_status))add(order.resolution_pending_resume&&!order.resolution_active?{type:'unknown',label:'Reprise à demander',sku:'',detail:'Des corrections sont enregistrées et la reprise de la préparation reste à demander. Consultez les documents et les diagnostics actuels avant toute reprise ; cet état ne confirme pas que tous les blocages sont résolus.',provider:'Erplain'}:compactProblem(''));
  // Historical job errors do not invalidate a mapping present on the current lines.
  const visible=out.filter(p=>{
+  if(pendingLine&&pending.recheckRequired&&p.detail===pending.previousError)return false;
   if(!p.sku&&(p.type==='weight'||p.type==='stock'&&new Set(lines.map(l=>l.sku||l.mapped_sku||l.source_sku).filter(Boolean)).size===1)&&out.some(x=>x.type===p.type&&x.sku&&x.label===p.label))return false;
-  if(pendingLine&&p.sku===pending.sku&&Number(pending.replaceQuantity)>=Number(pendingLine.quantity)&&Number(pendingLine.quantity)>0&&['weight','weight-unit','stock','missing','inactive','duplicate'].includes(p.type))return false;
+  if(pendingLine&&!pending.recheckRequired&&p.sku===pending.sku&&Number(pending.replaceQuantity)>=Number(pendingLine.quantity)&&Number(pendingLine.quantity)>0&&['weight','weight-unit','stock','missing','inactive','duplicate'].includes(p.type))return false;
   if(pendingLine&&!p.sku&&p.detail===pending.error)return false;
   if(p.type!=='mapping')return true;
   const relevant=lines.filter(l=>[l.source_sku,l.sku,l.mapped_sku].filter(Boolean).some(s=>s===p.sku||problemMentionsSku(p.detail,s)));
