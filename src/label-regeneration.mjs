@@ -15,6 +15,7 @@ export async function regenerateProductionLabels(db,{batchId=randomUUID(),ids=nu
   await db.transaction(async tx=>{
    const job=(await tx.query('SELECT * FROM carrier_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];
    if(job?.batch_id===batchId)return;
+   if(job?.status==='failed'&&(await tx.query('SELECT 1 FROM carrier_documents WHERE order_id=$1 LIMIT 1',[o.id])).rows.length){skipped.push({id:o.id,reference:o.reference,reason:'PDF existant à conserver : aucune reprise de création'});return;}
    if(job?.status==='failed'&&!await canRetryFailedCarrier(tx,job,{manualRequest})){skipped.push({id:o.id,reference:o.reference,reason:'Création précédente à rapprocher : aucune reprise automatique ou incertaine'});return;}
    if(job?.status==='ready'&&!allowReady){skipped.push({id:o.id,reference:o.reference,reason:'Étiquette déjà disponible : conserver le PDF existant'});return;}
    if(job&&(['pending','creating','awaiting_pdf'].includes(job.status)||(job.environment==='production'&&(job.status==='review'||(job.result&&!(allowReady&&job.status==='ready')))))){skipped.push({id:o.id,reference:o.reference,reason:'Création en cours ou incertaine : vérifier avant recréation'});return;}
