@@ -1,4 +1,6 @@
 import {temuCommercialSource} from './temu-commercial-source.mjs';
+import {excelAmounts} from './temu-excel-commercial.mjs';
+import {temuDestinationVat} from './temu-destination-vat.mjs';
 import {temuCountryAmounts,temuFixedVat} from './temu-country-vat.mjs';
 import {equivalentReceipts,applyEquivalentReceipts} from './temu-equivalent-margin.mjs';
 import {amountFields,quoteCost} from './temu-margin-data.mjs';
@@ -45,6 +47,13 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
   const equivalentOrder=o.channel==='temu'&&sourceLines.length>0&&sourceLines.every(l=>['erplain_live_equivalent','erplain_live_bc'].includes(l.source_payload?.origin));
   const raw=sourceLines.map(l=>{const source={...(o.source_payload?.origin==='temu_excel'?l.source_payload?.excel:{}),...o.source_payload,...l.source_payload},lookup=new Map(Object.entries(source).map(([k,v])=>[canonical(k),v]));const r=Object.fromEntries(fields.map(k=>[k,lookup.get(canonical(k))??'']));r.sourceRow=l.id;if(o.channel==='amazon'){r['amazon-order-id']=o.reference;r['order-item-id']=l.id;r.sku=l.source_sku;r.quantity=Number(l.quantity);r['ship-country']=o.address?.country||r['ship-country'];}else{r['Order ID']=o.reference;r["N° de l'article de la commande"]=l.id;r['contribution SKU']=l.source_sku;r['quantité achetée']=Number(l.quantity);r["pays d'expédition"]=o.address?.country||r["pays d'expédition"];r['N° SKU']=r['N° SKU']||source.skuId||'';r['nom du produit']=r['nom du produit']||source.goodsName||'';
    const amounts=o.source_payload?.temuAmounts;
+   if(!equivalentOrder&&o.source_payload?.origin==='temu_excel'){try{
+    const {rate}=temuDestinationVat(o),a=excelAmounts([l],{country:o.address?.country}),row=a.rows[0];
+    const gross=Math.round((row.net+row.tax)*100),shipping=Math.round((row.shipping+row.shippingTax)*100),tax=Math.round(gross*rate/(100+rate)),shippingTax=Math.round(shipping*rate/(100+rate));
+    const money=n=>(n/100)+' '+a.currency;
+    for(const key of ['Total du prix de base après réduction','Prix de base total','Prix de vente (hors taxes)','Total du prix de vente après réductions (hors taxes)'])r[key]=money(gross-tax);
+    r['Taxe sur les produits']=money(tax);r["Total de l'expédition (hors taxes)"]=money(shipping-shippingTax);r["Taxe d'expédition"]=money(shippingTax);
+   }catch(e){amountIssues.push(e.message);}}
    if(!equivalentOrder&&o.source_payload?.origin!=='temu_excel'){try{Object.assign(r,amountFields(temuCommercialSource(o,temuCountryAmounts(o)),o.reference,l));}catch(e){amountIssues.push(e.message);}}
    const hasReportPrice=['Total du prix de base après réduction','Prix de base total'].some(k=>String(r[k]).trim()!=='');
    const unit=source.puht,quantity=Number(l.quantity),currency=String(source.currency||'').toUpperCase();
@@ -107,4 +116,3 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
  }
  return {async get({fresh=false}={}){if(fresh)return calculate();if(cache&&Date.now()-last<30000)return cache;if(!inflight)inflight=calculate().then(r=>{cache=r;last=Date.now();return r;}).finally(()=>inflight=null);return inflight;}};
 }
-

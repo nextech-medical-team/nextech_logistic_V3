@@ -51,3 +51,18 @@ test('source failure is explicitly incomplete and other sources remain readable'
  await request({days:28});const runId=result.runId;await request({runId});await request({runId});
  assert.equal(result.done,true);assert.equal(result.complete,false);assert.equal(result.errors.length,2);assert.doesNotMatch(JSON.stringify(result),/private credential/);
 });
+
+
+test('missing-order verification remains wired alongside manual cancellation refresh',async()=>{
+ const {readFile}=await import('node:fs/promises');
+ const server=await readFile(new URL('../src/server.mjs',import.meta.url),'utf8');
+ const page=await readFile(new URL('../public/index.html',import.meta.url),'utf8');
+ for(const asset of ['missing-orders-verification','manual-platform-cancellation']){
+  assert.ok(page.includes('src="/'+asset+'.js?'));
+  assert.ok(server.includes("'/"+asset+".js'"));
+ }
+ assert.ok(server.includes("import {missingOrdersVerification} from './missing-orders-verification.mjs'"));
+ assert.ok(server.includes('const verifyMissingOrders=missingOrdersVerification(db,directory)'));
+ assert.ok(server.includes('if(await verifyMissingOrders({p,req,res,user,permitted,body,json}))return'));
+ assert.ok(server.includes('await platformCancellationRefresh.next(await body(req),user)'));
+});

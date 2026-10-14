@@ -18,7 +18,7 @@ async function fixture(t){
  CREATE TABLE resolution_jobs(id text,order_id text,request_id text,action text,payload jsonb,result jsonb,status text DEFAULT 'queued',stage text DEFAULT 'En attente',error text,created_at timestamptz DEFAULT now());`);
  await initializeTemuShipping(db);
  await db.query("INSERT INTO orders(id,channel,reference,recipient,address,source_date,source_payload,suspension,tracking_status,resolution_pending_resume) VALUES('o','temu',$1,'Client fictif',$2,'2026-10-12',$3,$4,'not_shipped',true)",[reference,JSON.stringify({name:'Client fictif',country:'HR',street:'Rue fictive',postal:'10000',city:'Ville'}),JSON.stringify({origin:'temu_excel',manualPreparationRequired:true}),JSON.stringify({active:true,note:excelImportHold,version:'initial'})]);
- const excel={'Prix de vente (hors taxes)':'67,25€','Total du prix de vente après réductions (hors taxes)':'67,25€','Taxe sur les produits':'16,80€',"Total de l'expédition (hors taxes)":'0€',"Taxe d'expédition":'0€'};
+ const excel={'Prix de vente (hors taxes)':'67,25€','Total du prix de base après réduction':'67,25€','Total du prix de vente après réductions (hors taxes)':'67,25€','Taxe sur les produits':'16,80€',"Total de l'expédition (hors taxes)":'0€',"Taxe d'expédition":'0€'};
  await db.query("INSERT INTO lines(id,order_id,source_line,source_sku,quantity,source_payload,target_sku,target_quantity) VALUES('l','o','item','SKU',5,$1,'ERP-SKU',10)",[JSON.stringify({temuOrderSn:'item',excel})]);
  const now=Math.floor(Date.now()/1000),detail={parentOrderMap:{parentOrderSn:reference,parentOrderStatus:2,expectShipLatestTime:now+4*86400},orderList:[{orderSn:'item',orderStatus:2,quantity:5,productList:[{extCode:'SKU'}]}]};
  let bought=0;const calls=[],api={canBuy:true,async buy(){bought++;return {packageSnList:['PK-123']};},async pdf(){return Buffer.from('%PDF-fixture');},async read(method){calls.push(method);
@@ -73,7 +73,7 @@ test('production worker uses Excel source totals and shared pricing, without API
  const f=await fixture(t);await f.service.prepare(await f.input(),user);const o=await f.read(),lines=await f.lines();
  assert.equal(await ensureTemuBcPricing(f.db,o,lines,()=>assert.fail('No API amount request')),false);
  o.source_payload.temuAmounts={data:{parentOrderMap:{estimatedRevenue:{currency:'USD',amount:1}}}};
- assert.equal(sourceCurrency(o),'EUR');const pricing=buildBcPricing(o,lines,[{variant:{id:'1'},quantity:10}],[{id:'25',active:true,tax_rates:[{rate:25}]}]);assert.equal(pricing.total,84.05);assert.equal(pricing.tax,16.8);assert.equal(pricing.items[0].quantity,10);assert.equal(pricing.items[0].price,8.405);assert.equal(pricing.tax_type,'inclusive');
+ assert.equal(sourceCurrency(o),'EUR');const pricing=buildBcPricing(o,lines,[{variant:{id:'1'},tax_codes:[{id:'25'}],quantity:10}],[{id:'25',active:true,tax_rates:[{rate:25}]}]);assert.equal(pricing.total,84.05);assert.equal(pricing.tax,16.81);assert.equal(pricing.items[0].quantity,10);assert.equal(pricing.items[0].price,8.405);assert.equal(pricing.tax_type,'inclusive');
  assert.equal(temuSellerTotals(o).total,84.05);verifySourceCommercialTotals({total:84.05,currency:{label:'EUR'},line_items:[{tax_amount:16.8}]},temuSellerTotals(o));
  lines[0].quantity=10;await assert.rejects(ensureTemuBcPricing(f.db,o,lines,()=>assert.fail('No API amount request')),/modifiés/);
 });

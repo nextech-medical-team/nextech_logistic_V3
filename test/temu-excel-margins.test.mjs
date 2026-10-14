@@ -19,6 +19,13 @@ test('existing calculator uses Excel seller revenue, contribution once, catalogu
  f.job.plan.amount=12;const updated=(await service.get({fresh:true})).rows[0];assert.equal(updated.profit,-4);assert.equal(updated.status,'negative');
  f.job.result={packageInfoResultList:[{packageSn:'PK-1',estimatedAmount:3,estimatedCurrencyCode:'EUR',orderSendInfoList:[{parentOrderSn:f.order.reference}]}]};const paid=(await service.get({fresh:true})).rows[0];assert.equal(paid.shipping,2.5);assert.match(paid.shippingSource,/Coût étiquette/);
 });
+test('Excel margin follows destination VAT rather than the retail tax in the report',async()=>{
+ const f=fixture();f.order.address.country='SK';f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ f.options.snapshotLoader=async()=>({...structuredClone(snapshot),countries:{...snapshot.countries,SK:{...snapshot.countries.FR,n:'Slovakia'}}});
+ const result=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];
+ assert.deepEqual(result.issues,[]);assert.equal(result.revenue,17.56);assert.equal(result.credit,1.95);
+ assert.ok(Math.abs(result.profit-.51)<.00001);
+});
 test('missing prices, unknown SKUs and mismatched prepared quantities never give a complete margin',async()=>{
  for(const change of [f=>{delete f.line.source_payload.excel['Prix de base total'];delete f.line.source_payload.excel['Total du prix de base après réduction'];},f=>f.line.target_sku='OTHER',f=>f.line.target_quantity=20,f=>{f.line.source_sku='unknown';f.line.source_payload.skuId='unknown';}]){
   const f=fixture();change(f);const service=await createMarginsService(f.db,f.options);const row=(await service.get({fresh:true})).rows[0];assert.equal(row.status,'incomplete');assert.ok(row.issues.length);
