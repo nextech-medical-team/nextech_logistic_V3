@@ -128,7 +128,7 @@ test('post-BL Excel path preserves suspension, cancellation, partial scope and d
 test('automatic TEMU purchase uses existing BL without Excel, ERP, stock or preparation rechecks and preserves diagnostics',async t=>{
  const {initializeTemuAutomaticPurchase,temuAutomaticPurchaseWorker}=await import('../src/temu-automatic-purchase.mjs');
  const f=await fixture(t);
- await f.db.exec("CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE extra_parcels(order_id text);ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false;");
+ await f.db.exec("CREATE TABLE IF NOT EXISTS correction_jobs(order_id text,status text);CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE extra_parcels(order_id text);ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false;");
  await initializeTemuAutomaticPurchase(f.db);
  const erp={bl:{id:'existing-bl',status:'in_preparation'},bc:{id:'bc'},stock:{error:'Stock insuffisant'},pricing:{status:'blocked'}};
  await f.db.query("UPDATE orders SET suspension='{}',issue='Mapping modifié',resolution_pending_resume=true,erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);

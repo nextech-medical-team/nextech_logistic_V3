@@ -136,6 +136,8 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
     if(current.blAuthority){
      if(!o||String(o.erp_live?.bl?.id)!==current.blAuthority.blId)throw Error('BL associé modifié avant achat');
      assertExistingBlLabelOrder(o);
+     const activeWrites=(await tx.query("SELECT order_id FROM correction_jobs WHERE order_id=$1 AND status IN ('queued','applying','checking') UNION ALL SELECT order_id FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running')",[o.id])).rows;
+     if(activeWrites.length)throw Error('correction ou reprise en cours');
      if(hasExternalLabel(o)||(await tx.query('SELECT 1 FROM temu_label_documents WHERE reference=$1 LIMIT 1',[reference])).rows.length)throw Error('Étiquette existante à conserver : aucun nouvel achat');
      const claimed=await tx.query(claimSql,args);
      if(proof&&claimed.rows.length)await tx.query('INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) VALUES($1,$2,$3,$4)',[claimed.rows[0].attempt_id,reference,current.id,JSON.stringify(admission.audit)]);
