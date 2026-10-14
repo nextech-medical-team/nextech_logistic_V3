@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto';
+import {localOrderBusy} from './order-local-transaction.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 import {readErplainDocuments} from './erplain-document-read.mjs';
 import {erplainLifecycleGateway} from './erplain-lifecycle-gateway.mjs';
@@ -52,13 +53,15 @@ async function event(tx,order,action,note,state,user){
  await tx.query('INSERT INTO order_suspension_events(id,order_id,action,user_email,note,state) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),order.id,action,user.email,note,JSON.stringify(state)]);
  await tx.query('INSERT INTO audit(user_email,action,detail) VALUES($1,$2,$3)',[user.email,'order.'+action,JSON.stringify({orderId:order.id,note,version:state.version})]);
 }
-export function orderSuspensionService(db,api){
+export function orderSuspensionService(db,api,{onTiming=event=>console.info(JSON.stringify({event:'order-suspension-timing',...event}))}={}){
+ function recordTiming(event){try{onTiming(event);}catch{}}
  function authorized(user){if(!['admin','manager','operator'].includes(user?.role))throw Object.assign(Error('Droits insuffisants'),{status:403});}
- async function context(id){
+ async function context(id,requestedTrace){
+  const began=performance.now(),requestId=/^[a-f0-9-]{36}$/.test(requestedTrace||'')?requestedTrace:randomUUID();
   const order=(await db.query('SELECT id,reference,suspension,erp_live,tracking_status,archived FROM orders WHERE id=$1',[id])).rows[0];
   if(!order)throw Error('Commande introuvable');
   const history=(await db.query('SELECT action,user_email,note,state,created_at FROM order_suspension_events WHERE order_id=$1 ORDER BY created_at DESC,id DESC',[id])).rows;
-  return {order,history};
+  const timings={contextMs:Math.round(performance.now()-began)};recordTiming({requestId,action:'context',...timings});return {order,history,requestId,timings};
  }
  async function locked(id,fn){
   const order=(await db.query('SELECT reference FROM orders WHERE id=$1',[id])).rows[0];if(!order)throw Error('Commande introuvable');
@@ -66,14 +69,21 @@ export function orderSuspensionService(db,api){
  }
  async function change(input,user,active){
   authorized(user);const b=validateSuspension(input);
-  return locked(b.id,()=>db.transaction(async tx=>{
-   const order=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows[0];
+  const began=performance.now(),requestId=randomUUID();
+  const transaction=db.localTransaction|| (async fn=>({result:await db.transaction(fn),timings:{totalMs:Math.round(performance.now()-began)}}));
+  try{const {result,timings}=await transaction(async tx=>{
+   const order=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE NOWAIT',[b.id])).rows[0];
    if(!order||order.archived)throw Error('Commande absente ou archivée');
    if(version(order.suspension)!==b.expectedVersion)throw Error('La commande a changé : actualiser avant de confirmer');
    if((order.suspension?.active===true)===active)throw Error(active?'Commande déjà suspendue':'Commande déjà active');
    if(!active&&['processing','review'].includes(order.suspension?.erplainCancellation?.status))throw Error('Annulation ERPLAIN à rapprocher avant réactivation');
    // Suspension is a local hold, including shipped/delivered orders.
    // Physical/document cancellation keeps its separate guard below.
+   // NOWAIT avoids job-row/order-row deadlocks. Claim triggers take FOR SHARE
+   // on this order; a new claim after commit will see suspension.active=true.
+   for(const table of ['erp_live_jobs','carrier_jobs','resolution_jobs','correction_jobs','partial_deliveries','extra_parcels','document_lifecycle','jobs'])
+    await tx.query(`SELECT order_id FROM ${table} WHERE order_id=$1 FOR UPDATE NOWAIT`,[b.id]);
+   await tx.query('SELECT reference FROM temu_label_jobs WHERE reference=$1 FOR UPDATE NOWAIT',[order.reference]);
    await idle(tx,order);
    const state={...order.suspension,active,note:b.note,version:randomUUID(),updatedAt:new Date().toISOString(),updatedBy:user.email};
    if(active){state.suspendedAt=state.updatedAt;state.suspendedBy=user.email;}
@@ -91,7 +101,8 @@ export function orderSuspensionService(db,api){
    await tx.query('UPDATE orders SET suspension=$2,resolution_pending_resume=true WHERE id=$1',[b.id,JSON.stringify(state)]);
    await event(tx,order,active?'suspended':'reactivated',b.note,state,user);
    return {ok:true,message:active?'Commande suspendue.':state.erplainCancellation?'Commande réactivée dans V3. Le BC ERPLAIN annulé reste protégé contre toute recréation automatique.':'Commande réactivée. Reprise manuelle nécessaire.',suspension:state};
-  }));
+  });recordTiming({requestId,action:active?'suspend':'reactivate',outcome:'saved',...timings});return {...result,requestId,timings};
+  }catch(error){recordTiming({requestId,action:active?'suspend':'reactivate',outcome:error.code==='LOCAL_ORDER_UNCERTAIN'?'uncertain':'refused',totalMs:Math.round(performance.now()-began),code:error.code||'business_guard',phase:error.phase||'transaction',...error.timings});if(error.code==='55P03'||error.code==='57014')throw localOrderBusy(error);throw error;}
  }
  async function cancelErplain(input,user){
   authorized(user);

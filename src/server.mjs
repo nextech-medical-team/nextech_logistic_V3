@@ -357,7 +357,7 @@ const server=http.createServer(async(req,res)=>{
     if(['/api/problem-deferral/defer','/api/problem-deferral/restore'].includes(p)&&req.method==='POST'){
       permitted(user,operational);const b=await body(req);json(res,200,await deferralService[p.endsWith('/defer')?'defer':'restore'](b,user));return;
     }
-    if(p==='/api/orders/suspension'&&req.method==='GET'){json(res,200,await suspensionService.context(url.searchParams.get('id')));return;}
+    if(p==='/api/orders/suspension'&&req.method==='GET'){json(res,200,await suspensionService.context(url.searchParams.get('id'),url.searchParams.get('requestId')));return;}
     if(p==='/api/orders/refresh-platform-cancellations'&&req.method==='POST'){
       permitted(user,operational);json(res,200,await platformCancellationRefresh.next(await body(req),user));return;
     }
