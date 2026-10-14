@@ -28,5 +28,5 @@
   }
  }
  new MutationObserver(refresh).observe(root,{childList:true,subtree:true});refresh();
- setInterval(()=>{if(document.hidden||document.getElementById('view-orders')?.hidden)return;for(const info of root.querySelectorAll('[data-stock-information][data-expires-at]'))if(Number(info.dataset.expiresAt)<=Date.now())info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';load(info.dataset.stockInformation).then(data=>show(info,data));},60000);
+ setInterval(()=>{if(document.hidden||document.getElementById('view-orders')?.hidden)return;for(const info of root.querySelectorAll('[data-stock-information][data-expires-at]'))if(Number(info.dataset.expiresAt)<=Date.now()){info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';load(info.dataset.stockInformation).then(data=>show(info,data));}},60000);
 })();

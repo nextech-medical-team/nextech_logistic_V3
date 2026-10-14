@@ -24,3 +24,16 @@ for(const width of [1440,390])test(`stock visible rows, bounded wait, retry and 
  expect(await page.evaluate(()=>reads.filter(r=>r.sku==='GOOD').length)).toBe(1);
  await page.screenshot({path:'proofs/stock-information-'+width+'.png'});
 });
+
+for(const empty of [true,false])test('periodic stock refresh handles empty and populated tables '+empty,async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.setContent('<div id="view-orders"><div id="order-rows">'+(empty?'':'<button class="compact-problem" data-problem-type="stock" data-problem-sku="TEST">Stock</button>')+'</div></div>');
+ await page.evaluate(()=>{window.reads=0;window.stockNow=Date.now();Date.now=()=>window.stockNow;window.stockTimers=[];window.setInterval=fn=>{stockTimers.push(fn);return stockTimers.length;};window.esc=s=>String(s??'');window.api=async()=>{reads++;if(reads===2)throw Error('Lecture indisponible');return {original:{incoming:reads},equivalentCount:0,equivalents:[],locationId:'TEST',checkedAt:new Date().toISOString(),expiresAt:new Date(stockNow+30000).toISOString()};};});
+ await page.addScriptTag({content:script});
+ if(empty){await page.evaluate(()=>stockTimers.forEach(fn=>fn()));expect(await page.evaluate(()=>reads)).toBe(0);expect(errors).toEqual([]);return;}
+ const info=page.locator('[data-stock-information]');await expect(info).toContainText('ERPLAIN : 1');await page.evaluate(()=>stockTimers.forEach(fn=>fn()));expect(await page.evaluate(()=>reads)).toBe(1);
+ await page.evaluate(()=>{stockNow+=31000;stockTimers.forEach(fn=>fn());});await expect(info).toContainText('lecture indisponible ou différée');
+ await info.locator('button').click();await expect(info).toContainText('ERPLAIN : 3');
+ await page.evaluate(()=>{stockNow+=31000;document.getElementById('view-orders').hidden=true;stockTimers.forEach(fn=>fn());});expect(await page.evaluate(()=>reads)).toBe(3);
+ await page.evaluate(()=>{document.getElementById('view-orders').hidden=false;stockTimers.forEach(fn=>fn());});await expect(info).toContainText('ERPLAIN : 4');expect(errors).toEqual([]);
+});
