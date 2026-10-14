@@ -189,3 +189,27 @@ test('explicit order-not-found in another shop does not reject the verified owne
   await assert.rejects(resolveExcelTemuShop(order,orderLines,[owner,{mallId:'failed',api:{read:async()=>{throw failure;}}}]),e=>e.code===failure.code);
  }
 });
+
+test('legacy Excel with a published BL can find its shop without import job metadata',async()=>{
+ const stored={...order,id:'excel',channel:'temu',erp_live:{bc:{id:'bc'},bl:{id:'bl',status:'ready_to_ship'}},source_payload:{origin:'temu_excel'}};
+ let refused=true,writes=0;
+ const db={query:async(sql,args)=>{
+  if(sql.startsWith('SELECT * FROM lines'))return {rows:orderLines};
+  if(sql.startsWith('UPDATE orders')){writes++;stored.source_payload={...stored.source_payload,...JSON.parse(args[1])};return {rows:[]};}
+  return {rows:[stored]};
+ }};
+ const local=temuLocalService(db,'/unused',{
+  configLoader:async()=>config,shopLoader:async()=>[],apiFactory:()=>({read:async method=>{
+   if(refused)throw unavailable();
+   if(method==='bg.open.accesstoken.info.get')return {mallId:'owner'};
+   if(method==='bg.order.detail.v2.get')return orderDetail;
+   if(method==='bg.logistics.shipment.v2.get')return {shipmentInfoDTO:[]};
+   throw Error(method);
+  }})
+ });
+ await assert.rejects(local.diagnose(order.reference),/abnormal/);
+ assert.equal(writes,0);assert.equal(stored.erp_live.bl.id,'bl');
+ refused=false;const result=await local.diagnose(order.reference);
+ assert.equal(result.errors.length,0);assert.equal(stored.source_payload.mallId,'owner');assert.equal(writes,1);
+ assert.equal(stored.source_payload.temuDirect,undefined); // Shop binding alone is not purchase authorization.
+});
