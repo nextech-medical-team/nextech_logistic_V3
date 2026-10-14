@@ -9,5 +9,5 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await page.goto('/');
  const yes=page.locator('#order-rows tr[data-complete-order-documents="true"]'),no=page.locator('#order-rows tr[data-complete-order-documents="false"]');
  await expect(yes).toHaveCount(1);await expect(no).toHaveCount(1);await expect(yes).toContainText('Quantités entièrement allouées');await expect(yes.locator('.compact-problem')).toHaveCount(0);await expect(yes.locator('.order-processing')).toHaveCount(0);await expect(yes).not.toContainText('stock insuffisant');await expect(no).toContainText('1 unités à allouer');
- await expect(no.locator('.order-processing')).toHaveCount(1);await page.screenshot({path:'proofs/partial-complete-documents-'+name+'.png'});expect(errors).toEqual([]);expect(writes).toEqual([]);
+ await expect(no.locator('.order-processing')).toHaveCount(1);await yes.scrollIntoViewIfNeeded();await page.screenshot({path:'proofs/partial-complete-documents-'+name+'.png',fullPage:true});expect(errors).toEqual([]);expect(writes).toEqual([]);
 });
