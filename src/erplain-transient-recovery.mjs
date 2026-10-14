@@ -4,7 +4,7 @@ import {recoverOrder} from './erplain-document-metadata.mjs';
 export async function recordTransientFailure(db,o,message,error){
  const old=o.erp_live?.transientRecovery||{};
  const readRateLimited=error?.httpStatus===429&&error?.erplainReadOnly===true;
- const state={...old,lastError:transientErpError(message)?message:null,lastFailureAt:new Date().toISOString(),readRateLimited,
+ const state={...old,originalError:old.originalError||message,lastError:transientErpError(message)?message:null,lastFailureAt:new Date().toISOString(),readRateLimited,
   nextReadCheckAt:readRateLimited?new Date(Date.now()+Math.max(60000,Number(error.retryAfter||0)*1000)).toISOString():null};
  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{transientRecovery}',$2::jsonb) WHERE id=$1",[o.id,JSON.stringify(state)]);
  o.erp_live.transientRecovery=state;
@@ -64,6 +64,7 @@ export async function resumeTransientErplain(db,api){
      if(String(bc?.id)!==String(state.bc.id)||bc.status!=='active'||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
      const bl=list.data[0];
      if(bl&&(!bl.id||['cancelled','closed'].includes(bl.status)))throw Error('BL annulé ou non identifiable : contrôle nécessaire');
+     if(state.bl?.id&&!bl)throw Error(state.bl.status==='unpublished'?'Brouillon BL introuvable dans Erplain : reprendre depuis le BC après rapprochement':'BL introuvable dans Erplain : rapprochement nécessaire');
      if(state.bl?.id&&String(bl?.id)!==String(state.bl.id))throw Error('BL différent : contrôle nécessaire');
      if(bl)state.bl=bl;
     }

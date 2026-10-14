@@ -15,4 +15,5 @@ groups.at(-1).push('test/manual-platform-cancellation-ui.test.mjs');
 groups.at(-1).push('test/missing-orders-verification.test.mjs');
 groups.push(quotaGroup);
 groups.push(recoveredPreparationGroup);
+groups.push(['--test','test/missing-draft-recovery.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
