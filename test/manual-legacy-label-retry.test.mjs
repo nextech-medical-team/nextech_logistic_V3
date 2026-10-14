@@ -24,6 +24,11 @@ test('fresh manual request alone requeues a rejected legacy attempt without ERP 
    if(sql.startsWith('SELECT * FROM orders'))return {rows:[o]};
    if(sql.startsWith('SELECT * FROM carrier_jobs'))return {rows:[job]};
    if(sql.startsWith('SELECT 1 FROM carrier_documents'))return {rows:documents?[{exists:1}]:[]};
+   if(sql.startsWith('SELECT action,detail,created_at FROM audit')){
+    assert.deepEqual(args,[job.order_id,job.updated_at]);
+    assert.match(sql,/date_trunc\('milliseconds',created_at\)=date_trunc\('milliseconds',\$2::timestamptz\)/);
+    return {rows:[]};
+   }
    assert.ok(!sql.startsWith('SELECT'),'Unexpected business read: '+sql);
    writes.push(sql);return {rows:[]};
   }};
