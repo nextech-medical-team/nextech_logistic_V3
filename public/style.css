@@ -290,5 +290,18 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
  .order-information-dialog{padding:0 16px 16px}
 }
 
-#view-orders .orders-fixed-layout td[data-fixed-column="reference"]>:not([data-detail]):not([data-delivery-detail]):not([data-order-more-info]){display:none!important}
+#view-orders .orders-fixed-layout tr:not(.order-row-expanded) td[data-fixed-column="reference"]>:not([data-detail]):not([data-delivery-detail]):not([data-order-more-info]){display:none!important}
 #view-orders .orders-fixed-layout .processing-details-toggle{display:none!important}
+
+/* A deliberate arrow expands original controls in place; collapsed geometry stays fixed. */
+#view-orders .orders-fixed-layout .order-more-information{left:6px;right:auto;width:36px;max-width:calc(100% - 12px);font-size:21px;line-height:1;padding:3px!important}
+#view-orders .orders-fixed-layout tr.order-row-expanded{height:auto;max-height:none}
+#view-orders table.orders-fixed-layout.orders-with-margins tbody tr.order-row-expanded>td:not(.total-quantity-column){height:auto;max-height:none;overflow:visible}
+#view-orders .orders-fixed-layout tr.order-row-expanded td[data-fixed-column="reference"]{padding-bottom:10px!important}
+#view-orders .orders-fixed-layout tr.order-row-expanded .order-more-information{position:sticky;top:56px;bottom:auto;left:auto;right:auto;display:block;margin:8px 0;width:36px}
+#view-orders #order-rows tr.order-row-expanded .processing-content{height:auto;overflow:visible}
+#view-orders #order-rows tr.order-row-expanded .processing-content::after{display:none}
+@media(max-width:900px){
+ #view-orders table.orders-fixed-layout.orders-with-margins tbody tr.order-row-expanded>td:not(.total-quantity-column){display:block;height:auto;min-height:0;max-height:none}
+ #view-orders .orders-fixed-layout tr.order-row-expanded{min-height:320px}
+}
