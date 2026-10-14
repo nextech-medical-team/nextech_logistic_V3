@@ -1,4 +1,3 @@
-import {currentMappingFingerprint} from './current-mapping-line.mjs';
 import {randomUUID} from 'node:crypto';
 import {currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
 import {assertTemuManualLabel} from './manual-label-policy.mjs';
@@ -41,8 +40,7 @@ export async function queueCarrierLabels(db,ids,{automatic=false}={}){
     if(r?.status!=='complete'||r.error||r.result?.partialRemainder||!(r.result?.erpOnly||r.result?.equivalent))throw Error('Préparation suspendue : terminer sa validation');
    }
    await tx.query('SELECT id FROM lines WHERE order_id=$1 ORDER BY id FOR SHARE',[id]);
-   await tx.query('SELECT source_sku FROM mappings WHERE channel=$2 AND source_sku IN (SELECT source_sku FROM lines WHERE order_id=$1) FOR SHARE',[id,o.channel]);
-   if(!o.erp_live.mappingPreparationFingerprint||await currentMappingFingerprint(tx,o)!==o.erp_live.mappingPreparationFingerprint)throw Error('Mapping modifié depuis la validation du BL : recontrôle requis');
+   // The recorded BC owns this preparation; later global mappings cannot veto its label.
    await assertLabelStockGate(tx,o);
    if((await tx.query('SELECT document_index FROM carrier_documents WHERE order_id=$1 LIMIT 1',[id])).rows.length)throw Error('Étiquette existante à rapprocher');
    if((await tx.query('SELECT id FROM carrier_label_history WHERE order_id=$1 LIMIT 1',[id])).rows.length)throw Error('Historique transporteur à rapprocher');
@@ -86,7 +84,6 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
       const e=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[o.id])).rows[0];
       if(!job.stock_override){
        assertPreparedLabelOrder(o,e);
-       if(!o.erp_live.mappingPreparationFingerprint||await currentMappingFingerprint(db,o)!==o.erp_live.mappingPreparationFingerprint)throw Error('Mapping modifié avant création : recontrôle requis');
       }
       await assertLabelStockGate(db,o,job.stock_override);
      }
