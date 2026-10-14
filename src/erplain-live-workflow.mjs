@@ -335,5 +335,5 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    }
   }catch(e){for(const o of working)await fail(o,e);}finally{running=false;activeBcOnlyOrderId=null;}
  }
- return {run:options=>withShipmentLock(()=>run(options),['erplain-live-workflow']),get running(){return running;}};
+ return {run,get running(){return running;}};
 }

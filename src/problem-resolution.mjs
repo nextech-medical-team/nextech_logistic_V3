@@ -481,7 +481,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
      }))return;
      await update(j.id,'complete','Terminé',result);
     }catch(e){await failure(j,e);}
-    },['force-stock-label','replace-equivalent'].includes(j.action)?['erplain-live-workflow','stock-mutations']:['stock-mutations']);
+    },['stock-mutations']);
    }catch(e){if(j)await failure(j,e);}finally{running=false;}
   }
  };
