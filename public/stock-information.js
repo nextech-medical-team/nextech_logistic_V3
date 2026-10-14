@@ -14,7 +14,8 @@
    cache.set(sku,{until:Date.parse(data.expiresAt),data});resolve(data);
   }).catch(()=>{const data={error:true};cache.set(sku,{until:Date.now()+60000,data});resolve(data);}).finally(()=>{clearTimeout(timer);running--;pending.delete(sku);pump();});}}
  function load(sku){const prior=cache.get(sku);if(prior?.until>Date.now())return Promise.resolve(prior.data);if(pending.has(sku))return pending.get(sku);const promise=new Promise(resolve=>queue.push({sku,resolve}));pending.set(sku,promise);pump();return promise;}
- function show(info,data){if(!info.isConnected)return;info.dataset.expiresAt=String(cache.get(info.dataset.stockInformation)?.until||Date.now()+60000);if(data.error){info.innerHTML='À venir ERPLAIN : lecture indisponible ou différée · équivalents V3 : non vérifiés<br><button type="button" class="link-button" data-stock-retry>Réessayer la lecture</button>';info.querySelector('[data-stock-retry]').onclick=()=>{cache.delete(info.dataset.stockInformation);info.remove();refresh();};}else info.innerHTML=html(data);}
+ function show(info,data){if(!info.isConnected)return;info.dataset.expiresAt=String(cache.get(info.dataset.stockInformation)?.until||Date.now()+60000);if(data.error){info.innerHTML='À venir ERPLAIN : lecture indisponible ou différée · équivalents V3 : non vérifiés<br><button type="button" class="link-button" data-stock-retry>Réessayer la lecture</button>';info.querySelector('[data-stock-retry]').onclick=()=>{cache.delete(info.dataset.stockInformation);info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';load(info.dataset.stockInformation).then(data=>show(info,data));};}else info.innerHTML=html(data);}
+ window.V3StockInformation={populate(info,sku){info.dataset.stockInformation=sku;info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';load(sku).then(data=>show(info,data));}};
  // Read only rows currently visible; hidden rows must not monopolize the two slots.
  const watched=new Set();
  const visible=new IntersectionObserver(entries=>{for(const {target:info,isIntersecting}of entries)if(isIntersecting&&info.isConnected&&!info.dataset.started){info.dataset.started='true';info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';load(info.dataset.stockInformation).then(data=>show(info,data));visible.unobserve(info);watched.delete(info);}},{rootMargin:'0px'});
@@ -27,5 +28,5 @@
   }
  }
  new MutationObserver(refresh).observe(root,{childList:true,subtree:true});refresh();
- setInterval(()=>{if(document.hidden||document.getElementById('view-orders')?.hidden)return;for(const info of root.querySelectorAll('[data-stock-information][data-expires-at]'))if(Number(info.dataset.expiresAt)<=Date.now())info.remove();refresh();},60000);
+ setInterval(()=>{if(document.hidden||document.getElementById('view-orders')?.hidden)return;for(const info of root.querySelectorAll('[data-stock-information][data-expires-at]'))if(Number(info.dataset.expiresAt)<=Date.now())info.textContent='À venir ERPLAIN et équivalents V3 : lecture en cours…';load(info.dataset.stockInformation).then(data=>show(info,data));},60000);
 })();
