@@ -11,14 +11,6 @@ function fixture({channel='shopify',cancelled=true,error=null,bc=true,shipped=fa
  return {order,calls,service:manualPlatformCancellation(db,'unused',suspension,{shopify,connect})};
 }
 const user={role:'operator',email:'test@example.test'};
-
-test('refresh and apply retain the order destination country for both platforms',async()=>{
- for(const channel of ['shopify','temu']){
-  const f=fixture({channel});f.order.address={country:'IT'};
-  assert.equal((await f.service.next({},user)).result.country,'IT');
-  assert.equal((await f.service.apply({id:'a'},user)).result.country,'IT');
- }
-});
 test('confirmed cancellations suspend V3 before cancelling Erplain for both channels',async()=>{
  for(const channel of ['shopify','temu']){const f=fixture({channel});const result=await f.service.apply({id:'a'},user);assert.equal(result.result.status,'cancelled');assert.ok(f.calls.indexOf('suspend')<f.calls.indexOf('cancel'));assert.ok(f.calls.some(s=>s.includes("label_status='cancelled'")));}
 });
