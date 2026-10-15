@@ -42,4 +42,5 @@ groups.push(['--test','test/catalogue-local-review-resume.test.mjs']);
 groups.push(['--test','test/temu-bl-quantity-data.test.mjs']);
 groups.push(['--test','test/erplain-recovery-fluidity.test.mjs']);
 groups.push(postBlHistoryGroup);
+groups.push(['--test','test/manual-label-request-view.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

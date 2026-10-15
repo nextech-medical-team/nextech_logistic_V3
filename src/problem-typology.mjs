@@ -5,7 +5,7 @@ export function orderProblemLabels(order, compactProblems, inProblemFilter=false
  if(order.suspension?.problemDeferral?.active===true||hasCompleteOrderDocuments(order))return [];
  if(order.archived||order.suspension?.active===true||order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'||order.suspension?.erplainCancellation?.status==='complete')return [];
  const labels=[...new Set(compactProblems(order).map(d=>d.label).filter(Boolean))];
- if(!labels.length&&inProblemFilter&&!order.label_manual_request_required)labels.push(WITHOUT_DIAGNOSTIC);
+ if(!labels.length&&inProblemFilter&&!order.label_manual_request_required&&!order.manual_label_request)labels.push(WITHOUT_DIAGNOSTIC);
  return labels;
 }
 export function selectProblemOrders(orders, selectedLabels, compactProblems, problemIds=[]){

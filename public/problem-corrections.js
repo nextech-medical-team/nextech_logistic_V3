@@ -368,7 +368,7 @@ function resolutionDialog(title,reference){
 
 
 
-   let queued=ctx.active||queuedHandle;if(!queued){const requested={id:ctx.order.id,action,type,...data};if(pendingRequest){const {requestId,...previous}=pendingRequest;if(JSON.stringify(previous)!==JSON.stringify(requested))throw Error('L’enregistrement précédent reste à vérifier. Ne changez pas son contenu avant de vérifier la commande.');}else pendingRequest=JSON.parse(JSON.stringify({...requested,requestId:crypto.randomUUID()}));queued=await api('/api/resolutions',pendingRequest);}queuedHandle={...queued,action:queued.action||action};pendingRequest=null;if((queued.action||action)==='replace-equivalent'){modal.dataset.equivalentSubmitted='true';delete modal.dataset.unsavedEquivalent;}
+   let queued=ctx.active||queuedHandle;if(!queued){const requested={id:ctx.order.id,action,type,...data};if(pendingRequest){const {requestId,...previous}=pendingRequest;if(JSON.stringify(previous)!==JSON.stringify(requested))throw Error('L’enregistrement précédent reste à vérifier. Ne changez pas son contenu avant de vérifier la commande.');}else pendingRequest=JSON.parse(JSON.stringify({...requested,requestId:crypto.randomUUID()}));queued=await api('/api/resolutions',pendingRequest);}queuedHandle={...queued,action:queued.action||action,carrier:queued.carrier||data.carrier};pendingRequest=null;if(queuedHandle.action==='choose-carrier'&&manualRequestFeedbackText('queued',queuedHandle.carrier)){state.textContent=manualRequestFeedbackText('queued',queuedHandle.carrier);flash(state.textContent);}if((queued.action||action)==='replace-equivalent'){modal.dataset.equivalentSubmitted='true';delete modal.dataset.unsavedEquivalent;}
 
 
 
@@ -429,7 +429,7 @@ function resolutionDialog(title,reference){
 
 
 
-    state.textContent=r.error||r.stage;
+    state.textContent=r.error||((r.action||queuedHandle?.action)==='choose-carrier'?manualRequestFeedbackText(r.status,queuedHandle?.carrier):null)||r.stage;
     clearInterval(timer);
     const observation=Date.now();let observedStatus=r.status,observedSince=r.state_since,observedService=['equivalent-preview','replace-equivalent','check-sku','compare-bc','weight','reconcile-bc'].includes(r.action||action)?'V3 → Erplain':'V3',observedStep=r.stage||'';
     if(r.status==='waiting'){try{const follow=await api('/api/orders/processing',{ids:[ctx.order.id]});const current=follow.rows?.[0];if(current?.state){observedStatus=({active:'running',queued:'queued',blocked:'review'})[current.state];observedSince=current.since;observedService='V3 → '+current.service;observedStep=current.step;}}catch{observedStatus='unconfirmed';}}
