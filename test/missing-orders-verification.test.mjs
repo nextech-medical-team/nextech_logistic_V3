@@ -86,3 +86,24 @@ test('missing-order verification remains wired alongside manual cancellation ref
  assert.ok(server.includes('if(await verifyMissingOrders({p,req,res,user,permitted,body,json}))return'));
  assert.ok(server.includes('await platformCancellationRefresh.next(await body(req),user)'));
 });
+
+// The main mall is not necessarily registered in the shop vault.
+test('missing mall country uses explicit config or unambiguous V3 history',async()=>{
+ for(const scenario of [
+  {history:['FR'],expected:'FR'},
+  {history:['FR','DE'],expected:''},
+  {history:['FR','DE'],config:'BE',expected:'BE'},
+  {history:['FR'],config:'BE',vault:'IT',expected:'IT'}
+ ]){
+  let result;
+  const db={query:async sql=>({rows:sql.includes('SELECT DISTINCT')?scenario.history.map(country=>({mall:'main',country})):[]})};
+  const service=missingOrdersVerification(db,'unused',{
+   now:()=>Date.parse('2026-10-15T12:00:00Z'),
+   connect:async()=>({clients:new Map([['main',{read:async()=>({totalItemNum:1,pageItems:[{parentOrderMap:{parentOrderSn:'PO-TEST',parentOrderTime:Date.parse('2026-10-12T00:00:00Z')/1000}}]})}]]),countryByMall:new Map(scenario.vault?[['main',scenario.vault]]:[]),config:{TEMU_COUNTRIES:{main:scenario.config}},connectionErrors:new Map()})
+  });
+  const request=async b=>service({p:'/api/missing-orders/verify',req:{method:'POST'},user:{id:'u'},permitted:()=>{},body:async()=>b,json:(_r,_s,data)=>result=data});
+  await request({platform:'temu'});const runId=result.runId;
+  await request({runId});await request({runId});
+  assert.equal(result.complete,true);assert.equal(result.rows[0].country,scenario.expected);
+ }
+});
