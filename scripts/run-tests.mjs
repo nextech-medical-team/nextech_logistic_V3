@@ -1,4 +1,5 @@
 const quotaGroup=['--test','test/erplain-quota-admission.test.mjs'];
+const postBlPreparationReviewGroup=['--test','test/post-bl-preparation-review.test.mjs','test/post-bl-margin-cost.test.mjs'];
 const recoveredPreparationGroup=['--test','test/recovered-preparation-issue.test.mjs'];
 const manualCreatedBlWaitingGroup=['--test','test/manual-created-bl-waiting.test.mjs'];
 const excelRenewalGroup=['--test','test/temu-excel-renewal.test.mjs'];
@@ -28,6 +29,7 @@ groups.at(-1).push('test/equivalent-label-edition.test.mjs');
 groups.at(-1).push('test/equivalence-post-bc-policy.test.mjs');
 
 groups.push(quotaGroup);
+groups.push(postBlPreparationReviewGroup);
 groups.push(recoveredPreparationGroup);
 groups.push(['--test','test/missing-draft-recovery.test.mjs']);
 groups.push(manualCreatedBlWaitingGroup);
