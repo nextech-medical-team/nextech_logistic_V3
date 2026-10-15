@@ -29,7 +29,7 @@ groups.at(-1).push('test/equivalence-post-bc-policy.test.mjs');
 
 groups.push(quotaGroup);
 groups.push(recoveredPreparationGroup);
-groups.push(['--test','test/missing-draft-recovery.test.mjs','test/native-bl-policy.test.mjs']);
+groups.push(['--test','test/missing-draft-recovery.test.mjs','test/native-bl-policy.test.mjs','test/before-bl-stock.test.mjs']);
 groups.push(manualCreatedBlWaitingGroup);
 groups.push(excelRenewalGroup);
 groups.push(['--test','test/equivalent-preview-recheck.test.mjs']);
