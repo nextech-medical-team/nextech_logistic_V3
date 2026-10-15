@@ -15,7 +15,7 @@ export function assertCancelledStockAssociation(bc,bl,stock,pointer){
  if(JSON.stringify(totals(bl.line_items))!==JSON.stringify(totals(stock.line_items)))throw Error('Quantités BL et sortie de stock différentes : rapprochement manuel requis');
 }
 // Explicit repair only: refresh and preview remain read-only in Erplain.
-export async function restoreCancelledDeliveryStock(db,api,id,stockId,{lock=withShipmentLock,refresh=refreshErplainDocuments,requireCancelledBC=false}={}){
+export async function restoreCancelledDeliveryStock(db,api,id,stockId,{lock=withShipmentLock,refresh=refreshErplainDocuments,requireCancelledBC=false,allowMarkedAttempt=false}={}){
  return lock(async()=>{
   await assertDocumentIdle(db,id);const o=(await db.query('SELECT * FROM orders WHERE id=$1',[id])).rows[0];if(!o?.erp_live?.bc?.id)throw Error('BC Erplain requis');
   const deliveries=(await db.query('SELECT * FROM partial_deliveries WHERE order_id=$1',[id])).rows;
@@ -32,6 +32,7 @@ export async function restoreCancelledDeliveryStock(db,api,id,stockId,{lock=with
   const before=await read();assertProof(before);
   await assertDocumentIdle(db,id);
   if(before.StockRemoval.status!=='cancelled'){
+   if(!allowMarkedAttempt&&deliveries.some(row=>String(row.stock_document?.id)===String(stockId)&&row.stage==='restoring_cancelled_stock'))throw Error('Restitution antérieure incertaine : rapprocher Erplain, aucune nouvelle écriture de stock.');
    // Never retry an uncertain mutation. A subsequent user action first reads its outcome.
    try{await api.request('mutation V3RestoreCancelledStock($id:ID!,$input:StockAdjustmentInput!){UpdateStockRemoval(id:$id,input:$input){id label status update_stock}}',{id:String(stockId),input:{status:'cancelled'}})}catch(e){throw Error('Restitution non confirmée : actualisez Erplain avant toute nouvelle tentative. '+e.message)}
   }
