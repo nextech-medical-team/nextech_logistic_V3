@@ -116,8 +116,13 @@ export async function closeTransientReviews(db){
    ORDER BY r.updated_at LIMIT 100 FOR UPDATE OF r,o,e SKIP LOCKED`)).rows;
   for(const r of rows){const o=r.order,s=o.erp_live||{};
    const raw=['Erplain temporairement limité : vérification et reprise automatiques programmées',quotaWaitingMessage].includes(r.error)&&s.transientRecovery?.readRateLimited===true?s.transientRecovery.lastError:r.error;
-   if(!transientErpError(raw)||cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||!s.bc?.id||!s.bl?.id||s.bc.status!=='active'||!['ready_to_ship','make_the_shipment'].includes(s.bl.status)||!s.stockDocument?.id||s.stockDocument.status!=='completed'||s.stockDocument.update_stock!==true||!(new Date(s.verifiedAt).getTime()>new Date(r.updated_at).getTime()))continue;
-   await tx.query("UPDATE resolution_jobs SET status='complete',error=null,stage='Incident Erplain résolu',result=coalesce(result,'{}'::jsonb)||$2::jsonb,updated_at=now() WHERE id=$1",[r.id,JSON.stringify({resolvedPreviousError:r.error,reconciledAt:new Date().toISOString()})]);
+   // The current BC/BL reservation flow deliberately has no separate stock
+   // removal. Its worker completion plus fresh bl_ready proof is authoritative;
+   // never require a new document or provider write just to retire an old error.
+   const stockComplete=!!s.stockDocument?.id&&s.stockDocument.status==='completed'&&s.stockDocument.update_stock===true;
+   const bcFlowComplete=s.bc?.update_stock===true&&s.phase==='bl_ready';
+   if(!transientErpError(raw)||cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||!s.bc?.id||!s.bl?.id||s.bc.status!=='active'||!['ready_to_ship','make_the_shipment'].includes(s.bl.status)||(!stockComplete&&!bcFlowComplete)||!(new Date(s.verifiedAt).getTime()>new Date(r.updated_at).getTime()))continue;
+   await tx.query("UPDATE resolution_jobs SET status='complete',error=null,stage='Incident Erplain résolu',result=coalesce(result,'{}'::jsonb)||$2::jsonb,updated_at=now() WHERE id=$1",[r.id,JSON.stringify({resolvedPreviousError:r.error,reconciledAt:new Date().toISOString(),verifiedAt:s.verifiedAt,completionAuthority:bcFlowComplete?'completed_bc_bl_flow':'completed_stock_document'})]);
   }
  });
 }
