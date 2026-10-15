@@ -4,6 +4,7 @@ export const retiredReservationEquation=message=>/^BC · Quantités réservées 
 export function reservationReviewEligible(o){
  const s=o?.erp_live;
  return !!s?.bc?.id&&s.phase==='bc_created'&&!s.bl?.id&&!s.stockDocument?.id&&!s.stockCreationAttemptedAt&&retiredReservationEquation(o.error)
+ &&!['cancelled','closed'].includes(s.bc.status)&&!['production_ready','sandbox_ready','ready','cancelled'].includes(o.label_status)&&!o.source_payload?.externalLabel?.active
  &&!o.archived&&!o.partial_mode&&!o.resolution_pending_resume&&!cancellationBlock(o)&&o.channel!=='tender'
  &&!String(o.reference||'').startsWith('DEMO-')&&!o.source_payload?.visibilityHold&&!o.source_payload?.erplainValidationHold
  &&!Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection')&&!['shipped','in_transit','delivered'].includes(o.tracking_status)
