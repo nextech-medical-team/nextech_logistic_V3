@@ -2,11 +2,12 @@ const id=value=>String(value??'');
 const published=bl=>bl?.id&&bl.status!=='unpublished';
 // A number is a display attribute, never proof that two documents are identical.
 export function observeBlIdentity(state,bc,bl,{now=Date.now()}={}){
- if(!state?.bc?.id||id(bc?.id)!==id(state.bc.id)||!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.paginatorInfo?.hasMorePages!==false)throw Error('Identité BL : lecture du BC incomplète');
+ if(!state?.bc?.id||id(bc?.id)!==id(state.bc.id)||!bc.label||!bc.status||!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.paginatorInfo?.hasMorePages!==false)throw Error('Identité BL : lecture du BC incomplète');
  const related=bc.shipping_orders.data;
  if(related.some(b=>!b?.id||!b.status)||new Set(related.map(b=>id(b.id))).size!==related.length)throw Error('Identité BL : livraisons incohérentes');
  if(bl===undefined)throw Error('Identité BL : réponse absente, aucune conclusion');
  if(bl!==null&&id(bl.id)!==id(state.bl?.id))throw Error('Identité BL : identifiant de réponse différent');
+ if(bl!==null&&(!bl.label||!bl.status))throw Error('Identité BL : document incomplet');
  const linked=related.find(b=>id(b.id)===id(state.bl?.id));
  if(bl===null&&linked)throw Error('Identité BL : lectures contradictoires, aucune conclusion');
  const status=!state.bl?.id?'none':bl===null?'missing':bl.status==='unpublished'?'draft':!linked?'detached':'verified';
