@@ -6,7 +6,9 @@ export function comparePrices(bc,source){
  if(!valid(bc)||!valid(source))throw Error('Montant ou devise absent ou invalide');
  if(bc.currency!==source.currency)throw Error('Devises différentes : comparaison impossible');
  const difference=(Math.round(Number(bc.amount)*100)-Math.round(Number(source.amount)*100))/100;
- return {bc,source,difference,status:difference===0?'same':'different'};
+ const sourceCents=Math.round(Number(source.amount)*100);
+ const differencePercent=sourceCents===0?(difference===0?0:null):Math.round(difference*100/sourceCents*10000)/100;
+ return {bc,source,difference,differencePercent,status:difference===0?'same':'different'};
 }
 
 export function priceVerification(db,directory,{shopify=shopifyObservationApi(directory),connect=()=>connectTemuShops(directory)}={}){
@@ -15,7 +17,17 @@ export function priceVerification(db,directory,{shopify=shopifyObservationApi(di
   async options(){return {countries:(await db.query(`SELECT DISTINCT channel,${countrySql} country FROM orders WHERE archived=false AND channel IN ('shopify','temu') ORDER BY channel,country`)).rows.filter(r=>r.country)};},
   async next(input){
    if(!['shopify','temu'].includes(input.channel)||! /^[A-Z]{2}$/.test(input.country||'')||input.cursor!=null&&typeof input.cursor!=='string')throw Error('Plateforme, pays ou curseur invalide');
-   const order=(await db.query(`SELECT * FROM orders WHERE archived=false AND channel=$1 AND ${countrySql}=$2 AND id>$3 ORDER BY id LIMIT 1`,[input.channel,input.country,input.cursor||''])).rows[0];
+   const hasRange=input.start!=null||input.end!=null;
+   const instant=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)?Date.parse(value):NaN;
+   const start=instant(input.start),end=instant(input.end);
+   if(hasRange&&(!Number.isFinite(start)||!Number.isFinite(end)||start>end))throw Error('Intervalle de dates invalide');
+   let order,scanCursor=input.cursor||'';
+   while(!order){
+    const candidates=(await db.query(`SELECT * FROM orders WHERE archived=false AND channel=$1 AND ${countrySql}=$2 AND id>$3 ORDER BY id LIMIT $4`,[input.channel,input.country,scanCursor,hasRange?100:1])).rows;
+    order=candidates.find(candidate=>{if(!hasRange)return true;const date=String(candidate.source_date||'').trim();if(!/^\d{4}-\d{2}-\d{2}(?:$|[T ])/.test(date))return false;const time=Date.parse(date);return Number.isFinite(time)&&time>=start&&time<=end;});
+    if(order||candidates.length<100||!hasRange)break;
+    scanCursor=candidates.at(-1).id;
+   }
    if(!order)return {done:true};
    const result={id:order.id,reference:order.reference,country:input.country,channel:order.channel,bcId:order.erp_live?.bc?.id,checkedAt:new Date().toISOString(),status:'review'};
    try{
