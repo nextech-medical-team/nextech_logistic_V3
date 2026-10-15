@@ -1,5 +1,3 @@
-import {hasCreatedBl} from './created-bl-label.mjs';
-import {preparedTemuMarginCost} from './post-bl-margin-cost.mjs';
 import {temuCommercialSource} from './temu-commercial-source.mjs';
 import {excelAmounts} from './temu-excel-commercial.mjs';
 import {temuDestinationVat} from './temu-destination-vat.mjs';
@@ -37,7 +35,7 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
  let cache=null,last=0,inflight=null;
  async function calculate(){
  const supplied=loadData?await loadData():null;
- const orders=supplied?.orders||(await db.query('SELECT id,reference,channel,carrier,address,source_payload,source_date,erp_live FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
+ const orders=supplied?.orders||(await db.query('SELECT id,reference,channel,carrier,address,source_payload,source_date FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
  const lines=supplied?.lines||(await db.query('SELECT l.id,l.order_id,l.source_line,l.source_sku,l.quantity,l.target_sku,l.target_quantity,l.source_payload FROM lines l JOIN orders o ON o.id=l.order_id WHERE o.archived=false')).rows;
  const grouped=new Map();for(const l of lines){if(!grouped.has(l.order_id))grouped.set(l.order_id,[]);grouped.get(l.order_id).push(l);}
  const labelJobs=new Map((await db.query('SELECT reference,plan,result FROM temu_label_jobs')).rows.map(j=>[j.reference,j]));
@@ -95,7 +93,6 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
    transportSource=name+' retenu dans V3 ('+carrier+') · poids calculateur '+weight+' kg · tarif publié '+price.toLocaleString('fr-FR',{maximumFractionDigits:5})+' € HT';
    return price;
   },find(l){const found=adapters[o.channel].find(l);const v3=sourceLines.find(x=>x.id===l.id);
-   if(o.channel==='temu'&&hasCreatedBl(o))return preparedTemuMarginCost({profiles:snapshot.temu,line:v3,orderLine:l,adapter:adapters.temu});
    if(o.source_payload?.origin==='temu_excel'&&v3?.target_sku){
     const byId=snapshot.temu.filter(r=>String(r.sku_id||'')===String(l.skuId||'')&&l.skuId);
     const matches=byId.length?byId:snapshot.temu.filter(r=>String(r.sku_temu)===String(l.sku));

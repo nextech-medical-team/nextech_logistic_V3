@@ -31,24 +31,6 @@ test('missing prices, unknown SKUs and mismatched prepared quantities never give
   const f=fixture();change(f);const service=await createMarginsService(f.db,f.options);const row=(await service.get({fresh:true})).rows[0];assert.equal(row.status,'incomplete');assert.ok(row.issues.length);
  }
 });
-
-test('published BL costs prepared units instead of vetoing a changed global mapping',async()=>{
- const f=fixture();f.order.erp_live={bl:{id:'bl',status:'ready_to_ship'}};
- f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';f.line.target_quantity=20;
- const row=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];
- assert.deepEqual(row.issues,[]);assert.equal(row.purchase,60);assert.equal(row.supplierShipping,10);assert.equal(row.profit,-55);assert.equal(row.status,'negative');
- // A negative result remains a purchase veto, not an obsolete mapping veto.
- assert.ok(!row.issues.some(s=>/Mapping|SKU préparé/.test(s)));
-});
-
-test('published BL replacement uses its own unit purchase costs; missing costs remain unknown',async()=>{
- const f=fixture();f.order.erp_live={bl:{id:'bl',status:'ready_to_ship'}};
- f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';f.line.target_sku='REPLACEMENT';
- f.options.snapshotLoader=async()=>({...structuredClone(snapshot),temu:[...snapshot.temu,{...snapshot.temu[0],sku_temu:'NEW',sku_id:'456',sku_erplain:'REPLACEMENT',purchase_unit_ht:1}]});
- const service=await createMarginsService(f.db,f.options),row=(await service.get({fresh:true})).rows[0];
- assert.deepEqual(row.issues,[]);assert.equal(row.purchase,4);assert.equal(row.profit,9);assert.equal(row.status,'positive');
- f.line.target_sku='UNKNOWN';const missing=(await service.get({fresh:true})).rows[0];assert.equal(missing.status,'incomplete');assert.ok(missing.issues.some(s=>s.includes('Coût du SKU préparé')));
-});
 test('Excel adapter projects BC quantities and reports absent private costs explicitly',async()=>{
  const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
  const documents={state:async()=>({pricing:{items:[{variant:{id:'v'},description:'ERP',quantity:4}]}})};
