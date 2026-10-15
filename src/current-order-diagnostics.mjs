@@ -1,3 +1,4 @@
+import {projectSubstitutionDiagnostics} from './substitution-diagnostics.mjs';
 import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
 import {projectPostBlLabelHistory} from './post-bl-label-history.mjs';
 import {hasCompleteOrderDocuments} from './complete-order-documents.mjs';
@@ -54,6 +55,7 @@ export function projectTemuPdfArchiveWarning(o){
  if(warnings.length)o.temu_pdf_archive_note=[...new Set(warnings)].join(' ; ');
 }
 export function projectCurrentDiagnostics(o){
+ projectSubstitutionDiagnostics(o);
  projectPostBlLabelHistory(o);
  projectTemuPdfArchiveWarning(o);
  if(hasCompleteOrderDocuments(o)){
