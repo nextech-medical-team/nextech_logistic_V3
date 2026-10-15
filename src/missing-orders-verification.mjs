@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {shopifyObservationApi} from './shopify-observation-api.mjs';
 import {connectTemuShops} from './temu-shop-clients.mjs';
 
-const query=`query MissingOrders($after:String,$search:String!){orders(first:100,after:$after,query:$search,sortKey:CREATED_AT){nodes{id name createdAt displayFulfillmentStatus shippingAddress{countryCodeV2}} pageInfo{hasNextPage endCursor}}}`;
+const query=`query MissingOrders($after:String,$search:String!){orders(first:100,after:$after,query:$search,sortKey:CREATED_AT){nodes{id name createdAt cancelledAt displayFulfillmentStatus shippingAddress{countryCodeV2}} pageInfo{hasNextPage endCursor}}}`;
 export async function missingFromV3(db,rows,start,end){
  const eligible=rows.filter(r=>Date.parse(r.date)>=Date.parse(start)&&Date.parse(r.date)<Date.parse(end));
  if(!eligible.length)return [];
@@ -23,7 +23,9 @@ export function missingOrdersVerification(db,directory,{shopify=shopifyObservati
    const days=Number(b.days??60);if(!Number.isInteger(days)||days<2||days>60)throw Error('Période requise : 2 à 60 jours');
    const minimumAgeHours=Number(b.minimumAgeHours??24);if(!Number.isInteger(minimumAgeHours)||minimumAgeHours<24||minimumAgeHours>720)throw Error('Ancienneté requise : 24 à 720 heures');
    if(runs.size>=20)throw Error('Trop de vérifications en cours');
-   const id=randomUUID(),at=now();runs.set(id,{owner:user.id,platform,minimumAgeHours,start:new Date(at-days*86400000).toISOString(),end:new Date(at-minimumAgeHours*3600000).toISOString(),checkedAt:new Date(at).toISOString(),expires:at+3600000,phase:platform==='temu'?'connect-temu':'shopify',cursor:null,seen:new Set(),checked:0,rows:[],errors:[],sources:[],index:0});
+   const at=now(),end=b.beforeDate===undefined?at-minimumAgeHours*3600000:(typeof b.beforeDate==='string'?Date.parse(b.beforeDate):NaN);
+   if(!Number.isFinite(end)||end>at-24*3600000||end<=at-days*86400000)throw Error('Date limite requise : au moins 24 h dans le passé et dans les '+days+' derniers jours');
+   const id=randomUUID();runs.set(id,{owner:user.id,platform,minimumAgeHours:(at-end)/3600000,start:new Date(at-days*86400000).toISOString(),end:new Date(end).toISOString(),checkedAt:new Date(at).toISOString(),expires:at+3600000,phase:platform==='temu'?'connect-temu':'shopify',cursor:null,seen:new Set(),checked:0,rows:[],errors:[],sources:[],index:0});
    json(res,200,{runId:id,done:false});return true;
   }
   const s=runs.get(b.runId);if(!s||s.owner!==user.id)throw Error('Vérification expirée ou inaccessible');
@@ -34,7 +36,7 @@ export function missingOrdersVerification(db,directory,{shopify=shopifyObservati
     if(s.phase==='shopify'){
      const {data,shop}=await shopify.read(query,{after:s.cursor,search:`created_at:>='${s.start}' created_at:<'${s.end}'`});const page=data.orders;
      if(!Array.isArray(page?.nodes)||typeof page.pageInfo?.hasNextPage!=='boolean')throw Error('Pagination Shopify incomplète');
-     rows=page.nodes.map(n=>{if(!n.id||!n.name||!Number.isFinite(Date.parse(n.createdAt)))throw Error('Identité ou date Shopify absente');return {channel:'shopify',shop,reference:n.name,date:n.createdAt,country:n.shippingAddress?.countryCodeV2||'',status:n.displayFulfillmentStatus||''};});
+     rows=page.nodes.map(n=>{if(!n.id||!n.name||!Number.isFinite(Date.parse(n.createdAt)))throw Error('Identité ou date Shopify absente');return {channel:'shopify',shop,reference:n.name,date:n.createdAt,country:n.shippingAddress?.countryCodeV2||'',status:n.cancelledAt?'CANCELLED':n.displayFulfillmentStatus||''};});
      const next=page.pageInfo.hasNextPage?page.pageInfo.endCursor:null;
      if(page.pageInfo.hasNextPage&&(!next||s.seen.has(next)||!rows.length))throw Error('Pagination Shopify interrompue');
      if(next)s.seen.add(next);s.cursor=next;if(!next)s.phase=s.platform==='shopify'?'done':'connect-temu';
