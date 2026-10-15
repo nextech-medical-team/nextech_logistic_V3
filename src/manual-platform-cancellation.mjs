@@ -14,26 +14,30 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
   }
   const mall=String(order.source_payload?.sourceShop||order.source_payload?.mallId||'');
   if(!mall)throw Error('Boutique TEMU de la commande non identifiée');
-  const {clients}=await connect(),api=clients.get(mall);
+  const {clients,countryByMall,config}=await connect(),api=clients.get(mall);
   if(!api)throw Error('Boutique TEMU indisponible');
   const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:order.reference});
   const parent=detail?.parentOrderMap;
   if(parent?.parentOrderSn!==order.reference||!Number.isInteger(Number(parent.parentOrderStatus))||Number(parent.parentOrderStatus)<1||Number(parent.parentOrderStatus)>7)throw Error('Identité ou statut TEMU non confirmé');
-  return {cancelled:confirmedTemuCancellation(order,detail),source:'temu',observation:{reference:order.reference,status:parent.parentOrderStatus,mallId:mall,observedAt:new Date().toISOString()}};
+  return {cancelled:confirmedTemuCancellation(order,detail),source:'temu',country:parent.regionName1||order.address?.country||countryByMall?.get(mall)||config?.TEMU_COUNTRIES?.[mall]||'',observation:{reference:order.reference,status:parent.parentOrderStatus,mallId:mall,observedAt:new Date().toISOString()}};
  }
- return {async next(input,user){
+ async function process(input,user,apply=false){
   if(!['admin','manager','operator'].includes(user?.role))throw Object.assign(Error('Droits insuffisants'),{status:403});
   if(input?.cursor!=null&&typeof input.cursor!=='string')throw Error('Curseur invalide');
   const channels=input?.channels??['temu','shopify'];
   if(!Array.isArray(channels)||!channels.length||channels.some(channel=>!['temu','shopify'].includes(channel)))throw Error('Plateformes invalides');
-  const order=(await db.query("SELECT * FROM orders WHERE archived=false AND channel=ANY($2::text[]) AND id>$1 ORDER BY id LIMIT 1",[input?.cursor||'',channels])).rows[0];
+  if(apply&&(typeof input?.id!=='string'||!input.id))throw Error('Commande requise');
+  const order=(await db.query(apply?"SELECT * FROM orders WHERE archived=false AND id=$1 AND channel=ANY($2::text[])":"SELECT * FROM orders WHERE archived=false AND channel=ANY($2::text[]) AND id>$1 ORDER BY id LIMIT 1",[apply?input.id:input?.cursor||'',channels])).rows[0];
+  if(apply&&!order)throw Error('Commande archivée ou inaccessible');
   if(!order)return {done:true};
   return withShipmentLock(async()=>{
-   let result={id:order.id,reference:order.reference,channel:order.channel,status:'unchanged'};
+   let result={id:order.id,reference:order.reference,channel:order.channel,country:order.address?.country||'',status:'unchanged'};
    try{
     const observed=await proof(order);
+    result.country=observed.country||result.country;
     await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[order.id,JSON.stringify({manualPlatformCancellation:{...observed,checkedAt:new Date().toISOString(),checkedBy:user.email}})]);
-    if(observed.cancelled){
+    if(observed.cancelled)result.status='cancelled';
+    if(observed.cancelled&&apply){
      let current=(await suspension.context(order.id)).order;
      if(current.archived)throw Error('Commande archivée pendant la vérification');
      if(!current.suspension?.active){await suspension.suspend({id:order.id,expectedVersion:current.suspension?.version||'',note:'Annulation confirmée dans '+order.channel+' par actualisation manuelle'},user);current=(await suspension.context(order.id)).order;}
@@ -45,10 +49,12 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
      }
      await db.query("UPDATE orders SET label_status='cancelled',tracking_status=CASE WHEN tracking_status IN ('shipped','delivered','in_transit','delivered_simulated') THEN tracking_status ELSE 'cancelled' END WHERE id=$1",[order.id]);
      result.status='cancelled';
+     result.applied=true;
     }
    }catch(error){result.status='review';result.error=String(error.message).slice(0,1000);}
-   await db.query('INSERT INTO audit(user_email,action,detail) VALUES($1,$2,$3)',[user.email,'order.manual_platform_cancellation',JSON.stringify(result)]);
+   await db.query('INSERT INTO audit(user_email,action,detail) VALUES($1,$2,$3)',[user.email,apply?'order.manual_platform_cancellation':'order.manual_platform_cancellation_check',JSON.stringify(result)]);
    return {done:false,cursor:order.id,result};
   },['manual-platform-cancellation:'+order.id,'stock-mutations','temu-order:'+order.reference,'suspension:'+order.id]);
- }};
+ }
+ return {next:(input,user)=>process(input,user),apply:(input,user)=>process(input,user,true)};
 }

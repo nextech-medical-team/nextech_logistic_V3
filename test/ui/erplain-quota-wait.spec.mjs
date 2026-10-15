@@ -1,0 +1,23 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+import {processingView} from '../../src/order-priority.mjs';
+const old='Erplain temporairement limité : vérification et reprise automatiques programmées';
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('Erplain scheduled quota wait '+name,async({page})=>{
+ const writes=[],errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()!=='GET'&&!['/api/orders/processing','/api/partial/visible'].includes(new URL(r.url()).pathname))writes.push(r.url());});
+ const row={id:'quota-wait',reference:'TEST-QUOTA-WAIT',channel:'amazon',carrier:'gofo',recipient:'Client fictif',source_date:'2026-10-15',address:{country:'FR',city:'Paris'},sku_lines:[{sku:'TEST',quantity:1}],source_payload:{},erp_live:{},erp_status:'live_review',label_status:'pending',tracking_status:'not_shipped'};
+ let message=old;
+ const projection=()=>processingView({id:row.id,erp_status:'review',erp_error:message,quotaRecovery:{readRateLimited:true,nextReadCheckAt:'2099-10-15T15:00:00Z'},resolution_status:'review',resolution_error:old});
+ await page.setViewportSize(viewport);
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:[row],total:1,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/order-problem-types*',r=>r.fulfill({json:{problemTypes:[]}}));
+ await page.route('**/api/orders/processing',r=>r.fulfill({json:{at:new Date().toISOString(),rows:[projection()]}}));
+ await page.goto('/');const card=page.locator('#order-rows .order-processing');await expect(card).toHaveCount(1);
+ await expect(card.locator('.processing-stage')).toHaveText('Erplain · En attente · reprise à 17:00');
+ await expect(card.locator('.processing-reason')).toContainText('Prochaine tentative à 17:00:00');
+ await expect(card.locator('.processing-elapsed')).toContainText('Attente');
+ await expect(card.locator('.processing-other')).not.toContainText(old);
+ await card.scrollIntoViewIfNeeded();const bounds=await card.boundingBox();expect(bounds.width).toBeLessThan(viewport.width);
+ fs.mkdirSync('proofs',{recursive:true});await page.screenshot({path:'proofs/erplain-quota-wait-'+name+'.png',fullPage:false});
+ message='Stock indisponible';await page.reload();await expect(card.locator('.processing-reason')).toContainText('Stock indisponible');await expect(card.locator('.processing-elapsed')).toContainText('Blocage');
+ expect(writes).toEqual([]);expect(errors).toEqual([]);fs.writeFileSync('proofs/erplain-quota-wait-'+name+'.json',JSON.stringify({status:'PASS',viewport,bounds,writes,errors,waitingIsQueued:true,nextAttemptDisplayed:true,stockErrorPreserved:true,providerCalls:0,scope:'Synthetic full application using actual backend processing projection'}));
+});

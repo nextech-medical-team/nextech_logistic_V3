@@ -24,3 +24,4 @@ try{
  await Promise.all(children.map(child=>new Promise(resolve=>{if(child.exitCode!==null)return resolve();child.once('exit',resolve);child.send({close:true});})));
  await pool.query('DROP SCHEMA IF EXISTS '+schema+' CASCADE');await pool.end();
 }
+await import('./test-erplain-priority-postgres.mjs');

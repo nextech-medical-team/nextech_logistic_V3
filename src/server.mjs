@@ -1,3 +1,4 @@
+import {cancelPartialDelivery} from './partial-cancellation.mjs';
 import {priceVerification} from './price-verification.mjs';
 import {missingOrdersVerification} from './missing-orders-verification.mjs';
 import {readOrdersPage} from './order-list-reader.mjs';
@@ -361,13 +362,16 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/orders/refresh-platform-cancellations'&&req.method==='POST'){
       permitted(user,operational);json(res,200,await platformCancellationRefresh.next(await body(req),user));return;
     }
+    if(p==='/api/orders/apply-platform-cancellations'&&req.method==='POST'){
+      permitted(user,operational);json(res,200,await platformCancellationRefresh.apply(await body(req),user));return;
+    }
     if(p==='/api/orders/platform-cancellations/export'&&req.method==='POST'){
       permitted(user,operational);const input=await body(req);
       if(!Array.isArray(input.results)||input.results.length>100000||input.results.some(r=>!r||!['temu','shopify'].includes(r.channel)||!['cancelled','unchanged','review'].includes(r.status)||typeof r.reference!=='string'))throw Error('Résultats invalides');
       const {default:ExcelJS}=await import('exceljs'),book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Annulations');
-      sheet.columns=[{header:'Plateforme',key:'channel',width:18},{header:'Référence',key:'reference',width:35},{header:'Résultat',key:'status',width:22},{header:'Détail',key:'error',width:80}];
-      for(const r of input.results)sheet.addRow({channel:r.channel==='temu'?'Temu':'Shopify',reference:r.reference,status:({cancelled:'Annulée',unchanged:'Non annulée',review:'À vérifier'})[r.status],error:String(r.error||'').slice(0,1000)});
-      sheet.getRow(1).font={bold:true};sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter='A1:D'+Math.max(1,sheet.rowCount);
+      sheet.columns=[{header:'Plateforme',key:'channel',width:18},{header:'Référence',key:'reference',width:35},{header:'Pays',key:'country',width:24},{header:'Résultat',key:'status',width:22},{header:'Détail',key:'error',width:80}];
+      for(const r of input.results)sheet.addRow({channel:r.channel==='temu'?'Temu':'Shopify',reference:r.reference,country:String(r.country||'').slice(0,100),status:({cancelled:'Annulée',unchanged:'Non annulée',review:'À vérifier'})[r.status],error:String(r.error||'').slice(0,1000)});
+      sheet.getRow(1).font={bold:true};sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter='A1:E'+Math.max(1,sheet.rowCount);
       const summary=book.addWorksheet('Bilan');summary.addRow(['Plateformes',String(input.platforms||'')]);summary.addRow(['Commandes vérifiées',input.results.length]);summary.addRow(['Annulées',input.results.filter(r=>r.status==='cancelled').length]);summary.addRow(['À vérifier',input.results.filter(r=>r.status==='review').length]);
       for(const issue of Array.isArray(input.issues)?input.issues:[])summary.addRow(['Information',String(issue).slice(0,1000)]);
       summary.getColumn(1).width=25;summary.getColumn(2).width=100;
@@ -466,12 +470,13 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/erplain/documents/refresh'&&req.method==='POST'){permitted(user,operational);const b=await body(req);if(typeof b.id!=='string'||!['bc','bl'].includes(b.kind))throw Error('Actualisation BC/BL invalide');const result=await refreshErplainDocuments(db,erplainAccount(directory,'source'),b.id);await audit(user,'erplain.documents_refreshed',{orderId:b.id,kind:b.kind,notFound:!!result.notFound,stockHolds:result.stockHolds.length});json(res,200,{message:result.message,stockHolds:result.stockHolds,notFound:!!result.notFound});return;}
     if(p==='/api/partial/refresh'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialWorker.refresh(b.id);await audit(user,'partial.erplain_refreshed',{orderId:b.id,stockHolds:result.stockHolds.length});json(res,200,{message:result.message,stockHolds:result.stockHolds});return;}
     if(p==='/api/partial/prepare'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialWorker.prepare(b.id,b.selection,b.requestId,b.labelChoice??(b.replaceLabel===true?'replace':null));await audit(user,'partial.prepared',{orderId:b.id,deliveryId:result.id,replayed:result.replayed||false});json(res,202,result);return;}
+    if(p==='/api/partial/cancel'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await cancelPartialDelivery(db,erplainAccount(directory,'live'),b);await audit(user,'partial.cancel',{orderId:b.id,deliveryId:b.deliveryId,blId:b.blId,...result});json(res,200,result);return;}
     if(p==='/api/partial/retry'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialWorker.retry(b.id);await audit(user,'partial.retry',{deliveryId:b.id,...result});json(res,202,{ok:true,...result});return;}
     if(p==='/api/partial/visible'&&req.method==='POST'){
       const {ids}=await body(req);if(!Array.isArray(ids)||ids.length>200||ids.some(id=>typeof id!=='string'))throw new Error('Page de commandes invalide');
       const rows=(await db.query("SELECT d.id,d.order_id,o.reference,o.channel,o.recipient,o.address,o.erp_live,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.label_choice,d.environment,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE d.order_id=ANY($1::text[]) ORDER BY d.created_at,d.id",[ids])).rows;json(res,200,{rows});return;
     }
-    if(p==='/api/partial/list'&&req.method==='GET'){const rows=(await db.query("SELECT d.id,d.order_id,o.reference,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.environment,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE ($1='' OR d.order_id=$1) ORDER BY d.created_at DESC LIMIT 100",[url.searchParams.get('id')||''])).rows;json(res,200,{rows});return;}
+    if(p==='/api/partial/list'&&req.method==='GET'){const rows=(await db.query("SELECT d.id,d.order_id,o.reference,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.environment,d.stock_document,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE ($1='' OR d.order_id=$1) ORDER BY d.created_at DESC LIMIT 100",[url.searchParams.get('id')||''])).rows;json(res,200,{rows});return;}
     const partialDoc=p.match(/^\/api\/partial\/documents\/([^/]+)\/(\d+)$/);
     if(partialDoc&&req.method==='GET'){const row=(await db.query('SELECT pdf FROM partial_documents WHERE delivery_id=$1 AND document_index=$2',[partialDoc[1],Number(partialDoc[2])])).rows[0];if(!row)throw new Error('PDF partiel indisponible');res.setHeader('Content-Type','application/pdf');await labelAttachment(db,res,'partial',partialDoc[1],Number(partialDoc[2])+1);res.end(await currentPartialSkuPdf(db,row.pdf,partialDoc[1],Number(partialDoc[2])));return;}
 
