@@ -47,8 +47,8 @@ test('new reservation intent cannot silently become a legacy document on retry',
   await assert.rejects(publishIncrementalBc(api,'1934803',{expectedStockPolicy:true,verify:()=>{},lock:fn=>fn()}),/réservation différente/);
  }
 });
-test('missing reservations or changed stock flag fail provider confirmation',()=>{
- for(const changed of [{...bc(),update_stock:false},{...bc(),line_items:[{...line(),reserved_quantity:0}]},{...bc(),line_items:[{...line(),reserved_quantity:null}]},{...bc(),line_items:[{...line(),variant:{id:'642345'}}]}])assert.throws(()=>assertPublishedBcReservation(changed,true));
+test('changed stock policy or unknown product tracking fail provider confirmation',()=>{
+ for(const changed of [{...bc(),update_stock:false},{...bc(),line_items:[{...line(),variant:{id:'642345'}}]}])assert.throws(()=>assertPublishedBcReservation(changed,true));
  assert.doesNotThrow(()=>assertPublishedBcReservation({...bc(),line_items:[{...line(),variant:{id:'642345',track_inventory:false},reserved_quantity:0}]},true));
 });
 test('a reservation alone remains visible during shortage but never certifies a physical debit',()=>{
@@ -113,9 +113,9 @@ test('receipt recovery admits only verified new reservations and sufficient repl
  document.line_items[0].reserved_quantity=100000;o.erp_live.stockCreationAttemptedAt='2026-10-08T00:00:00Z';assert.equal(plan().status,'blocked');
 });
 
- test('reservation failure reports provider quantities instead of implying a stock shortage',()=>{
+ test('reservation counters do not block published BC confirmation',()=>{
   const document={...bc(),line_items:[{...line(),quantity:100,reserved_quantity:0,shipped_quantity:0,variant:{...line().variant,sku:'491930'}}]};
-  assert.throws(()=>assertPublishedBcReservation(document,true),/SKU 491930 : commandées 100, réservées 0, expédiées 0/);
+  assert.doesNotThrow(()=>assertPublishedBcReservation(document,true));
   document.line_items[0].reserved_quantity=null;
-  assert.throws(()=>assertPublishedBcReservation(document,true),/réservées non reçues/);
+  assert.doesNotThrow(()=>assertPublishedBcReservation(document,true));
  });

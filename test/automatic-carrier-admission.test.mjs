@@ -32,6 +32,26 @@ async function order(db,id,carrier='gls',channel='shopify'){
 }
 const count=async(db,sql)=>Number((await db.query(sql)).rows[0].n);
 
+test('published BL overrides historic sync flags and retired review, but preserves active or unrelated corrections',async()=>{
+ const db=await fixture();try{
+  await db.exec('ALTER TABLE correction_jobs ADD COLUMN error text');
+  const cases=[['readonly',null,'readOnly'],['noresume',null,'resumeAfter'],['retired','review'],['active','applying'],['unknown','review'],['cancel-review','review']];
+  for(const [id,status,flag] of cases){
+   await order(db,id,'gofo','amazon');
+   if(flag)await db.query('UPDATE resolution_jobs SET result=$2 WHERE order_id=$1',[id,JSON.stringify({[flag]:flag==='readOnly'})]);
+   if(status)await db.query('INSERT INTO correction_jobs VALUES($1,$1,$2,$3)',[id,status,id==='unknown'?'Autre décision à vérifier':id==='cancel-review'?'Annulation à vérifier':'BC · Quantités réservées non confirmées']);
+  }
+  assert.equal(await queueCarrierLabels(db,['readonly','noresume','retired']),3);
+  for(const id of ['active','unknown','cancel-review'])await assert.rejects(queueCarrierLabels(db,[id]),/Correction en cours/);
+  // A later stale resume flag must not strand an admitted shipment in the worker.
+  await db.query("UPDATE orders SET resolution_pending_resume=true WHERE id IN ('readonly','noresume','retired')");
+  let posts=0;const worker=createCarrierWorkers(db,null,{clients:{gofoCreate:async()=>{posts++;return {reference:'ref-'+posts,tracking:['track-'+posts]};},gofoLabel:async()=>Buffer.from('%PDF-1.4 preserved').toString('base64')}});
+  for(let i=0;i<4;i++)await worker.run('gofo');
+  assert.equal(posts,3);assert.equal(await count(db,"SELECT count(*) n FROM carrier_jobs WHERE status='ready'"),3);
+  assert.equal(await count(db,"SELECT count(*) n FROM correction_jobs"),4);
+ }finally{await db.close();}
+});
+
 test('recorded BC labels ignore missing or changed mappings at admission and again before GOFO creation',async()=>{
  const db=await fixture();try{
   for(const id of ['manual-missing','auto-changed'])await order(db,id,'gofo','amazon');
@@ -86,9 +106,9 @@ test('blocked variants preserve hold and evidence; one invalid order does not pr
  const db=await fixture();try{
  const scenarios={temu:"UPDATE orders SET channel='temu' WHERE id=$1",suspended:"UPDATE orders SET suspension='{\"active\":true}' WHERE id=$1",cancelled:"UPDATE orders SET tracking_status='cancelled' WHERE id=$1",partial:"UPDATE orders SET partial_mode=true WHERE id=$1",archived:"UPDATE orders SET archived=true WHERE id=$1",fingerprint:"UPDATE orders SET weight_kg=2 WHERE id=$1",erp:"UPDATE erp_live_jobs SET status='review' WHERE order_id=$1",unready:"UPDATE orders SET erp_live=jsonb_set(erp_live,'{bl,status}','\"in_preparation\"') WHERE id=$1",readOnly:"UPDATE resolution_jobs SET result='{\"erpOnly\":true,\"readOnly\":true}' WHERE order_id=$1",noResume:"UPDATE resolution_jobs SET result='{\"erpOnly\":true,\"resumeAfter\":false}' WHERE order_id=$1",uncertain:"INSERT INTO carrier_jobs(order_id,carrier,status,environment,error) VALUES($1,'gls','review','production','Création incertaine')",pdf:"INSERT INTO carrier_documents VALUES($1,0,decode('255044462d','hex'))",history:"INSERT INTO carrier_label_history VALUES('history',$1,'{\"environment\":\"production\"}',now())",extra:"INSERT INTO extra_parcels VALUES('extra',$1,'failed')",busy:"INSERT INTO correction_jobs VALUES('correction',$1,'waiting')"};
  for(const [id,sql] of Object.entries(scenarios)){await order(db,id);await db.query(sql,[id]);}
- await order(db,'zz-valid','gls_shop');assert.equal(await admitPreparedCarrierLabels(db),4);
- assert.equal(await count(db,"SELECT count(*) n FROM carrier_jobs WHERE order_id NOT IN ('uncertain','zz-valid','fingerprint','erp','unready')"),0);
- assert.equal(await count(db,"SELECT count(*) n FROM orders WHERE id NOT IN ('zz-valid','fingerprint','erp','unready') AND NOT resolution_pending_resume"),0);
+ await order(db,'zz-valid','gls_shop');assert.equal(await admitPreparedCarrierLabels(db),6);
+ assert.equal(await count(db,"SELECT count(*) n FROM carrier_jobs WHERE order_id NOT IN ('uncertain','zz-valid','fingerprint','erp','unready','readOnly','noResume')"),0);
+ assert.equal(await count(db,"SELECT count(*) n FROM orders WHERE id NOT IN ('zz-valid','fingerprint','erp','unready','readOnly','noResume') AND NOT resolution_pending_resume"),0);
  assert.equal((await db.query("SELECT status,error FROM carrier_jobs WHERE order_id='uncertain'")).rows[0].error,'Création incertaine');
  assert.equal(await count(db,'SELECT count(*) n FROM carrier_documents'),1);
  assert.equal(await count(db,"SELECT count(*) n FROM carrier_jobs WHERE order_id='fingerprint'"),1); // source fingerprint no longer blocks an existing BC

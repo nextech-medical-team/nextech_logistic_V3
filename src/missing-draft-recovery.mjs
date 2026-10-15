@@ -1,5 +1,22 @@
 import {cancellationBlock} from './erp-transient-policy.mjs';
 import {isDeepStrictEqual} from 'node:util';
+import {usesNativeBlCycle,assertNativeBlOrder} from './native-bl-policy.mjs';
+
+// A missing unpublished native BL may be retired only after proving that it
+// produced no movement. This is duplicate-write protection, not a BC debit test.
+async function assertMissingNativeDraftNoMovement(api,bc,old){
+ if(!/^\d{4}-\d{2}-\d{2}[ T]/.test(bc.created_at||'')||!Array.isArray(bc.line_items)||!bc.line_items.length)throw Error('Brouillon BL absent : périmètre du journal non vérifiable');
+ let complete=false;
+ // Scan the complete dated ledger, including variants no longer on the BC.
+ // Erplain does not offer a document-id filter for InventoryLogs.
+ for(let page=1;page<=100;page++){
+  const {InventoryLogs:logs}=await api.request('query V3MissingNativeDraftLedger($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id order_type variant{id}} paginatorInfo{hasMorePages}}}',{page,where:{column:'CREATED_AT',operator:'GTE',value:bc.created_at.slice(0,10)+' 00:00:00'}});
+  if(!Array.isArray(logs?.data)||typeof logs.paginatorInfo?.hasMorePages!=='boolean'||logs.data.some(l=>!l.id||l.document_id==null||!l.order_type))throw Error('Brouillon BL absent : journal incomplet');
+  if(logs.data.some(l=>l.order_type==='ShippingOrder'&&String(l.document_id)===String(old.id)))throw Error('Brouillon BL absent : mouvement existant, aucune nouvelle création');
+  if(!logs.paginatorInfo.hasMorePages){complete=true;break;}
+ }
+ if(!complete)throw Error('Brouillon BL absent : journal trop volumineux');
+}
 export async function assertMissingDraftIdle(db,o,resolutionId){
  const busy=(await db.query(`SELECT 1 FROM carrier_documents WHERE order_id=$1
  UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1
@@ -20,17 +37,21 @@ export async function commitMissingDraftRecovery(tx,o,next,{resolutionId,userEma
 // normal worker remains responsible for creating and publishing the new BL.
 export async function prepareMissingDraftRecovery(db,api,o,{resolutionId,now=Date.now()}={}){
  const s=o.erp_live||{},old=s.bl;
- if(s.phase!=='publishing_bl'||old?.status!=='unpublished')return null;
- if(!old.id||!/^SHO[0-9]{8}$/.test(old.label||'')||!s.bc?.id||old.update_stock!==false||o.archived||o.partial_mode||cancellationBlock(o)||['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Brouillon BL absent : reprise non applicable');
- if(s.stockDocument||s.stockCreationAttemptedAt||s.stockCreationOutcome||s.stockPendingVariants?.length||s.previousCancelledCycle||s.historicalStockProof)throw Error('Brouillon BL absent : mouvement de stock antérieur ou incertain, rapprochement requis');
+ const native=usesNativeBlCycle(o);
+ if(!(native?['bl_created','publishing_bl']:['publishing_bl']).includes(s.phase)||old?.status!=='unpublished')return null;
+ if(native)assertNativeBlOrder(o);
+ if(!old.id||!/^SHO[0-9]{8}$/.test(old.label||'')||!s.bc?.id||old.update_stock!==(native?true:false)||o.archived||o.partial_mode||cancellationBlock(o)||['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Brouillon BL absent : reprise non applicable');
+ if(s.stockDocument||s.stockCreationAttemptedAt||s.stockCreationOutcome||s.stockPendingVariants?.length||s.previousCancelledCycle||(!native&&s.historicalStockProof))throw Error('Brouillon BL absent : mouvement de stock antérieur ou incertain, rapprochement requis');
  await assertMissingDraftIdle(db,o,resolutionId);
- const r=await api.request('query V3MissingDraftRead($bc:ID!,$bl:ID!){Order(id:$bc){id status update_stock shipping_orders(first:100){data{id label status} paginatorInfo{hasMorePages}}} ShippingOrder(id:$bl){id label status}}',{bc:String(s.bc.id),bl:String(old.id)});
+ const r=await api.request('query V3MissingDraftRead($bc:ID!,$bl:ID!){Order(id:$bc){id created_at status update_stock line_items{type variant{id}} shipping_orders(first:100){data{id label status} paginatorInfo{hasMorePages}}} ShippingOrder(id:$bl){id label status}}',{bc:String(s.bc.id),bl:String(old.id)});
  const bc=r.Order,list=bc?.shipping_orders;
- if(String(bc?.id)!==String(s.bc.id)||bc.status!=='active'||bc.update_stock!==false||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false)throw Error('Brouillon BL absent : lecture du BC incomplète ou politique de stock incompatible');
+ if(String(bc?.id)!==String(s.bc.id)||bc.status!=='active'||bc.update_stock!==(native?true:false)||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false)throw Error('Brouillon BL absent : lecture du BC incomplète ou politique de stock incompatible');
  if(r.ShippingOrder!=null){if(String(r.ShippingOrder.id)!==String(old.id))throw Error('Brouillon BL : identifiant de réponse incohérent');return null;}
  if(list.data.length)throw Error('Brouillon BL absent : un BL associé au BC existe, rapprochement requis');
+ if(native)await assertMissingNativeDraftNoMovement(api,bc,old);
  const stocks=await api.request('query V3MissingDraftStock($where:QueryStockRemovalsWhereWhereConditions!){StockRemovals(first:100,where:$where){data{id label status} paginatorInfo{hasMorePages}}}',{where:{column:'LABEL',operator:'EQ',value:'V3FS-'+o.id}});
  if(!Array.isArray(stocks.StockRemovals?.data)||stocks.StockRemovals.paginatorInfo?.hasMorePages!==false||stocks.StockRemovals.data.length)throw Error('Brouillon BL absent : absence de mouvement de stock non confirmée');
+ if(native){const extra=await api.request('query V3MissingDraftStock($where:QueryStockRemovalsWhereWhereConditions!){StockRemovals(first:100,where:$where){data{id label status} paginatorInfo{hasMorePages}}}',{where:{column:'LABEL',operator:'EQ',value:'V3FS-'+o.id+'-BC'+s.bc.id}});if(!Array.isArray(extra.StockRemovals?.data)||extra.StockRemovals.paginatorInfo?.hasMorePages!==false||extra.StockRemovals.data.length)throw Error('Brouillon BL absent : sortie distincte ou recherche incomplète');}
  const labels=await api.request('query V3MissingDraftLabel($where:QueryShippingOrdersWhereWhereConditions!){ShippingOrders(first:100,where:$where){data{id label status orders(first:100){data{id} paginatorInfo{hasMorePages}}} paginatorInfo{hasMorePages}}}',{where:{column:'LABEL',operator:'EQ',value:old.label}});
  const matches=labels.ShippingOrders;
  if(!Array.isArray(matches?.data)||matches.paginatorInfo?.hasMorePages!==false)throw Error('Brouillon BL absent : recherche du numéro incomplète');

@@ -1,4 +1,5 @@
 import {sourceProductName} from './missing-product-creation.mjs';
+import {resumeReconciledCatalogueReview} from './catalogue-reconciled-review.mjs';
 // This particular error is thrown by minimalProductInput before the durable
 // product-creation claim and before any provider write. Never reset another
 // error or a claimed creation merely because its title is now available.
@@ -9,6 +10,7 @@ export async function resumeLocalPreparationReview(db,id,{catalogueOnly=false}={
   if(!o||o.archived||o.suspension?.active||Object.hasOwn(o.suspension||{},'erplainCancellation')||o.partial_mode||o.erp_live?.bc?.id||o.erp_live?.bl?.id||o.label_status==='cancelled'||o.tracking_status!=='not_shipped')return false;
   const j=(await tx.query('SELECT * FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[id])).rows[0];
   if(j?.status!=='review')return false;
+  if(j.error===null)return resumeReconciledCatalogueReview(tx,o,j);
   // The retired generator failed before CreateCustomer. Its replacement uses
   // the existing deterministic V3 number; never replay the number allocation.
   if(!catalogueOnly&&j.error==='Client TEMU : numéro Erplain non reçu'){

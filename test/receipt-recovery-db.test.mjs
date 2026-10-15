@@ -50,13 +50,13 @@ test('a new reserved BC enters native receipt recovery without any ERP mutation 
   const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume-erp');assert.equal(f.actual().line_items[0].reserved_quantity,1);assert.equal(f.actual().line_items[0].on_hand,1);assert.equal(f.labelCalls(),0);assert.ok(f.calls.every(q=>q.startsWith('query ')));
  }finally{await f.engine.close();}
 });
-test('receipt execution refuses a reservation lost after preview',async()=>{
+test('receipt execution ignores reservation equality when usable physical stock remains',async()=>{
  const f=await fixture();try{
   await f.db.query("UPDATE orders SET erp_live=erp_live||'{\"bcReservationPolicy\":\"erplain_bc_bl\"}'::jsonb WHERE id=$1",[f.id]);
   f.change({...f.actual(),update_stock:true,line_items:f.actual().line_items.map(l=>({...l,reserved_quantity:1,shipped_quantity:0,available:0}))});
   const run=await f.start();await f.service.submit({id:run,ids:[f.id]},f.user);
-  f.change({...f.actual(),line_items:f.actual().line_items.map(l=>({...l,reserved_quantity:0}))});await f.service.run();
-  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);assert.match((await f.service.status(run)).plan.rows[0].item.error,/Réservation/);assert.equal(f.labelCalls(),0);
+  f.change({...f.actual(),line_items:f.actual().line_items.map(l=>({...l,reserved_quantity:0,available:1}))});await f.service.run();
+  assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,1);assert.equal(f.labelCalls(),0);assert.ok(f.calls.every(q=>q.startsWith('query ')));
  }finally{await f.engine.close();}
 });
 test('TEMU never buys or falls back to a direct carrier, returns supplier refusal',async()=>{
