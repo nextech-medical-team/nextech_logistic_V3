@@ -3,6 +3,7 @@ import {platformIndicativeView} from './platform-indicative-view.mjs';
 import {attachEquivalentDiagnostics} from './equivalent-diagnostics.mjs';
 import {attachSkuSubstitutions} from './sku-substitution-view.mjs';
 import {hasCompletePartialDocuments} from './complete-order-documents.mjs';
+import {visibleOrderBls} from './bl-identity.mjs';
 // Diagnostic dependencies must be attached before classification. Display-only
 // joins can wait until pagination; no cache or stale diagnostic snapshot is used.
 export async function orderPageDetails(db,rows,mode='all'){
@@ -12,7 +13,7 @@ export async function orderPageDetails(db,rows,mode='all'){
  for(const row of rows)row.platform_status=platformIndicativeView(row);
  const partialBls=(await db.query('SELECT order_id,bl,status,environment,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=partial_deliveries.id) documents FROM partial_deliveries WHERE order_id=ANY($1::text[]) ORDER BY created_at,id',[rows.map(r=>r.id)])).rows;
  const byBl=new Map();for(const d of partialBls){if(d.bl?.id){const list=byBl.get(d.order_id)||[];list.push(d.bl);byBl.set(d.order_id,list);}}
- for(const row of rows)row.erplain_tracking_bls=row.partial_mode?(byBl.get(row.id)||[]):row.erp_live?.documentSource?.shippingOrders?.length?row.erp_live.documentSource.shippingOrders:row.erp_live?.bl?[row.erp_live.bl]:[];
+ for(const row of rows)row.erplain_tracking_bls=visibleOrderBls(row,byBl.get(row.id)||[]);
  const byPartial=new Map();for(const d of partialBls){const list=byPartial.get(d.order_id)||[];list.push({bl:{id:d.bl?.id,status:d.bl?.status},status:d.status,environment:d.environment,documents:d.documents});byPartial.set(d.order_id,list);}
  for(const row of rows)if(row.partial_mode){row.partial_document_status=byPartial.get(row.id)||[];row.complete_order_documents=hasCompletePartialDocuments(row);}
  const choices=new Map((await db.query('SELECT id,transport_choice FROM orders WHERE id=ANY($1::text[])',[rows.map(r=>r.id)])).rows.map(r=>[r.id,r.transport_choice]));for(const row of rows)row.transport_choice=choices.get(row.id)||null;
