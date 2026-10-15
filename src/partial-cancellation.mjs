@@ -29,14 +29,14 @@ export async function cancelPartialDelivery(db,api,input,{lock=withShipmentLock,
   const before=await read();assertPartialCancellationProof(order,d,before);const latest=await local();if(String(latest.order.erp_live.bc.id)!==String(order.erp_live.bc.id)||JSON.stringify(latest.d.bl)!==JSON.stringify(d.bl)||JSON.stringify(latest.d.stock_document)!==JSON.stringify(d.stock_document)||latest.d.stage!==d.stage||latest.d.status!==d.status)throw Error('Documents modifiés pendant la lecture : actualiser avant annulation');
   if(before.ShippingOrder.status!=='cancelled'){
    if(['cancelling_bl','restoring_cancelled_stock'].includes(d.stage))throw Error('Annulation antérieure incertaine : BL toujours actif, aucun nouvel envoi. Rapprocher le résultat Erplain.');
-   const marked=await db.query("UPDATE partial_deliveries SET stage='cancelling_bl',updated_at=now() WHERE id=$1 AND status=$2 AND stage IS NOT DISTINCT FROM $3 RETURNING id",[d.id,d.status,d.stage]);
+   const marked=await db.query("UPDATE partial_deliveries SET status='review',stage='cancelling_bl',error='Annulation demandée : résultat Erplain à rapprocher',updated_at=now() WHERE id=$1 AND status=$2 AND stage IS NOT DISTINCT FROM $3 RETURNING id",[d.id,d.status,d.stage]);
    if(marked.rows.length!==1)throw Error('Livraison modifiée pendant le contrôle : annulation différée');
    try{await api.request('mutation V3CancelPartialBL($ids:[ID!]!,$status:ShippingOrderStatus!){UpdateShippingOrdersStatus(ids:$ids,status:$status)}',{ids:[String(blId)],status:'cancelled'});}catch(error){throw Error('Annulation du BL non confirmée : actualiser Erplain avant toute nouvelle tentative. '+error.message);}
   }
   const after=await read();assertPartialCancellationProof(order,d,after);if(after.ShippingOrder.status!=='cancelled')throw Error('Annulation du BL non confirmée dans Erplain : aucune restitution effectuée');
   // Reuse the existing exclusive BL/BC/stock proof and confirmed stock restoration.
   if(d.stage==='restoring_cancelled_stock'&&after.StockRemoval.status!=='cancelled')throw Error('Restitution antérieure incertaine : aucune nouvelle écriture de stock. Rapprocher le résultat Erplain.');
-  await db.query("UPDATE partial_deliveries SET stage='restoring_cancelled_stock',updated_at=now() WHERE id=$1",[d.id]);
+  await db.query("UPDATE partial_deliveries SET status='review',stage='restoring_cancelled_stock',error='Restitution demandée : résultat Erplain à rapprocher',updated_at=now() WHERE id=$1",[d.id]);
   const result=await restore(db,api,id,String(d.stock_document.id),{allowMarkedAttempt:d.stage!=='restoring_cancelled_stock'});
   return {blId:String(blId),deliveryId,replayed:before.ShippingOrder.status==='cancelled',message:'BL '+after.ShippingOrder.label+' annulé et sortie de stock restituée. Les quantités du BC sont de nouveau préparables selon le stock actuel. Anciennes étiquettes conservées.',stockHolds:result.stockHolds};
  });
