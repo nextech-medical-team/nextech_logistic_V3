@@ -405,8 +405,8 @@ function orderTrackingPreviewHtml(o){
 function deliveredOrderHtml(o){
  const links=[];
  if(!o.source_payload?.externalLabel?.active){
-  for(let i=0;i<Number(o.document_count||0);i++)links.push('<a class="pdf-link" href="/api/carriers/documents/'+encodeURIComponent(o.id)+'/'+i+'" target="_blank" rel="noopener">PDF '+(i+1)+'</a>');
-  for(const d of o.temu_documents||[])links.push('<a class="pdf-link" href="/api/temu/pdf?reference='+encodeURIComponent(o.reference)+'&package='+encodeURIComponent(d.package)+'" target="_blank" rel="noopener">PDF TEMU</a>');
+  for(let i=0;i<Number(o.document_count||0);i++)links.push('<a class="pdf-link" href="/api/carriers/documents/'+encodeURIComponent(o.id)+'/'+i+'" target="_blank" rel="noopener">▤ PDF '+(o.carrier_job?.environment==='production'?'PROD':'TEST')+' '+(i+1)+'/'+(Number(o.document_count)+(o.extra_parcels||[]).filter(p=>p.status!=='failed').length)+' ↗</a>');
+  for(const d of o.temu_documents||[])links.push('<a class="pdf-link" href="/api/temu/pdf?reference='+encodeURIComponent(o.reference)+'&package='+encodeURIComponent(d.package)+'" target="_blank" rel="noopener">▤ PDF TEMU ↗</a>');
  }
  return '<span class="badge">Livrée · aucun problème à gérer</span>'+links.map(link=>'<br>'+link).join('');
 }

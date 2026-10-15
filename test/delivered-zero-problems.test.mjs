@@ -68,6 +68,9 @@ test('the same served UI suppresses generic fallback, transport preparation and 
  assert.deepEqual(p.activities,[]);assert.equal(p.stage,null);assert.equal(p.canPrioritize,false);
  const monitor=monitoringObservation(o,{blocked:true,followUp:true,alert:true,result:'Ancien refus'});
  assert.equal(monitor.blocked,false);assert.equal(monitor.followUp,false);assert.equal(monitor.alert,false);assert.equal(monitor.result,'Livrée · aucun problème à gérer');
+ const app=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');vm.runInContext(app.slice(app.lastIndexOf('function deliveredOrderHtml(')),context);
+ const html=context.deliveredOrderHtml({...dirty(),document_count:1,carrier_job:{environment:'production'},temu_documents:[{package:'PK'}],reference:'TEST'});
+ assert.match(html,/▤ PDF PROD 1\/1 ↗/);assert.match(html,/▤ PDF TEMU ↗/);assert.match(html,/Livrée · aucun problème à gérer/);
 });
 test('fresh ERP delivery closes problems in the refresh request before stock or recovery controls',async()=>{
  const bc={...erp().bc,id:1935181,label:'BC',status:'active',update_stock:true};
