@@ -61,3 +61,19 @@ test('Excel button downloads displayed results without running verification agai
  f.context.URL={createObjectURL:()=> 'blob:export',revokeObjectURL(){}};f.context.setTimeout=fn=>fn();f.context.document.body={append(link){link.click=()=>{downloaded=true;assert.match(link.download,/\.xlsx$/);};link.remove=()=>{};}};
  await f.find('platform-cancellation-export').onclick();assert.equal(payload.results[0].reference,'REF');assert.equal(downloaded,true);assert.equal(count,2);
 });
+
+test('refresh previews cancellations and Apply alone calls the application endpoint',async()=>{
+ const f=fixture(),apply=f.find('platform-cancellation-apply');assert.equal(apply.disabled,true);
+ let reads=0;f.context.api=async(url)=>{assert.equal(url,'/api/orders/refresh-platform-cancellations');return reads++===0?{done:false,cursor:'a',result:{id:'a',channel:'temu',reference:'REF',status:'cancelled'}}:{done:true};};
+ await f.find('platform-cancellation-refresh').onclick();assert.equal(apply.disabled,false);
+ const detail=()=>f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children[3].textContent;
+ assert.match(detail(),/appliquer/);
+ let writes=0;f.context.api=async(url,input)=>{writes++;assert.equal(url,'/api/orders/apply-platform-cancellations');assert.equal(input.id,'a');assert.deepEqual(Array.from(input.channels),['temu']);return {result:{id:'a',channel:'temu',reference:'REF',status:'cancelled',applied:true}};};
+ await apply.onclick();assert.equal(writes,1);assert.equal(apply.disabled,true);assert.match(detail(),/appliqu.e dans V3/);
+ await apply.onclick();assert.equal(writes,1);
+});
+
+test('an interrupted refresh keeps Apply disabled',async()=>{
+ const f=fixture();let reads=0;f.context.api=async()=>{if(reads++)throw Error('Source unavailable');return {done:false,cursor:'a',result:{id:'a',channel:'temu',reference:'REF',status:'cancelled'}};};
+ await f.find('platform-cancellation-refresh').onclick();assert.equal(f.find('platform-cancellation-apply').disabled,true);
+});

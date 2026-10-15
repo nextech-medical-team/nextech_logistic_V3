@@ -362,6 +362,9 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/orders/refresh-platform-cancellations'&&req.method==='POST'){
       permitted(user,operational);json(res,200,await platformCancellationRefresh.next(await body(req),user));return;
     }
+    if(p==='/api/orders/apply-platform-cancellations'&&req.method==='POST'){
+      permitted(user,operational);json(res,200,await platformCancellationRefresh.apply(await body(req),user));return;
+    }
     if(p==='/api/orders/platform-cancellations/export'&&req.method==='POST'){
       permitted(user,operational);const input=await body(req);
       if(!Array.isArray(input.results)||input.results.length>100000||input.results.some(r=>!r||!['temu','shopify'].includes(r.channel)||!['cancelled','unchanged','review'].includes(r.status)||typeof r.reference!=='string'))throw Error('Résultats invalides');

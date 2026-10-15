@@ -17,8 +17,10 @@ export function receiptWork(row,order){
  const shipped=['shipped','in_transit','delivered','delivered_simulated','cancelled'];
  const bl=row.currentBl||(row.bls?.length===1?row.bls[0]:null);
  if(order?.archived||shipped.includes(order?.tracking_status)||!order?.partial_mode&&(shipped.includes(bl?.status)||bl?.status==='completed'))return 'history';
- if(row.labels?.length)return 'available';
- if(row.item?.state==='complete')return 'available';
+ // A carrier PDF alone does not prove that a delivery note exists.
+ // Runtime rows carry the stronger proof for every expected parcel.
+ const complete=!!(bl?.id&&bl?.label&&bl.status!=='cancelled'&&row.labels?.length&&(row.documentsComplete??true));
+ if(complete)return 'available';
  if(row.status==='eligible'||row.canLabel)return 'action';
  return 'blocked';
 }
