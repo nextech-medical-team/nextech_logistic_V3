@@ -19,6 +19,7 @@ const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 export function localObservationPatch(state){const patch={};for(const key of ['lastCheck','nextCheck','result','holdCode','externalOverdue','nextStep','blocked','followUp','progress','lastProgress','alert','alertSince','firstExternalDueAt'])if(Object.hasOwn(state,key))patch[key]=state[key];return patch;}
 export function monitoringObservation(order,previous={},now=Date.now()){
  const o=projectCurrentDiagnostics(structuredClone(order)),erp=o.erp_live||{};o.carrierAdmission=previous.carrierAdmission;
+ if(o.order_delivered)return {...previous,lastCheck:new Date(now).toISOString(),nextCheck:new Date(now+recheckCadence.local).toISOString(),result:'Livrée · aucun problème à gérer',holdCode:null,externalOverdue:false,nextStep:'Aucune action attendue',blocked:false,followUp:false,alert:false,alertSince:null,firstExternalDueAt:null};
  const stockCheck=erp.stockIncidentRecheck;
  const stockDisplay=stockCheck&&stockCheck.status!=='resolved'&&stockCheck.currentError&&now-Date.parse(stockCheck.checkedAt)<recheckCadence.external+recheckCadence.local?stockCheck.currentError:null;
  const awaitingPurchase=o.channel==='temu'&&(o.awaiting_purchase===true||(o.awaiting_purchase===undefined&&o.erp_live?.phase==='bl_ready'&&o.erp_live_job?.status==='complete'&&!o.erp_live_job?.error&&o.temu_job?.status==='ready'&&!o.temu_job?.error&&!o.transport_choice&&!o.partial_mode&&!o.resolution_pending_resume&&!o.carrier_job?.status&&!currentResolutionState(o.resolution_actions).reviews.length));

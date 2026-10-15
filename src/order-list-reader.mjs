@@ -48,6 +48,7 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
 
       for(const row of rows)if(row.label_status==='waiting_catalog'&&connection.configured&&!connection.running&&!connection.nextRetryAt){row.label_status='weight_pending';row.issue='Poids Erplain non disponible dans V3 ; consulter Connexions pour le dernier résultat. Aucun téléchargement en cours.';}
       if(!connection.configured)for(const row of rows)if(row.label_status==='waiting_catalog'){row.issue='Connexion Erplain à configurer : aucun téléchargement de poids en cours.';row.label_status='connection_missing';}
+      for(const row of rows)projectCurrentDiagnostics(row);
 
       let matched=null;
       if(scanAll){
@@ -64,6 +65,7 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
         rows=paginateProblemOrders(matched,page,pageSize).rows;
         await orderPageDetails(db,rows,'display');
       }
+      for(const row of rows)projectCurrentDiagnostics(row);
       return {rows,transportStats,summary,total,page,pages:Math.max(1,Math.ceil(total/pageSize))};
       
 }

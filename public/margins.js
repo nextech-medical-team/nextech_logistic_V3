@@ -18,6 +18,7 @@ function positionCountryMargins(){
 }
 function paintMarginChip(target,r,id){
  let chip=target.querySelector('[data-margin-chip]');
+ if(target.closest('tr')?.dataset.orderDelivered==='true'&&(!r||r.status==='incomplete')){chip?.remove();target.textContent='—';return;}
  if(!r){if(chip)chip.remove();const text=loadError?'Marge indisponible · actualisez la liste':data?'Marge à compléter':'Chargement de la marge…';if(target.textContent!==text)target.textContent=text;return;}
  const label=r.status==='incomplete'?'Marge à compléter':(r.profit>0?'+':'')+money(r.profit)+'\nRecettes : '+pct(r.margin)+'\nCoûts nets : '+pct(r.markup);
  if(!chip){chip=document.createElement('button');chip.dataset.marginChip='';if(target.hasAttribute('data-temu-margin'))target.textContent='';target.append(chip);chip.onclick=()=>openMargin(id);}

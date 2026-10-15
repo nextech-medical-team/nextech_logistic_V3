@@ -64,6 +64,7 @@ export async function processingRows(db,ids){
    carrier_job:row.diagnostic_carrier||{error:row.carrier_error,updated_at:row.carrier_updated},
    temu_job:row.temu_status?{error:row.temu_error,updated_at:row.temu_updated}:null,
    resolution_error:row.resolution_error,resolution_error_updated_at:row.resolution_updated});
+  if(current.order_delivered)return {...processingView({...row,tracking_status:'delivered'}),order_delivered:true,currentCarrier:row.diagnostic_order?.carrier||null,label_manual_request_required:false,label_diagnostic_history:[]};
   return {...processingView({...row,quotaRecovery:row.diagnostic_order?.erp_live?.transientRecovery,erp_error:current.erp_live_job.error,carrier_error:current.carrier_job.error,
    resolution_error:current.resolution_error,label_manual_request_required:current.label_manual_request_required}),currentCarrier:row.diagnostic_order?.carrier||null,
    label_manual_request_required:!!current.label_manual_request_required,label_diagnostic_history:current.label_diagnostic_history||[]};
@@ -74,6 +75,7 @@ const serviceName = value => ({gls:'GLS home',gls_pharma:'GLS PHARMA',gls_shop:'
 export function processingView(r){
  const base={id:r.id,priority:!!r.processing_priority_at,canPrioritize:!['shipped','in_transit','delivered'].includes(r.tracking_status)&&!['production_ready','sandbox_ready','ready'].includes(r.label_status),position:null,since:null,stage:null,remaining:null};
  const activities=[];
+ if(r.tracking_status==='delivered')return {...base,priority:false,canPrioritize:false,activities,previewPending:null};
  const add=(service,state,step,since,lastSignal,reason,extra={})=>activities.push({service,state,step,since:since||null,lastSignal:lastSignal||null,reason:reason||null,...extra});
  const carrier=serviceName(r.carrier);
  if(['queued','running'].includes(r.resolution_status))add(['equivalent-preview','replace-equivalent','check-sku','compare-bc','weight','reconcile-bc'].includes(r.resolution_action)?'V3 → Erplain':'V3',r.resolution_status==='queued'?'queued':'active',r.stage||'Correction',r.resolution_since,r.resolution_updated,null,{queue:'Corrections',position:r.resolution_position});
