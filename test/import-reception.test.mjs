@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {importOrders,previewOrders} from '../src/imports.mjs';
-import {sameImportIdentity,matchImport} from '../src/import-reception.mjs';
+import {sameImportIdentity,matchImport,importCandidates} from '../src/import-reception.mjs';
 import {recoverOrder,externalReference} from '../src/erplain-document-metadata.mjs';
 
 async function fixture(){const db=new PGlite();await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,channel text,reference text,source_reference text,duplicate_of text,recipient text,address jsonb,source_date text,source_payload jsonb DEFAULT '{}',label_status text DEFAULT 'pending',erp_status text DEFAULT 'pending',tracking_status text DEFAULT 'unknown',archived boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,erp_live jsonb DEFAULT '{}',issue text,received_at timestamptz DEFAULT now(),UNIQUE(channel,reference));CREATE TABLE lines(id text PRIMARY KEY,order_id text,source_line text,source_sku text,quantity numeric,source_payload jsonb);CREATE TABLE jobs(id text PRIMARY KEY,order_id text,kind text);CREATE TABLE import_receipts(id text PRIMARY KEY,signature text,result jsonb);`);return db;}
@@ -80,4 +80,13 @@ test('reusable customer numbers never prove ownership of a BC; incomplete search
  await assert.rejects(()=>recoverOrder({request:async()=>({Orders:{data:[{...candidate,internal_notes:''}],paginatorInfo:{hasMorePages:false}}})},current),/rapprocher/);
  await assert.rejects(()=>recoverOrder({request:async()=>({Orders:{data:[],paginatorInfo:{}}})},current),/incomplète/);
  await assert.rejects(()=>recoverOrder({request:async()=>({Orders:{data:[{status:'active'}],paginatorInfo:{hasMorePages:false}}})},current),/incomplète/);
+});
+
+
+test('stored Shopify global IDs and decimal IDs share the same duplicate search identity',async()=>{
+ const db=await fixture();try{
+  await db.query("INSERT INTO orders(id,channel,reference,source_payload) VALUES('global','shopify','#old',$1)",[JSON.stringify({id:'gid://shopify/Order/1001',sourceShop:'shop.myshopify.com'})]);
+  const incoming={reference:'#new',source_payload:{id:'1001',sourceShop:'shop.myshopify.com'}};
+  const candidates=await importCandidates(db,[incoming],'shopify');assert.equal(candidates.length,1);assert.equal(matchImport(incoming,candidates,'shopify').existing.id,'global');
+ }finally{await db.close();}
 });

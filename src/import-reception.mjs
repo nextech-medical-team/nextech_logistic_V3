@@ -14,7 +14,7 @@ export function sameImportIdentity(a,b,channel){
 }
 export async function importCandidates(db,orders,channel){
  const refs=[...new Set(orders.map(o=>ref(o.source_reference||o.reference)))],ids=channel==='shopify'?orders.map(shopifyId).filter(Boolean):[];
- return (await db.query(`SELECT id,channel,reference,source_reference,recipient,label_status,erp_status,source_payload,erp_live FROM orders WHERE NOT (${cancelledImportSql}) AND (channel=$1 OR channel='erplain' OR ($1 IN ('tender','samples') AND channel IN ('tender','samples'))) AND (coalesce(source_reference,reference)=ANY($2::text[]) OR reference=ANY($2::text[]) OR ($1='shopify' AND source_payload->>'id'=ANY($3::text[]))) ORDER BY received_at,id`,[channel,refs,ids])).rows;
+ return (await db.query(`SELECT id,channel,reference,source_reference,recipient,label_status,erp_status,source_payload,erp_live FROM orders WHERE NOT (${cancelledImportSql}) AND (channel=$1 OR channel='erplain' OR ($1 IN ('tender','samples') AND channel IN ('tender','samples'))) AND (coalesce(source_reference,reference)=ANY($2::text[]) OR reference=ANY($2::text[]) OR ($1='shopify' AND regexp_replace(source_payload->>'id','^gid://shopify/Order/','')=ANY($3::text[]))) ORDER BY received_at,id`,[channel,refs,ids])).rows;
 }
 export function matchImport(order,candidates,channel){
  const matches=candidates.filter(o=>sameImportIdentity(order,o,channel));
