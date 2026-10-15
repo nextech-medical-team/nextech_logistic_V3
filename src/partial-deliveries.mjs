@@ -1,3 +1,4 @@
+import {preserveTemuPartialLabels} from './temu-partial-labels.mjs';
 import {partialPreparationChoice,assertPartialTransportMode} from './partial-transport-mode.mjs';
 import {verifyRecordedOrSourceTotals} from './existing-bc-execution.mjs';
 import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
@@ -67,6 +68,7 @@ export function partialService(db,directory,{api=erplainAccount(directory,'live'
  const current=(await tx.query('SELECT * FROM carrier_jobs WHERE order_id=$1',[id])).rows[0];if(current&&['pending','creating','awaiting_pdf','review'].includes(current.status))throw new Error('Résultat transporteur incertain : vérifier avant fractionnement');
  const docs=(await tx.query('SELECT document_index,pdf FROM carrier_documents WHERE order_id=$1 ORDER BY document_index',[id])).rows;
  const hasLabel=current?.status==='ready'&&docs.length>0;
+ if(blOnly&&(docs.length||(await tx.query('SELECT 1 FROM temu_label_documents WHERE reference=$1 LIMIT 1',[s.order.reference])).rows.length))await preserveTemuPartialLabels(tx,s.order);
  const claimed=(await tx.query("SELECT 1 FROM partial_deliveries WHERE order_id=$1 AND label_choice='reuse' AND status<>'cancelled'",[id])).rows.length;
  
  if(labelChoice==='reuse'&&hasLabel&&current?.environment!=='production')throw Error('Étiquette TEST : créer une nouvelle étiquette de production');
