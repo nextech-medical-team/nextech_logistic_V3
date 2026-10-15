@@ -11,9 +11,9 @@ test('delivered PDF history cannot reenter active problems through the SQL fallb
  for(const labels of [[],[WITHOUT_DIAGNOSTIC]]){const r=selectProblemOrders([o],labels,currentProblemClassifier(),[o.id],true);assert.equal(r.total,0);assert.deepEqual(r.problemTypes,[]);}
  assert.deepEqual(before,delivered());assert.equal(o.tracking_status,'delivered');assert.equal(o.temu_job.status,'external');
 });
-test('an independent active error survives delivered PDF archival',()=>{
+test('human delivery rule closes even independent errors while retaining archived PDF history',()=>{
  const o=delivered();o.erp_live_job={status:'review',error:'Stock insuffisant'};projectCurrentDiagnostics(o);
- const r=selectProblemOrders([o],[],currentProblemClassifier(),[o.id],true);assert.equal(r.total,1);assert.ok(r.problemTypes.some(p=>p.label==='Bloqué : stock insuffisant'));
+ const r=selectProblemOrders([o],[],currentProblemClassifier(),[o.id],true);assert.equal(r.total,0);assert.deepEqual(r.problemTypes,[]);assert.equal(o.erp_live_job.error,null);assert.equal(o.temu_pdf_archive_note,archived);
 });
 test('ordinary lists retain history, unknown active errors and partial remainders remain visible',()=>{
  const o=delivered();projectCurrentDiagnostics(o);assert.equal(selectProblemOrders([o],[],currentProblemClassifier(),[o.id]).total,1);
