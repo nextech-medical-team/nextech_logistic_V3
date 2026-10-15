@@ -55,12 +55,13 @@ function recordedBcQuoteId(plan){
 
 function assertExistingBlLabelOrder(order){
  const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);
- if(order.archived||order.simulation||order.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(order.tracking_status))throw Error('Commande annulée, expédiée ou hors production : aucun nouvel achat');
+ if(order.archived||order.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(order.tracking_status))throw Error('Commande annulée ou expédiée : aucun nouvel achat');
  if(order.partial_mode)throw Error('Utiliser le BL et les quantités de la livraison partielle');
  if(!hasCreatedBl(order))throw Error('BL publié absent : préparation à terminer avant achat');
 }
 const postBlAutomaticClaimGuard=` AND EXISTS(SELECT 1 FROM orders o WHERE o.id=$4 AND o.reference=temu_label_jobs.reference
- AND NOT o.archived AND NOT o.simulation AND NOT o.partial_mode AND o.transport_choice IS NULL
+ AND NOT o.archived AND NOT o.partial_mode AND o.transport_choice IS NULL
+ AND coalesce(o.tracking_status,'not_shipped') NOT IN ('cancelled','shipped','in_transit','delivered') AND coalesce(o.label_status,'')<>'cancelled'
  AND o.erp_live->'bl'->>'id'=$5::text
  AND o.erp_live->'bl'->>'status' IN ('pending','make_the_shipment','in_preparation','ready_to_ship')
  AND o.suspension=$6::jsonb

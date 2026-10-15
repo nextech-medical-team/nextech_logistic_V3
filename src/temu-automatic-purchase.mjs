@@ -36,7 +36,7 @@ export async function initializeTemuAutomaticPurchase(db){
 }
 export function automaticPreparationHold(o,now=Date.now()){
  const blocked=suspensionBlock(o);if(blocked)return blocked;
- if(!o||o.archived||o.simulation||o.channel!=='temu')return 'Commande hors périmètre des achats automatiques';
+ if(!o||o.archived||o.channel!=='temu'||o.simulation&&!hasCreatedBl(o))return 'Commande hors périmètre des achats automatiques';
  if(o.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(o.tracking_status))return 'Commande annulée ou déjà expédiée';
  if(hasExternalLabel(o)||o.transport_choice)return 'Étiquette ou choix de transport existant à préserver';
  if(o.partial_mode)return 'Utiliser le BL de la livraison partielle';
