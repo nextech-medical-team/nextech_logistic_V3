@@ -9,19 +9,38 @@
  const statusNames={UNFULFILLED:'Non traitée',FULFILLED:'Traitée',PARTIALLY_FULFILLED:'Partiellement traitée',IN_PROGRESS:'En cours',ON_HOLD:'En attente',SCHEDULED:'Planifiée',CANCELLED:'Annulée',CANCELED:'Annulée'};
  function sourceStatus(row){return row.channel==='shopify'?(statusNames[row.status]||row.status||'Non communiqué'):(row.status==='3'?'Annulée (TEMU 3)':row.status?'Statut TEMU '+row.status:'Non communiqué');}
  function emptyRows(message){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=7;td.className='missing-empty';td.textContent=message;tr.append(td);$('missing-rows').replaceChildren(tr);}
+ const filterLabel=document.createElement('label');filterLabel.htmlFor='missing-status';filterLabel.textContent='Statut de commande';
+ const statusFilter=document.createElement('select');statusFilter.id='missing-status';filterLabel.append(statusFilter);
+ const filterCount=document.createElement('p');filterCount.setAttribute('role','status');filterCount.setAttribute('aria-live','polite');
+ $('missing-rows').closest('.table-wrap').before(filterLabel,filterCount);
+ let report=null;
+ function refreshStatuses(){
+  const selected=statusFilter.value;statusFilter.replaceChildren(new Option('Tous les statuts',''));
+  for(const status of [...new Set((report?.rows||[]).map(sourceStatus))].sort((a,b)=>a.localeCompare(b,'fr')))statusFilter.add(new Option(status,status));
+  if([...statusFilter.options].some(option=>option.value===selected))statusFilter.value=selected;
+  statusFilter.disabled=!report?.rows.length;
+ }
+ function renderReport(){
+  if(!report)return;
+  const rows=report.rows.filter(row=>!statusFilter.value||sourceStatus(row)===statusFilter.value);
+  $('missing-rows').replaceChildren();
+  for(const row of rows){const tr=document.createElement('tr');for(const value of [row.channel.toUpperCase(),row.shop,row.reference,new Date(row.date).toLocaleString('fr-FR'),row.country||'—',sourceStatus(row),'Absente de V3']){const td=document.createElement('td');td.textContent=value;tr.append(td);}$('missing-rows').append(tr);}
+  if(!rows.length)emptyRows(report.rows.length?'Aucune commande pour ce statut.':report.done?(report.complete?'Aucune commande manquante sur la période sélectionnée.':'Aucune commande manquante détectée dans les résultats disponibles. La vérification est incomplète.'):'Recherche des commandes manquantes en cours…');
+  filterCount.textContent=`${rows.length} commande(s) affichée(s) sur ${report.rows.length} absente(s) de V3`;
+ }
+ statusFilter.onchange=renderReport;refreshStatuses();
  emptyRows('Choisissez une plateforme puis lancez la vérification.');
  button.addEventListener('click',()=>{show('missing-orders');$('title').textContent='Vérification des commandes';});
  $('missing-run').onclick=async()=>{
   refreshBounds();
   if(!$('missing-before').reportValidity())return;
+  report=null;refreshStatuses();filterCount.textContent='';
   const control=$('missing-run');control.disabled=true;control.textContent='Vérification en cours…';$('missing-platform').disabled=true;$('missing-before').disabled=true;emptyRows('Recherche des commandes manquantes en cours…');$('missing-errors').textContent='';$('missing-state').textContent='Lecture des API en cours…';
   try{
    let result=await api('/api/missing-orders/verify',{beforeDate:new Date($('missing-before').value).toISOString(),platform:$('missing-platform').value});
    while(!result.done){
     result=await api('/api/missing-orders/verify',{runId:result.runId});
-    $('missing-rows').replaceChildren();
-    for(const row of result.rows){const tr=document.createElement('tr');for(const value of [row.channel.toUpperCase(),row.shop,row.reference,new Date(row.date).toLocaleString('fr-FR'),row.country||'—',sourceStatus(row),'Absente de V3']){const td=document.createElement('td');td.textContent=value;tr.append(td);}$('missing-rows').append(tr);}
-    if(!result.rows.length)emptyRows(result.done?(result.complete?'Aucune commande manquante sur la période sélectionnée.':'Aucune commande manquante détectée dans les résultats disponibles. La vérification est incomplète.'):'Recherche des commandes manquantes en cours…');
+    report=result;refreshStatuses();renderReport();
     $('missing-errors').textContent=result.errors.join(' · ');
     $('missing-state').textContent=`${result.done?(result.complete?'Vérification terminée':'Vérification incomplète'):'Lecture en cours'} · ${result.checked} commandes lues · ${result.rows.length} absentes de V3 · du ${new Date(result.start).toLocaleString('fr-FR')} au ${new Date(result.end).toLocaleString('fr-FR')} (heure locale).`;
    }
