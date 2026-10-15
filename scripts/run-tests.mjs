@@ -27,6 +27,7 @@ groups.at(-1).push('test/equivalent-label-edition.test.mjs');
 
 groups.at(-1).push('test/equivalence-post-bc-policy.test.mjs');
 
+groups.push(['--test','test/post-bl-margin-cost.test.mjs']);
 groups.push(quotaGroup);
 groups.push(recoveredPreparationGroup);
 groups.push(['--test','test/missing-draft-recovery.test.mjs']);
