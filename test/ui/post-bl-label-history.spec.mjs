@@ -1,0 +1,21 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+import {projectCurrentDiagnostics} from '../../src/current-order-diagnostics.mjs';
+import {currentProblemClassifier} from '../../src/problem-typology-reader.mjs';
+const stale='Mapping modifié avant création : recontrôle requis';
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('post BL historical refusal and manual state '+name,async({page})=>{
+ const row=projectCurrentDiagnostics({id:'post-bl-history',reference:'TEST-POST-BL-HISTORY',channel:'temu',carrier:'gls',transport_choice:'gls',recipient:'Synthetic recipient',source_date:'2026-10-14',address:{country:'GR'},sku_lines:[],source_payload:{},erp_live:{bl:{id:'BL',label:'SHO-TEST',status:'ready_to_ship'}},label_status:'production_pending',tracking_status:'not_shipped',document_count:0,resolution_error:stale,carrier_job:{status:'failed',error:stale,tracking:[]}});
+ const writes=[],errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>{if(r.method()!=='GET'&&!['/api/orders/processing','/api/partial/visible'].includes(new URL(r.url()).pathname))writes.push(r.url());});
+ await page.setViewportSize(viewport);
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:[row],total:1,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/order-problem-types*',r=>r.fulfill({json:{problemTypes:[]}}));
+ await page.route('**/api/orders/processing',r=>r.fulfill({json:{rows:[{id:row.id,currentCarrier:'gls',stage:'GLS · Nouvelle demande manuelle d’étiquette attendue',state:'manual',canPrioritize:false,activities:[],label_manual_request_required:true,label_diagnostic_history:row.label_diagnostic_history,monitoring:{blocked:true,alert:true,result:stale,nextStep:'Recontrôler la préparation',nextCheck:'2026-10-15T10:00:00Z'}}]}}));
+ await page.goto('/');const tr=page.locator('#order-rows tr').filter({hasText:row.reference});await expect(tr).toHaveCount(1);
+ await expect(tr.locator('.compact-problem')).toHaveCount(0);await expect(tr.locator('.label-diagnostic-history')).toHaveCount(1);
+ await expect(tr.getByText('Ancien refus : '+stale,{exact:true})).not.toBeVisible();
+ await expect(tr.locator('.monitoring-result')).toContainText('Ancien refus conservé');await expect(tr.locator('.monitoring-result')).not.toContainText('contrôle de préparation');
+ await expect(tr.locator('.monitoring-alert')).toBeEmpty();await expect(tr.locator('.processing-stage')).toContainText('demande manuelle');
+ await tr.locator('.label-diagnostic-history summary').click();await expect(tr.getByText('Ancien refus : '+stale,{exact:true})).toBeVisible();
+ await page.reload();await expect(page.locator('.compact-problem')).toHaveCount(0);expect(currentProblemClassifier()(row)).toHaveLength(0);expect(writes).toEqual([]);expect(errors).toEqual([]);
+ fs.mkdirSync('proofs',{recursive:true});await page.screenshot({path:'proofs/post-bl-label-history-'+name+'.png',fullPage:false});fs.writeFileSync('proofs/post-bl-label-history-'+name+'.json',JSON.stringify({status:'PASS',viewport,writes,errors,scope:'Full application with synthetic data; historical reason available, no current mapping gate or automatic request'}));
+});
