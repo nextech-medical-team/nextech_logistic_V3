@@ -2,7 +2,8 @@ import {cancellationBlock} from './erp-transient-policy.mjs';
 export const quotaWaitingMessage='Accès Erplain en attente · reprise automatique programmée';
 export function quotaReadRetryAt(error,now=Date.now()){
  const local=error?.erplainRequestNotSent===true&&error?.erplainProviderRateLimited!==true;
- return new Date(now+Math.max(local?2000:60000,Number(error?.retryAfter||0)*1000)).toISOString();
+ const raw=error?.retryAfter,seconds=Number(raw),supplied=raw!=null&&String(raw).trim()!==''&&Number.isFinite(seconds)&&seconds>=0;
+ return new Date(now+(supplied?Math.max(2000,seconds*1000):local?2000:60000)).toISOString();
 }
 export function safeQuotaReadQueue(order,error){
  return error?.erplainRequestNotSent===true&&error?.erplainReadOnly===true&&error?.httpStatus===429&&
