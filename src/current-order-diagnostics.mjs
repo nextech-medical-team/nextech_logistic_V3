@@ -1,4 +1,5 @@
 import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
+import {projectPostBlLabelHistory} from './post-bl-label-history.mjs';
 import {hasCompleteOrderDocuments} from './complete-order-documents.mjs';
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
 import {stockIncidentOnly} from './stock-incident-recheck.mjs';
@@ -53,6 +54,7 @@ export function projectTemuPdfArchiveWarning(o){
  if(warnings.length)o.temu_pdf_archive_note=[...new Set(warnings)].join(' ; ');
 }
 export function projectCurrentDiagnostics(o){
+ projectPostBlLabelHistory(o);
  projectTemuPdfArchiveWarning(o);
  if(hasCompleteOrderDocuments(o)){
   for(const [target,key] of [[o,'issue'],[o,'resolution_error'],[o.erp_live_job,'error'],[o.carrier_job,'error'],[o.temu_job,'error'],[o.pending_equivalent,'error'],...(o.resolution_actions||[]).map(job=>[job,'error']),...(o.sku_lines||[]).map(line=>[line,'catalog_issue'])])if(target)target[key]=null;
