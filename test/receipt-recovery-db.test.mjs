@@ -164,5 +164,6 @@ test('receipt outcome requires every parcel PDF, preserves in_preparation and re
   await f.db.query("UPDATE receipt_recovery_runs SET plan=jsonb_set(plan,'{coverage,complete}','false') WHERE id=$1",[run]);
   await assert.rejects(f.route('/api/receipts/recovery/resume',{id:run},'operator'),/Forbidden/);
   await f.route('/api/receipts/recovery/resume',{id:run});assert.equal((await f.service.status(run)).state,'queued');await f.service.run();assert.equal((await f.service.status(run)).plan.coverage.complete,true);
+  await f.db.query("UPDATE orders SET label_status='cancelled' WHERE id=$1",[f.id]);s=await f.service.status(run);assert.equal(s.outcome.existing.length,0);assert.equal(s.outcome.excluded.length,1);
  }finally{await f.engine.close();}
 });
