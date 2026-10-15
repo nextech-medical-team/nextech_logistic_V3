@@ -1,3 +1,4 @@
+import {projectOpenBlDiagnosticHistory} from './open-bl-diagnostic-history.mjs';
 import {projectSubstitutionDiagnostics} from './substitution-diagnostics.mjs';
 import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
 import {projectDeliveredOrder} from './delivered-order.mjs';
@@ -58,6 +59,7 @@ export function projectTemuPdfArchiveWarning(o){
 // Persisting workflows explicitly retain their previous diagnostic policy;
 // the default read projection always applies the terminal delivery rule.
 export function projectCurrentDiagnostics(o,{delivery=true}={}){
+ projectOpenBlDiagnosticHistory(o);
  projectTemuPdfArchiveWarning(o);
  if(delivery&&projectDeliveredOrder(o))return o;
  projectSubstitutionDiagnostics(o);
