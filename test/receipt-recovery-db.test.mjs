@@ -13,8 +13,8 @@ async function fixture(channel='amazon',temu=undefined){
  CREATE TABLE resolution_jobs(id text PRIMARY KEY,order_id text,request_id text UNIQUE,action text,payload jsonb,status text DEFAULT 'queued',error text,stage text);
  CREATE UNIQUE INDEX resolution_busy ON resolution_jobs(order_id) WHERE status IN ('queued','running','waiting');
  CREATE TABLE erp_live_jobs(order_id text,status text); CREATE TABLE correction_jobs(order_id text,status text);
- CREATE TABLE carrier_jobs(order_id text,status text,environment text,tracking jsonb,error text); CREATE TABLE carrier_documents(order_id text,document_index int);
- CREATE TABLE temu_label_jobs(reference text,status text,error text); CREATE TABLE temu_label_documents(reference text,package text);
+ CREATE TABLE carrier_jobs(order_id text,status text,environment text,tracking jsonb,error text); CREATE TABLE carrier_documents(order_id text,document_index int,pdf bytea DEFAULT '\x25504446');
+ CREATE TABLE temu_label_jobs(reference text,status text,error text,packages jsonb DEFAULT '[]'); CREATE TABLE temu_label_documents(reference text,package text,pdf bytea DEFAULT '\x25504446'); CREATE TABLE extra_parcels(order_id text,environment text,status text,pdf bytea);
  CREATE TABLE equivalence_import_rows(order_id text,batch_id text);CREATE TABLE equivalence_imports(id text,status text);
  CREATE TABLE audit(user_email text,action text,detail jsonb);`);
  await initializeReceiptRecovery(db);await initializeReceiptRecovery(db);
@@ -38,7 +38,7 @@ test('durable receipt preview, native resume, labels, finished result and duplic
   const bl={id:'bl',label:'SHO-SYNTHETIC',status:'ready_to_ship',update_stock:false};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
   await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl,phase:'bl_ready'})]);
   await f.service.run();assert.equal(f.labelCalls(),1);await f.service.run();assert.equal(f.labelCalls(),1);
-  await f.db.query("UPDATE carrier_jobs SET status='ready'");await f.db.query('INSERT INTO carrier_documents VALUES($1,0)',[f.id]);await f.service.run();await f.service.run();
+  await f.db.query("UPDATE carrier_jobs SET status='ready'");await f.db.query('INSERT INTO carrier_documents(order_id,document_index) VALUES($1,0)',[f.id]);await f.service.run();await f.service.run();
   const r=await f.service.status(run);assert.equal(r.state,'finished');assert.equal(r.plan.rows[0].item.state,'complete');assert.equal(r.plan.rows[0].labels.length,1);assert.match(r.plan.rows[0].labels[0].url,/carriers\/documents/);assert.equal(r.plan.rows[0].currentBl.label,bl.label);
  }finally{await f.engine.close();}
 });
@@ -65,7 +65,7 @@ test('TEMU never buys or falls back to a direct carrier, returns supplier refusa
   const bl={id:'bl',label:'SHO-TEMU',status:'ready_to_ship',update_stock:false};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
   await f.db.query("UPDATE resolution_jobs SET status='complete'");await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);await f.db.query("INSERT INTO temu_label_jobs VALUES('SYNTHETIC','shipment_error','Non-English characters')");
   await f.service.run();await f.service.run();const r=await f.service.status(run);assert.equal(r.state,'finished');assert.equal(r.plan.rows[0].item.state,'label_action_required');assert.match(r.plan.rows[0].labelError,/Non-English/);assert.equal(f.labelCalls(),0);
-  await f.db.query("INSERT INTO temu_label_documents VALUES('SYNTHETIC','PK1')");assert.match((await f.service.status(run)).plan.rows[0].labels[0].url,/temu\/pdf/);
+  await f.db.query("INSERT INTO temu_label_documents(reference,package) VALUES('SYNTHETIC','PK1')");assert.match((await f.service.status(run)).plan.rows[0].labels[0].url,/temu\/pdf/);
  }finally{await f.engine.close();}
 });
 test('preview changed quantity or suspension cannot enqueue any resume',async()=>{
@@ -101,7 +101,7 @@ for(const channel of ['amazon','temu'])test(`${channel}: existing ready BL obtai
   const bl={id:'existing',label:'SHO-EXISTING',status:'ready_to_ship',update_stock:false};f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});await f.db.query("UPDATE orders SET erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl,phase:'bl_ready'})]);
   const run=await f.start('documents');assert.equal((await f.service.status(run)).plan.rows[0].canLabel,true);await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);
   if(channel==='temu'){assert.equal(f.labelCalls(),0);assert.equal((await f.service.status(run)).plan.rows[0].item.state,'label_action_required');}
-  else{assert.equal(f.labelCalls(),1);await f.service.run();assert.equal(f.labelCalls(),1);await f.db.query("UPDATE carrier_jobs SET status='ready'");await f.db.query('INSERT INTO carrier_documents VALUES($1,0)',[f.id]);await f.service.run();assert.equal((await f.service.status(run)).plan.rows[0].item.state,'complete');}
+  else{assert.equal(f.labelCalls(),1);await f.service.run();assert.equal(f.labelCalls(),1);await f.db.query("UPDATE carrier_jobs SET status='ready'");await f.db.query('INSERT INTO carrier_documents(order_id,document_index) VALUES($1,0)',[f.id]);await f.service.run();assert.equal((await f.service.status(run)).plan.rows[0].item.state,'complete');}
  }finally{await f.engine.close();}
 });
 test('another receipt can be analyzed while a native preparation is waiting',async()=>{
@@ -145,9 +145,24 @@ test('receipt preview refreshes related BC individually before showing its BL st
   const bl={id:'existing',label:'SHO-EXISTING',status:'ready_to_ship',update_stock:false};
   f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
   await f.db.query("UPDATE orders SET resolution_pending_resume=true,erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl:{...bl,status:'make_the_shipment'},stockDocument:{id:'stock',status:'completed'}})]);
-  await f.db.query("INSERT INTO carrier_jobs VALUES($1,'ready','production','[]',null)",[f.id]);await f.db.query('INSERT INTO carrier_documents VALUES($1,0)',[f.id]);
+  await f.db.query("INSERT INTO carrier_jobs VALUES($1,'ready','production','[]',null)",[f.id]);await f.db.query('INSERT INTO carrier_documents(order_id,document_index) VALUES($1,0)',[f.id]);
   const run=await f.start('documents');const state=await f.service.status(run);
   assert.ok(f.calls.some(q=>q.includes('DocumentRead')));assert.equal(state.plan.rows[0].currentBl.status,'ready_to_ship');assert.match(state.plan.rows[0].reason,/aucune nouvelle génération/);assert.equal(state.plan.rows[0].labels.length,1);
   assert.equal((await f.db.query('SELECT * FROM resolution_jobs')).rows.length,0);assert.equal(f.labelCalls(),0);
+ }finally{await f.engine.close();}
+});
+
+test('receipt outcome requires every parcel PDF, preserves in_preparation and resumes incomplete analysis only',async()=>{
+ const f=await fixture();try{
+  const bl={id:'existing',label:'SHO-EXISTING',status:'in_preparation'};
+  f.change({...f.actual(),shipping_orders:{data:[bl],paginatorInfo:{hasMorePages:false}}});
+  await f.db.query("UPDATE orders SET parcel_count=2,erp_live=erp_live||$2::jsonb WHERE id=$1",[f.id,JSON.stringify({bl})]);
+  await f.db.query("INSERT INTO carrier_jobs VALUES($1,'ready','production','[]',null)",[f.id]);await f.db.query('INSERT INTO carrier_documents(order_id,document_index) VALUES($1,0)',[f.id]);
+  const run=await f.start('blocked');let s=await f.service.status(run);assert.equal(s.outcome.existing.length,0);assert.equal(s.outcome.unfinished.length,1);
+  await f.db.query('INSERT INTO carrier_documents(order_id,document_index) VALUES($1,1)',[f.id]);s=await f.service.status(run);assert.equal(s.outcome.existing.length,1);assert.equal(s.plan.rows[0].currentBl.status,'in_preparation');
+  await assert.rejects(f.route('/api/receipts/recovery/resume',{id:run}),/ne peut pas/);
+  await f.db.query("UPDATE receipt_recovery_runs SET plan=jsonb_set(plan,'{coverage,complete}','false') WHERE id=$1",[run]);
+  await assert.rejects(f.route('/api/receipts/recovery/resume',{id:run},'operator'),/Forbidden/);
+  await f.route('/api/receipts/recovery/resume',{id:run});assert.equal((await f.service.status(run)).state,'queued');await f.service.run();assert.equal((await f.service.status(run)).plan.coverage.complete,true);
  }finally{await f.engine.close();}
 });
