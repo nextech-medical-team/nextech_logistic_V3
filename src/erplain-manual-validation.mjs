@@ -35,7 +35,8 @@ export function manualReviewService(db,api){return {
    if(manualReviewHash(d)!==b.reviewHash){await queueManualReview(tx,d,r.order_id);return {changed:true,previousDocument:r.document,document:d,reviewHash:manualReviewHash(d),...documentIssues(d),readAt:new Date().toISOString()};}
    const scope=recoveryScope(d);const issues=documentIssues(d);if(issues.admissionIssues.length)throw Error(issues.admissionIssues.join(' ; '));
    const ref=String(d.external_reference||d.label).trim();
-   const duplicates=(await tx.query('SELECT id FROM orders WHERE reference=$1 AND id IS DISTINCT FROM $2',[ref,r.order_id])).rows;
+   if(db.kind==='postgres')await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('nextech:import-order-identity',0))");
+   const duplicates=(await tx.query("SELECT id FROM orders WHERE (reference=$1 OR coalesce(source_reference,reference)=$1 OR erp_live->'bc'->>'id'=$3) AND id IS DISTINCT FROM $2",[ref,r.order_id,b.bcId])).rows;
    if(duplicates.length)throw Error('Référence déjà présente dans V3 : rapprochement requis, aucune seconde commande créée');
    let id=r.order_id;
    if(id){

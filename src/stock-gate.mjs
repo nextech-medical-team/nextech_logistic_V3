@@ -1,7 +1,9 @@
 const stockNumeric=value=>(typeof value==='number'||typeof value==='string'&&value.trim()!=='')&&Number.isFinite(Number(value));
 export function assertFullOrderStock(lines){
  const groups=new Map();
- for(const l of lines){if(!l.variant)continue;if(l.variant.track_inventory===false)continue;
+ for(const l of lines){if(!l.variant)continue;
+ if(!stockNumeric(l.quantity)||Number(l.quantity)<=0)throw new Error('Quantité produit invalide : '+l.variant.sku);
+ if(l.variant.track_inventory===false)continue;
  const key=l.variant.id+':'+l.location?.id;if(!l.location?.id)throw new Error('Lieu de stockage absent : '+l.variant.sku);
  const qty=stockNumeric(l.quantity)?Number(l.quantity):NaN,available=l.available,onHand=l.on_hand,reserved=l.reserved_quantity;
  if(!stockNumeric(l.quantity)||qty<=0||![available,onHand,reserved].every(stockNumeric))throw new Error('Stock non vérifiable : '+l.variant.sku);

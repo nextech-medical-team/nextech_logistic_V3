@@ -1,3 +1,4 @@
+import {initializeImportReceptions,recordImportReception} from './import-reception.mjs';
 import ExcelJS from 'exceljs';
 import {createHash,randomUUID} from 'node:crypto';
 import {postalCellValue} from './import-postal-code.mjs';
@@ -140,7 +141,7 @@ export async function parseTemuExcelFiles(files){
  return {hash:digest.digest('hex'),rows:rowCount,repeatedLines,files:fileSummaries,orders:[...groups.values()],errors};
 }
 async function existingReferences(db,references){
- return new Set((await db.query("SELECT DISTINCT reference,source_reference FROM orders WHERE channel='temu' AND (reference=ANY($1::text[]) OR source_reference=ANY($1::text[]))",[references])).rows.flatMap(r=>[r.reference,r.source_reference].filter(Boolean)));
+ return new Set((await db.query("SELECT DISTINCT reference,source_reference FROM orders WHERE channel IN ('temu','erplain') AND (reference=ANY($1::text[]) OR source_reference=ANY($1::text[]))",[references])).rows.flatMap(r=>[r.reference,r.source_reference].filter(Boolean)));
 }
 export async function previewTemuExcel(db,files){
  const parsed=await parseTemuExcelFiles(files),existing=await existingReferences(db,parsed.orders.map(o=>o.reference));
@@ -152,6 +153,7 @@ export async function previewTemuExcel(db,files){
  return {...parsed,orders,countries,newCount:orders.filter(o=>o.eligible).length,duplicateCount:orders.filter(o=>o.duplicate).length};
 }
 export async function confirmTemuExcel(db,input,user){
+ await initializeImportReceptions(db);
  if(!Array.isArray(input.selection)||!input.selection.length||input.selection.length>MAX_ROWS||input.selection.some(r=>typeof r!=='string'))throw Error('Sélectionnez les commandes à importer');
  if(!/^[a-f0-9-]{36}$/i.test(input.requestId||''))throw Error('Identifiant de validation invalide');
  const parsed=await parseTemuExcelFiles(input.files);
@@ -160,6 +162,7 @@ export async function confirmTemuExcel(db,input,user){
  for(const reference of selected){const o=byReference.get(reference);if(!o||o.issues.length||!o.lines.length)throw Error('Commande absente ou invalide dans la sélection : '+reference);}
  const signature=createHash('sha256').update(JSON.stringify(['temu-excel-v1',parsed.hash,selected])).digest('hex');
  return db.transaction(async tx=>{
+  if(db.kind==='postgres')await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('nextech:import-order-identity',0))");
   const receipt=await tx.query('INSERT INTO import_receipts(id,signature) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING id',[input.requestId,signature]);
   if(!receipt.rows.length){
    const prior=(await tx.query('SELECT signature,result FROM import_receipts WHERE id=$1',[input.requestId])).rows[0];
@@ -181,6 +184,7 @@ export async function confirmTemuExcel(db,input,user){
    await tx.query('INSERT INTO order_suspension_events(id,order_id,action,user_email,note,state) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),id,'import_held',user.email,note,JSON.stringify(suspension)]);
    results.push({reference,country:o.country,status:'created',orderId:id});
   }
+  for(const o of parsed.orders){const result=results.find(r=>r.reference===o.reference);await recordImportReception(tx,{...o,source_payload:{origin:'temu_excel',files:o.files,issues:o.issues}},{channel:'temu',filename:o.files.join(', '),receiptId:input.requestId,orderId:result?.orderId||null,outcome:result?.status==='created'?'created':result?.status==='skipped'?'duplicate_received':'excluded'});}
   const created=results.filter(r=>r.status==='created').length,skipped=results.length-created;
   const result={created,skipped,excluded:parsed.orders.length-selected.length,errors:parsed.errors,results,message:`${created} commandes TEMU importées en attente de validation ; ${skipped} déjà présentes ignorées. Aucune préparation lancée.`};
   await tx.query('UPDATE import_receipts SET result=$2 WHERE id=$1',[input.requestId,JSON.stringify(result)]);

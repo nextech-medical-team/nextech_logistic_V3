@@ -51,7 +51,7 @@ test('BL pagination retains every status and rejects repeated identities',async(
 test('approval stores completed history without creating preparation work',async()=>{
  const engine=new PGlite();const wrap=e=>({query:(q,p)=>e.query(q,p)}),db={...wrap(engine),transaction:fn=>engine.transaction(tx=>fn(wrap(tx)))};
  try{
-  await engine.exec(`CREATE TABLE orders(id text PRIMARY KEY,channel text,reference text,recipient text,address jsonb,source_date timestamptz,erp_live jsonb,source_payload jsonb,label_status text,erp_status text,resolution_pending_resume boolean,issue text);
+  await engine.exec(`CREATE TABLE orders(id text PRIMARY KEY,channel text,reference text,source_reference text,recipient text,address jsonb,source_date timestamptz,erp_live jsonb,source_payload jsonb,label_status text,erp_status text,resolution_pending_resume boolean,issue text);
    CREATE TABLE lines(id text,order_id text,source_line text,source_sku text,quantity numeric,target_sku text,target_quantity numeric,source_payload jsonb);
    CREATE TABLE erplain_manual_review(bc_id text PRIMARY KEY,document jsonb,review_hash text,status text,order_id text,validated_by text,validated_at timestamptz,updated_at timestamptz);
    CREATE TABLE erplain_order_identity(account text,bc_id text,order_id text,PRIMARY KEY(account,bc_id));
