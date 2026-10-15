@@ -106,8 +106,30 @@ export async function resumeTransientErplain(db,api){
   }return resumed;
 }
 
+export async function syncSupersededQuotaReviews(tx){
+ // A current business refusal supersedes a past quota refusal. Keep the review
+ // blocked and preserve the previous reason; this never retries provider work.
+ const rows=(await tx.query(`SELECT r.id,r.error,e.error current_error,e.updated_at current_updated,to_jsonb(o) AS "order"
+  FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
+  WHERE r.status='review' AND r.stage='Erplain à compléter' AND e.status='review'
+  AND r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée')
+  AND e.error IS NOT NULL AND e.error<>'' AND e.updated_at>=r.updated_at
+  AND o.erp_live->'transientRecovery'->>'readRateLimited'='false'
+  AND o.erp_live->'transientRecovery'->>'lastError' IS NULL
+  AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
+  AND NOT EXISTS(SELECT 1 FROM resolution_jobs a WHERE a.order_id=o.id AND a.status IN ('queued','running','waiting'))
+  AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
+  ORDER BY r.updated_at LIMIT 100 FOR UPDATE OF r,o,e SKIP LOCKED`)).rows;
+ for(const r of rows){
+  const o=r.order;
+  if(cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||transientErpError(r.current_error)||/^(?:Accès Erplain en attente|Erplain temporairement limité|Incident temporaire Erplain|Lecture Erplain temporairement indisponible)/.test(r.current_error))continue;
+  await tx.query("UPDATE resolution_jobs SET error=$2,result=coalesce(result,'{}'::jsonb)||$3::jsonb,updated_at=now() WHERE id=$1",[r.id,r.current_error,JSON.stringify({supersededQuotaError:r.error,currentErpErrorAt:r.current_updated,diagnosticAuthority:'current_erp_review',diagnosticSyncedAt:new Date().toISOString()})]);
+ }
+}
+
 export async function closeTransientReviews(db){
  return db.transaction(async tx=>{
+  await syncSupersededQuotaReviews(tx);
   const rows=(await tx.query(`SELECT r.id,r.error,r.updated_at,to_jsonb(o) AS "order" FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE r.status='review' AND r.stage='Erplain à compléter' AND e.status='complete' AND e.error IS NULL
    AND (r.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR (r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée') AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'transientRecovery'->>'lastError' ~* 'Erplain HTTP 429'))
