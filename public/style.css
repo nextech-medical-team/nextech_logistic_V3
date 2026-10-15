@@ -310,19 +310,13 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 
 /* Keep long provider statuses inside the preview; shared alignment must not force overlap. */
 #view-orders #order-rows tr:not(.order-row-expanded) td.aligned-status-cell>.aligned-primary-status{min-height:0!important;height:auto!important;max-height:48px!important;overflow:hidden!important;display:-webkit-box!important;-webkit-box-orient:vertical;-webkit-line-clamp:2}
-/* Expanded information uses the entire row as labelled cards, keeping original controls. */
-#view-orders .orders-fixed-layout tbody tr.order-row-expanded{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:12px;box-sizing:border-box;align-items:start;background:#eef6f4}
-#view-orders table.orders-fixed-layout.orders-with-margins tbody tr.order-row-expanded>td:not(.total-quantity-column){display:block;grid-column:auto!important;width:auto!important;min-height:0;height:auto;max-height:none;padding:14px!important;border:1px solid #cddfda;border-radius:8px;background:#fff;overflow-wrap:anywhere}
-#view-orders .orders-fixed-layout tbody tr.order-row-expanded>td[data-order-column]::before{content:attr(data-order-column);display:block;font-weight:700;color:#526d67;margin-bottom:10px}
-#view-orders .orders-fixed-layout tbody tr.order-row-expanded>td[data-fixed-column="select"]{grid-column:1/-1!important;border:0;padding:0!important;background:transparent}
+/* Expanded status controls retain their complete text. */
 #view-orders .orders-fixed-layout tbody tr.order-row-expanded>td[data-fixed-column="select"]::before{display:none}
 #view-orders #order-rows tr.order-row-expanded td.aligned-status-cell>.aligned-primary-status{min-height:0!important;max-height:none!important;height:auto!important;overflow:visible!important;margin-bottom:8px!important}
 #view-orders #order-rows tr.order-row-expanded .status-with-spacer::before{display:none}
 #view-orders #order-rows tr.order-row-expanded .status-with-reference>.erp-reference{min-height:0}
 #view-orders #order-rows tr.order-row-expanded :is(button,.badge,.erp-status,.pdf-link,.compact-problem){max-width:100%!important;overflow-wrap:anywhere!important;word-break:normal!important}
 #view-orders .orders-fixed-layout tr.order-row-expanded .order-more-information{position:static}
-@media(min-width:901px) and (max-width:1150px){#view-orders .orders-fixed-layout tbody tr.order-row-expanded{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:900px){#view-orders .orders-fixed-layout tbody tr.order-row-expanded{display:grid;grid-template-columns:minmax(0,1fr)}}
 
 /* Incoming quantities remain a concise, visible part of the SKU preview. */
 #view-orders #order-rows [data-stock-preview]{display:block;margin:0 0 6px;padding:4px 6px;border-radius:5px;background:#e8f4ee;color:#185343;font-size:11px!important;font-weight:600;line-height:1.35}
@@ -331,11 +325,6 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 #view-orders #order-rows tr.order-row-expanded td :is(.badge,.erp-status,.compact-problem){font-size:12px!important;line-height:1.45!important;text-align:left!important;justify-content:flex-start!important}
 
 #view-orders .orders-fixed-layout tbody tr.order-row-expanded{position:relative}
-#view-orders table.orders-fixed-layout.orders-with-margins tbody tr.order-row-expanded>td:first-child{position:absolute;right:18px;top:18px;width:24px!important;min-height:24px;padding:0!important;border:0;background:transparent;z-index:2}
-#view-orders table.orders-fixed-layout.orders-with-margins tbody tr.order-row-expanded>td[data-fixed-column="reference"]{grid-column:1/-1!important;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-right:48px!important}
-#view-orders .orders-fixed-layout tbody tr.order-row-expanded>td[data-fixed-column="reference"]::before{flex-basis:100%;margin-bottom:0}
-#view-orders #order-rows tr.order-row-expanded td[data-fixed-column="reference"]>:is(button,a){width:auto!important;max-width:250px!important;margin:0!important}
-#view-orders #order-rows tr.order-row-expanded td[data-fixed-column="reference"]>.order-processing{flex-basis:100%}
 #view-orders #order-rows tr:not(.order-row-expanded) td .link-button{font-size:11px!important;line-height:1.3!important;margin:4px 0!important;padding:3px 2px!important}
 
 #view-orders #order-rows tr:not(.order-row-expanded) td button[data-compact-label]{font-size:0!important;border:1px solid #b9d3cb;border-radius:5px;background:#f1f7f5;min-height:28px;padding:4px!important}
@@ -357,3 +346,19 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 #order-action-tooltip[hidden]{display:none}
 
 #view-orders #order-rows td .order-icon-action[data-erplain-document-kind]::after{content:attr(data-erplain-document-kind);text-transform:uppercase;position:absolute;bottom:1px;right:1px;font-size:7px;line-height:1;background:#eef6f3;padding:1px;border-radius:2px}
+/* Unfold only overflow: retain the table tracks and original controls. */
+#view-orders .orders-fixed-layout tbody tr.order-row-expanded{grid-template-columns:var(--order-fixed-columns);gap:0;padding:0;align-items:stretch;background:inherit}
+#view-orders table.orders-fixed-layout.orders-with-margins tbody tr.order-row-expanded>td:not(.total-quantity-column){padding:10px 6px!important;border-radius:0;background:inherit;min-width:0}
+#view-orders .orders-fixed-layout tbody tr.order-row-expanded>td::before{display:none}
+#view-orders #order-rows .carrier-tracking-preview{display:block;font-size:12px!important;line-height:1.35;color:#155349;margin:4px 0 6px;font-weight:600;overflow-wrap:anywhere;word-break:normal}
+#view-orders #order-rows .carrier-tracking-preview span{display:block;user-select:text}
+#view-orders #order-rows tr:not(.order-row-expanded) .carrier-tracking-preview{max-height:82px;overflow:auto}
+@media(max-width:900px){
+ #view-orders .orders-fixed-layout tbody tr.order-row-expanded{display:block}
+ #view-orders table.orders-fixed-layout.orders-with-margins tbody tr:not(.order-row-expanded)>td[data-fixed-column="reference"]{height:100px;max-height:100px}
+ #view-orders table.orders-fixed-layout.orders-with-margins tbody tr:not(.order-row-expanded)>td[data-fixed-column="sku"]{height:56px;max-height:56px}
+ #view-orders table.orders-fixed-layout.orders-with-margins tbody tr:not(.order-row-expanded)>td[data-fixed-column="label"]{height:56px;max-height:56px}
+ #view-orders table.orders-fixed-layout.orders-with-margins tbody tr:not(.order-row-expanded)>td[data-fixed-column="carrier"]{display:block;height:76px;max-height:76px}
+ #view-orders #order-rows tr:not(.order-row-expanded) td[data-fixed-column="carrier"]>:not(.carrier-tracking-preview){display:none!important}
+ #view-orders #order-rows tr:not(.order-row-expanded) .carrier-tracking-preview{max-height:56px;margin:0}
+}
