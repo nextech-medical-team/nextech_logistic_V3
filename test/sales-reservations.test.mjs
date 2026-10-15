@@ -61,7 +61,7 @@ test('a reservation alone remains visible during shortage but never certifies a 
 });
 test('resume after replenishment requests pre-BL proof; a published BL requests physical proof',async()=>{
  const options=[];const prove=async(api,o,opt)=>{options.push(opt);return {bcId:'1934803',stockOnBc:true};};
- await assertResumeStock({},order(),bc(),[line()],{prove});const o=order();o.erp_live.bl={id:'20',status:'unpublished'};await assertResumeStock({},o,bc(),[line()],{prove});o.erp_live.bl.status='pending';await assertResumeStock({},o,bc(),[line()],{prove});assert.deepEqual(options.map(o=>o.beforeBlPublication),[true,true,false]);
+ await assertResumeStock({},order(),bc(),[{...line(),on_hand:100000,available:100000}],{prove});const o=order();o.erp_live.bl={id:'20',status:'unpublished'};await assertResumeStock({},o,bc(),[line()],{prove});o.erp_live.bl.status='pending';await assertResumeStock({},o,bc(),[line()],{prove});assert.deepEqual(options.map(o=>o.beforeBlPublication),[true,true,false]);
 });
 
 function partialFixture(){
