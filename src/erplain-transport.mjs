@@ -8,15 +8,19 @@ export function erplainBudgetKey(config){
 }
 export function erplainRetryDelay(response,attempt=0,now=Date.now()){
  const raw=response.headers?.get('retry-after')?.trim();
- let requested=0;
+ let requested=NaN;
  if(raw){requested=/^\d+(?:\.\d+)?$/.test(raw)?Number(raw)*1000:Date.parse(raw)-now;}
- return Math.max(Number.isFinite(requested)?requested:0,Math.min(900000,60000*2**Math.min(attempt,4)));
+ if(Number.isFinite(requested)&&requested>=0)return Math.max(1000,requested);
+ return Math.min(900000,60000*2**Math.min(attempt,4));
 }
+// API v2 documents 2 HTTP calls/second; retain a 100 ms safety margin.
+// Other endpoints keep their existing conservative pacing.
+export function erplainRequestInterval(url){const u=new URL(url);return u.origin==='https://api.erplain.app'&&u.pathname==='/graphql'?600:1600;}
 export const erplainQuotaWaitMs=15000;
 export async function erplainFetch(config,url,buildOptions,{fetchImpl=fetch,readOnly=false,slot=apiAcquireSlot,defer=apiDefer}={}){
  const key=erplainBudgetKey(config);
  for(let attempt=0;;attempt++){
-  try{await slot(key,1600,{fair:true,maxWaitMs:erplainQuotaWaitMs});}
+  try{await slot(key,erplainRequestInterval(url),{fair:true,maxWaitMs:erplainQuotaWaitMs});}
   catch(error){
    if(error?.code!=='source_budget_deferred')throw error;
    // Admission failed before fetch: no provider request was sent. Release the

@@ -5,3 +5,11 @@ V3 peut envoyer le statut `ready_to_ship` (« prêt à livrer ») vers ERPLAIN, 
 Avant toute mutation de statut vers `ready_to_ship` sur un document existant, V3 relit le statut ERPLAIN. Si le statut est `in_preparation`, aucun envoi de mutation n'a lieu et une erreur métier explicite est remontée. Si le statut source ne peut pas être vérifié, l'envoi est refusé. Les autres statuts de départ conservent leurs contrôles existants : cette règle ne les autorise pas à elle seule.
 
 La lecture et l'affichage de `ready_to_ship` restent autorisés. Aucun statut existant, document, stock, étiquette ou historique ne doit être corrigé ou annulé rétroactivement par cette règle. La publication et la recette installée restent à la charge de Section7.
+
+## Débit et reprise du quota Erplain
+
+Pour `https://api.erplain.app/graphql`, les connecteurs utilisent un espacement partagé de 600 ms (environ 100 requêtes par minute hors pauses), sous la limite officielle v2 de 2 appels HTTP par seconde. Les autres endpoints conservent 1 600 ms. La file commune et la priorité des préparations sur les lectures de fond restent actives ; le débit concerne tous les connecteurs ensemble.
+
+Un `Retry-After` valide est respecté sans imposer systématiquement une minute supplémentaire (minimum local de 1 seconde au transport et 2 secondes pour la remise en file). En l’absence de délai exploitable, le repli progressif de 60 secondes à 15 minutes reste appliqué. Une pause partagée plus longue déjà enregistrée ne peut pas être raccourcie. Les écritures ne sont pas rejouées par le transport ; les réponses partielles sont préservées.
+
+Source vérifiée le 15 octobre 2026 : [limites officielles Erplain v2](https://erplain.readme.io/v2.0/reference/throttling). Il s’agit d’une capacité d’envoi, pas d’un délai garanti de préparation d’une commande.
