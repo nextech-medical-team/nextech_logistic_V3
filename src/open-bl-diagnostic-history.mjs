@@ -12,5 +12,8 @@ export function projectOpenBlDiagnosticHistory(order){
   if(!history.some(item=>item.reason===noPendingBlReason))history.push({reason:noPendingBlReason,openBlIds:open.map(bl=>String(bl.id))});
   target[key]=null;
  }
- if(history.length)order.open_bl_diagnostic_history=history;
+ if(history.length){
+  order.open_bl_diagnostic_history=history;
+  order.open_bl_diagnostic_retired=![order.erp_live_job,order.carrier_job,order.temu_job].some(job=>job&&['failed','review','uncertain'].includes(job.status)&&!job.error);
+ }
 }

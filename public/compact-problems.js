@@ -120,7 +120,7 @@ function compactProblems(order){
   const affected=relevant.length?relevant:lines;
   return !affected.length||affected.some(l=>!l.mapping_exists&&!l.mapping_resolved);
  });
- if(!visible.length&&!order.open_bl_diagnostic_history?.length&&order.erp_status==='live_review'&&order.erp_live_job?.status!=='complete')visible.push({type:'erp-review',label:'Erplain · Préparation à vérifier',sku:'',detail:'Préparation Erplain à vérifier. Aucun motif détaillé applicable à la commande actuelle n’est disponible. Consultez le BC, les BL et l’historique du traitement avant toute reprise ; cet état ne confirme pas que les blocages sont résolus.',provider:'Erplain'});
+ if(!visible.length&&!order.open_bl_diagnostic_retired&&order.erp_status==='live_review'&&order.erp_live_job?.status!=='complete')visible.push({type:'erp-review',label:'Erplain · Préparation à vérifier',sku:'',detail:'Préparation Erplain à vérifier. Aucun motif détaillé applicable à la commande actuelle n’est disponible. Consultez le BC, les BL et l’historique du traitement avant toute reprise ; cet état ne confirme pas que les blocages sont résolus.',provider:'Erplain'});
  return visible;
 }
 function compactProblemButtons(order){const list=compactProblems(order),id=esc(order.id);return list.slice(0,2).map(p=>'<button class="badge warn compact-problem" data-exact-problem="'+id+'" data-problem-type="'+esc(p.type)+'" data-problem-sku="'+esc(p.sku)+'" data-problem-detail="'+esc(p.detail)+'" title="'+esc((p.sku?p.sku+' · ':'')+(p.detail||p.label))+'">'+(p.sku?'<span>'+esc(p.sku)+'</span>':'')+'<span>'+esc(p.label)+'</span></button>').join('')+(list.length>2?'<button class="link-button" data-exact-problem="'+id+'">+'+(list.length-2)+' problèmes</button>':'');}

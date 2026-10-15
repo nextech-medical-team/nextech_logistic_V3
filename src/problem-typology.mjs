@@ -7,7 +7,7 @@ export function orderProblemLabels(order, compactProblems, inProblemFilter=false
  if(order.suspension?.problemDeferral?.active===true||hasCompleteOrderDocuments(order))return [];
  if(order.archived||order.suspension?.active===true||order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'||order.suspension?.erplainCancellation?.status==='complete')return [];
  const labels=[...new Set(compactProblems(order).map(d=>d.label).filter(Boolean))];
- if(!labels.length&&inProblemFilter&&!order.label_manual_request_required&&!order.temu_pdf_archive_note&&!order.open_bl_diagnostic_history?.length)labels.push(WITHOUT_DIAGNOSTIC);
+ if(!labels.length&&inProblemFilter&&!order.label_manual_request_required&&!order.temu_pdf_archive_note&&!order.open_bl_diagnostic_retired)labels.push(WITHOUT_DIAGNOSTIC);
  return labels;
 }
 export function selectProblemOrders(orders, selectedLabels, compactProblems, problemIds=[],activeOnly=false){
