@@ -16,7 +16,7 @@ export function assertPartialCancellationProof(order,d,proof){
  const bc=proof?.Order,bl=proof?.ShippingOrder;
  if(String(bc?.id)!==String(order.erp_live.bc.id)||!['active','pending','open','in_progress','confirmed'].includes(bc.status))throw Error('BC actif non confirmé dans Erplain');
  if(String(bl?.id)!==String(d.bl.id)||bl.label!==d.bl.label||!['pending','make_the_shipment','in_preparation','ready_to_ship','cancelled'].includes(bl.status))throw Error('BL non identifiable, expédié ou statut non annulable');
- if(Number(bl.invoices_count)!==0||bl.invoices_count==null||!Array.isArray(bl.invoices?.data)||bl.invoices.data.length||bl.invoices.paginatorInfo?.hasMorePages!==false)throw Error('Facturation du BL présente ou non vérifiable : annulation refusée');
+ if(!(bl.invoices_count===0||bl.invoices_count==='0')||!Array.isArray(bl.invoices?.data)||bl.invoices.data.length||bl.invoices.paginatorInfo?.hasMorePages!==false)throw Error('Facturation du BL présente ou non vérifiable : annulation refusée');
  assertCancelledStockAssociation(bc,{...bl,status:'cancelled'},proof.StockRemoval,d.stock_document);
 }
 // Explicit user action only. Never enqueue this operation or replay uncertain writes.
