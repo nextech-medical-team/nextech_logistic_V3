@@ -51,7 +51,10 @@ export function orderQuery(params,orderIds=null){
    if(rest.length){args.push(rest);clauses.push(column+'=ANY($'+args.length+'::text[])');}parts.push('('+clauses.join(' OR ')+')');
   }else if(key==='channel'){
    const ordinary=values.filter(v=>!v.startsWith('amazon_')&&!v.startsWith('shopify_')),amazon=values.filter(v=>['amazon_standard','amazon_prime','amazon_priority','shopify_boutique','shopify_relay'].includes(v)),clauses=[];
-   if(ordinary.length){args.push(ordinary);clauses.push('channel=ANY($'+args.length+'::text[])');}
+   // Erplain AOs belong to the displayed tender manager, not the broad Erplain bucket.
+   // Keep this read-only classification shared by lists, counts and filtered exports.
+   const managerChannel="CASE WHEN orders.channel='erplain' AND regexp_replace(lower(coalesce(orders.erp_live->'bc'->'account_representative'->>'label','')),'[^a-z]','','g') IN ('appelsdoffres','appeldoffres') THEN 'tender' ELSE orders.channel END";
+   if(ordinary.length){args.push(ordinary);clauses.push('('+managerChannel+')=ANY($'+args.length+'::text[])');}
    if(amazon.length){args.push(amazon);clauses.push('('+managerSql+')=ANY($'+args.length+'::text[])');}
    if(clauses.length)parts.push('('+clauses.join(' OR ')+')');else parts.push('false');
   }else add(column+'=ANY(?::text[])',values);
