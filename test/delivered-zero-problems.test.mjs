@@ -43,6 +43,12 @@ test('non delivered errors remain actionable, including every partial remainder'
   assert.equal(projectDeliveredOrder(o),false);assert.ok(currentProblemClassifier()(o).length);assert.equal(JSON.stringify(o),before);
  }
 });
+test('persisting billing/preparation workflows retain their diagnostic policy, read responses still close every error',()=>{
+ const source={...dirty(),issue:'Stock insuffisant',source_payload:{}};
+ const stored=projectCurrentDiagnostics(structuredClone(source),{delivery:false});
+ assert.equal(stored.issue,'Stock insuffisant');assert.equal(stored.label_status,'blocked');assert.equal(stored.resolution_pending_resume,true);
+ const view=projectCurrentDiagnostics(structuredClone(stored));assert.equal(view.issue,null);assert.equal(view.label_status,'delivered');assert.equal(view.resolution_pending_resume,false);
+});
 test('SQL and the browser/server predicate agree before pagination, counts and fallback',async()=>{
  const db=new PGlite();
  try{
