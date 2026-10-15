@@ -5,6 +5,7 @@ import {productCreationBlock} from './missing-product-creation.mjs';
 // Reconciliation deliberately changes diagnostics only; a NULL error by itself
 // never proves that a stopped job can safely run again.
 export async function resumeReconciledCatalogueReview(tx,o,j){
+ if(o.source_payload?.temuDirect?.attemptedAt)return false;
  if(j.error!==null||o.issue||o.duplicate_of||o.simulation||o.reference?.startsWith('DEMO-')||o.resolution_pending_resume||o.erp_live?.phase||o.erp_live?.customer||o.erp_live?.stockDocument||o.erp_live?.stockCreationAttemptedAt||productCreationBlock(o))return false;
  const events=(await tx.query("SELECT detail FROM audit WHERE action='diagnostic.catalogue_lookup_reconciled' AND detail->>'orderId'=$1 ORDER BY created_at DESC LIMIT 1",[o.id])).rows;
  const event=events[0]?.detail,proof=event?.proof;
