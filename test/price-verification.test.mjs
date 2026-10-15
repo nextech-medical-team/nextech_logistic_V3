@@ -1,6 +1,6 @@
 ﻿import test from 'node:test';
 import assert from 'node:assert/strict';
-import {priceVerification} from '../src/price-verification.mjs';
+import {comparePrices,priceVerification} from '../src/price-verification.mjs';
 const start='2026-10-13T20:00:00.000Z',end='2026-10-14T08:00:00.000Z';
 function setup(orders){
  const calls=[];
@@ -27,4 +27,15 @@ test('rejects incomplete, malformed and reversed intervals before querying',asyn
 });
 test('empty interval preserves verification of all orders',async()=>{
  const {api}=setup([order('a',null)]);assert.equal((await api.next({channel:'shopify',country:'BE',start:null,end:null})).cursor,'a');
+});
+
+test('percentage uses platform total, signed values and two decimal rounding',()=>{
+ const compare=(bc,source)=>comparePrices({amount:bc,currency:'EUR'},{amount:source,currency:'EUR'}).differencePercent;
+ assert.equal(compare(110,100),10);
+ assert.equal(compare(90,100),-10);
+ assert.equal(compare(10,10),0);
+ assert.equal(compare(10,3),233.33);
+ assert.equal(compare(0,0),0);
+ assert.equal(compare(10,0),null);
+ assert.equal(compare(70.43,70.43),0);
 });

@@ -6,7 +6,9 @@ export function comparePrices(bc,source){
  if(!valid(bc)||!valid(source))throw Error('Montant ou devise absent ou invalide');
  if(bc.currency!==source.currency)throw Error('Devises différentes : comparaison impossible');
  const difference=(Math.round(Number(bc.amount)*100)-Math.round(Number(source.amount)*100))/100;
- return {bc,source,difference,status:difference===0?'same':'different'};
+ const sourceCents=Math.round(Number(source.amount)*100);
+ const differencePercent=sourceCents===0?(difference===0?0:null):Math.round(difference*100/sourceCents*10000)/100;
+ return {bc,source,difference,differencePercent,status:difference===0?'same':'different'};
 }
 
 export function priceVerification(db,directory,{shopify=shopifyObservationApi(directory),connect=()=>connectTemuShops(directory)}={}){
