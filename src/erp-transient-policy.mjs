@@ -21,5 +21,5 @@ export function retryDecision(o,error,updatedAt,now=Date.now()){
  if(!initialRead&&phase!=='creating_bc'&&!o.erp_live?.bc?.id)return false;
  const retryAt=o.erp_live?.transientRecovery?.nextReadCheckAt;
  if(retryAt&&(!Number.isFinite(Date.parse(retryAt))||Date.parse(retryAt)>now))return false;
- return Number.isFinite(Date.parse(updatedAt))&&now-Date.parse(updatedAt)>=[30000,120000,300000][Math.min(attempts,2)];
+ return Number.isFinite(Date.parse(updatedAt))&&now-Date.parse(updatedAt)>=(readLimited?0:[30000,120000,300000][Math.min(attempts,2)]);
 }

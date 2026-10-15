@@ -65,13 +65,13 @@ test('no PDF ever saved remains an explicit provider refusal, without purchase',
 
 import {projectCurrentDiagnostics} from '../src/current-order-diagnostics.mjs';
 const pastPdfWarning='Étiquette TEMU déjà achetée : PDF original indisponible (120018027). FedEx TRACK déjà collecté ; conserver cette expédition.';
-test('delivered registered shipment retains PDF refusal as history, preserves ERPLAIN and independent blockers',()=>{
+test('delivered registered shipment retains PDF refusal as history and preserves ERPLAIN while closing all active blockers',()=>{
  const original={channel:'temu',tracking_status:'delivered',source_payload:{externalLabel:{active:true}},issue:pastPdfWarning,temu_job:{status:'external',error:pastPdfWarning},erp_live:{bl:{status:'in_preparation'}},erp_live_job:{status:'review',error:'Stock insuffisant'}};
  const projected=projectCurrentDiagnostics(structuredClone(original));
  assert.equal(projected.issue,null);assert.equal(projected.temu_job.error,null);assert.equal(projected.temu_pdf_archive_note,pastPdfWarning);
- assert.equal(projected.erp_live.bl.status,'in_preparation');assert.equal(projected.erp_live_job.error,'Stock insuffisant');assert.equal(original.issue,pastPdfWarning);
+ assert.equal(projected.erp_live.bl.status,'in_preparation');assert.equal(projected.erp_live_job.error,null);assert.equal(original.erp_live_job.error,'Stock insuffisant');assert.equal(original.issue,pastPdfWarning);
 });
-for(const variant of [{tracking_status:'in_transit'},{source_payload:{}},{issue:pastPdfWarning+' ; Stock insuffisant'},{issue:pastPdfWarning+' ; Produit introuvable'},{channel:'shopify'}])test('PDF history projection requires proof and does not hide unrelated blockers '+JSON.stringify(variant),()=>{
+for(const variant of [{tracking_status:'in_transit'},{source_payload:{}},{issue:pastPdfWarning+' ; Stock insuffisant'},{issue:pastPdfWarning+' ; Produit introuvable'},{channel:'shopify'}])test('delivery closes all current errors independently of PDF archival, undelivered errors remain '+JSON.stringify(variant),()=>{
  const original={channel:'temu',tracking_status:'delivered',source_payload:{externalLabel:{active:true}},issue:pastPdfWarning,...variant};
- assert.equal(projectCurrentDiagnostics(structuredClone(original)).issue,original.issue);
+ assert.equal(projectCurrentDiagnostics(structuredClone(original)).issue,original.tracking_status==='delivered'?null:original.issue);
 });

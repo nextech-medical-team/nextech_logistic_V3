@@ -1,4 +1,5 @@
 import {reconcileStockIncident} from './stock-incident-recheck.mjs';
+import {isDeliveredOrder} from './delivered-order.mjs';
 import {reconcileRefreshedBcDiagnostics,assertRefreshedBcDocument,documentReadVersion} from './bc-comparison-refresh.mjs';
 import {synchronizeRecoveredOrder} from './erplain-targeted-orders.mjs';
 import {recoveryScope,recoveredPendingScope,scopeSnapshot} from './erplain-pending-scope.mjs';
@@ -23,6 +24,18 @@ export async function refreshErplainDocuments(db,api,id){
   if(!r.data.length)return {notFound:true,message:'Aucun BC trouvé dans Erplain pour cette référence. Aucun document créé.',stockHolds:[],bc:null};bcId=r.data[0].id;
  }
  const bc=await readErplainDocuments(api,bcId);
+ // Delivery is observed before any preparation/stock reconciliation. This same
+ // request saves documentary evidence and returns no active error or retry.
+ if(String(bc?.id)===String(bcId)&&bc.label&&bc.status&&isDeliveredOrder({tracking_status:o.tracking_status,erp_live:{bc}})){
+  await db.transaction(async tx=>{
+   const fresh=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];await assertDocumentIdle(tx,id);
+   if(documentReadVersion(fresh)!==readVersion)throw Error('Documents locaux modifiés pendant la lecture : actualisation différée');
+   const old=fresh.erp_live||{},linked=bc.shipping_orders.data.find(b=>String(b.id)===String(old.bl?.id));
+   const state={...old,bc,documentSource:{...old.documentSource,shippingOrders:bc.shipping_orders.data,checkedAt:new Date().toISOString()},...(linked?{bl:{...old.bl,...linked}}:{})};
+   await tx.query('UPDATE orders SET erp_live=$2::jsonb WHERE id=$1',[id,JSON.stringify(state)]);
+  });
+  return {delivered:true,message:'Livrée · aucun problème à gérer',stockHolds:[],comparison:null,bc,notFound:false};
+ }
  assertRefreshedBcDocument({...o,erp_live:{...o.erp_live,bc:{...o.erp_live?.bc,id:bcId}}},bc);
  if(o.partial_mode)return db.transaction(async tx=>{
   const fresh=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];await assertDocumentIdle(tx,id);

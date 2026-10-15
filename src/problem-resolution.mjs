@@ -171,7 +171,8 @@ async function context(db,directory,id){
  const active=(await db.query("SELECT id,action,status,stage,created_at FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting')",[id])).rows[0];
  const latest=(await db.query('SELECT status,error FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1',[id])).rows[0];order.resolution_error=latest?.status==='review'?latest.error:null;await attachEquivalentDiagnostics(db,[order]);
  const temuJob=order.channel==='temu'?(await db.query('SELECT status,error,packages,attempt_id FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]:null;
- projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob}));
+ projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob,carrier_job:job,temu_job:temuJob}));
+ if(order.order_delivered){for(const line of lines){line.message=null;line.catalog_issue=null;}return {order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active:null,temuJob,priceFingerprint:pricingFingerprint(lines)};}
  return projectSharedParcelContext({order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
 }
 export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic}={}){

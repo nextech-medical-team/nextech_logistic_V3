@@ -13,7 +13,9 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
       const catalogOnly=p==='/api/order-problem-types';
       const problemLabels=url.searchParams.getAll('problem-label').filter(Boolean);
       if(problemLabels.length>100||problemLabels.some(label=>label.length>2000))throw Error('Sélection de problèmes invalide');
-      const scanAll=catalogOnly||problemLabels.length>0||all;
+      const statuses=url.searchParams.getAll('status').flatMap(value=>value.split(',')).filter(Boolean);
+      const activeOnly=statuses.length>0&&statuses.every(value=>value==='__problems');
+      const scanAll=catalogOnly||problemLabels.length>0||activeOnly||all;
       const scopeParams=new URLSearchParams(url.searchParams);scopeParams.delete('problem-label');
       const diagnosticStart=Date.now();
 
@@ -46,13 +48,14 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
 
       for(const row of rows)if(row.label_status==='waiting_catalog'&&connection.configured&&!connection.running&&!connection.nextRetryAt){row.label_status='weight_pending';row.issue='Poids Erplain non disponible dans V3 ; consulter Connexions pour le dernier résultat. Aucun téléchargement en cours.';}
       if(!connection.configured)for(const row of rows)if(row.label_status==='waiting_catalog'){row.issue='Connexion Erplain à configurer : aucun téléchargement de poids en cours.';row.label_status='connection_missing';}
+      for(const row of rows)projectCurrentDiagnostics(row);
 
       let matched=null;
       if(scanAll){
         const problemParams=new URLSearchParams(scopeParams);problemParams.append('status','__problems');
         const problemScope=orderQuery(problemParams);
         const problemIds=(await db.query('SELECT id FROM orders '+problemScope.where,problemScope.args)).rows.map(row=>row.id);
-        matched=selectProblemOrders(rows,catalogOnly?[]:problemLabels,currentProblemClassifier(),problemIds);
+        matched=selectProblemOrders(rows,catalogOnly?[]:problemLabels,currentProblemClassifier(),problemIds,activeOnly);
         if(catalogOnly)return {problemTypes:matched.problemTypes,at:new Date().toISOString()};
       }
       const {transportStats,summary}=matched?await orderStatistics(db,scopeParams,matched.rows.map(row=>row.id)):await cachedOrderSummary(scopeParams,db);
@@ -62,6 +65,7 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
         rows=paginateProblemOrders(matched,page,pageSize).rows;
         await orderPageDetails(db,rows,'display');
       }
+      for(const row of rows)projectCurrentDiagnostics(row);
       return {rows,transportStats,summary,total,page,pages:Math.max(1,Math.ceil(total/pageSize))};
       
 }

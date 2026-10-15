@@ -47,6 +47,7 @@ import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 
 import {erplainAccount} from './erplain-accounts.mjs';
+import {queueQuotaRead} from './erplain-quota-wait.mjs';
 
 import {convertedQuantity,addressIssue} from './domain.mjs';
 
@@ -76,9 +77,9 @@ export function creationResumeBlock(o){
  return null;
 }
 export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'live'),refreshTemuPricing=temuBcPricingLoader(db,directory)}={}){
- let running=false,activeBcOnlyOrderId=null;
+ let running=false,activeBcOnlyOrderId=null,nextRunAt=0;
  const save=async o=>db.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(o.erp_live)]);
- const fail=async(o,e)=>{let message=stockFailureMessage(o,e.message);message=await stockCheckFailure(db,o,e,message);if(o.erp_live?.phase==='creating_stock'&&!/sortie non confirmée, aucune nouvelle déduction automatique/.test(message)){o.erp_live.stockLastFailure={at:new Date().toISOString(),message};await save(o);}e=new Error(await recordTransientFailure(db,o,message,e));await db.query("UPDATE erp_live_jobs SET status='review',error=$2,updated_at=now() WHERE order_id=$1",[o.id,e.message]);await db.query("UPDATE orders SET erp_status='live_review' WHERE id=$1",[o.id]);};
+ const fail=async(o,e)=>{let message=stockFailureMessage(o,e.message);message=await stockCheckFailure(db,o,e,message);if(o.erp_live?.phase==='creating_stock'&&!/sortie non confirmée, aucune nouvelle déduction automatique/.test(message)){o.erp_live.stockLastFailure={at:new Date().toISOString(),message};await save(o);}const waiting=await recordTransientFailure(db,o,message,e);if(e?.httpStatus===429)nextRunAt=Date.now()+Math.max(2000,Number(e.retryAfter||60)*1000);if(await queueQuotaRead(db,o,e))return;e=new Error(waiting);await db.query("UPDATE erp_live_jobs SET status='review',error=$2,updated_at=now() WHERE order_id=$1",[o.id,e.message]);await db.query("UPDATE orders SET erp_status='live_review' WHERE id=$1",[o.id]);};
  async function batchMutation(orders,phase,field,type,operation,input,selection){
   if(!orders.length)return;
   if(operation==='CreateOrder'){
@@ -96,6 +97,9 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
  }
  async function run({bcOnlyOrderId}={}){if(running)return;running=true;activeBcOnlyOrderId=bcOnlyOrderId||null;let working=[];
   try{
+   if(!bcOnlyOrderId&&Date.now()<nextRunAt)return;
+   const quotaDelay=await api.quotaDelay?.()||0;
+   if(!bcOnlyOrderId&&quotaDelay>15000){nextRunAt=Date.now()+quotaDelay;return;}
    if(!bcOnlyOrderId&&process.env.ERPLAIN_LIVE_WRITES==='1'&&process.env.MIGRATION_PREPARATION!=='1'){
     const {recheckOrders}=await import('./problem-resolution.mjs');
     await prepareIncompleteTemuCatalogue(db,api,{bind:v=>bindProduct(db,v)});
@@ -104,6 +108,13 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.
    if(!bcOnlyOrderId){await retirePostBcCommercialControls(db,api);await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
    if(!bcOnlyOrderId){await queueSourceVatReviews(db);await scheduleStockChecks(db);}
+   // Verify admission before claiming a batch. A quota wait must leave the
+   // orders queued rather than turn ten untouched orders into ten failures.
+   if(!bcOnlyOrderId){
+    const pending=(await db.query(`SELECT order_id FROM erp_live_jobs WHERE ${erplainEligible} LIMIT 1`)).rows;
+    if(!pending.length)return;
+    await api.verify();
+   }
    const ids=await db.transaction(async tx=>{
     if(bcOnlyOrderId){
      const prior=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[bcOnlyOrderId])).rows[0];
@@ -115,7 +126,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     const jobs=(await tx.query(`SELECT order_id FROM erp_live_jobs WHERE ${erplainEligible} ORDER BY ${priorityOrder('erp_live_jobs')} FOR UPDATE SKIP LOCKED LIMIT 10`)).rows;for(const j of jobs)await tx.query("UPDATE erp_live_jobs SET status='processing',updated_at=now() WHERE order_id=$1",[j.order_id]);return jobs.map(j=>j.order_id);
    });if(!ids.length)return;
    working=(await db.query('SELECT * FROM orders WHERE id=ANY($1::text[])',[ids])).rows;
-   await api.verify();
+   if(bcOnlyOrderId)await api.verify();
    for(const o of working){const block=cancellationBlock(o);if(block){o.failed=true;await fail(o,new Error(block));}}
    working=working.filter(o=>!o.failed);
    for(const o of working.filter(uncertainBc)){try{const found=await recoverOrder(api,o);o.erp_live.bcReconciliation={status:found?'found':'missing',checkedAt:new Date().toISOString()};if(found){o.erp_live.bc={id:found.id,label:found.label,status:found.status};o.erp_live.phase='bc_created';}await save(o);}catch(e){o.failed=true;await fail(o,e);}}
@@ -339,7 +350,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     const recorded=usesRecordedBc(o),mappingProof=recorded?recordedBcFingerprint({...o.erp_live.bc,line_items:o.items}):mappingSelectionFingerprint(o.selectedSourceLines,o.channel);if(!recorded&&await currentMappingFingerprint(db,o)!==mappingProof){await fail(o,new Error('Mapping modifié pendant la préparation : BC et BL à recontrôler'));continue;}o.erp_live.mappingPreparationFingerprint=mappingProof;if(recorded)o.erp_live.preparationAuthority=recordedBcPreparationAuthority(o.erp_live.bc);
     assertHistoricalBlNumber(bl);o.erp_live.bl={...o.erp_live.bl,label:bl.label};o.erp_live.verifiedAt=new Date().toISOString();o.erp_live.labelPreparationFingerprint=await shipmentFingerprint(db,(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0]);await save(o);await db.query("UPDATE orders SET erp_status='live_created' WHERE id=$1",[o.id]);await db.query("UPDATE erp_live_jobs SET status='complete',error=null,updated_at=now() WHERE order_id=$1",[o.id]);
    }
-  }catch(e){for(const o of working)await fail(o,e);}finally{running=false;activeBcOnlyOrderId=null;}
+  }catch(e){if(e?.httpStatus===429)nextRunAt=Date.now()+Math.max(2000,Number(e.retryAfter||60)*1000);for(const o of working)await fail(o,e);}finally{running=false;activeBcOnlyOrderId=null;}
  }
  return {run,get running(){return running;}};
 }

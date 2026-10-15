@@ -4,6 +4,8 @@ Dans le menu, ouvrir « Annulations Temu / Shopify », sélectionner Temu, Shopi
 
 Le tableau affiche le compte rendu par commande et reste disponible pendant la navigation dans l’application. Le bouton « Export Excel » télécharge les résultats affichés au format `.xlsx`. Un nouveau contrôle remplace le bilan précédent ; un rechargement du navigateur efface ce bilan.
 
+Le calendrier unique « Commandes créées depuis le » vérifie le statut actuel des commandes créées entre la date choisie et le moment du lancement, bornes incluses. La fin est automatique et reste fixe pendant toute la lecture. Les heures locales sont converties en UTC. Sans date, tout l’historique est consulté. Les dates futures sont refusées. Les commandes sans date de création exploitable sont exclues et signalées lorsqu’une date est choisie ; la date d’import V3 ne remplace pas la date de création. Le bilan et l’export conservent la période vérifiée.
+
 Chaque commande est relue directement sur sa plateforme. Shopify doit confirmer une date d'annulation ; un remboursement seul ne déclenche rien. Temu doit confirmer le statut 3 et la référence exacte sur la boutique identifiée de la commande.
 
 « Actualiser les annulations » consulte les plateformes et enregistre les observations, sans suspendre ni annuler les commandes ou les documents Erplain. Le tableau distingue les annulations confirmées à appliquer et les annulations appliquées dans V3.
