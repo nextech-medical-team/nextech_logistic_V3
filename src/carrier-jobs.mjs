@@ -15,6 +15,7 @@ import {randomUUID} from 'node:crypto';
 import {currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
 import {assertTemuManualLabel} from './manual-label-policy.mjs';
 import {assertBlLabelWorker} from './direct-label.mjs';
+import {applyTenderBlLabelPayload} from './tender-bl-label-payload.mjs';
 import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {assertPreparedLabelOrder} from './equivalent-auto-label.mjs';
 import {initializePriority,carrierEligible,priorityOrder} from './order-priority.mjs';
@@ -86,7 +87,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
    try{
     const selectedClient=job.environment==='production'?productionClient:client;
     if(!selectedClient)throw new Error('Accès transporteur production non configurés');
-    const o=(await db.query('SELECT * FROM orders WHERE id=$1',[job.order_id])).rows[0];
+    let o=(await db.query('SELECT * FROM orders WHERE id=$1',[job.order_id])).rows[0];
     o.glsInternational={...(await loadRouting(db)).international,...o.source_payload?.glsInternationalOverride};
     o.lines=(await db.query('SELECT source_sku,target_sku,quantity,target_quantity FROM lines WHERE order_id=$1 ORDER BY source_line',[o.id])).rows;
     if(!result){
@@ -95,7 +96,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
      if(o.channel==='temu')assertTemuManualLabel((await db.query('SELECT status FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0]);
      if(job.environment!=='production')throw new Error('Création TEST désactivée : reprendre la commande en production');
      const directBl=!!job.manual_bl_request?.creationId&&job.manual_bl_request.creationId===job.creation_id;
-     if(directBl)assertBlLabelWorker(o,job.manual_bl_request);
+     if(directBl){assertBlLabelWorker(o,job.manual_bl_request);o=applyTenderBlLabelPayload(o,job.manual_bl_request);}
      else{
       const e=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[o.id])).rows[0];
       if(!job.stock_override){
