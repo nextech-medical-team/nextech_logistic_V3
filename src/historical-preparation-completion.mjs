@@ -11,7 +11,8 @@ export function currentResolutionState(actions=[]){
  const preparation=new Set(['resume-erp','resume','replace-equivalent','reconcile-bc','compare-bc','manual-temu-pricing','equivalent-preview','refresh','create-product']);
  const completed=actions.findIndex(j=>['resume-erp','resume','replace-equivalent'].includes(j.action)&&j.status==='complete'&&!j.error&&!j.result?.partialRemainder);
  const reviews=actions.filter((j,i)=>j.status==='review'&&!closedStockReview(j)&&!retiredRecordedBcSourceReview(j)&&(reopenedStockReview(j)||!preparation.has(j.action)||completed<0||i<completed));
- const preview=actions.findIndex(currentReplacementPreview);return {reviews,pendingReplacement:preview>=0&&(completed<0||preview<completed)};
+ const applied=actions.findIndex(j=>j.action==='replace-equivalent'&&j.status==='waiting'&&!j.error&&j.result?.equivalent===true&&j.result?.erpOnly===true&&!j.result?.partialRemainder&&!j.result?.importDeferred);
+ const preview=actions.findIndex(currentReplacementPreview);return {reviews,pendingReplacement:preview>=0&&(completed<0||preview<completed)&&(applied<0||preview<applied)};
 }
 const historicalReason='Reprise historique \u00e0 v\u00e9rifier : BL non cr\u00e9\u00e9';
 export function completedHistoricalPreparation(o,e,now=Date.now()){
