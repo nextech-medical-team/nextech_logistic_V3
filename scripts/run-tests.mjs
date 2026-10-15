@@ -38,7 +38,7 @@ groups.push(['--test','test/temu-excel-purchase-admission.test.mjs','test/temu-e
 groups.push(['--test','test/stock-lock-resume.test.mjs']);
 groups.push(['--test','test/tender-name-overflow.test.mjs','test/tender-bl-label-payload.test.mjs','test/partial-label-recovery.test.mjs']);
 groups.push(['--test','test/partial-complete-documents.test.mjs']);
-groups.push(['--test','test/catalogue-local-review-resume.test.mjs']);
+groups.push(['--test','test/catalogue-local-review-resume.test.mjs','test/catalogue-reconciled-review.test.mjs']);
 groups.push(['--test','test/temu-bl-quantity-data.test.mjs']);
 groups.push(['--test','test/partial-cancellation.test.mjs','test/partial-preview-read.test.mjs']);
 groups.push(['--test','test/erplain-recovery-fluidity.test.mjs']);

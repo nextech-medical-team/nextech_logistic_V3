@@ -55,7 +55,7 @@ export async function initializeErplainLive(db){await initializePriority(db);awa
 
 export async function queueErplainLive(db,ids){
  if(!Array.isArray(ids)||!ids.length||ids.length>10000)throw new Error('Sélection de 1 à 10000 commandes requise');
- let resumed=0;const reviews=(await db.query("SELECT order_id FROM erp_live_jobs WHERE order_id=ANY($1::text[]) AND status='review' AND (error LIKE 'Création produit · Nom du produit manquant ou invalide : %' OR error='Client TEMU : numéro Erplain non reçu')",[ids])).rows;
+ let resumed=0;const reviews=(await db.query("SELECT order_id FROM erp_live_jobs WHERE order_id=ANY($1::text[]) AND status='review' AND (error IS NULL OR error LIKE 'Création produit · Nom du produit manquant ou invalide : %' OR error='Client TEMU : numéro Erplain non reçu')",[ids])).rows;
  for(const j of reviews)if(await resumeLocalPreparationReview(db,j.order_id))resumed++;
  return resumed+(await db.query(`INSERT INTO erp_live_jobs(order_id) SELECT id FROM orders WHERE id=ANY($1::text[]) AND coalesce(suspension->>'active','false')<>'true' AND NOT (suspension ? 'erplainCancellation') AND reference NOT LIKE 'DEMO-%' ON CONFLICT DO NOTHING RETURNING order_id`,[ids])).rows.length;
 }
