@@ -8,7 +8,7 @@
   const seconds=Math.max(0,Math.floor((Date.now()-new Date(since).getTime())/1000));
   return seconds<60?`${seconds} s`:`${Math.floor(seconds/60)} min ${seconds%60} s`;
  }
- function durationText(state,since){const label=({active:'Traitement V3 actif depuis',blocked:'Blocage depuis',queued:'Attente depuis'})[state];return label?(elapsed(since)==='Début non disponible'?label.replace(' depuis','')+' · Début non disponible':label+' '+elapsed(since)):'État à actualiser · activité non confirmée';}
+ function durationText(state,since){if(state==='manual')return 'Aucun traitement lancé automatiquement';const label=({active:'Traitement V3 actif depuis',blocked:'Blocage depuis',queued:'Attente depuis'})[state];return label?(elapsed(since)==='Début non disponible'?label.replace(' depuis','')+' · Début non disponible':label+' '+elapsed(since)):'État à actualiser · activité non confirmée';}
  function rowIds(){return [...body.querySelectorAll('[data-detail]')].map(e=>e.dataset.detail);}
  function paint(){
   const index=[...body.closest('table').querySelectorAll('thead th')].findIndex(th=>th.dataset.column==='label');
@@ -32,6 +32,7 @@
    // Stored monitoring can predate the current carrier choice. Keep every
    // independent reason and the recorded control state until its next check.
    const carrierMessage=raw=>{
+    if(r.label_manual_request_required&&(r.label_diagnostic_history||[]).some(h=>h.reason===raw))return null;
     if(!['gls','gls_pharma','gls_shop','gofo'].includes(r.currentCarrier)||typeof raw!=='string')return raw;
     const parts=raw.split(';');if(!parts.some(part=>part.trim()==='Transporteur non déterminé'))return raw;
     return parts.map(part=>part.trim()).filter(part=>part&&part!=='Transporteur non déterminé').join(' ; ')||null;
