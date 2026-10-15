@@ -45,6 +45,7 @@ groups.push(['--test','test/erplain-recovery-fluidity.test.mjs']);
 groups.push(postBlHistoryGroup);
 groups.at(-1).push('test/receipt-analysis-outcome.test.mjs');
 groups.push(['--test','test/bl-identity.test.mjs']);
+groups.push(['--test','test/gls-sku-font.test.mjs']);
 groups.push(['--test','test/erplain-quota-priority.test.mjs']);
 groups.push(['--test','test/extra-parcel-count.test.mjs']);
 groups.push(['--test','test/delivered-zero-problems.test.mjs']);

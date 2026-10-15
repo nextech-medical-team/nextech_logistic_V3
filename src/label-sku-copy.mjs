@@ -22,14 +22,16 @@ export async function savedSkuCopy(db,bytes,key){
  const row=(await db.query('SELECT pdf,order_id,context_hash FROM label_sku_copies WHERE document_key=$1 AND source_hash=$2 ORDER BY created_at DESC,id DESC LIMIT 1',[key,digest(bytes)])).rows[0];
  if(!row)return null;if(!row.context_hash||row.context_hash!==await skuContextHash(db,row.order_id))throw Error('Copie SKU devenue obsolète : la commande, le BL ou le colis a changé. Contrôler les mentions avant toute impression. Aucune nouvelle étiquette achetée.');return Buffer.from(row.pdf);
 }
-function glsNote(doc,page,block){
+function glsNote(doc,page,block,fontName){
  if(Math.abs(page.getWidth()-283.465)>1||Math.abs(page.getHeight()-425.197)>1)return null;
  const td=/70\.86614 (-22\.17323|-30\.67717) Td/.exec(block);if(!td)return null;
  const hex=/<([a-fA-F0-9]+)> Tj/.exec(block),literal=/\(((?:\\[\s\S]|[^\\)])*)\) Tj/.exec(block);if(!hex&&!literal)return null;
  let bytes=hex?Buffer.from(hex[1],'hex'):Buffer.from(literal[1].replace(/\\([0-7]{1,3}|[\s\S])/g,(_,x)=>/^[0-7]/.test(x)?String.fromCharCode(parseInt(x,8)):({n:'\n',r:'\r',t:'\t',b:'\b',f:'\f'})[x]??x),'latin1');
  let value;if(block.includes('/Helvetica-SkuCopy '))value=bytes.toString('latin1');
  else {
-  const f=page.node.Resources().lookup(PDFName.of('Font'))?.lookup(PDFName.of('F1'));if(!String(f?.get(PDFName.of('BaseFont'))).includes('NotoSansDisplayCondensed-Regular'))return null;
+  // GLS resource names vary by template (F1 can be bold and F2 regular).
+  // Decode with the font active at this text block, never a guessed resource.
+  const f=fontName&&page.node.Resources().lookup(PDFName.of('Font'))?.lookup(PDFName.of(fontName));if(!String(f?.get(PDFName.of('BaseFont'))).includes('NotoSansDisplayCondensed-Regular'))return null;
   const cmap=f.lookup(PDFName.of('ToUnicode'));if(!(cmap instanceof PDFRawStream)||bytes.length%2)return null;
   const mapping=new Map(),text=Buffer.from(decodePDFRawStream(cmap).decode()).toString('latin1');
   for(const part of text.matchAll(/beginbfrange([\s\S]*?)endbfrange/g))for(const m of part[1].matchAll(/<([\da-f]+)>\s*<([\da-f]+)>\s*<([\da-f]+)>/gi)){const lo=parseInt(m[1],16),hi=parseInt(m[2],16),base=parseInt(m[3],16);if(hi-lo>65536)throw Error('Police GLS invalide');for(let i=lo;i<=hi;i++)mapping.set(i,String.fromCodePoint(base+i-lo));}
@@ -42,11 +44,11 @@ function glsNote(doc,page,block){
 export async function skuTextBlocks(bytes,kind){
  const doc=await PDFDocument.load(bytes);const blocks=[];
  for(const [pageIndex,page] of doc.getPages().entries()){
-  const contents=page.node.Contents();const refs=contents instanceof PDFArray?contents.asArray():[contents];
+  const contents=page.node.Contents();const refs=contents instanceof PDFArray?contents.asArray():[page.node.get(PDFName.of('Contents'))];
   for(const ref of refs){const stream=doc.context.lookup(ref);if(!(stream instanceof PDFRawStream))continue;
    const text=Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1');
    for(const match of text.matchAll(/BT\b[\s\S]*?\bET/g)){
-    if(String(kind).startsWith('gls')){const note=glsNote(doc,page,match[0]);if(note&&/ \([\d ,.]+(?: pcs)?\)/.test(note.value))blocks.push({pageIndex,ref,text,block:match[0],...note});continue;}
+    if(String(kind).startsWith('gls')){const fontName=[...text.slice(0,match.index+match[0].length).matchAll(/\/((?!Helvetica-SkuCopy\b)[^\s/]+)\s+[\d.]+\s+Tf\b/g)].at(-1)?.[1];const note=glsNote(doc,page,match[0],fontName);if(note&&/ \([\d ,.]+(?: pcs)?\)/.test(note.value))blocks.push({pageIndex,ref,text,block:match[0],...note});continue;}
     const block=match[0],font=/\/(Helvetica(?:-Bold)?-[\d]+) ([\d.]+) Tf/.exec(block),tm=/1 0 0 1 ([\d.]+) ([\d.]+) Tm/.exec(block),hex=/<([A-Fa-f0-9]+)> Tj/.exec(block);
     if(!font||!tm||!hex)continue;const x=Number(tm[1]),y=Number(tm[2]);
     const safe=kind==='gofo'?x===93&&(y===64||y===72):kind==='temu'?x===9&&font[1].startsWith('Helvetica-Bold-'):false;
