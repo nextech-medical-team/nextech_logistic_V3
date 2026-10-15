@@ -41,7 +41,8 @@ export async function refreshErplainDocuments(db,api,id){
    if(documentReadVersion(fresh)!==readVersion||!isDeepStrictEqual(fresh.erp_live,o.erp_live))throw Error('Documents locaux modifiés pendant la lecture : actualisation différée');
    await tx.query('UPDATE orders SET erp_live=$2::jsonb WHERE id=$1',[id,JSON.stringify(state)]);
   });
-  return {identityIssue:true,message:'Référence BL obsolète identifiée. Les BL réellement associés sont affichés ; historique, stock et étiquettes conservés.',stockHolds:[],bc,notFound:false};
+  const identityIssue=['missing','detached'].includes(state.blIdentity.status);
+  return {identityIssue,message:identityIssue?'Référence BL obsolète identifiée. Les BL réellement associés sont affichés ; historique, stock et étiquettes conservés.':'BL brouillon retrouvé. Son numéro reste non confirmé jusqu’à publication ; documents existants conservés.',stockHolds:[],bc,notFound:false};
  }
  let stock=o.erp_live?.stockDocument;
  if(stock?.id){const actual=(await api.request('query V3DocumentStockProof($id:ID!){StockRemoval(id:$id){id label status update_stock line_items{quantity variant{id} location{id}}}}',{id:String(stock.id)})).StockRemoval;
