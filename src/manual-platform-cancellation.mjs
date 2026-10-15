@@ -24,7 +24,9 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
  return {async next(input,user){
   if(!['admin','manager','operator'].includes(user?.role))throw Object.assign(Error('Droits insuffisants'),{status:403});
   if(input?.cursor!=null&&typeof input.cursor!=='string')throw Error('Curseur invalide');
-  const order=(await db.query("SELECT * FROM orders WHERE archived=false AND channel IN ('temu','shopify') AND id>$1 ORDER BY id LIMIT 1",[input?.cursor||''])).rows[0];
+  const channels=input?.channels??['temu','shopify'];
+  if(!Array.isArray(channels)||!channels.length||channels.some(channel=>!['temu','shopify'].includes(channel)))throw Error('Plateformes invalides');
+  const order=(await db.query("SELECT * FROM orders WHERE archived=false AND channel=ANY($2::text[]) AND id>$1 ORDER BY id LIMIT 1",[input?.cursor||'',channels])).rows[0];
   if(!order)return {done:true};
   return withShipmentLock(async()=>{
    let result={id:order.id,reference:order.reference,channel:order.channel,status:'unchanged'};

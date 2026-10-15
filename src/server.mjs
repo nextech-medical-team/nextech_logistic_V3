@@ -361,6 +361,18 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/orders/refresh-platform-cancellations'&&req.method==='POST'){
       permitted(user,operational);json(res,200,await platformCancellationRefresh.next(await body(req),user));return;
     }
+    if(p==='/api/orders/platform-cancellations/export'&&req.method==='POST'){
+      permitted(user,operational);const input=await body(req);
+      if(!Array.isArray(input.results)||input.results.length>100000||input.results.some(r=>!r||!['temu','shopify'].includes(r.channel)||!['cancelled','unchanged','review'].includes(r.status)||typeof r.reference!=='string'))throw Error('Résultats invalides');
+      const {default:ExcelJS}=await import('exceljs'),book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Annulations');
+      sheet.columns=[{header:'Plateforme',key:'channel',width:18},{header:'Référence',key:'reference',width:35},{header:'Résultat',key:'status',width:22},{header:'Détail',key:'error',width:80}];
+      for(const r of input.results)sheet.addRow({channel:r.channel==='temu'?'Temu':'Shopify',reference:r.reference,status:({cancelled:'Annulée',unchanged:'Non annulée',review:'À vérifier'})[r.status],error:String(r.error||'').slice(0,1000)});
+      sheet.getRow(1).font={bold:true};sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter='A1:D'+Math.max(1,sheet.rowCount);
+      const summary=book.addWorksheet('Bilan');summary.addRow(['Plateformes',String(input.platforms||'')]);summary.addRow(['Commandes vérifiées',input.results.length]);summary.addRow(['Annulées',input.results.filter(r=>r.status==='cancelled').length]);summary.addRow(['À vérifier',input.results.filter(r=>r.status==='review').length]);
+      for(const issue of Array.isArray(input.issues)?input.issues:[])summary.addRow(['Information',String(issue).slice(0,1000)]);
+      summary.getColumn(1).width=25;summary.getColumn(2).width=100;
+      res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition','attachment; filename="annulations-temu-shopify.xlsx"');res.setHeader('Cache-Control','no-store');res.end(Buffer.from(await book.xlsx.writeBuffer()));return;
+    }
     if(['/api/orders/suspend','/api/orders/reactivate','/api/orders/cancel-erplain'].includes(p)&&req.method==='POST'){
       permitted(user,operational);const b=await body(req);const method=p.endsWith('/suspend')?'suspend':p.endsWith('/reactivate')?'reactivate':'cancelErplain';json(res,200,await suspensionService[method](b,user));return;
     }
