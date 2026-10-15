@@ -13,7 +13,7 @@ test('resume retains successful reads, retries only missing reads and expires ol
 });
 test('bounded reader returns even if provider hangs; late result cannot save or report',async()=>{
  let release,saved=0,reports=0;const pending=new Promise(r=>release=r),api={request:()=>pending};
- await assert.rejects(receiptAnalysis(api,r=>r.request('query Slow'),{maxMs:15,save:async()=>saved++,progress:async()=>reports++}),/délai/);
+ await assert.rejects(receiptAnalysis(api,r=>r.request('query Slow'),{maxMs:15,now:()=>0,save:async()=>saved++,progress:async()=>reports++}),/délai/);
  release({value:1});await new Promise(r=>setTimeout(r,5));assert.equal(saved,0);assert.equal(reports,1);
 });
 test('analysis cannot execute mutations or reuse mutated cached response',async()=>{
