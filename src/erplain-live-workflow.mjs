@@ -1,4 +1,5 @@
 import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
+import {resumeLocalCatalogueReview} from './catalogue-local-review-resume.mjs';
 import {retirePostBcCommercialControls} from './post-bc-control-recovery.mjs';
 import {usesRecordedBc,readRecordedBc,recordedBcFingerprint,recordedBcPreparationAuthority,verifyRecordedOrSourceTotals,withRecordedOrSourceGuard,assertRecordedBc} from './existing-bc-execution.mjs';
 import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
@@ -51,7 +52,12 @@ import {convertedQuantity,addressIssue} from './domain.mjs';
 
 export async function initializeErplainLive(db){await initializePriority(db);await db.exec(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS erp_live JSONB NOT NULL DEFAULT '{}'; CREATE TABLE IF NOT EXISTS erp_live_jobs(order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,status TEXT DEFAULT 'pending',error TEXT,updated_at TIMESTAMPTZ DEFAULT now());`);if(db.recoverInterrupted!==false)await db.query("UPDATE erp_live_jobs SET status='review',error='Traitement interrompu : rapprocher les documents avant reprise' WHERE status='processing'");}
 
-export async function queueErplainLive(db,ids){if(!Array.isArray(ids)||!ids.length||ids.length>10000)throw new Error('Sélection de 1 à 10000 commandes requise');return (await db.query(`INSERT INTO erp_live_jobs(order_id) SELECT id FROM orders WHERE id=ANY($1::text[]) AND coalesce(suspension->>'active','false')<>'true' AND NOT (suspension ? 'erplainCancellation') AND reference NOT LIKE 'DEMO-%' ON CONFLICT DO NOTHING RETURNING order_id`,[ids])).rows.length;}
+export async function queueErplainLive(db,ids){
+ if(!Array.isArray(ids)||!ids.length||ids.length>10000)throw new Error('Sélection de 1 à 10000 commandes requise');
+ let resumed=0;const reviews=(await db.query("SELECT order_id FROM erp_live_jobs WHERE order_id=ANY($1::text[]) AND status='review' AND error LIKE 'Création produit · Nom du produit manquant ou invalide : %'",[ids])).rows;
+ for(const j of reviews)if(await resumeLocalCatalogueReview(db,j.order_id))resumed++;
+ return resumed+(await db.query(`INSERT INTO erp_live_jobs(order_id) SELECT id FROM orders WHERE id=ANY($1::text[]) AND coalesce(suspension->>'active','false')<>'true' AND NOT (suspension ? 'erplainCancellation') AND reference NOT LIKE 'DEMO-%' ON CONFLICT DO NOTHING RETURNING order_id`,[ids])).rows.length;
+}
 
 
 function orderDate(value){if(/^\d{2}\/\d{2}\/\d{4}$/.test(value||'')){const [d,m,y]=value.split('/');return `${y}-${m}-${d}`;}if(/^\d{4}-\d{2}-\d{2}/.test(value||''))return value.slice(0,10);return new Date().toISOString().slice(0,10);}

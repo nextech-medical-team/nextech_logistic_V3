@@ -99,14 +99,15 @@ test('same TEMU shipping engine uses published BL without ERP revalidation, quot
 test('existing BL alone admits Excel TEMU despite missing preparation, stale stock and unresolved business diagnostics',async t=>{
  const f=await fixture(t),shipping=temuShipping(f.db,f.api);
  const state={bl:{id:'existing-bl',status:'in_preparation'},bc:{id:'bc'},pricing:{status:'blocked'},stock:{error:'Stock insuffisant'}};
- await f.db.query("UPDATE orders SET suspension='{}',issue='Commande V3 et BC différents',resolution_pending_resume=true,erp_live=$1 WHERE id='o'",[JSON.stringify(state)]);
+ await f.db.exec('ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false');
+ await f.db.query("UPDATE orders SET simulation=true,suspension='{}',issue='Commande V3 et BC différents',resolution_pending_resume=true,erp_live=$1 WHERE id='o'",[JSON.stringify(state)]);
  const statements=[],query=f.db.query.bind(f.db);f.db.query=async(sql,args)=>{statements.push(sql);return query(sql,args);};
  const plan=await shipping.prepare(reference);assert.equal(plan.executionAuthority,'recorded_bl');assert.equal(plan.amount,2.5);assert.equal(f.bought,0);
  await query("UPDATE lines SET quantity=999,target_quantity=999 WHERE order_id='o'");
  await query("UPDATE orders SET issue='Mapping modifié',erp_live=erp_live||'{\"stockCheckedAt\":\"2000-01-01\",\"labelPreparationFingerprint\":\"stale\"}' WHERE id='o'");
  const result=await shipping.buy(reference,plan.id,plan.amount);assert.equal(result.status,'complete');assert.equal(f.bought,1);
  assert.equal(statements.some(sql=>/FROM lines|FROM resolution_jobs|FROM erp_live_jobs/.test(sql)),false);
- const o=await f.read();assert.equal(o.erp_live.bl.status,'in_preparation');assert.equal(o.resolution_pending_resume,true);assert.equal(o.erp_live.stock.error,'Stock insuffisant');
+ const o=await f.read();assert.equal(o.simulation,true);assert.equal(o.erp_live.bl.status,'in_preparation');assert.equal(o.resolution_pending_resume,true);assert.equal(o.erp_live.stock.error,'Stock insuffisant');
  await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
 });
 
@@ -131,7 +132,7 @@ test('automatic TEMU purchase uses existing BL without Excel, ERP, stock or prep
  await f.db.exec("CREATE TABLE IF NOT EXISTS correction_jobs(order_id text,status text);CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE extra_parcels(order_id text);ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT false;");
  await initializeTemuAutomaticPurchase(f.db);
  const erp={bl:{id:'existing-bl',status:'in_preparation'},bc:{id:'bc'},stock:{error:'Stock insuffisant'},pricing:{status:'blocked'}};
- await f.db.query("UPDATE orders SET suspension='{}',issue='Mapping modifié',resolution_pending_resume=true,erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);
+ await f.db.query("UPDATE orders SET simulation=true,suspension='{}',issue='Mapping modifié',resolution_pending_resume=true,erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);
  await f.db.query("INSERT INTO temu_label_jobs(reference,status) VALUES($1,'to_buy')",[reference]);
  const shipping=temuShipping(f.db,f.api),local={amounts:async()=>({}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
  const margins={get:async()=>({calculatedAt:new Date().toISOString(),rows:[{reference,status:'positive',profit:1,shipping:2.5/1.2,shippingSource:'Devis TEMU final',issues:[]}]})};
@@ -139,6 +140,14 @@ test('automatic TEMU purchase uses existing BL without Excel, ERP, stock or prep
  await worker.run();assert.equal(f.bought,1);assert.equal((await f.db.query('SELECT status FROM temu_label_jobs')).rows[0].status,'complete');
  const o=await f.read();assert.deepEqual(o.erp_live,erp);assert.equal(o.issue,'Mapping modifié');assert.equal(o.resolution_pending_resume,true);
  await worker.run();assert.equal(f.bought,1);
+});
+
+test('legacy simulation flag with BL never bypasses concurrent cancellation at the durable buy claim',async t=>{
+ const f=await fixture(t);await f.db.exec("ALTER TABLE orders ADD COLUMN simulation boolean DEFAULT true;CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE extra_parcels(order_id text);");
+ await f.db.query("UPDATE orders SET suspension='{}',erp_live='{\"bl\":{\"id\":\"bl\",\"status\":\"pending\"}}' WHERE id='o'");
+ const shipping=temuShipping(f.db,f.api),plan=await shipping.prepare(reference);
+ await assert.rejects(shipping.buy(reference,plan.id,plan.amount,{beforeClaim:async current=>{await f.db.query("UPDATE orders SET tracking_status='cancelled' WHERE id='o'");return {orderProof:{id:'o',suspension:{}},allowed:true,audit:{profit:1,planId:current.id}};}}),/annulée/);
+ assert.equal(f.bought,0);assert.equal((await f.db.query('SELECT attempt_id FROM temu_label_jobs')).rows[0].attempt_id,null);
 });
 
 test('dedicated Excel preparation rejects customer holds and every recorded Erplain cancellation before API calls',async t=>{
