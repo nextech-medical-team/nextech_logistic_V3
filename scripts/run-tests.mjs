@@ -34,4 +34,5 @@ groups.push(['--test','test/manual-legacy-label-retry.test.mjs']);
 groups.push(['--test','test/temu-excel-purchase-admission.test.mjs','test/temu-excel-label-admission.test.mjs','test/source-product-name.test.mjs']);
 groups.push(['--test','test/stock-lock-resume.test.mjs']);
 groups.push(['--test','test/tender-name-overflow.test.mjs','test/tender-bl-label-payload.test.mjs','test/partial-label-recovery.test.mjs']);
+groups.push(['--test','test/partial-complete-documents.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
