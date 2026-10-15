@@ -1,5 +1,5 @@
 const quotaGroup=['--test','test/erplain-quota-admission.test.mjs'];
-const postBlPreparationReviewGroup=['--test','test/post-bl-preparation-review.test.mjs','test/post-bl-margin-cost.test.mjs'];
+const postBlPreparationReviewGroup=['--test','test/post-bl-preparation-review.test.mjs','test/post-bl-margin-cost.test.mjs','test/carrier-postal.test.mjs'];
 const recoveredPreparationGroup=['--test','test/recovered-preparation-issue.test.mjs'];
 const manualCreatedBlWaitingGroup=['--test','test/manual-created-bl-waiting.test.mjs'];
 const excelRenewalGroup=['--test','test/temu-excel-renewal.test.mjs'];
