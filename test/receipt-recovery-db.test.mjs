@@ -5,7 +5,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {initializeReceiptRecovery,receiptRecoveryService} from '../src/receipt-recovery.mjs';
 import {queueResolutionRequest} from '../src/resolution-request.mjs';
 
-async function fixture(channel='amazon',temu=undefined){
+async function fixture(channel='amazon',temu=undefined,overrides={}){
  const engine=new PGlite();await engine.waitReady;const wrap=e=>({exec:s=>e.exec(s),query:(s,p=[])=>e.query(s,p)}),db={...wrap(engine),transaction:fn=>engine.transaction(tx=>fn(wrap(tx)))};
  await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,reference text,channel text,archived boolean DEFAULT false,erp_live jsonb DEFAULT '{}',suspension jsonb DEFAULT '{}',source_payload jsonb DEFAULT '{}',received_at timestamptz DEFAULT now(),processing_priority_at timestamptz,tracking_status text DEFAULT 'not_shipped',label_status text DEFAULT 'pending',partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,address jsonb DEFAULT '{}',carrier text,weight_kg numeric,parcel_count int);
  CREATE TABLE lines(order_id text,source_sku text,target_sku text); CREATE TABLE mappings(channel text,source_sku text,target_sku text);
@@ -22,7 +22,7 @@ async function fixture(channel='amazon',temu=undefined){
  let actual={id:'1925605',label:'C00014132',status:'active',update_stock:false,line_items:[line],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}},labelCalls=0;
  await db.query('INSERT INTO orders(id,reference,channel,erp_live) VALUES($1,$2,$3,$4)',[id,'SYNTHETIC',channel,JSON.stringify({bc:{id:'1925605',label:'C00014132'},phase:'bc_created',pricing:{status:'blocked',tax_type:'exclusive',total:999}})]);
  const calls=[],api={verify:async()=>{},request:async(q)=>{calls.push(q);assert.match(q,/^query /);if(q.includes('ReceiptByLabel'))return {PurchaseReceipts:{data:[receipt],paginatorInfo:{hasMorePages:false}}};if(q.includes('ReceiptOrderStock'))return {Orders:{data:[actual],paginatorInfo:{hasMorePages:false}}};if(q.includes('DocumentRead'))return {Order:actual};throw Error('Unexpected '+q);}};
- const service=receiptRecoveryService(db,'unused',{api,temu,queueLabel:async()=>{labelCalls++;await db.query("INSERT INTO carrier_jobs VALUES($1,'pending','production','[]',null)",[id]);return {id,status:'pending'};}});
+ const service=receiptRecoveryService(db,'unused',{api,temu,queueLabel:async()=>{labelCalls++;await db.query("INSERT INTO carrier_jobs VALUES($1,'pending','production','[]',null)",[id]);return {id,status:'pending'};},...overrides});
  const user={role:'admin',email:'synthetic@example.test'},permitted=(u,roles)=>{if(!roles.includes(u.role))throw Error('Forbidden');};
  async function route(path,body,role='admin'){
   let result;await service.routes({p:path,url:new URL('http://localhost'+path),req:{method:'POST'},res:{},user:{...user,role},body:async()=>body,json:(_r,status,value)=>{result={status,...value};},permitted});return result;
@@ -175,4 +175,9 @@ test('TEMU PDF without BL never announces ready documents and keeps the existing
   await f.db.query("INSERT INTO receipt_recovery_items(run_id,order_id,request_id,state) VALUES($1,$2,$3,'complete')",[run,f.id,randomUUID()]);
   s=await f.service.status(run);assert.notEqual(s.plan.rows[0].work,'available');assert.equal(s.outcome.finalized.length,0);assert.equal(s.outcome.unfinished.length,1);
  }finally{await f.engine.close();}
+});
+
+test('warehouse PDF jobs continue while another receipt is applying or waiting for its BL',async()=>{
+ let exportsAdvanced=0;const f=await fixture('amazon',undefined,{warehouse:{advance:async()=>{exportsAdvanced++;},routes:async()=>false}});
+ try{const run=await f.start(),before=exportsAdvanced;await f.service.submit({id:run,ids:[f.id]},f.user);await f.service.run();await f.service.run();assert.equal(exportsAdvanced,before+2);assert.equal((await f.service.status(run)).state,'applying');assert.equal(f.labelCalls(),0);}finally{await f.engine.close();}
 });

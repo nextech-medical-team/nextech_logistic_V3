@@ -43,9 +43,9 @@ function snapshotLabelLinks(o){
   ...(o.partial_documents||[]).map(d=>({name:'Étiquette livraison partielle',url:'/api/partial/documents/'+encodeURIComponent(d.delivery_id)+'/'+d.document_index}))
  ];
 }
-export function receiptRecoveryService(db,directory,{api:providedApi,queueResolution=queueResolutionRequest,queueLabel=queueLabelFromBl,enabled=()=>true,temu=temuLocalService(db,directory)}={}){
+export function receiptRecoveryService(db,directory,{api:providedApi,queueResolution=queueResolutionRequest,queueLabel=queueLabelFromBl,enabled=()=>true,temu=temuLocalService(db,directory),warehouse:providedWarehouse}={}){
  const api=providedApi||erplainAccount(directory,'source');
- const warehouse=receiptWarehouseExports(db,directory);
+ const warehouse=providedWarehouse||receiptWarehouseExports(db,directory);
  let running=false,activeItem=null;
  async function preview(number,onProgress=async()=>{},reader=api){
   await onProgress({phase:'receipt',message:'Lecture de la réception Erplain'});
@@ -155,7 +155,8 @@ export function receiptRecoveryService(db,directory,{api:providedApi,queueResolu
  return {get running(){return running;},preview,status,submit,
   async run(){if(running||!enabled())return;running=true;let run;
    try{
-    run=(await db.query("SELECT * FROM receipt_recovery_runs WHERE state IN ('queued','reading','applying') ORDER BY CASE WHEN state='reading' THEN 0 WHEN state='queued' THEN 1 ELSE 2 END,created_at LIMIT 1")).rows[0];if(!run){await warehouse.advance();return;}
+    try{await warehouse.advance();}catch{console.error('Export PDF réception différé ; les préparations continuent.');}
+    run=(await db.query("SELECT * FROM receipt_recovery_runs WHERE state IN ('queued','reading','applying') ORDER BY CASE WHEN state='reading' THEN 0 WHEN state='queued' THEN 1 ELSE 2 END,created_at LIMIT 1")).rows[0];if(!run)return;
    if(run.state==='applying'){activeItem=null;try{await advance(run);}catch(e){if(activeItem)await itemState(run.id,activeItem,'blocked',e.message);else throw e;}return;}
     const attempt=randomUUID();await db.query("UPDATE receipt_recovery_runs SET state='reading',error=null,progress=$2,updated_at=now() WHERE id=$1",[run.id,JSON.stringify({attempt,startedAt:new Date().toISOString(),message:'Démarrage de l’analyse'})]);
     const controller=new AbortController(),analysisApi=providedApi||erplainAccount(directory,'source',{fetchImpl:(url,options)=>fetch(url,{...options,signal:AbortSignal.any([options.signal,controller.signal])})});
