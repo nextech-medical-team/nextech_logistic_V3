@@ -44,4 +44,5 @@ groups.push(['--test','test/partial-cancellation.test.mjs','test/partial-preview
 groups.push(['--test','test/erplain-recovery-fluidity.test.mjs']);
 groups.push(postBlHistoryGroup);
 groups.push(['--test','test/bl-identity.test.mjs']);
+groups.push(['--test','test/gls-sku-font.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
