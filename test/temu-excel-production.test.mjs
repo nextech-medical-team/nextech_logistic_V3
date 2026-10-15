@@ -126,6 +126,23 @@ test('post-BL Excel path preserves suspension, cancellation, partial scope and d
  await assert.rejects(shipping.prepare(reference),/tentative/);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,0);
 });
 
+test('zero supplier quantity after BL reaches the quote API with recorded source units, preserves raw response and never buys twice',async t=>{
+ const f=await fixture(t),shipping=temuShipping(f.db,f.api);f.detail.orderList[0].quantity=0;
+ const line=f.detail.orderList[0].orderSn,erp={bl:{id:'existing-bl',status:'ready_to_ship'},equivalentOriginalLines:[{source_line:line,quantity:1}]};
+ await f.db.query("UPDATE orders SET suspension='{}',erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);
+ const plan=await shipping.prepare(reference);assert.equal(plan.request.sendRequestList[0].orderSendInfoList[0].quantity,1);assert.equal(plan.quantityData[0].providerQuantity,0);assert.equal(f.detail.orderList[0].quantity,0);assert.equal(f.bought,0);
+ await shipping.buy(reference,plan.id,plan.amount);assert.equal(f.bought,1);assert.deepEqual((await f.read()).erp_live,erp);assert.equal(f.detail.orderList[0].quantity,0);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
+});
+
+test('native TEMU service accepts the BL alone despite import visibility hold, no BC, no preparation and zero current quantity',async t=>{
+ const {temuLocalService}=await import('../src/temu-local.mjs');const f=await fixture(t);f.detail.orderList[0].quantity=0;
+ const line=f.detail.orderList[0].orderSn,erp={bl:{id:'existing-bl',status:'ready_to_ship'},equivalentOriginalLines:[{source_line:line,quantity:1}]};
+ await f.db.query("UPDATE orders SET suspension='{}',resolution_pending_resume=true,source_payload=source_payload||'{\"mallId\":\"shop\",\"visibilityHold\":true}',erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);
+ const api={...f.api,read:async(method,args)=>method==='bg.open.accesstoken.info.get'?{mallId:'shop'}:f.api.read(method,args)};
+ const local=temuLocalService(f.db,'unused',{apiFactory:()=>api,shopLoader:async()=>[],configLoader:async()=>({TEMU_APP_KEY:'synthetic',TEMU_APP_SECRET:'synthetic',TEMU_ACCESS_TOKEN:'synthetic'})});
+ const plan=await local.prepare(reference);assert.equal(plan.executionAuthority,'recorded_bl');assert.equal(plan.request.sendRequestList[0].orderSendInfoList[0].quantity,1);assert.equal(f.bought,0);const current=await f.read();assert.equal(current.source_payload.visibilityHold,true);assert.equal(current.source_payload.temuOrderDetail.orderList[0].quantity,0);assert.deepEqual(current.erp_live,erp);
+});
+
 test('automatic TEMU purchase uses existing BL without Excel, ERP, stock or preparation rechecks and preserves diagnostics',async t=>{
  const {initializeTemuAutomaticPurchase,temuAutomaticPurchaseWorker}=await import('../src/temu-automatic-purchase.mjs');
  const f=await fixture(t);
@@ -211,7 +228,7 @@ test('Excel replacement keeps original TEMU identity and prices, and recovers th
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,error,result,created_at) VALUES('equivalent','o','replace-equivalent','review',$1,'{\"erpOnly\":true}',now()+interval '1 second')",[temuLabelPolicyMessage]);
  const current=await f.lines(),o=await f.read();
  assert.doesNotThrow(()=>verifyExcelTemuDetail(o,current,f.detail));assert.equal(verifiedExcelCommercial(o,current).total,84.05);
- const beforeBc={...o,erp_live:{...o.erp_live,bc:null}};
+ const beforeBc={...o,erp_live:{...o.erp_live,bc:null,bl:null}};
  f.detail.orderList[0].quantity=6;
  assert.doesNotThrow(()=>verifyExcelTemuDetail(o,current,f.detail)); // Recorded BC remains the execution authority.
  assert.throws(()=>verifyExcelTemuDetail(beforeBc,current,f.detail),/quantités/);f.detail.orderList[0].quantity=5;
