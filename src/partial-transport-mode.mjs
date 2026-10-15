@@ -8,7 +8,7 @@ export function partialPreparationChoice(order,choice){
  }
  if(choice===temuBlOnly)throw Error('Mode BL seul réservé au circuit TEMU');
  if(choice==='reuse')throw Error('Chaque nouveau BL nécessite une nouvelle étiquette');
- if(choice!=null&&choice!=='new')throw Error('Choix de transport partiel invalide');
+ if(choice!=null&&!['new','replace'].includes(choice))throw Error('Choix de transport partiel invalide');
  return 'new';
 }
 export function assertPartialTransportMode(order,delivery){

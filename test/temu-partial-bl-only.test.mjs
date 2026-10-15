@@ -5,7 +5,7 @@ import {retryPartialLabel} from '../src/partial-label-recovery.mjs';
 const order=()=>({id:'o',reference:'PO-100-200',channel:'temu',carrier:'temu',address:{country:'SI'},source_payload:{},erp_live:{bc:{id:'10',status:'active'}},suspension:{},tracking_status:'unknown'});
 test('TEMU requires explicit BL-only choice; direct carrier, reuse and forged modes fail closed',()=>{
  const o=order();assert.equal(partialPreparationChoice(o,'bl_only_temu'),'bl_only_temu');for(const choice of [null,'new','reuse','gls'])assert.throws(()=>partialPreparationChoice(o,choice));
- assert.equal(partialPreparationChoice({...o,channel:'tender'},null),'new');assert.throws(()=>partialPreparationChoice({...o,channel:'tender'},'bl_only_temu'));
+ assert.equal(partialPreparationChoice({...o,channel:'tender'},null),'new');assert.equal(partialPreparationChoice({...o,channel:'tender'},'replace'),'new');assert.throws(()=>partialPreparationChoice({...o,channel:'tender'},'bl_only_temu'));
  for(const changed of [x=>x.suspension={active:true},x=>x.archived=true,x=>x.tracking_status='shipped']){const x=order();changed(x);assert.throws(()=>assertPartialTransportMode(x,{label_choice:'bl_only_temu'}));}
  assert.throws(()=>assertPartialTransportMode(o,{label_choice:'new'}));assert.throws(()=>assertPartialTransportMode({...o,channel:'tender'},{label_choice:'bl_only_temu'}));
 });
