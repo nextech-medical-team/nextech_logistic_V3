@@ -13,9 +13,16 @@ test('each parcel preserves the complete text and its own index, including addre
 });
 test('a true overflow, overlong word, invalid telephone or street remains a provider payload error',()=>{
  const long=order();long.address.name='SERVICE PHARMACIE '.repeat(12);assert.throws(()=>tenderGlsAddress(long),/trop longs/);
- const word=order();word.erplain_label_customer.label='A'.repeat(36);assert.throws(()=>tenderGlsAddress(word),/Nom trop long/);
+ const word=order();word.erplain_label_customer.label='A'.repeat(41);assert.throws(()=>tenderGlsAddress(word),/Nom trop long/);
  const phone=order();phone.address.phone='420937';assert.throws(()=>tenderGlsAddress(phone),/téléphone absent ou invalide/);
  const street=order();street.address.street='RUE '.repeat(12);assert.throws(()=>tenderGlsAddress(street),/dépasse 40/);
+});
+test('a published BL does not require an optional full phone; a provided extension remains printed and no number is invented',()=>{
+ const o=order();o.label_bl_id='bl';o.address.phone='420937';const before=JSON.stringify(o),a=tenderGlsAddress(o);assert.equal(a.ContactPerson,'Tél : 420937');assert.equal(a.FixedLinePhonenumber,undefined);assert.equal(a.MobilePhoneNumber,undefined);assert.equal(JSON.stringify(o),before);
+ o.address.phone='';const empty=tenderGlsAddress(o);assert.equal(empty.ContactPerson,undefined);assert.equal(empty.FixedLinePhonenumber,undefined);
+});
+test('a real 36-to-40-character word may use the documented ShipIT capacity without truncation',()=>{
+ const o=order();o.erplain_label_customer.label='A'.repeat(36);o.address.name='PHARMACIE';o.parcel_count=1;const a=tenderGlsAddress(o);assert.equal(a.Name1,'A'.repeat(36));assert.equal(a.Name2,'PHARMACIE');assert([a.Name1,a.Name2,a.Name3].every(x=>x.length<=40));
 });
 const localError='Appels d’offres · Client et destinataire dépassent les trois lignes GLS : vérifier avant création';
 const job=()=>({order_id:'o',status:'failed',attempts:1,error:localError,tracking:[],result:null,reference:null,creation_id:'allocated-at-queue',creation_started_at:null,failure_phase:null});
