@@ -29,8 +29,13 @@ export function visibleOrderBls(order,partialBls=[]){
 }
 export function applyBlIdentityObservation(state,bc,bl,options){
  const proof=observeBlIdentity(state,bc,bl,options);
+ // A status-only read must not erase already saved BL lines, addresses or
+ // stock flags used by PDF recovery. Enrichment is strictly by immutable ID.
+ const metadata=new Map();
+ for(const saved of [...(state.bc?.shipping_orders?.data||[]),...(state.documentSource?.shippingOrders||[]),...(state.bl?[state.bl]:[])])if(saved?.id)metadata.set(id(saved.id),{...metadata.get(id(saved.id)),...saved});
+ const shippingOrders=proof.shippingOrders.map(current=>({...metadata.get(id(current.id)),...current}));
  return {...state,bc:{...state.bc,id:bc.id,label:bc.label,status:bc.status},
   ...(bl&&['verified','draft'].includes(proof.status)?{bl:{...state.bl,...bl}}:{}),
   blIdentity:proof,status_checked_at:proof.checkedAt,
-  documentSource:{...state.documentSource,shippingOrders:proof.shippingOrders,identityCheckedAt:proof.checkedAt}};
+  documentSource:{...state.documentSource,shippingOrders,identityCheckedAt:proof.checkedAt}};
 }

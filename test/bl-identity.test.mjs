@@ -29,6 +29,13 @@ test('published response updates a changed number by immutable ID',()=>{
  const f=fixture(),bl={id:9,label:'SHO00744467',status:'pending'};f.bc.shipping_orders.data=[bl];
  const next=applyBlIdentityObservation(f.o.erp_live,f.bc,bl);assert.equal(next.bl.label,bl.label);assert.deepEqual(visibleOrderBls({erp_live:next}),[bl]);
 });
+test('status-only reads retain BL contents by ID without adopting same-number foreign metadata',()=>{
+ const f=fixture(),lines=[{variant:{id:3},quantity:100}],address={city:'Lille'};
+ f.o.erp_live.documentSource={lines:[{sku:'SKU',quantity:100}],shippingOrders:[{id:9,label:'old',status:'pending',line_items:lines,shipping_address:address,update_stock:false}]};
+ const own={id:9,label:'same-number',status:'in_preparation'};f.bc.shipping_orders.data=[own];
+ const next=applyBlIdentityObservation(f.o.erp_live,f.bc,own);assert.deepEqual(next.documentSource.shippingOrders[0].line_items,lines);assert.deepEqual(next.documentSource.shippingOrders[0].shipping_address,address);assert.equal(next.documentSource.shippingOrders[0].update_stock,false);
+ const foreign={id:12,label:'old',status:'pending'};f.bc.shipping_orders.data=[foreign];const other=applyBlIdentityObservation(f.o.erp_live,f.bc,null);assert.equal(other.documentSource.shippingOrders[0].id,12);assert.equal(other.documentSource.shippingOrders[0].line_items,undefined);
+});
 test('draft numbers never appear as confirmed including partial deliveries',()=>{
  const f=fixture();assert.deepEqual(visibleOrderBls(f.o),[]);assert.deepEqual(visibleOrderBls({partial_mode:true},[f.o.erp_live.bl,{id:10,status:'pending'}]),[{id:10,status:'pending'}]);
  const next=applyBlIdentityObservation(f.o.erp_live,f.bc,{...f.o.erp_live.bl});assert.equal(next.blIdentity.status,'draft');assert.deepEqual(visibleOrderBls({erp_live:next}),[]);
