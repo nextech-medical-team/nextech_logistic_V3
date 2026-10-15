@@ -65,7 +65,7 @@ test('only a provably unsent read at stable checkpoints can return to the queue'
  assert.equal(safeQuotaReadQueue(o,e),true);
  for(const phase of ['creating_bc','creating_bl','creating_customer','creating_stock','publishing_bl','finalizing_bl'])assert.equal(safeQuotaReadQueue({...o,erp_live:{phase}},e),false);
  assert.equal(safeQuotaReadQueue({...o,suspension:{active:true}},e),false);assert.equal(safeQuotaReadQueue(o,{...e,erplainReadOnly:false}),false);assert.equal(safeQuotaReadQueue(o,{...e,erplainRequestNotSent:false}),false);
- assert.equal(Date.parse(quotaReadRetryAt(e,0)),2000);assert.equal(Date.parse(quotaReadRetryAt({...e,erplainProviderRateLimited:true},0)),60000);
+ assert.equal(Date.parse(quotaReadRetryAt(e,0)),2000);assert.equal(Date.parse(quotaReadRetryAt({...e,erplainProviderRateLimited:true},0)),2000);
 });
 test('quota waiting is shown as queued, while unrelated stock errors stay blocked',()=>{
  const r={id:'1',erp_status:'review',erp_error:'Erplain temporairement limité : vérification et reprise automatiques programmées',quotaRecovery:{readRateLimited:true,nextReadCheckAt:'2099-10-15T15:00:00Z'},resolution_status:'review',resolution_error:'Erplain temporairement limité : vérification et reprise automatiques programmées'};
