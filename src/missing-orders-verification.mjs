@@ -43,7 +43,12 @@ export function missingOrdersVerification(db,directory,{shopify=shopifyObservati
      if(page.pageInfo.hasNextPage&&(!next||s.seen.has(next)||!rows.length))throw Error('Pagination Shopify interrompue');
      if(next)s.seen.add(next);s.cursor=next;if(!next)s.phase=s.platform==='shopify'?'done':'connect-temu';
     }else if(s.phase==='connect-temu'){
-     const connection=await connect();s.sources=[...connection.clients].map(([shop,api])=>({shop,api,country:connection.countryByMall.get(shop)||''}));
+     const connection=await connect();
+     const knownCountries=(await db.query("SELECT DISTINCT source_payload->>'mallId' mall,address->>'country' country FROM orders WHERE channel='temu' AND address->>'country' IS NOT NULL")).rows;
+     s.sources=[...connection.clients].map(([shop,api])=>{
+      const countries=[...new Set(knownCountries.filter(row=>row.mall===String(shop)&&/^[A-Z]{2}$/.test(row.country)).map(row=>row.country))];
+      return {shop,api,country:connection.countryByMall.get(shop)||connection.config?.TEMU_COUNTRIES?.[shop]||(countries.length===1?countries[0]:'')};
+     });
      for(const [country] of connection.connectionErrors)s.errors.push('TEMU '+country+' : connexion impossible');
      s.phase=s.sources.length?'temu':'done';s.cursor=1;s.seen.clear();
     }else if(s.phase==='temu'){

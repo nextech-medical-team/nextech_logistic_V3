@@ -14,7 +14,25 @@
  }
  $('missing-start').value='2026-10-07T00:00';refreshBounds();$('missing-start').oninput=refreshBounds;$('missing-before').oninput=refreshBounds;
  const statusNames={UNFULFILLED:'Non traitée',FULFILLED:'Traitée',PARTIALLY_FULFILLED:'Partiellement traitée',IN_PROGRESS:'En cours',ON_HOLD:'En attente',SCHEDULED:'Planifiée',CANCELLED:'Annulée',CANCELED:'Annulée'};
- function sourceStatus(row){return row.channel==='shopify'?(statusNames[row.status]||row.status||'Non communiqué'):(row.status==='3'?'Annulée (TEMU 3)':row.status?'Statut TEMU '+row.status:'Non communiqué');}
+ const temuStatusNames={'1':'En attente','2':'À expédier','3':'Annulée','4':'Expédiée','5':'Reçue','41':'Partiellement expédiée','51':'Partiellement reçue'};
+ const regionNames=new Intl.DisplayNames(['fr'],{type:'region'});
+ const englishRegions=new Intl.DisplayNames(['en'],{type:'region'});
+ const countryCodes=new Map();
+ for(let a=65;a<=90;a++)for(let b=65;b<=90;b++){
+  const code=String.fromCharCode(a,b),name=englishRegions.of(code);
+  if(name!==code){countryCodes.set(name.toLowerCase(),code);countryCodes.set(regionNames.of(code).toLowerCase(),code);}
+ }
+ function countryName(value){
+  const country=String(value||'').trim();
+  if(!country||['—','--','__'].includes(country))return 'Pays non communiqué';
+  const code=/^[a-z]{2}$/i.test(country)?country.toUpperCase():countryCodes.get(country.toLowerCase());
+  return code?regionNames.of(code):country;
+ }
+ function sourceStatus(row){
+  if(row.channel==='shopify')return statusNames[row.status]||row.status||'Non communiqué';
+  const status=String(row.status??'');
+  return status?(temuStatusNames[status]||'Statut non reconnu')+' (TEMU '+status+')':'Non communiqué';
+ }
  function emptyRows(message){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=7;td.className='missing-empty';td.textContent=message;tr.append(td);$('missing-rows').replaceChildren(tr);}
  const filterLabel=document.createElement('label');filterLabel.htmlFor='missing-status';filterLabel.textContent='Statut de commande';
  const statusFilter=document.createElement('select');statusFilter.id='missing-status';filterLabel.append(statusFilter);
@@ -32,7 +50,7 @@
   if(!report)return;
   const rows=report.rows.filter(row=>!statusFilter.value||sourceStatus(row)===statusFilter.value);
   $('missing-rows').replaceChildren();
-  for(const row of rows){const tr=document.createElement('tr');for(const value of [row.channel.toUpperCase(),row.shop,row.reference,new Date(row.date).toLocaleString('fr-FR'),row.country||'—',sourceStatus(row),'Absente de V3']){const td=document.createElement('td');td.textContent=value;tr.append(td);}$('missing-rows').append(tr);}
+  for(const row of rows){const tr=document.createElement('tr');for(const value of [row.channel.toUpperCase(),row.shop,row.reference,new Date(row.date).toLocaleString('fr-FR'),countryName(row.country),sourceStatus(row),'Absente de V3']){const td=document.createElement('td');td.textContent=value;tr.append(td);}$('missing-rows').append(tr);}
   if(!rows.length)emptyRows(report.rows.length?'Aucune commande pour ce statut.':report.done?(report.complete?'Aucune commande manquante sur la période sélectionnée.':'Aucune commande manquante détectée dans les résultats disponibles. La vérification est incomplète.'):'Recherche des commandes manquantes en cours…');
   filterCount.textContent=`${rows.length} commande(s) affichée(s) sur ${report.rows.length} absente(s) de V3`;
  }
