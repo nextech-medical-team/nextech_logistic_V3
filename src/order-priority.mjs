@@ -1,9 +1,12 @@
 import {createdBlSql} from './created-bl-label.mjs';
 import {bcAllowedSql} from './bc-authorization.mjs';
 import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
+// Older schemas may be inspected before the ERP initializer adds erp_live.
+// JSON row access keeps that inspection read-only and treats a missing BL as absent.
+const createdBlClaimSql=createdBlSql.replaceAll('erp_live',"to_jsonb(orders)->'erp_live'");
 // Shared by the claim queries and the queue-position display.
 export const erplainEligible = `status='pending' AND EXISTS(SELECT 1 FROM orders o WHERE o.id=erp_live_jobs.order_id AND (${bcAllowedSql}) AND (o.erp_live->'bc'->>'id' IS NULL OR NOT o.resolution_pending_resume) AND (o.erp_live->'transientRecovery'->>'readRateLimited' IS DISTINCT FROM 'true' OR o.erp_live->'transientRecovery'->>'nextReadCheckAt' IS NULL OR o.erp_live->'transientRecovery'->>'nextReadCheckAt'<=to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=erp_live_jobs.order_id AND r.status IN ('queued','running'))`;
-export const carrierEligible = `NOT EXISTS(SELECT 1 FROM orders suspended_order WHERE suspended_order.id=carrier_jobs.order_id AND (coalesce(suspended_order.suspension->>'active','false')='true' OR suspended_order.suspension ? 'erplainCancellation')) AND ((status='pending' AND ((manual_bl_request->>'creationId'=creation_id) OR stock_override IS NOT NULL OR EXISTS(SELECT 1 FROM orders WHERE orders.id=carrier_jobs.order_id AND (${createdBlSql})) OR NOT EXISTS(SELECT 1 FROM orders o WHERE o.id=carrier_jobs.order_id AND o.resolution_pending_resume=true))) OR (status='awaiting_pdf' AND attempts<5 AND updated_at<now()-interval '10 seconds'))`;
+export const carrierEligible = `NOT EXISTS(SELECT 1 FROM orders suspended_order WHERE suspended_order.id=carrier_jobs.order_id AND (coalesce(suspended_order.suspension->>'active','false')='true' OR suspended_order.suspension ? 'erplainCancellation')) AND ((status='pending' AND ((manual_bl_request->>'creationId'=creation_id) OR stock_override IS NOT NULL OR EXISTS(SELECT 1 FROM orders WHERE orders.id=carrier_jobs.order_id AND (${createdBlClaimSql})) OR NOT EXISTS(SELECT 1 FROM orders o WHERE o.id=carrier_jobs.order_id AND o.resolution_pending_resume=true))) OR (status='awaiting_pdf' AND attempts<5 AND updated_at<now()-interval '10 seconds'))`;
 export const priorityOrder = table => `(SELECT processing_priority_at FROM orders WHERE id=${table}.order_id) ASC NULLS LAST,${table}.updated_at,${table}.order_id`;
 
 export async function initializePriority(db){
