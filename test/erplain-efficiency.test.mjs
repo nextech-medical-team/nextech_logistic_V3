@@ -1,3 +1,4 @@
+import {positiveImportQuantity} from '../src/quantity-value.mjs';
 import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
@@ -37,9 +38,19 @@ test('automatic continuation ignores diagnostic timestamps but responds to quant
  assert.equal(automaticContinuationKey({...o,issue:'another diagnostic',updated_at:'later'},{mappingFingerprint:'m',checkedAt:'second'}),first);
  for(const edit of [x=>x.erp_live.bc.line_items[0].quantity++,x=>x.erp_live.bc.line_items[0].on_hand++,x=>x.erp_live.bc.id++,x=>x.suspension={active:true},x=>x.source_payload={visibilityHold:true}]){const changed=structuredClone(o);edit(changed);assert.notEqual(automaticContinuationKey(changed,{mappingFingerprint:'m'}),first);}
 });
+test('decimal and scientific file quantities remain supported without accepting nondecimal or ambiguous syntax',()=>{for(const [value,expected] of [['1e3',1000],['+2',2],['1 000',1000],['1,5',1.5]])assert.equal(positiveImportQuantity(value),expected);for(const value of ['0x10','0b10','1 2',true,[2],0,-1,'Infinity','NaN'])assert.throws(()=>positiveImportQuantity(value));});
 test('invalid quantities are rejected even for products not tracking inventory',()=>{
  for(const quantity of [null,undefined,'',0,-1,'bad'])assert.throws(()=>assertFullOrderStock([{quantity,variant:{id:1,sku:'A',track_inventory:false}}]),/Quantité/);
  assert.doesNotThrow(()=>assertFullOrderStock([{quantity:2,variant:{id:1,track_inventory:false}}]));
+});
+test('pre-BL stock guard rejects an empty BC, shipping-only BC and missing product identity',()=>{
+ for(const lines of [[],[{type:'shipping_cost',quantity:1}],[{type:'normal',quantity:2}],[{quantity:1,variant:{id:1,track_inventory:false}},{type:'normal',quantity:2}]])assert.throws(()=>assertFullOrderStock(lines),/sans produit|identité produit/);
+});
+test('a real decimal shortage is never waived by an epsilon; repeated fractional lines do not create a false shortage',()=>{
+ const line={quantity:1,available:'0.999999',on_hand:'0.999999',reserved_quantity:0,location:{id:1},variant:{id:1,sku:'A'}};
+ assert.throws(()=>assertFullOrderStock([line]),/manque 0.000001/);
+ assert.throws(()=>assertFullOrderStock([{...line,quantity:'0.000001',available:0,on_hand:0}]),/stock insuffisant/);
+ assert.doesNotThrow(()=>assertFullOrderStock([{...line,quantity:0.1,available:0.3,on_hand:0.3},{...line,quantity:0.2,available:0.3,on_hand:0.3}]));
 });
 test('native watcher accepts reservation policy true and still refuses incomplete BL searches and shortages',()=>{
  const s=snapshot('1',0);assert.throws(()=>verifiedStock(s,'1',{native:true}),/stock insuffisant/);

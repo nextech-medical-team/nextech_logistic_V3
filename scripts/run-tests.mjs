@@ -1,4 +1,4 @@
-const efficiencyGroup=['--test','test/erplain-efficiency.test.mjs','test/import-reception.test.mjs','test/cross-format-contract.test.mjs'];
+const efficiencyGroup=['--test','test/erplain-efficiency.test.mjs','test/import-reception.test.mjs','test/cross-format-contract.test.mjs','test/bc-representative-observation.test.mjs'];
 const quotaGroup=['--test','test/erplain-quota-admission.test.mjs'];
 const postBlPreparationReviewGroup=['--test','test/post-bl-preparation-review.test.mjs','test/carrier-postal.test.mjs'];
 const recoveredPreparationGroup=['--test','test/recovered-preparation-issue.test.mjs'];

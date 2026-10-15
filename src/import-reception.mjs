@@ -2,7 +2,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import {cancelledImportSql} from './cancelled-import-reimport.mjs';
 
 const ref=x=>String(x??'').trim();
-const receptionCanonical=value=>Array.isArray(value)?value.map(receptionCanonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().filter(k=>!['importRows','importApiVerifiedAt','importedAt','importedBy','row','requestId'].includes(k)).map(k=>[k,receptionCanonical(value[k])])):value;
+const receptionCanonical=value=>Array.isArray(value)?value.map(receptionCanonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().filter(k=>!['importRows','importApiVerifiedAt','importedAt','importedBy','row','requestId','file','files','filename'].includes(k)).map(k=>[k,receptionCanonical(value[k])])):value;
 export const shopIdentity=o=>ref(o.source_payload?.sourceShop||o.source_payload?.shop_domain||o.source_payload?.shop).toLowerCase().replace(/^https?:\/\//,'').replace(/\/$/,'');
 const shopifyId=o=>ref(o.source_payload?.id).replace(/^gid:\/\/shopify\/Order\//,'');
 export function sameImportIdentity(a,b,channel){

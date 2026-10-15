@@ -141,7 +141,9 @@ export async function parseTemuExcelFiles(files){
  return {hash:digest.digest('hex'),rows:rowCount,repeatedLines,files:fileSummaries,orders:[...groups.values()],errors};
 }
 async function existingReferences(db,references){
- return new Set((await db.query("SELECT DISTINCT reference,source_reference FROM orders WHERE channel IN ('temu','erplain') AND (reference=ANY($1::text[]) OR source_reference=ANY($1::text[]))",[references])).rows.flatMap(r=>[r.reference,r.source_reference].filter(Boolean)));
+ const rows=(await db.query("SELECT id,channel,reference,source_reference FROM orders WHERE channel IN ('temu','erplain') AND (reference=ANY($1::text[]) OR source_reference=ANY($1::text[]))",[references])).rows,map=new Map();
+ for(const row of rows)for(const reference of [row.reference,row.source_reference].filter(Boolean)){const prior=map.get(reference);map.set(reference,prior&&prior.id!==row.id?{id:null,ambiguous:true}:row);}
+ return map;
 }
 export async function previewTemuExcel(db,files){
  const parsed=await parseTemuExcelFiles(files),existing=await existingReferences(db,parsed.orders.map(o=>o.reference));
@@ -184,7 +186,7 @@ export async function confirmTemuExcel(db,input,user){
    await tx.query('INSERT INTO order_suspension_events(id,order_id,action,user_email,note,state) VALUES($1,$2,$3,$4,$5,$6)',[randomUUID(),id,'import_held',user.email,note,JSON.stringify(suspension)]);
    results.push({reference,country:o.country,status:'created',orderId:id});
   }
-  for(const o of parsed.orders){const result=results.find(r=>r.reference===o.reference);await recordImportReception(tx,{...o,source_payload:{origin:'temu_excel',files:o.files,issues:o.issues}},{channel:'temu',filename:o.files.join(', '),receiptId:input.requestId,orderId:result?.orderId||null,outcome:result?.status==='created'?'created':result?.status==='skipped'?'duplicate_received':'excluded'});}
+  for(const o of parsed.orders){const result=results.find(r=>r.reference===o.reference);await recordImportReception(tx,{...o,source_payload:{origin:'temu_excel',files:o.files,issues:o.issues}},{channel:'temu',filename:o.files.join(', '),receiptId:input.requestId,orderId:result?.orderId||existing.get(o.reference)?.id||null,outcome:result?.status==='created'?'created':result?.status==='skipped'?(existing.get(o.reference)?.channel==='erplain'||existing.get(o.reference)?.ambiguous?'identity_review':'duplicate_received'):'excluded'});}
   const created=results.filter(r=>r.status==='created').length,skipped=results.length-created;
   const result={created,skipped,excluded:parsed.orders.length-selected.length,errors:parsed.errors,results,message:`${created} commandes TEMU importées en attente de validation ; ${skipped} déjà présentes ignorées. Aucune préparation lancée.`};
   await tx.query('UPDATE import_receipts SET result=$2 WHERE id=$1',[input.requestId,JSON.stringify(result)]);
