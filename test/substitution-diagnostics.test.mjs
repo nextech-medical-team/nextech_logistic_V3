@@ -7,6 +7,16 @@ import {replacementDiagnosticProof,supersededStockReason} from '../src/substitut
 import {currentResolutionState,completedHistoricalPreparation} from '../src/historical-preparation-completion.mjs';
 import {monitoringObservation} from '../src/order-recheck-monitor.mjs';
 const shortage=sku=>'BL bloqué — stock insuffisant : '+sku+' : 1 nécessaires, 0 utilisables, manque 1';
+test('terminal delivery remains authoritative over a pending replacement projection',()=>{
+ const original=order();original.tracking_status='delivered';
+ const projected=projectCurrentDiagnostics(structuredClone(original));
+ assert.equal(projected.order_delivered,true);
+ assert.equal(projected.replacement_preparation,undefined);
+ assert.equal(projected.resolution_error,null);
+ assert.equal(projected.resolution_active,null);
+ assert.equal(original.erp_live_job.status,'pending');
+ assert.equal(original.resolution_error,shortage('OLD'));
+});
 function order(){
  const at=new Date(Date.now()-1000).toISOString();
  return {id:'o',channel:'temu',reference:'PO-EXAMPLE',source_payload:{},label_status:'pending',erp_status:'live_review',tracking_status:'not_shipped',issue:null,erp_live_job:{status:'pending',error:null},resolution_active:{stage:'Équivalent enregistré · contrôle stock et BL'},resolution_error:shortage('OLD'),erp_live:{bc:{id:'10',status:'active',line_items:[{variant:{sku:'OLD'},quantity:1}]},phase:'bc_created',equivalentAttemptId:'committed-attempt',equivalentRefreshedAt:at,equivalentOriginalLines:[{source_sku:'OLD',quantity:1}],equivalentItems:[{description:'NEW',quantity:1}],documentSource:{checkedAt:at,lines:[{lineId:'new',sku:'NEW',quantity:1}]},stockIncidentRecheck:{status:'active',checkedAt:at,currentError:shortage('OLD')}},resolution_actions:[{action:'replace-equivalent',status:'waiting',error:null,result:{equivalent:true,erpOnly:true}},{action:'equivalent-preview',status:'complete',result:{replacementSku:'NEW'}},{action:'resume-erp',status:'review',error:shortage('OLD')} ]};
