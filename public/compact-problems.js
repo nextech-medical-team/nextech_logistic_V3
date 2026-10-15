@@ -1,3 +1,15 @@
+// One request, one decision: delivery closes every current diagnostic.
+// A delivered BL alone is not delivery of a still-open order/remainder.
+function isDeliveredOrder(order){
+ if(order.tracking_status==='delivered')return true;
+ const state=order.erp_live||{},bc=state.bc||{};
+ const bls=Array.isArray(state.documentSource?.shippingOrders)?state.documentSource.shippingOrders:bc.shipping_orders?.paginatorInfo?.hasMorePages===false?bc.shipping_orders.data:null;
+ if(!Array.isArray(bls))return false;
+ const current=bls.filter(b=>b.status!=='cancelled');
+ if(!current.length||current.some(b=>!b.id||b.status!=='delivered'))return false;
+ const lines=Array.isArray(bc.line_items)?bc.line_items.filter(l=>l.variant):[];
+ return lines.length>0&&lines.every(l=>l.quantity!=null&&l.shipped_quantity!=null&&String(l.quantity).trim()!==''&&String(l.shipped_quantity).trim()!==''&&Number.isFinite(Number(l.quantity))&&Number(l.quantity)>=0&&Number.isFinite(Number(l.shipped_quantity))&&Number(l.shipped_quantity)>=Number(l.quantity));
+}
 function compactProblem(raw,sku='',provider='Erplain') {
  const text=String(raw||'');const explicitSku=text.match(/^(?:Produit équivalent|Produit restant|Produit de remplacement) \[([^\]]+)\] : /)?.[1];if(explicitSku)sku=explicitSku;const code=text.match(/(?:HTTP\s*|\()(\d{3})(?:\)|\b)/i)?.[1];
  const result=(type,label,s=sku)=>({type,label,sku:s,detail:text,provider:apiName});
@@ -83,6 +95,7 @@ function hasCompleteOrderDocuments(order){
   (Number(order.document_count)>0||(Array.isArray(order.temu_documents)&&order.temu_documents.length>0));
 }
 function compactProblems(order){
+ if(isDeliveredOrder(order))return [];
  // Human instruction 2026-10-12: BC + BL + existing label closes blocking messages only.
  if(hasCompleteOrderDocuments(order))return [];
  if(order.archived||order.suspension?.active===true||order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'||order.suspension?.erplainCancellation?.status==='complete')return [];
@@ -111,7 +124,7 @@ function compactProblems(order){
  return visible;
 }
 function compactProblemButtons(order){const list=compactProblems(order),id=esc(order.id);return list.slice(0,2).map(p=>'<button class="badge warn compact-problem" data-exact-problem="'+id+'" data-problem-type="'+esc(p.type)+'" data-problem-sku="'+esc(p.sku)+'" data-problem-detail="'+esc(p.detail)+'" title="'+esc((p.sku?p.sku+' · ':'')+(p.detail||p.label))+'">'+(p.sku?'<span>'+esc(p.sku)+'</span>':'')+'<span>'+esc(p.label)+'</span></button>').join('')+(list.length>2?'<button class="link-button" data-exact-problem="'+id+'">+'+(list.length-2)+' problèmes</button>':'');}
-transportPendingText=function(order){const weight=Number(order.weight_kg),parcels=Number(order.parcel_count);if(Number.isFinite(weight)&&weight>0)return Number(weight.toPrecision(12))+' kg · '+(Number.isInteger(parcels)&&parcels>0?parcels+' colis':'nombre de colis à confirmer');if(order.channel==='temu'&&order.temu_job?.status==='ready'&&!order.temu_documents?.length)return 'Achat TEMU à confirmer';if(compactProblems(order).some(p=>p.type==='stock'))return 'Préparation arrêtée : stock insuffisant';return 'Préparation à compléter';};
+transportPendingText=function(order){if(isDeliveredOrder(order))return 'Livrée · aucun problème à gérer';const weight=Number(order.weight_kg),extraReady=(order.extra_parcels||[]).filter(p=>p.status==='ready').length,parcels=extraReady&&order.document_count?Number(order.document_count)+extraReady:Number(order.parcel_count);if(Number.isFinite(weight)&&weight>0)return Number(weight.toPrecision(12))+' kg · '+(Number.isInteger(parcels)&&parcels>0?parcels+' colis':'nombre de colis à confirmer');if(order.channel==='temu'&&order.temu_job?.status==='ready'&&!order.temu_documents?.length)return 'Achat TEMU à confirmer';if(compactProblems(order).some(p=>p.type==='stock'))return 'Préparation arrêtée : stock insuffisant';return 'Préparation à compléter';};
 
 
-if(typeof orderProblemText==='function'){const previousOrderProblemText=orderProblemText;orderProblemText=function(order){return hasCompleteOrderDocuments(order)?'':previousOrderProblemText(order);};}
+if(typeof orderProblemText==='function'){const previousOrderProblemText=orderProblemText;orderProblemText=function(order){return isDeliveredOrder(order)||hasCompleteOrderDocuments(order)?'':previousOrderProblemText(order);};}

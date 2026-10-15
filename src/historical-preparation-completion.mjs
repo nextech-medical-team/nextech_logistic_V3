@@ -32,7 +32,7 @@ export function completedHistoricalPreparation(o,e,now=Date.now()){
  if(!p.stockDocument?.id){const stock=p.historicalStockProof;if(stock.stockOnBc!==true||String(stock.bcId)!==String(p.bc.id)||!Array.isArray(stock.quantities)||!Array.isArray(stock.logIds))return false;}
  if(!/^[a-f0-9]{64}$/.test(p.mappingPreparationFingerprint||'')||!/^[a-f0-9]{64}$/.test(p.labelPreparationFingerprint||''))return false;
  for(const value of [p.verifiedAt,p.stockCheckedAt]){const t=Date.parse(value);if(!Number.isFinite(t)||t>now||now-t>86400000)return false;}
- if(!usesRecordedBc(o)&&(successfulResume||oldFinanceErrors.includes(o.issue))){const issue=projectCurrentDiagnostics(structuredClone(o)).issue;if(issue!==null&&!(successfulResume&&o.issue===historicalReason&&issue===historicalReason))return false;}
+ if(!usesRecordedBc(o)&&(successfulResume||oldFinanceErrors.includes(o.issue))){const issue=projectCurrentDiagnostics(structuredClone(o),{delivery:false}).issue;if(issue!==null&&!(successfulResume&&o.issue===historicalReason&&issue===historicalReason))return false;}
  return true;
 }
 export async function reconcileHistoricalPreparation(db,orderId,{fingerprint=shipmentFingerprint,mappingFingerprint=currentMappingFingerprint}={}){

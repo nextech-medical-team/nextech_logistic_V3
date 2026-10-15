@@ -369,9 +369,9 @@ const server=http.createServer(async(req,res)=>{
       permitted(user,operational);const input=await body(req);
       if(!Array.isArray(input.results)||input.results.length>100000||input.results.some(r=>!r||!['temu','shopify'].includes(r.channel)||!['cancelled','unchanged','review'].includes(r.status)||typeof r.reference!=='string'))throw Error('Résultats invalides');
       const {default:ExcelJS}=await import('exceljs'),book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Annulations');
-      sheet.columns=[{header:'Plateforme',key:'channel',width:18},{header:'Référence',key:'reference',width:35},{header:'Pays',key:'country',width:24},{header:'Résultat',key:'status',width:22},{header:'Détail',key:'error',width:80}];
-      for(const r of input.results)sheet.addRow({channel:r.channel==='temu'?'Temu':'Shopify',reference:r.reference,country:String(r.country||'').slice(0,100),status:({cancelled:'Annulée',unchanged:'Non annulée',review:'À vérifier'})[r.status],error:String(r.error||'').slice(0,1000)});
-      sheet.getRow(1).font={bold:true};sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter='A1:E'+Math.max(1,sheet.rowCount);
+      sheet.columns=[{header:'Plateforme',key:'channel',width:18},{header:'Référence',key:'reference',width:35},{header:'Pays',key:'country',width:24},{header:'Annulée sur Temu / Shopify',key:'platformCancelled',width:30},{header:'Annulée dans V3',key:'v3Cancelled',width:24},{header:'Résultat',key:'status',width:22},{header:'Détail',key:'error',width:80}];
+      for(const r of input.results)sheet.addRow({channel:r.channel==='temu'?'Temu':'Shopify',reference:r.reference,country:String(r.country||'').slice(0,100),platformCancelled:r.platformCancelled===true||r.status==='cancelled'?'Oui':r.platformCancelled===false?'Non':'Non confirmé',v3Cancelled:r.v3Cancelled===true||r.applied?'Oui':r.v3Cancelled===false?'Non':'Non confirmé',status:({cancelled:'Annulée',unchanged:'Non annulée',review:'À vérifier'})[r.status],error:String(r.error||'').slice(0,1000)});
+      sheet.getRow(1).font={bold:true};sheet.views=[{state:'frozen',ySplit:1}];sheet.autoFilter='A1:G'+Math.max(1,sheet.rowCount);
       const summary=book.addWorksheet('Bilan');summary.addRow(['Plateformes',String(input.platforms||'')]);summary.addRow(['Commandes vérifiées',input.results.length]);summary.addRow(['Annulées',input.results.filter(r=>r.status==='cancelled').length]);summary.addRow(['À vérifier',input.results.filter(r=>r.status==='review').length]);
       for(const issue of Array.isArray(input.issues)?input.issues:[])summary.addRow(['Information',String(issue).slice(0,1000)]);
       summary.getColumn(1).width=25;summary.getColumn(2).width=100;
@@ -545,7 +545,7 @@ const server=http.createServer(async(req,res)=>{
 
     if(await temuExcelImportRoutes({p,req,res,user,body,json,permitted,db}))return;
 
-    if(p==='/api/orders/processing'&&req.method==='POST'){const b=await body(req);const rows=await processingRows(db,b.ids);const monitors=new Map((await db.query('SELECT order_id,state FROM order_recheck_monitor WHERE order_id=ANY($1::text[])',[b.ids])).rows.map(m=>[m.order_id,m.state]));for(const row of rows)row.monitoring=monitors.get(row.id)||null;json(res,200,{rows,at:new Date().toISOString()});return;}
+    if(p==='/api/orders/processing'&&req.method==='POST'){const b=await body(req);const rows=await processingRows(db,b.ids);const monitors=new Map((await db.query('SELECT order_id,state FROM order_recheck_monitor WHERE order_id=ANY($1::text[])',[b.ids])).rows.map(m=>[m.order_id,m.state]));for(const row of rows)row.monitoring=row.order_delivered?{blocked:false,followUp:false,alert:false,result:'Livrée · aucun problème à gérer',nextStep:'Aucune action attendue'}:monitors.get(row.id)||null;json(res,200,{rows,at:new Date().toISOString()});return;}
     if(p==='/api/orders/priority'&&req.method==='POST'){const b=await body(req);json(res,200,await setOrderPriority(db,b,user));return;}
     if(p==='/api/import-corrections/context'&&req.method==='GET'){permitted(user,operational);json(res,200,await importCorrectionService.context(url.searchParams.get('id')));return;}
     if(p==='/api/import-corrections/preview'&&req.method==='POST'){permitted(user,operational);json(res,200,await importCorrectionService.preview(await body(req)));return;}
