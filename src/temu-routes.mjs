@@ -26,7 +26,7 @@ export async function temuRoutes({p,req,res,url,db,service,local,sync,user,json,
   const excel=temuExcelPreparation(db,local);
   if(p==='/api/temu/excel/shops'&&req.method==='GET'){permitted(user,['admin','manager']);const country=url.searchParams.get('country');if(!/^[A-Z]{2}$/.test(country||''))throw Error('Pays ISO requis');json(res,200,{shops:await local.excelShops(country)});return true;}
   if(p==='/api/temu/excel/orders'&&req.method==='GET'){json(res,200,await excel.list());return true;}
-  if(p==='/api/temu/excel/preview'&&req.method==='GET'){json(res,200,await excel.preview(url.searchParams.get('reference')));return true;}
+  if(p==='/api/temu/excel/preview'&&req.method==='GET'){json(res,200,await excel.preview(url.searchParams.get('reference'),{renew:url.searchParams.get('renew')==='1'}));return true;}
   if(p==='/api/temu/excel/prepare'&&req.method==='POST'){permitted(user,['admin','manager']);json(res,202,await excel.prepare(await body(req),user));return true;}
  }
  if(!service)throw new Error('Accès privés TEMU non configurés');

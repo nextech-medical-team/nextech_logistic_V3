@@ -2,6 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {isTemuExcel,excelCommercialSource} from './temu-excel-commercial.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 import {hash} from './temu-shipping.mjs';
+import {assertExcelRenewal,excelRenewalCandidate,excelRenewalFingerprint} from './temu-excel-renewal.mjs';
 export const excelImportHold='Import Excel TEMU : vérifier la commande et sa boutique avant toute préparation.';
 export const excelPreparationFingerprint=(o,lines)=>hash({reference:o.reference,address:o.address,recipient:o.recipient,source:o.source_payload,suspension:o.suspension,lines});
 export function temuExcelPreparation(db){
@@ -12,19 +13,36 @@ export function temuExcelPreparation(db){
   return {o,lines};
  }
  return {
-  async list(){return {rows:(await db.query(`SELECT o.id,o.reference,o.recipient,o.address->>'country' country,o.suspension,o.issue,o.erp_live,o.source_payload->'temuExcelPreparation' preparation,e.status erp_status,e.error erp_error,
+  async list(){return {rows:(await db.query(`SELECT o.id,o.reference,o.recipient,o.address->>'country' country,o.suspension,o.issue,o.erp_live,o.label_status,o.tracking_status,o.partial_mode,o.transport_choice,o.archived,o.source_payload->'temuExcelPreparation' preparation,e.status erp_status,e.error erp_error,
    (SELECT json_build_object('status',r.status,'error',r.error,'stage',r.stage) FROM resolution_jobs r WHERE r.order_id=o.id ORDER BY r.created_at DESC LIMIT 1) resolution
-   FROM orders o LEFT JOIN erp_live_jobs e ON e.order_id=o.id WHERE o.channel='temu' AND o.source_payload->>'origin'='temu_excel' AND NOT o.archived ORDER BY o.source_date DESC,o.reference`)).rows};},
-  async preview(reference){
+   FROM orders o LEFT JOIN erp_live_jobs e ON e.order_id=o.id WHERE o.channel='temu' AND o.source_payload->>'origin'='temu_excel' AND NOT o.archived ORDER BY o.source_date DESC,o.reference`)).rows.map(o=>({...o,revalidationAvailable:excelRenewalCandidate({...o,channel:'temu',source_payload:{origin:'temu_excel',temuExcelPreparation:o.preparation}},o.erp_status?{status:o.erp_status,error:o.erp_error}:null,o.resolution)}))};},
+  async preview(reference,{renew=false}={}){
    const {o,lines}=await read(reference),commercial=excelCommercialSource(o,lines);
+   if(renew){await assertExcelRenewal(db,o,lines);return {reference,renewal:true,fingerprint:excelRenewalFingerprint(o,lines,commercial),commercial,previousCommercial:o.source_payload.temuExcelCommercial,lines:lines.map(l=>({sku:l.source_sku,quantity:Number(l.quantity)}))};}
    return {reference,fingerprint:o.source_payload.temuExcelPreparation?.fingerprint||excelPreparationFingerprint(o,lines),commercial,lines:lines.map(l=>({sku:l.source_sku,quantity:Number(l.quantity)}))};
   },
-  async prepare({reference,fingerprint,confirmPreparation},user){
+  async prepare({reference,fingerprint,confirmPreparation,confirmRenewal},user){
    if(!['admin','manager'].includes(user?.role))throw Object.assign(Error('Droits de préparation requis'),{status:403});
    if(confirmPreparation!==true||typeof fingerprint!=='string')throw Error('Confirmez la préparation des BC/BL');
    const initial=await read(reference);
    return withShipmentLock(async()=>{
     const {o,lines}=await read(reference);
+    if(confirmRenewal===true)return db.transaction(async tx=>{
+     await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[o.id]);
+     await tx.query('SELECT id FROM lines WHERE order_id=$1 ORDER BY source_line,id FOR UPDATE',[o.id]);
+     const current=await read(reference,tx),commercial=excelCommercialSource(current.o,current.lines);
+     if(excelRenewalFingerprint(current.o,current.lines,commercial)!==fingerprint)throw Error('Commande modifiée : relancez la vérification');
+     const proof=await assertExcelRenewal(tx,current.o,current.lines),at=new Date().toISOString(),jobId=randomUUID();
+     const old=current.o.source_payload;
+     const history=[...(old.temuExcelValidationHistory||[]),{commercial:old.temuExcelCommercial,preparation:old.temuExcelPreparation,revalidatedAt:at,revalidatedBy:user.email}];
+     const preparation={...old.temuExcelPreparation,fingerprint,at,user:user.email,jobId,source:'excel_revalidation'};
+     await tx.query('UPDATE orders SET source_payload=source_payload||$2::jsonb,issue=null,resolution_pending_resume=true WHERE id=$1',[o.id,JSON.stringify({temuExcelCommercial:commercial,temuExcelPreparation:preparation,temuExcelValidationHistory:history})]);
+     if(proof.job)await tx.query("UPDATE erp_live_jobs SET status='pending',error=null,updated_at=now() WHERE order_id=$1 AND status='review'",[o.id]);
+     for(const r of proof.reviews)await tx.query("UPDATE resolution_jobs SET status='complete',stage='Validation Excel renouvelée',error=null,result=$2::jsonb WHERE id=$1 AND status='review'",[r.id,JSON.stringify({previousReview:r,revalidatedBy:jobId,documentsModified:false})]);
+     await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload) VALUES($1,$2,$1,'resume',$3)",[jobId,o.id,JSON.stringify({id:o.id,requestId:jobId,action:'resume',type:'resolved'})]);
+     await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'temu.excel.preparation.revalidated',$2)",[user.email,JSON.stringify({orderId:o.id,jobId,previousCommercial:old.temuExcelCommercial,currentCommercial:commercial,previousPreparation:old.temuExcelPreparation,previousErpReview:proof.job,previousReviews:proof.reviews,externalWritesIssued:0})]);
+     return {id:o.id,jobId,message:'Validation Excel renouvelée depuis les données source ; reprise BC/BL demandée. Aucun achat d’étiquette effectué.'};
+    });
     if(o.source_payload.temuExcelPreparation){
      if(o.source_payload.temuExcelPreparation.fingerprint===fingerprint)return {id:o.id,replayed:true,message:'Préparation déjà demandée. Consultez son avancement.'};
      throw Error('Commande déjà raccordée : utilisez les corrections de la commande existante');
