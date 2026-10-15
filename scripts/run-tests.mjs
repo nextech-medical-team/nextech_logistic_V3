@@ -47,6 +47,7 @@ groups.at(-1).push('test/receipt-analysis-outcome.test.mjs');
 groups.push(['--test','test/bl-identity.test.mjs']);
 groups.push(['--test','test/gls-sku-font.test.mjs']);
 groups.push(['--test','test/erplain-quota-priority.test.mjs']);
+groups.push(['--test','test/substitution-diagnostics.test.mjs']);
 groups.push(['--test','test/extra-parcel-count.test.mjs']);
 groups.push(['--test','test/delivered-zero-problems.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
