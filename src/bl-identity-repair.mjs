@@ -82,7 +82,9 @@ export async function commitBlIdentityRepair(tx,o,next,{userEmail='system'}={}){
  if(erpJob&&!['review','complete','failed','cancelled'].includes(erpJob.status))throw Error('Identité BL : traitement ERP en attente ou en cours');
  const proof=next.blIdentityRepairs.at(-1),carrier=await carrierEvidence(tx,o.id);
  if(!isDeepStrictEqual(carrier,proof.carrier))throw Error('Identité BL : transport modifié pendant la lecture');
- await tx.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(next)]);
+ // Removing an invalid pointer must not make a background admission monitor
+ // interpret this local repair as authorization to create a new document.
+ await tx.query('UPDATE orders SET erp_live=$2,resolution_pending_resume=CASE WHEN $3 THEN true ELSE resolution_pending_resume END WHERE id=$1',[o.id,JSON.stringify(next),!next.bl]);
  if(!next.bl&&erpJob?.status==='review')await tx.query("UPDATE erp_live_jobs SET error=$2,updated_at=now() WHERE order_id=$1 AND status='review'",[o.id,'BL Erplain · Aucun BL publié associé au BC : ancienne référence retirée, documents existants conservés.']);
  await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'erplain.bl_identity_repaired',$2)",[userEmail,JSON.stringify({orderId:o.id,repair:proof,previousErpJob:erpJob})]);
 }

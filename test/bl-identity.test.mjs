@@ -57,7 +57,11 @@ test('provider read failure never stores an absence or clears local references',
 
 test('repair of absent draft archives pointer with no provider writes or automatic resume',async()=>{
  const f=fixture(),next=await f.run();assert.equal(next.bl,undefined);assert.equal(next.phase,'bc_created');assert.equal(next.blIdentityRepairs[0].previousBl.id,9);assert.equal(f.writes.length,0);
- await commitBlIdentityRepair(f.db,f.o,next);assert.equal(f.writes.length,2);assert.ok(f.writes.every(w=>!w.q.includes('erp_live_jobs')&&!w.q.includes('carrier_jobs')));
+ await commitBlIdentityRepair(f.db,f.o,next);assert.equal(f.writes.length,2);assert.equal(f.writes[0].p[2],true);assert.match(f.writes[0].q,/resolution_pending_resume=CASE/);assert.ok(f.writes.every(w=>!w.q.includes('erp_live_jobs')&&!w.q.includes('carrier_jobs')));
+});
+test('repair retires stale transient retry state while retaining the first failure',async()=>{
+ const f=fixture();f.o.erp_live.transientRecovery={originalError:'first provider failure',lastError:'Erplain HTTP 429',reconciliationError:'BL différent',readRateLimited:true};
+ const next=await f.run();assert.equal(next.transientRecovery.originalError,'first provider failure');assert.equal(next.transientRecovery.lastError,null);assert.equal(next.transientRecovery.reconciliationError,null);assert.equal(next.blIdentityRepairs[0].previousTransientRecovery.lastError,'Erplain HTTP 429');
 });
 test('existing production PDF and tracking are hashed and preserved during local repair',async()=>{
  const f=fixture();f.jobs=[{status:'ready',environment:'production',tracking:['YT123']}];f.docs=[{document_index:0,pdf:Buffer.from('existing PDF')}];
