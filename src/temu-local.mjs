@@ -1,4 +1,5 @@
 import {hasCreatedBl} from './created-bl-label.mjs';
+import {recordedBlQuantityData} from './temu-bl-quantity-data.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {resolveExcelTemuShop} from './temu-excel-shop.mjs';
 import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
@@ -97,7 +98,7 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
     return {reference,status};
    }
    // Preserve an unexpired quote only when the fresh TEMU order is unchanged.
-   const info=inspectTemu(detail,reference);
+   const info=inspectTemu(detail,reference,await recordedBlQuantityData(db,o,detail));
    if(!forceQuote&&old?.status==='ready'&&!old.error&&old.plan?.expiresAt>Date.now()+60000&&old.plan.orderFingerprint===info.fingerprint&&!excludedTemuCarrier(old.plan.offers?.find(offer=>offer.channelId===old.plan.selected)))return {reference,status:'ready',plan:old.plan};
    try{const plan=await service.prepare(reference,channel,{detail,shipments});return {reference,status:'ready',plan};}
    catch(e){if(isTemuReadDeferred(e))return fail(o,e);const error=directError(e);await db.query("INSERT INTO temu_label_jobs(reference,status,error,result) VALUES($1,'to_buy',$2,$3) ON CONFLICT(reference) DO UPDATE SET status='to_buy',error=excluded.error,result=excluded.result,updated_at=now()",[reference,error,JSON.stringify({source:'temu_direct',observedAt:now})]);return {reference,status:'to_buy',error};}

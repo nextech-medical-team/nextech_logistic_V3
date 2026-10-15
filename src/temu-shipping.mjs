@@ -1,6 +1,7 @@
 import {recoverMissingTemuPdfs} from './temu-pdf-archive.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {hasCreatedBl} from './created-bl-label.mjs';
+import {recordedBlQuantityData} from './temu-bl-quantity-data.mjs';
 import {retiredCommercialControl} from './post-bc-control-recovery.mjs';
 import {verifyExcelTemuDetail} from './temu-excel-identity.mjs';
 import {assertExcelLabelPreparation} from './temu-excel-label-admission.mjs';
@@ -22,13 +23,14 @@ export async function readTemuShipments(api,reference,detail){
  return {shipmentInfoDTO};
 }
 const names=v=>(v||[]).filter(x=>typeof x==='string'||x?.value===1||x?.value==='1'||x?.value===true).map(x=>typeof x==='string'?x:x.name);
-export function inspectTemu(detail,reference){
+export function inspectTemu(detail,reference,quantityData=[]){
  const p=detail.parentOrderMap,items=detail.orderList;if(p?.parentOrderSn!==reference||!Array.isArray(items)||!items.length)throw new Error('Identité ou articles TEMU incomplets');
  const flags=[...names(p.parentOrderLabel),...items.flatMap(i=>names(i.orderLabel))];
  // Platform risk/address/cancellation labels remain indicative; actual data and provider responses are checked below.
  if([p,...items].some(x=>String(x.orderPaymentType).toUpperCase()==='COD'))throw new Error('Paiement à la livraison incompatible');
  const packages=[...new Set(items.flatMap(i=>(i.packageSnInfo||[]).map(x=>x.packageSn)))];if(packages.some(x=>!/^PK-\d+$/.test(x)))throw new Error('Colis TEMU invalide');
- const lines=items.map(i=>({parentOrderSn:reference,orderSn:String(i.orderSn||''),quantity:Number(i.quantity)}));
+ const quantities=new Map(quantityData.map(l=>[l.orderSn,l.quantity]));
+ const lines=items.map(i=>({parentOrderSn:reference,orderSn:String(i.orderSn||''),quantity:Number(i.quantity)>0?Number(i.quantity):quantities.get(String(i.orderSn))??Number(i.quantity)}));
  if(lines.some(l=>!l.orderSn||!Number.isInteger(l.quantity)||l.quantity<=0)||new Set(lines.map(l=>l.orderSn)).size!==lines.length)throw new Error('Articles ou quantités TEMU invalides');
  const pres=items.map(i=>names(i.orderLabel).includes('Y2_advance_sale'));if(pres.some(Boolean)&&!pres.every(Boolean))throw new Error('Précommandes et commandes ordinaires à séparer');
  return {lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,status:Number(p.parentOrderStatus),fingerprint:hash({reference,lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,payment:[p,...items].map(x=>x.orderPaymentType),deadline:p.expectShipLatestTime}),deadline:Number(p.expectShipLatestTime)*1000};
@@ -87,7 +89,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
    excelProof={order:excelOrder,lines};
   }
   const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=fixedWeight??(excelOrder?'0.25':Number.isFinite(knownWeight)&&knownWeight>0.25?String(Math.ceil(knownWeight*1000)/1000):'0.25');
-  const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),info=inspectTemu(detail,reference);
+  const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),quantityData=await recordedBlQuantityData(db,blOrder,detail),info=inspectTemu(detail,reference,quantityData);
   if(excelProof)verifyExcelTemuDetail(excelProof.order,excelProof.lines,detail);
   const existing=fresh.shipments||await readTemuShipments(api,reference,detail);
   if(info.packages.length||(existing.shipmentInfoDTO||[]).length)throw new Error('Une expédition existe déjà dans TEMU : utiliser Récupérer les étiquettes');
@@ -101,7 +103,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   if(new Set(eligible.map(o=>o.currency)).size>1)throw new Error('Offres dans plusieurs devises : vérification nécessaire');
   const chosen=channelId?eligible.find(o=>o.channelId===Number(channelId)):eligible[0];if(!chosen)throw new Error('TEMU · Aucun service disponible : '+(offers.length?[...new Set(offers.map(o=>o.unavailableReason).filter(Boolean))].join(' ; ').slice(0,300):'aucune offre renvoyée par TEMU'));
   const request={sendType:0,shipLater:true,shipLaterLimitTime:String(info.hours),sendRequestList:[chosen.parcel]};
-  const plan={reference,offers,selected:chosen.channelId,amount:chosen.amount,currency:chosen.currency,request,orderFingerprint:info.fingerprint,expiresAt:Date.now()+600000};if(excelProof)plan.preparationFingerprint=hash(excelShipmentProof(excelProof.order,excelProof.lines));if(blOrder)plan.blAuthority={orderId:blOrder.id,blId:String(blOrder.erp_live.bl.id)};const recorded=!!blOrder||localOrders.some(o=>!o.archived&&usesRecordedBc(o));plan.executionAuthority=blOrder?'recorded_bl':recorded?'recorded_bc':'source';plan.id=recorded?recordedBcQuoteId(plan):hash({request,amount:plan.amount,currency:plan.currency,orderFingerprint:plan.orderFingerprint,...(excelProof?{preparationFingerprint:plan.preparationFingerprint}:{})});Object.defineProperty(plan,'excelProof',{value:excelProof});return plan;
+  const plan={reference,offers,selected:chosen.channelId,amount:chosen.amount,currency:chosen.currency,request,orderFingerprint:info.fingerprint,expiresAt:Date.now()+600000,...(quantityData.length?{quantityData}: {})};if(excelProof)plan.preparationFingerprint=hash(excelShipmentProof(excelProof.order,excelProof.lines));if(blOrder)plan.blAuthority={orderId:blOrder.id,blId:String(blOrder.erp_live.bl.id)};const recorded=!!blOrder||localOrders.some(o=>!o.archived&&usesRecordedBc(o));plan.executionAuthority=blOrder?'recorded_bl':recorded?'recorded_bc':'source';plan.id=recorded?recordedBcQuoteId(plan):hash({request,amount:plan.amount,currency:plan.currency,orderFingerprint:plan.orderFingerprint,...(excelProof?{preparationFingerprint:plan.preparationFingerprint}:{})});Object.defineProperty(plan,'excelProof',{value:excelProof});return plan;
  }
  async function recover(reference,fresh={}){return locked(reference,async()=>{
   if(hasExternalLabel((await db.query("SELECT channel,source_payload FROM orders WHERE reference=$1 AND channel='temu'",[reference])).rows[0]))return job(reference);

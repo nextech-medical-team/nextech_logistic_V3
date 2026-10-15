@@ -126,6 +126,14 @@ test('post-BL Excel path preserves suspension, cancellation, partial scope and d
  await assert.rejects(shipping.prepare(reference),/tentative/);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,0);
 });
 
+test('zero supplier quantity after BL reaches the quote API with recorded source units, preserves raw response and never buys twice',async t=>{
+ const f=await fixture(t),shipping=temuShipping(f.db,f.api);f.detail.orderList[0].quantity=0;
+ const line=f.detail.orderList[0].orderSn,erp={bl:{id:'existing-bl',status:'ready_to_ship'},equivalentOriginalLines:[{source_line:line,quantity:1}]};
+ await f.db.query("UPDATE orders SET suspension='{}',erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);
+ const plan=await shipping.prepare(reference);assert.equal(plan.request.sendRequestList[0].orderSendInfoList[0].quantity,1);assert.equal(plan.quantityData[0].providerQuantity,0);assert.equal(f.detail.orderList[0].quantity,0);assert.equal(f.bought,0);
+ await shipping.buy(reference,plan.id,plan.amount);assert.equal(f.bought,1);assert.deepEqual((await f.read()).erp_live,erp);assert.equal(f.detail.orderList[0].quantity,0);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,1);
+});
+
 test('automatic TEMU purchase uses existing BL without Excel, ERP, stock or preparation rechecks and preserves diagnostics',async t=>{
  const {initializeTemuAutomaticPurchase,temuAutomaticPurchaseWorker}=await import('../src/temu-automatic-purchase.mjs');
  const f=await fixture(t);
