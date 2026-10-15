@@ -27,8 +27,12 @@ export function stockSignature(ids,resources){
  // JSONB is free to reorder object keys between processes/restarts.
  return digest(values.map(x=>[x.state.id,x.state.active,x.state.track_inventory,x.state.levels]));
 }
+export async function publishStockWatchObservations(db,rows){
+ if(!rows.length)return;
+ await db.query(`UPDATE order_recheck_monitor m SET state=m.state||jsonb_build_object('stockWatch',jsonb_build_object('status','watching','checkedAt',x.checked_at,'resources',x.resources)) FROM jsonb_to_recordset($1::jsonb) AS x(order_id text,checked_at text,resources int) WHERE m.order_id=x.order_id`,[JSON.stringify(rows)]);
+}
 
-export async function groupedStockPass(db,api,{candidateSql,allowed,fingerprint,readOrder,verified,enqueue,record,enabled,now=()=>Date.now(),maxDocuments=20,maxVariants=100}){
+export async function groupedStockPass(db,api,{candidateSql,allowed,fingerprint,readOrder,verified,enqueue,record,enabled,observe=async()=>{},now=()=>Date.now(),maxDocuments=20,maxVariants=100}){
  const native=" AND o.erp_live->>'bcReservationPolicy'='erplain_bc_bl' AND coalesce(o.source_payload->>'erplainImported','false')<>'true' AND o.channel<>'tender'";
  const candidates=(await db.query(candidateSql+native+` ORDER BY o.processing_priority_at ASC NULLS LAST,e.updated_at,o.id`)).rows.filter(allowed);
  if(!candidates.length)return;
@@ -51,6 +55,14 @@ export async function groupedStockPass(db,api,{candidateSql,allowed,fingerprint,
    catch(error){await db.query('UPDATE stock_resume_resources SET last_error=$2 WHERE variant_id=$1',[id,error.message]);resources.set(id,{last_error:error.message});}
   }
  }
+ const observations=[];
+ for(const o of candidates){const requirement=requirements.get(o.id);if(!requirement)continue;
+  const times=requirement.variant_ids.map(id=>resources.get(String(id))).map(x=>!x?.last_error?stamp(x?.checked_at):NaN);
+  if(times.length&&times.every(t=>Number.isFinite(t)&&t<=now()+1000&&now()-t<=120000))observations.push({order_id:o.id,checked_at:new Date(Math.min(...times)).toISOString(),resources:times.length});
+ }
+ // Separate UI evidence, never lastExternalCheck/BC proof: it must not
+ // authorize an automatic continuation from an old document comparison.
+ await observe(observations);
  // Unknown requirements get a bounded bootstrap. Known orders wake on a new
  // resource signal, input change, or the 15-minute reservation safety check.
  // Candidate order is the application's explicit processing priority. Walk

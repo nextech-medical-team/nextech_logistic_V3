@@ -1,3 +1,4 @@
+import {publishStockWatchObservations} from './grouped-stock-watch.mjs';
 import {initializeImportReceptions,readImportReceptions} from './import-reception.mjs';
 import {cancelPartialDelivery} from './partial-cancellation.mjs';
 import {priceVerification} from './price-verification.mjs';
@@ -185,7 +186,7 @@ backgroundInterval(()=>rechecks.runExternal().catch(e=>console.error('Recontrôl
 const movementWatch=movementWatchWorker(db,directory,{shouldStop:()=>runtime.stopping});
 backgroundInterval(()=>movementWatch.run(),1000,'movement-watch');
 backgroundInterval(()=>movementWatchdog(db),300000,'movement-watchdog');
-const stockResume=stockResumeWorker(db,directory,{enabled:()=>!runtime.stopping&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation')});
+const stockResume=stockResumeWorker(db,directory,{observe:rows=>publishStockWatchObservations(db,rows),enabled:()=>!runtime.stopping&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation')});
 backgroundInterval(()=>stockResume.run(),30000,'stock-resume');
 const interruptedErplain=interruptedErplainRecovery(db,directory,{shouldStop:()=>runtime.stopping});
 backgroundInterval(()=>interruptedErplain.run(),15000,'erplain-interrupted-recovery');

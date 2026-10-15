@@ -35,7 +35,7 @@ export function verifiedStock(snapshot,bcId,{native=false}={}){
  assertFullOrderStock(snapshot.line_items);
 }
 const fields='id status update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id} paginatorInfo{hasMorePages}}';
-export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'source'),enabled=()=>true,grouped=groupedStockEnabled,now=()=>Date.now()}={}){
+export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'source'),enabled=()=>true,grouped=groupedStockEnabled,observe=async()=>{},now=()=>Date.now()}={}){
  let running=false;
  async function record(id,problem){const error=typeof problem==='string'?problem:problem?.message||null,lock=isStockLockMessage(error),quota=problem?.httpStatus===429||problem?.erplainRequestNotSent===true,retrySeconds=quota?Math.max(2,Number(problem.retryAfter)||30):transientErpError(error)?30:null;await db.query(`INSERT INTO stock_resume_watch(order_id,checked_at,next_at,failures,outcome,last_error) VALUES($1,now(),now()+coalesce($5::double precision,300)*interval '1 second',$3,$4,$2) ON CONFLICT(order_id) DO UPDATE SET checked_at=now(),next_at=now()+CASE WHEN $5::double precision IS NOT NULL THEN $5::double precision*interval '1 second' ELSE make_interval(mins=>CASE WHEN $3=0 THEN 5 ELSE least(60,5*power(2,least(4,stock_resume_watch.failures))::int) END) END,failures=CASE WHEN $3=0 THEN 0 ELSE stock_resume_watch.failures+1 END,outcome=$4,last_error=$2`,[id,error||null,error&&!lock&&!/stock insuffisant/i.test(error)?1:0,lock?'waiting_reconciliation':error?'waiting':'queued',retrySeconds]);
   if(lock)await db.query("UPDATE erp_live_jobs SET error=$2 WHERE order_id=$1 AND status='review' AND (error=$3 OR error LIKE $4)",[id,error,'Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison','Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison · %']);
@@ -56,7 +56,7 @@ export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'so
   try{
    if(!(await db.query("SELECT value FROM settings WHERE key='automatic_live'")).rows[0]?.value?.enabled)return;
    if(grouped()){
-    const pass=()=>groupedStockPass(db,api,{candidateSql:stockCandidateSql,allowed:candidateAllowed,fingerprint:o=>shipmentFingerprint(db,o),enabled,now,enqueue,record,
+    const pass=()=>groupedStockPass(db,api,{candidateSql:stockCandidateSql,allowed:candidateAllowed,fingerprint:o=>shipmentFingerprint(db,o),enabled,observe,now,enqueue,record,
      readOrder:async o=>{assertNativeBlOrder(o);await api.verify();return (await api.request('query V3StockResume($b0:ID!){b0:Order(id:$b0){'+fields+'}}',{b0:String(o.erp_live.bc.id)})).b0;},
      verified:(snapshot,o)=>{assertNativeBlOrder(o);verifiedStock(snapshot,o.erp_live.bc.id,{native:true});}});
     // The worker already owns the background leader and this instance's
