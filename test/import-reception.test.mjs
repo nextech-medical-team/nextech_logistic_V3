@@ -53,3 +53,31 @@ test('unmarked ERP reference prevents a second BC instead of being silently igno
  const marked={...api,request:async()=>({Orders:{data:[{id:7,status:'active',external_reference:'ORDER-1',internal_notes:'[V3:local]'}],paginatorInfo:{hasMorePages:false}}})};
  assert.equal((await recoverOrder(marked,o)).id,7);
 });
+test('same reference in another proved marketplace or Shopify shop does not falsely block a new BC',async()=>{
+ const candidate={id:7,status:'active',external_reference:'#1001',internal_notes:'[V3:owner]'},api={request:async()=>({Orders:{data:[candidate],paginatorInfo:{hasMorePages:false}}})};
+ for(const [channel,source_payload] of [['amazon',{}],['shopify',{sourceShop:'other.myshopify.com'}]]){
+  const owner={id:'owner',channel,source_payload,erp_live:{bc:{id:7}}},db={query:async()=>({rows:[owner]})},current={id:'new',channel:'shopify',reference:'#1001',source_payload:{sourceShop:'current.myshopify.com'}};
+  assert.equal(await recoverOrder(api,current,{db}),null);
+  await assert.rejects(()=>recoverOrder({...api,request:async()=>({Orders:{data:[{...candidate,internal_notes:''}],paginatorInfo:{hasMorePages:false}}})},current,{db}),/rapprocher/);
+ }
+ const db={query:async()=>({rows:[{id:'owner',channel:'shopify',source_payload:{sourceShop:'current.myshopify.com'},erp_live:{bc:{id:7}}}]})};
+ await assert.rejects(()=>recoverOrder(api,{id:'new',channel:'shopify',reference:'#1001',source_payload:{sourceShop:'current.myshopify.com'}},{db}),/rapprocher/);
+});
+test('a cancelled ERP BC is not absence proof and cannot silently cause a new creation',async()=>{
+ const o={id:'current',reference:'REF',channel:'amazon'};
+ for(const internal_notes of ['', '[V3:current]']){
+  const api={request:async()=>({Orders:{data:[{id:7,status:'cancelled',external_reference:'REF',internal_notes}],paginatorInfo:{hasMorePages:false}}})};
+  await assert.rejects(()=>recoverOrder(api,o),/BC annulé/);
+ }
+ const api={request:async()=>({Orders:{data:[{id:7,status:'cancelled',external_reference:'REF',internal_notes:'[V3:current]'},{id:8,status:'active',external_reference:'REF',internal_notes:'[V3:current]'}],paginatorInfo:{hasMorePages:false}}})};
+ await assert.rejects(()=>recoverOrder(api,o),/BC annulé/);
+ assert.equal((await recoverOrder(api,{...o,erp_live:{previousCancelledCycle:{bc:{id:7}}}})).id,8); // recover a documented existing cycle, never create
+});
+test('reusable customer numbers never prove ownership of a BC; incomplete search never proves absence',async()=>{
+ const current={id:'current',channel:'shopify',reference:'#1001',source_payload:{sourceShop:'current.myshopify.com'}},candidate={id:7,status:'active',external_reference:'#1001',internal_notes:'[V3:owner]',customer:{customer_number:'V3:current'}};
+ const db={query:async()=>({rows:[{id:'owner',channel:'shopify',source_payload:{sourceShop:'other.myshopify.com'},erp_live:{bc:{id:7}}}]})};
+ assert.equal(await recoverOrder({request:async()=>({Orders:{data:[candidate],paginatorInfo:{hasMorePages:false}}})},current,{db}),null);
+ await assert.rejects(()=>recoverOrder({request:async()=>({Orders:{data:[{...candidate,internal_notes:''}],paginatorInfo:{hasMorePages:false}}})},current),/rapprocher/);
+ await assert.rejects(()=>recoverOrder({request:async()=>({Orders:{data:[],paginatorInfo:{}}})},current),/incomplète/);
+ await assert.rejects(()=>recoverOrder({request:async()=>({Orders:{data:[{status:'active'}],paginatorInfo:{hasMorePages:false}}})},current),/incomplète/);
+});

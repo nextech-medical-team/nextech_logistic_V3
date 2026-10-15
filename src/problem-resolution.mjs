@@ -321,7 +321,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   }
   if(j.action==='reconcile-bc'){
    await stage('Recherche du BC existant dans Erplain LIVE');await api.verify();
-   let found;if(o.erp_live?.bc?.id){const r=await api.request('query V3ReconcileExistingBC($id:ID!){Order(id:$id){id label status}}',{id:String(o.erp_live.bc.id)});found=r.Order;}else found=await recoverOrder(api,o);
+   let found;if(o.erp_live?.bc?.id){const r=await api.request('query V3ReconcileExistingBC($id:ID!){Order(id:$id){id label status}}',{id:String(o.erp_live.bc.id)});found=r.Order;}else found=await recoverOrder(api,o,{db});
    const current={...o.erp_live,bcReconciliation:{status:found?'found':'missing',checkedAt:new Date().toISOString()}};
    if(found){current.bc=found;if(!current.bl?.id)current.phase='bc_created';}
    await db.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(current)]);
