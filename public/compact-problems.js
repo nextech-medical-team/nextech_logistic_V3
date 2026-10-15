@@ -76,6 +76,7 @@ function compactProblemParts(raw){
 }
 function hasCompleteOrderDocuments(order){
  if(order.complete_order_documents===true)return true;
+ if(order.partial_mode)return false;
  const identified=document=>document&&String(document.id??'').trim()!=='';
  return identified(order.erp_live?.bc)&&
   (identified(order.erp_live?.bl)||(Array.isArray(order.erplain_tracking_bls)&&order.erplain_tracking_bls.some(identified)))&&
