@@ -81,7 +81,14 @@ export function receiptRecoveryService(db,directory,{api:providedApi,queueResolu
    const canLabel=!!(currentBl?.id&&currentBl.status!=='cancelled'&&o?.erp_live?.bl?.status!=='cancelled'&&!labels.length&&!suspensionBlock(o)&&!o?.archived&&!o?.partial_mode&&!o?.label_busy&&!['cancelled','shipped','in_transit','delivered','delivered_simulated'].includes(o?.tracking_status)&&o?.label_status!=='cancelled'&&!['shipped','delivered','completed'].includes(currentBl.status));
    rows.push({...row,canLabel,...(canLabel?{status:'documents',action:'label'}:{}),labels,reason:row.status==='documents'?(labels.length?'BL et étiquettes disponibles · aucune nouvelle génération nécessaire':'BL déjà disponible · étiquette à obtenir'):row.reason,labelError:o?.temu_error||null,currentBl:confirmedBl|| (o?.erp_live?.bl?{id:o.erp_live.bl.id,label:o.erp_live.bl.label,status:o.erp_live.bl.status}:null),item:item?{state:item.state,error:item.error,job}:null});
   }
-  for(const row of rows){const o=byOrder.get(row.id);row.work=o?.label_status==='cancelled'||o?.erp_live?.bl?.status==='cancelled'?'history':receiptWork(row,o);row.documentsComplete=!!(o&&!o.partial_mode&&row.currentBl?.id&&row.currentBl.status!=='cancelled'&&o.erp_live?.bl?.status!=='cancelled'&&Number(o.pdf_count)>=Number(o.expected_pdfs)&&!o.extra_incomplete);if(row.work==='available'&&row.labels.length)row.reason='BL et étiquettes disponibles · état du BL conservé, aucune nouvelle génération nécessaire';}
+  for(const row of rows){
+   const o=byOrder.get(row.id);
+   row.documentsComplete=!!(o&&!o.partial_mode&&row.currentBl?.id&&row.currentBl?.label&&row.currentBl.status!=='cancelled'&&o.erp_live?.bl?.status!=='cancelled'&&row.labels.length&&Number(o.pdf_count)>=Number(o.expected_pdfs)&&!o.extra_incomplete);
+   row.work=o?.label_status==='cancelled'||o?.erp_live?.bl?.status==='cancelled'?'history':receiptWork(row,o);
+   if(row.work==='available')row.reason='BL et étiquettes disponibles · état du BL conservé, aucune nouvelle génération nécessaire';
+   else if(row.labels.length&&!row.currentBl?.id)row.reason='Étiquette disponible · BL manquant : préparation non finalisée'+(row.status!=='documents'&&row.reason?' · '+row.reason:'');
+   else if(row.labels.length&&!row.documentsComplete)row.reason='Documents incomplets · vérifier les PDF de tous les colis'+(row.reason&&row.status!=='documents'?' · '+row.reason:'');
+  }
   return {id:run.id,number:run.number,state:run.state,error:run.error,selection:run.selection,progress:run.progress,createdAt:run.created_at,updatedAt:run.updated_at,outcome:receiptOutcome(run,rows),plan:run.plan?{...run.plan,rows}:null};
  }
  async function submit({id,ids},user){

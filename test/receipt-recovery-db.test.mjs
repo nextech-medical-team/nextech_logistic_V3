@@ -167,3 +167,12 @@ test('receipt outcome requires every parcel PDF, preserves in_preparation and re
   await f.db.query("UPDATE orders SET label_status='cancelled' WHERE id=$1",[f.id]);s=await f.service.status(run);assert.equal(s.outcome.existing.length,0);assert.equal(s.outcome.excluded.length,1);
  }finally{await f.engine.close();}
 });
+
+test('TEMU PDF without BL never announces ready documents and keeps the existing label accessible',async()=>{
+ const f=await fixture('temu');try{
+  await f.db.query('INSERT INTO temu_label_documents(reference,package) VALUES($1,$2)',['SYNTHETIC','EXISTING']);
+  const run=await f.start();let s=await f.service.status(run),row=s.plan.rows[0];assert.equal(row.work,'action');assert.equal(row.documentsComplete,false);assert.match(row.reason,/BL manquant/);assert.equal(row.labels.length,1);assert.equal(s.outcome.existing.length,0);
+  await f.db.query("INSERT INTO receipt_recovery_items(run_id,order_id,request_id,state) VALUES($1,$2,$3,'complete')",[run,f.id,randomUUID()]);
+  s=await f.service.status(run);assert.notEqual(s.plan.rows[0].work,'available');assert.equal(s.outcome.finalized.length,0);assert.equal(s.outcome.unfinished.length,1);
+ }finally{await f.engine.close();}
+});
