@@ -20,6 +20,7 @@ test('delivered closes every active diagnostic immediately on the same projectio
  for(const channel of ['erplain','amazon','shopify','temu','tender','samples']){
   const source=dirty(channel),before=JSON.stringify(source),o=projectCurrentDiagnostics(structuredClone(source));
   assert.equal(o.order_delivered,true);assert.equal(o.issue,null);assert.equal(o.resolution_error,null);assert.equal(o.resolution_pending_resume,false);assert.equal(o.resolution_active,null);
+  assert.equal(o.label_status,'delivered');
   for(const node of [o.erp_live_job,o.carrier_job,o.temu_job,o.pending_equivalent,...o.extra_parcels,...o.resolution_actions])assert.equal(node.error,null);
   assert.equal(o.sku_lines[0].catalog_issue,null);assert.equal(currentProblemClassifier()(o).length,0);assert.deepEqual(orderProblemLabels(o,()=>[{label:'Any error'}],true),[]);
   assert.deepEqual(correctionStatusSnapshot(source,{erpJob:{error:'Any'},otherReviews:[{error:'Any'}]}).blockers,[]);

@@ -5,6 +5,7 @@ import {isDeliveredOrder} from './problem-typology-reader.mjs';
 export function projectDeliveredOrder(order){
  if(!isDeliveredOrder(order))return false;
  order.order_delivered=true;
+ order.label_status='delivered';
  order.issue=null;order.resolution_error=null;order.resolution_pending_resume=false;
  order.resolution_active=null;order.label_manual_request_required=false;
  const nodes=[order.erp_live_job,order.carrier_job,order.temu_job,order.pending_equivalent,order.erplain_refresh,
