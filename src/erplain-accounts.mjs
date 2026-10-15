@@ -1,4 +1,6 @@
 import {erplainFetch,erplainRetryDelay} from './erplain-transport.mjs';
+import {apiBudgetDelay} from './api-budget.mjs';
+import {sharedErplainReference} from './erplain-reference-cache.mjs';
 import {guardErplainReadyMutation} from './erplain-ready-transition.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -15,9 +17,12 @@ export function erplainAccount(directory,account,{fetchImpl=fetch,loadConfig=asy
   if(mutation)await guardErplainReadyMutation(query,variables,request);
   const c=await loadConfig();
   if(c.url!=='https://api.erplain.app/graphql'||Number(c.companyId)!==expected)throw new Error('Configuration ERPLAIN LIVE incohérente');
+  const perform=async()=>{
   const response=await erplainFetch(c,c.url,()=>({method:'POST',redirect:'error',signal:AbortSignal.timeout(45000),headers:{'content-type':'application/json',authorization:'Bearer '+c.apiKey,'x-company-id':String(expected)},body:JSON.stringify({query,variables})}),{fetchImpl,readOnly:!mutation&&!/\bmutation\b/i.test(query)});
   if(!response.ok){const e=new Error('Erplain HTTP '+response.status);e.retryAfter=erplainRetryDelay(response)/1000;e.httpStatus=response.status;e.erplainReadOnly=!mutation&&!/\bmutation\b/i.test(query);if(response.status===429&&mutation){try{e.confirmedRateLimitRejection=confirmedRateLimitRejection(await response.json());}catch{e.confirmedRateLimitRejection=false;}}throw e;}
   const j=await response.json();if(partial&&j.data)return {...j.data,_v3Errors:(j.errors||[]).map(e=>({path:e.path,message:String(e.message).replaceAll(c.apiKey,'[secret]').slice(0,400)}))};if(j.errors?.length&&j.errors.every(e=>e?.extensions?.code==='RATE_LIMITED')){const e=Error('Erplain HTTP 429 · réponse partielle à rapprocher');e.httpStatus=429;e.erplainReadOnly=!mutation;e.retryAfter=erplainRetryDelay(response)/1000;e.confirmedRateLimitRejection=false;throw e;}if(j.errors)throw new Error(j.errors.map(e=>e.message+' '+JSON.stringify(e.extensions?.validation||{})).join('; ').replaceAll(c.apiKey,'[secret]').slice(0,1000));return j.data;
+  };
+  return partial?perform():sharedErplainReference(c,query,variables,fetchImpl,perform);
  }
- return {request,async verify(){identity=false;const {Company}=await request('query V3CheckAccount { Company { id label } }');if(Company?.id!==expected)throw new Error('Identité Erplain incorrecte');identity=true;return Company;}};
+ return {request,quotaDelay:()=>apiBudgetDelay('erplain:shared'),async verify(){identity=false;const {Company}=await request('query V3CheckAccount { Company { id label } }');if(Company?.id!==expected)throw new Error('Identité Erplain incorrecte');identity=true;return Company;}};
 }
