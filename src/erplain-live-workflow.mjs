@@ -1,3 +1,4 @@
+import {resumeRetiredReservationReviews} from './retired-reservation-review.mjs';
 import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
 import {resumeLocalPreparationReview} from './catalogue-local-review-resume.mjs';
 import {retirePostBcCommercialControls} from './post-bc-control-recovery.mjs';
@@ -106,7 +107,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     await createBlockedMissingProducts(db,api,{blocked:mutationBlock,bind:v=>bindProduct(db,v),recheck:ids=>recheckOrders(db,ids)});
    }
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.
-   if(!bcOnlyOrderId){await retirePostBcCommercialControls(db,api);await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
+   if(!bcOnlyOrderId){await retirePostBcCommercialControls(db,api);await resumeRetiredReservationReviews(db,api);await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
    if(!bcOnlyOrderId){await queueSourceVatReviews(db);await scheduleStockChecks(db);}
    // Verify admission before claiming a batch. A quota wait must leave the
    // orders queued rather than turn ten untouched orders into ten failures.
