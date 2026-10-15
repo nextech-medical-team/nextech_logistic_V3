@@ -1,3 +1,4 @@
+import {usesNativeBlCycle,readNativeBlCycle} from './native-bl-policy.mjs';
 import {assertFullOrderStock} from './stock-gate.mjs';
 // Match only the existing preparable BL, while keeping the full BC for its stock ledger.
 export function historicalPendingLines(bc,bl,{allowPendingSiblings=false}={}){
@@ -189,6 +190,7 @@ export async function assertNoHistoricalStockRemoval(api,o){
 }
 
 export async function historicalPreparationProof(api,o,{beforeBlPublication=false}={}){
+ if(usesNativeBlCycle(o))return (await readNativeBlCycle(api,o,{beforeBlPublication})).observation;
  const id=String(o.erp_live?.bc?.id||'');
  if(!/^\d+$/.test(id))throw Error('BC historique non identifié');
  const r=await api.request('query V3HistoricalPreparation($id:ID!){Order(id:$id){id created_at status update_stock line_items{id type quantity reserved_quantity shipped_quantity on_hand available location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id status update_stock line_items{parent_id type quantity location{id} variant{id}}} paginatorInfo{hasMorePages}}}}',{id});

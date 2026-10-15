@@ -351,8 +351,8 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku,quantity=Number(l.quantity);if(typeof sku!=='string'||!sku.trim()||!Number.isFinite(quantity)||quantity<=0)throw Error('Produits ou quantités du BC non vérifiables : reprise non autorisée');sums.set(sku,(sums.get(sku)||0)+quantity);}return JSON.stringify([...sums].sort());};
     if(total(desired)!==total(resumeStockLines)&&(o.source_payload?.erplainImported||o.erp_live?.bl?.id))throw Error('Commande V3 et livraison existante différentes : vérifier les quantités avant reprise');
    }
-   await assertResumeStock(api,o,r.Order,resumeStockLines);
    const recoveredDraft=await prepareMissingDraftRecovery(db,api,o,{resolutionId:j.id});
+   await assertResumeStock(api,recoveredDraft?{...o,erp_live:recoveredDraft}:o,r.Order,resumeStockLines);
    await db.transaction(async tx=>{const e=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];if(e?.status==='processing')throw Error('Traitement Erplain en cours');
     if(recoveredDraft)await commitMissingDraftRecovery(tx,o,recoveredDraft,{resolutionId:j.id,userEmail:j.user_email||'system'});
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
