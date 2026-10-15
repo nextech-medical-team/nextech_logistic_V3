@@ -1,3 +1,4 @@
+import {retiredLabelPreparationReview} from './post-bl-preparation-review.mjs';
 import {installCarrierAttemptProof,markCarrierCreationStarted,recordCarrierFailure} from './carrier-attempt-proof.mjs';
 import {hasCreatedBl} from './created-bl-label.mjs';
 import {usesRecordedBc,recordedBcFingerprint} from './existing-bc-execution.mjs';
@@ -42,9 +43,10 @@ export async function queueCarrierLabels(db,ids,{automatic=false}={}){
    if(!o||!['pending','simulated'].includes(o.label_status)||o.channel==='temu')continue;
    if((await tx.query("SELECT id FROM resolution_jobs WHERE order_id=$1 AND status IN ('pending','processing','queued','running','waiting')",[id])).rows.length)throw Error('Préparation en cours : attendre sa validation');
    if((await tx.query('SELECT order_id FROM carrier_jobs WHERE order_id=$1',[id])).rows.length)continue;
-   if((await tx.query("SELECT 1 FROM correction_jobs WHERE order_id=$1 AND status IN ('pending','queued','running','applying','checking','waiting','review') LIMIT 1",[id])).rows.length)throw Error('Correction en cours ou à vérifier avant étiquette');
+   const corrections=(await tx.query("SELECT to_jsonb(c) correction FROM correction_jobs c WHERE order_id=$1 AND status IN ('pending','queued','running','applying','checking','waiting','review')",[id])).rows;
+   if(corrections.some(({correction:c})=>!hasCreatedBl(o)||!['review','waiting'].includes(c.status)||!retiredLabelPreparationReview(c.error)))throw Error('Correction en cours ou à vérifier avant étiquette');
    const actions=(await tx.query(resolutionStateSql,[id])).rows,state=currentResolutionState(actions);
-   if((!hasCreatedBl(o)&&(state.reviews.length||state.pendingReplacement))||actions[0]?.result?.readOnly||actions[0]?.result?.resumeAfter===false)throw Error('Décision de préparation à vérifier avant étiquette');
+   if(!hasCreatedBl(o)&&(state.reviews.length||state.pendingReplacement||actions[0]?.result?.readOnly||actions[0]?.result?.resumeAfter===false))throw Error('Décision de préparation à vérifier avant étiquette');
    if(o.source_payload?.visibilityHold||o.source_payload?.historicalShipments?.length||o.source_payload?.externalLabel?.active)throw Error('Expédition ou suspension existante à rapprocher');
    const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1 FOR SHARE',[id])).rows[0];
    assertPreparedLabelOrder(o,e);
