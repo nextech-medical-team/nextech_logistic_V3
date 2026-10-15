@@ -140,7 +140,7 @@ async function refreshAndResumeOrder(id){
 
 
 
- if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');
+ if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');if(isDeliveredOrder(ctx.order)){const d=resolutionDialog('Commande livrée',ctx.order.reference);d.body.textContent='Livrée · aucun problème à gérer';return;}
 
 
 
@@ -188,7 +188,7 @@ orders=async function(){await correctionRows();for(const row of $('order-rows').
 
 
 
- if(skuCell&&!skuCell.querySelector('[data-replace-product]')){const replace=document.createElement('button');replace.type='button';replace.className='link-button';replace.dataset.replaceProduct=id;replace.textContent='Remplacer un produit';skuCell.append(replace);}
+ if(row.dataset.orderDelivered!=='true'&&skuCell&&!skuCell.querySelector('[data-replace-product]')){const replace=document.createElement('button');replace.type='button';replace.className='link-button';replace.dataset.replaceProduct=id;replace.textContent='Remplacer un produit';skuCell.append(replace);}
 
 
 
@@ -498,7 +498,7 @@ async function openRemainingProblem(id){
 
 
 
- if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');
+ if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');if(isDeliveredOrder(ctx.order)){const d=resolutionDialog('Commande livrée',ctx.order.reference);d.body.textContent='Livrée · aucun problème à gérer';return;}
 
 
 
@@ -530,7 +530,7 @@ async function openOrderReplacement(id){
 
 
 
- if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');
+ if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');if(isDeliveredOrder(ctx.order)){const d=resolutionDialog('Commande livrée',ctx.order.reference);d.body.textContent='Livrée · aucun problème à gérer';return;}
 
 
 
@@ -582,7 +582,7 @@ async function openCorrection(id,type,sku,detail){
 
 
 
- if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');const problems=resolutionProblems(ctx);
+ if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');if(isDeliveredOrder(ctx.order)){const d=resolutionDialog('Commande livrée',ctx.order.reference);d.body.textContent='Livrée · aucun problème à gérer';return;}const problems=resolutionProblems(ctx);
 
 
 
@@ -1407,7 +1407,7 @@ async function openCarrierChoice(id){
 
 
 
- if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');
+ if(typeof invalidateOrderDetailReads==='function')invalidateOrderDetailReads();const contextRequest={version:++resolutionContextRequestVersion,user,view:currentView};let ctx;try{ctx=await api('/api/resolutions/context?id='+encodeURIComponent(id));}catch(error){if(!resolutionContextIsCurrent(contextRequest))return;throw error;}if(!resolutionContextIsCurrent(contextRequest))return;if(ctx.order?.id!==id)throw new Error('La réponse ne correspond pas à la commande demandée.');if(isDeliveredOrder(ctx.order)){const d=resolutionDialog('Commande livrée',ctx.order.reference);d.body.textContent='Livrée · aucun problème à gérer';return;}
 
 
 

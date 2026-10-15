@@ -1,4 +1,6 @@
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
+import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
+import {deliveredOrderSql} from './delivered-order.mjs';
 import {labelAttachment} from './label-attachment.mjs';
 import {saveMapping} from './mapping-store.mjs';
 import {currentParcelPdf} from './parcel-pdf.mjs';
@@ -51,11 +53,11 @@ export async function workspaceApi({p,url,req,res,db,user,body,json,permitted,au
   const id=url.searchParams.get('id');const order=(await db.query('SELECT orders.*, '+completeOrderDocumentsSql+' AS complete_order_documents FROM orders WHERE id=$1',[id])).rows[0];if(!order)throw new Error('Commande introuvable');
   const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line',[id])).rows;
   const jobs=(await db.query('SELECT kind,status,attempts,error,available_at FROM jobs WHERE order_id=$1',[id])).rows;
-  const carrierJob=(await db.query('SELECT status,environment,tracking FROM carrier_jobs WHERE order_id=$1',[id])).rows[0];json(res,200,{order,lines,jobs,carrierJob});return true;
+  const carrierJob=(await db.query('SELECT status,environment,tracking FROM carrier_jobs WHERE order_id=$1',[id])).rows[0];projectCurrentDiagnostics(order);if(order.order_delivered){for(const job of jobs)job.error=null;for(const line of lines){if('message' in line)line.message=null;if('catalog_issue' in line)line.catalog_issue=null;}}json(res,200,{order,lines,jobs,carrierJob});return true;
  }
  if(p==='/api/orders/export'&&req.method==='POST'){
   const {ids}=await body(req);if(!Array.isArray(ids)||!ids.length||ids.length>200)throw new Error('Sélectionner de 1 à 200 commandes');
-  const rows=(await db.query('SELECT o.reference,o.channel,o.recipient,o.address,o.source_date,o.weight_kg,o.parcel_count,o.carrier,o.label_status,o.erp_status,o.tracking_status,o.issue,l.source_sku,coalesce(l.target_sku,m.target_sku,CASE WHEN o.channel IN (\'tender\',\'samples\') THEN l.source_sku END) target_sku,l.quantity,coalesce(l.target_quantity,CASE WHEN o.channel IN (\'tender\',\'samples\') THEN l.quantity WHEN m.source_qty>0 THEN round(l.quantity*m.target_qty/m.source_qty,6) END) target_quantity,l.source_payload AS line_source FROM orders o LEFT JOIN lines l ON l.order_id=o.id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku WHERE o.id=ANY($1::text[]) ORDER BY array_position($1::text[],o.id),l.source_line',[ids])).rows;
+  const rows=(await db.query('SELECT o.reference,o.channel,o.recipient,o.address,o.source_date,o.weight_kg,o.parcel_count,o.carrier,o.label_status,o.erp_status,o.tracking_status,CASE WHEN ('+deliveredOrderSql+') THEN null ELSE o.issue END issue,l.source_sku,coalesce(l.target_sku,m.target_sku,CASE WHEN o.channel IN (\'tender\',\'samples\') THEN l.source_sku END) target_sku,l.quantity,coalesce(l.target_quantity,CASE WHEN o.channel IN (\'tender\',\'samples\') THEN l.quantity WHEN m.source_qty>0 THEN round(l.quantity*m.target_qty/m.source_qty,6) END) target_quantity,l.source_payload AS line_source FROM orders o LEFT JOIN lines l ON l.order_id=o.id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku WHERE o.id=ANY($1::text[]) ORDER BY array_position($1::text[],o.id),l.source_line',[ids])).rows;
   json(res,200,{rows});return true;
  }
  if(p==='/api/mappings/save'&&req.method==='POST'){

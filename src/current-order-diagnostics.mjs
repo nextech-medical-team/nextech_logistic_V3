@@ -1,4 +1,5 @@
 import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
+import {projectDeliveredOrder} from './delivered-order.mjs';
 import {projectPostBlLabelHistory} from './post-bl-label-history.mjs';
 import {hasCompleteOrderDocuments} from './complete-order-documents.mjs';
 import {currentPlatformModificationReason,currentPlatformModificationSql,genericPlatformModificationSql,platformChangeVerifiedSql} from './platform-change-diagnostics.mjs';
@@ -54,6 +55,7 @@ export function projectTemuPdfArchiveWarning(o){
  if(warnings.length)o.temu_pdf_archive_note=[...new Set(warnings)].join(' ; ');
 }
 export function projectCurrentDiagnostics(o){
+ if(projectDeliveredOrder(o))return o;
  projectPostBlLabelHistory(o);
  projectTemuPdfArchiveWarning(o);
  if(hasCompleteOrderDocuments(o)){

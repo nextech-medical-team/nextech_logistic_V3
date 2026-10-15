@@ -1,4 +1,5 @@
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
+import {deliveredOrderSql} from './delivered-order.mjs';
 import {catalogProblemSql,pendingEquivalentProblemSql,persistedRecheckProblemSql} from './order-problem-predicates.mjs';
 import {awaitingPurchaseSql,currentReasonSql,currentReasonEmptySql} from './current-order-diagnostics.mjs';
 import {partiallyAllocatedSql} from './partial-allocation.mjs';
@@ -13,6 +14,7 @@ export const orderDateSql=`CASE
  ELSE to_char(received_at AT TIME ZONE 'Europe/Paris','YYYYMMDD') END`;
 // Display-only gate: never alter suspended/cancelled orders or their documents.
 export const activeProblemOrderSql = `(archived IS NOT TRUE
+ AND NOT (${deliveredOrderSql})
  AND coalesce(suspension->'problemDeferral'->>'active','false')<>'true'
  AND coalesce(suspension->>'active','false')<>'true'
  AND label_status IS DISTINCT FROM 'cancelled'
