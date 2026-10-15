@@ -1,17 +1,19 @@
 import {cancellationBlock,retryDecision,transientErpError} from './erp-transient-policy.mjs';
 import {recoverOrder} from './erplain-document-metadata.mjs';
+import {quotaReadRetryAt,quotaWaitingMessage} from './erplain-quota-wait.mjs';
 
 export async function recordTransientFailure(db,o,message,error){
  const old=o.erp_live?.transientRecovery||{};
  const readRateLimited=error?.httpStatus===429&&error?.erplainReadOnly===true;
  const state={...old,originalError:old.originalError||message,lastError:transientErpError(message)?message:null,lastFailureAt:new Date().toISOString(),readRateLimited,
-  nextReadCheckAt:readRateLimited?new Date(Date.now()+Math.max(60000,Number(error.retryAfter||0)*1000)).toISOString():null};
+  requestNotSent:error?.erplainRequestNotSent===true,providerRateLimited:error?.httpStatus===429&&(error?.erplainRequestNotSent!==true||error?.erplainProviderRateLimited===true),
+  nextReadCheckAt:readRateLimited?quotaReadRetryAt(error):null};
  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{transientRecovery}',$2::jsonb) WHERE id=$1",[o.id,JSON.stringify(state)]);
  o.erp_live.transientRecovery=state;
  if(!state.lastError)return message;
  // Preserve the dedicated stock claim/reconciliation protocol and its diagnostic.
  if(['creating_stock','creating_customer'].includes(o.erp_live.phase))return message;
- if(state.readRateLimited)return cancellationBlock(o)||'Erplain temporairement limité : vérification et reprise automatiques programmées';
+ if(state.readRateLimited)return cancellationBlock(o)||quotaWaitingMessage;
  return cancellationBlock(o)||((Number(state.attempts||0)>=3)?'Incident temporaire Erplain persistant après 3 reprises : contrôle nécessaire':'Incident temporaire Erplain : rapprochement et reprise automatique en attente ('+Number(state.attempts||0)+'/3)');
 }
 
@@ -40,7 +42,7 @@ export async function resumeTransientErplain(db,api){
    AND (o.erp_live->'transientRecovery'->>'nextReadCheckAt' IS NULL OR o.erp_live->'transientRecovery'->>'nextReadCheckAt'<=to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
    AND (o.erp_live->>'phase' IN ('creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl') OR (o.erp_live->>'phase' IS NULL AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
    AND ((o.erp_live->>'phase'='creating_bc' AND o.erp_live->'customer'->>'id' IS NOT NULL) OR (o.erp_live->>'phase'<>'creating_bc' AND o.erp_live->'bc'->>'id' IS NOT NULL) OR o.erp_live->>'phase' IS NULL)
-   AND e.updated_at<=now()-CASE coalesce(o.erp_live->'transientRecovery'->>'attempts','0') WHEN '0' THEN interval '30 seconds' WHEN '1' THEN interval '2 minutes' ELSE interval '5 minutes' END
+   AND e.updated_at<=now()-CASE WHEN o.erp_live->'transientRecovery'->>'readRateLimited'='true' THEN interval '0 seconds' ELSE CASE coalesce(o.erp_live->'transientRecovery'->>'attempts','0') WHEN '0' THEN interval '30 seconds' WHEN '1' THEN interval '2 minutes' ELSE interval '5 minutes' END END
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
    AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
    ORDER BY o.resolution_pending_resume ASC,o.archived ASC,o.partial_mode ASC,e.updated_at,o.id LIMIT 10`)).rows;
@@ -75,11 +77,13 @@ export async function resumeTransientErplain(db,api){
    }catch(e){
     state.transientRecovery.lastError=transientErpError(e.message)?e.message:null;
     state.transientRecovery.readRateLimited=e.httpStatus===429&&e.erplainReadOnly===true;
-    state.transientRecovery.nextReadCheckAt=state.transientRecovery.readRateLimited?new Date(Date.now()+Math.max(60000,Number(e.retryAfter||0)*1000)).toISOString():null;
+    state.transientRecovery.nextReadCheckAt=state.transientRecovery.readRateLimited?quotaReadRetryAt(e):null;
+    state.transientRecovery.requestNotSent=e.erplainRequestNotSent===true;
+    state.transientRecovery.providerRateLimited=e.httpStatus===429&&(e.erplainRequestNotSent!==true||e.erplainProviderRateLimited===true);
     // A refused verification read consumes no mutation-recovery attempt.
     if(state.transientRecovery.readRateLimited)state.transientRecovery.attempts=Number(o.erp_live.transientRecovery?.attempts||0);
     state.transientRecovery.reconciliationError=e.message;
-    failure=state.transientRecovery.readRateLimited?'Erplain temporairement limité : vérification et reprise automatiques programmées':transientErpError(e.message)?'Lecture Erplain temporairement indisponible : rapprochement '+recovery.attempts+'/3':e.message;
+    failure=state.transientRecovery.readRateLimited?quotaWaitingMessage:transientErpError(e.message)?'Lecture Erplain temporairement indisponible : rapprochement '+recovery.attempts+'/3':e.message;
    }
    const committed=await db.transaction(async tx=>{
     const fresh=(await tx.query(`SELECT o.*,e.error,e.updated_at retry_updated FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
@@ -106,12 +110,12 @@ export async function closeTransientReviews(db){
  return db.transaction(async tx=>{
   const rows=(await tx.query(`SELECT r.id,r.error,r.updated_at,to_jsonb(o) AS "order" FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE r.status='review' AND r.stage='Erplain à compléter' AND e.status='complete' AND e.error IS NULL
-   AND (r.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR (r.error='Erplain temporairement limité : vérification et reprise automatiques programmées' AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'transientRecovery'->>'lastError' ~* 'Erplain HTTP 429'))
+   AND (r.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR (r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée') AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'transientRecovery'->>'lastError' ~* 'Erplain HTTP 429'))
    AND NOT o.resolution_pending_resume AND NOT o.archived AND NOT o.partial_mode
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs a WHERE a.order_id=o.id AND a.status IN ('queued','running','waiting'))
    ORDER BY r.updated_at LIMIT 100 FOR UPDATE OF r,o,e SKIP LOCKED`)).rows;
   for(const r of rows){const o=r.order,s=o.erp_live||{};
-   const raw=r.error==='Erplain temporairement limité : vérification et reprise automatiques programmées'&&s.transientRecovery?.readRateLimited===true?s.transientRecovery.lastError:r.error;
+   const raw=['Erplain temporairement limité : vérification et reprise automatiques programmées',quotaWaitingMessage].includes(r.error)&&s.transientRecovery?.readRateLimited===true?s.transientRecovery.lastError:r.error;
    if(!transientErpError(raw)||cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||!s.bc?.id||!s.bl?.id||s.bc.status!=='active'||!['ready_to_ship','make_the_shipment'].includes(s.bl.status)||!s.stockDocument?.id||s.stockDocument.status!=='completed'||s.stockDocument.update_stock!==true||!(new Date(s.verifiedAt).getTime()>new Date(r.updated_at).getTime()))continue;
    await tx.query("UPDATE resolution_jobs SET status='complete',error=null,stage='Incident Erplain résolu',result=coalesce(result,'{}'::jsonb)||$2::jsonb,updated_at=now() WHERE id=$1",[r.id,JSON.stringify({resolvedPreviousError:r.error,reconciledAt:new Date().toISOString()})]);
   }

@@ -21,7 +21,7 @@ export async function erplainFetch(config,url,buildOptions,{fetchImpl=fetch,read
    if(error?.code!=='source_budget_deferred')throw error;
    // Admission failed before fetch: no provider request was sent. Release the
    // order worker rather than hold processing and shipment locks indefinitely.
-   throw Object.assign(Error('Erplain HTTP 429 · attente du quota partagé différée, aucune requête envoyée'),{code:'erplain_budget_deferred',httpStatus:429,erplainReadOnly:readOnly,erplainRequestNotSent:true,retryAfter:Math.max(1,Number(error.retryAfter)||1)});
+   throw Object.assign(Error('Erplain HTTP 429 · attente du quota partagé différée, aucune requête envoyée'),{code:'erplain_budget_deferred',httpStatus:429,erplainReadOnly:readOnly,erplainRequestNotSent:true,erplainProviderRateLimited:attempt>0,retryAfter:Math.max(2,Number(error.retryAfter)||2)});
   }
   // Build the timeout after waiting, so a shared pause cannot expire it.
   let response=await fetchImpl(url,buildOptions());
