@@ -13,7 +13,9 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
       const catalogOnly=p==='/api/order-problem-types';
       const problemLabels=url.searchParams.getAll('problem-label').filter(Boolean);
       if(problemLabels.length>100||problemLabels.some(label=>label.length>2000))throw Error('Sélection de problèmes invalide');
-      const scanAll=catalogOnly||problemLabels.length>0||all;
+      const statuses=url.searchParams.getAll('status').flatMap(value=>value.split(',')).filter(Boolean);
+      const activeOnly=statuses.length>0&&statuses.every(value=>value==='__problems');
+      const scanAll=catalogOnly||problemLabels.length>0||activeOnly||all;
       const scopeParams=new URLSearchParams(url.searchParams);scopeParams.delete('problem-label');
       const diagnosticStart=Date.now();
 
@@ -53,7 +55,7 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
         const problemParams=new URLSearchParams(scopeParams);problemParams.append('status','__problems');
         const problemScope=orderQuery(problemParams);
         const problemIds=(await db.query('SELECT id FROM orders '+problemScope.where,problemScope.args)).rows.map(row=>row.id);
-        matched=selectProblemOrders(rows,catalogOnly?[]:problemLabels,currentProblemClassifier(),problemIds);
+        matched=selectProblemOrders(rows,catalogOnly?[]:problemLabels,currentProblemClassifier(),problemIds,activeOnly);
         if(catalogOnly)return {problemTypes:matched.problemTypes,at:new Date().toISOString()};
       }
       const {transportStats,summary}=matched?await orderStatistics(db,scopeParams,matched.rows.map(row=>row.id)):await cachedOrderSummary(scopeParams,db);

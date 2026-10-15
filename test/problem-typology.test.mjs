@@ -149,3 +149,11 @@ test('active problem gate executes before pagination and cannot be bypassed by c
   for(const params of ['', 'status=__suspended','search=cancelled-bc'])assert.ok(!orderQuery(new URLSearchParams(params)).where.includes(activeProblemOrderSql));
  }finally{await db.close();}
 });
+
+
+test('active problem status uses current diagnostics before pagination, totals and XLSX export',async()=>{
+ const first=await route('/api/orders','status=__problems');
+ assert.equal(first.out.total,20);assert.equal(first.out.rows.length,20);assert.equal(first.statsIds.length,20);assert.ok(!first.sql.q.includes('LIMIT 50'));
+ const second=await route('/api/orders','status=__problems&page=2');assert.equal(second.out.total,20);assert.equal(second.out.rows.length,0);
+ const exported=await route('/api/orders','status=__problems&page=2',{all:true});assert.equal(exported.out.total,20);assert.equal(exported.out.rows.length,20);
+});
