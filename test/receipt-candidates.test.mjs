@@ -8,7 +8,15 @@ test('receipt fast admission retains source/mapped SKU, recorded variant and unk
 });
 test('warehouse view separates finished history, existing PDFs, actionable and blocked orders',()=>{
  assert.equal(receiptWork({labels:[{}],bls:[{status:'delivered'}]},{}),'history');
- assert.equal(receiptWork({labels:[{}],status:'blocked',bls:[{status:'in_preparation'}]},{}),'available');
+ assert.equal(receiptWork({labels:[{}],status:'blocked',bls:[{id:'b',label:'SHO',status:'in_preparation'}]},{}),'available');
  assert.equal(receiptWork({labels:[],status:'documents',canLabel:true},{}),'action');
  assert.equal(receiptWork({labels:[],status:'blocked'},{}),'blocked');
+});
+
+test('documents ready requires a BL and every label, never a label or completed item alone',()=>{
+ assert.equal(receiptWork({labels:[{}],status:'eligible'},{}),'action');
+ assert.equal(receiptWork({labels:[{}],status:'blocked',item:{state:'complete'}},{}),'blocked');
+ assert.equal(receiptWork({labels:[],status:'blocked',bls:[{id:'b',label:'SHO',status:'ready_to_ship'}]},{}),'blocked');
+ assert.equal(receiptWork({labels:[{}],status:'blocked',documentsComplete:false,bls:[{id:'b',label:'SHO',status:'ready_to_ship'}]},{}),'blocked');
+ assert.equal(receiptWork({labels:[{}],status:'blocked',documentsComplete:true,currentBl:{id:'b',label:'SHO',status:'in_preparation'}},{}),'available');
 });
