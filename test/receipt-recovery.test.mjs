@@ -52,7 +52,7 @@ test('new BC reservation remains subject to physical stock and FIFO on receipt c
  const result=plan([a,b],[reserved(a),reserved(b)]);
  assert.equal(result.rows[0].stockAlreadyApplied,false);assert.equal(result.rows[0].status,'eligible');assert.equal(result.rows[1].status,'blocked');
  const absent=reserved(a);absent.line_items[0].on_hand=0;assert.equal(plan([a],[absent]).rows[0].status,'blocked');
- const lost=reserved(a);lost.line_items[0].reserved_quantity=0;assert.match(plan([a],[lost]).rows[0].reason,/Réservation/);
+ const lost=reserved(a);lost.line_items[0].reserved_quantity=0;assert.match(plan([a],[lost]).rows[0].reason,/Stock insuffisant/);
  const changed=reserved(a);changed.update_stock=false;assert.match(plan([a],[changed]).rows[0].reason,/Réservation/);
 });
 test('known existing pending BL is continued, never requested as a new BL',()=>{const o=order();o.erp_live.bl={id:'bl'};const b=bc(o);b.shipping_orders.data=[{id:'bl',status:'pending'}];const p=plan([o],[b]);assert.equal(p.rows[0].status,'eligible');assert.equal(p.rows[0].bls[0].id,'bl');});

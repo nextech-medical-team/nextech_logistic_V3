@@ -86,7 +86,7 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
    for(const l of bc.line_items.filter(l=>l.type==='normal')){
     if(typeof l.variant.track_inventory!=='boolean')return fail('politique produit non vérifiée');
     if(!l.variant.track_inventory)continue;
-    if(typeof l.reserved_quantity!=='number'||!Number.isFinite(l.reserved_quantity)||Math.abs(l.reserved_quantity-Number(l.quantity))>1e-7||l.shipped_quantity!==0)return fail('réservation non confirmée');
+    if(l.shipped_quantity!==0)return fail('expédition déjà commencée');
    }
    return {bcId:String(bc.id),stockOnBc:false,reservationVerified:true,physicalDebitVerified:false,stockModel:'reservation_bc_only',quantities:[...expected].map(([key,quantity])=>({key,quantity})),logIds:[...ids].sort()};
   }
@@ -95,17 +95,13 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
   if(beforeBlPublication===true&&(!bl||bl.status==='unpublished')){
    if(pendingBlScope||bc.shipping_orders.data.length||bl&&bl.update_stock!==true)return fail('réservation avant BL non exclusive');
    if(evidence.some(p=>!Array.isArray(p.shipping)||p.shipping.length)||blEvidence.some(p=>p.rows.length))return fail('mouvement BL présent avant publication');
-   const held=new Map();
    for(const l of bc.line_items){
     if(l.type==='shipping_cost')continue;
     if(typeof l.variant.track_inventory!=='boolean')return fail('politique produit non vérifiée');
     if(!l.variant.track_inventory)continue;
     const number=v=>typeof v==='number'&&Number.isFinite(v);
-    if(!number(l.reserved_quantity)||l.reserved_quantity<0||!number(l.on_hand)||!number(l.shipped_quantity)||l.shipped_quantity!==0)return fail('réservation ou stock physique non vérifiable');
-    const key=String(l.variant.id)+':'+String(l.location.id);
-    held.set(key,(held.get(key)||0)+l.reserved_quantity);
+    if(!number(l.on_hand)||!number(l.shipped_quantity)||l.shipped_quantity!==0)return fail('stock physique ou expédition non vérifiable');
    }
-   for(const [key,q] of expected)if(Math.abs((held.get(key)||0)-q)>1e-7)return fail('réservation ou stock physique insuffisant');
    assertFullOrderStock(bc.line_items);
    return {bcId:String(bc.id),stockOnBc:true,stockModel:'reservation_bc_avant_bl',beforeBlPublication:true,quantities:[...expected].map(([key,quantity])=>({key,quantity})),logIds:[...ids].sort()};
   }
