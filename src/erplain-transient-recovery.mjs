@@ -27,7 +27,7 @@ export async function resumeTransientErplain(db,api){
   // Network/quota waits must never hold row locks or a pool connection. The
   // worker run guard serializes passes; the short commit below also rejects any
   // concurrent edit, cancellation, or job replacement made during the read.
-  const rows=(await db.query(`SELECT o.*,e.error,e.updated_at retry_updated FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
+  const rows=(await db.query(`SELECT o.*,e.error,e.updated_at retry_updated,e.updated_at::text retry_version FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE e.status='review' AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL)
    AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
@@ -83,12 +83,12 @@ export async function resumeTransientErplain(db,api){
    }
    const committed=await db.transaction(async tx=>{
     const fresh=(await tx.query(`SELECT o.*,e.error,e.updated_at retry_updated FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
-     WHERE o.id=$1 AND e.status='review' AND e.updated_at=$2 AND o.erp_live=$3::jsonb
+     WHERE o.id=$1 AND e.status='review' AND e.updated_at::text=$2 AND o.erp_live=$3::jsonb
      AND NOT coalesce(o.issue,'') ~* 'commande annulée'
      AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
      AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
      AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
-     FOR UPDATE OF o,e SKIP LOCKED`,[o.id,o.retry_updated,JSON.stringify(o.erp_live)])).rows[0];
+     FOR UPDATE OF o,e SKIP LOCKED`,[o.id,o.retry_version,JSON.stringify(o.erp_live)])).rows[0];
     if(!fresh||!retryDecision(fresh,raw,fresh.retry_updated))return false;
     await tx.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(state)]);
     if(failure)await tx.query('UPDATE erp_live_jobs SET error=$2,updated_at=now() WHERE order_id=$1',[o.id,failure]);

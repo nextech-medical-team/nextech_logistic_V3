@@ -20,6 +20,9 @@ async function fixture(t,n=2){
 }
 test('recovery reads outside transactions and shares one identity request for ten orders',async t=>{
  const {engine,db,api}=await fixture(t,12);let reads=0;const request=api.request;api.request=async q=>{reads++;return request(q);};
+ // PostgreSQL timestamps retain microseconds; JavaScript Date retains only
+ // milliseconds. The optimistic job version must preserve the exact value.
+ await engine.query("UPDATE erp_live_jobs SET updated_at='2020-01-01T00:00:00.123456Z'");
  assert.equal(await resumeTransientErplain(db,api),10);assert.equal(reads,1);
  assert.equal((await engine.query("SELECT count(*)::int n FROM erp_live_jobs WHERE status='pending'")).rows[0].n,10);
 });
