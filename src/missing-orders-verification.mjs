@@ -25,7 +25,9 @@ export function missingOrdersVerification(db,directory,{shopify=shopifyObservati
    if(runs.size>=20)throw Error('Trop de vérifications en cours');
    const at=now(),end=b.beforeDate===undefined?at-minimumAgeHours*3600000:(typeof b.beforeDate==='string'?Date.parse(b.beforeDate):NaN);
    if(!Number.isFinite(end)||end>at-24*3600000||end<=at-days*86400000)throw Error('Date limite requise : au moins 24 h dans le passé et dans les '+days+' derniers jours');
-   const id=randomUUID();runs.set(id,{owner:user.id,platform,minimumAgeHours:(at-end)/3600000,start:new Date(at-days*86400000).toISOString(),end:new Date(end).toISOString(),checkedAt:new Date(at).toISOString(),expires:at+3600000,phase:platform==='temu'?'connect-temu':'shopify',cursor:null,seen:new Set(),checked:0,rows:[],errors:[],sources:[],index:0});
+   const start=b.startDate===undefined?at-days*86400000:(typeof b.startDate==='string'?Date.parse(b.startDate):NaN);
+   if(!Number.isFinite(start)||start<at-days*86400000||start>=end)throw Error('Date de début requise : dans les '+days+' derniers jours et avant la date de fin');
+   const id=randomUUID();runs.set(id,{owner:user.id,platform,minimumAgeHours:(at-end)/3600000,start:new Date(start).toISOString(),end:new Date(end).toISOString(),checkedAt:new Date(at).toISOString(),expires:at+3600000,phase:platform==='temu'?'connect-temu':'shopify',cursor:null,seen:new Set(),checked:0,rows:[],errors:[],sources:[],index:0});
    json(res,200,{runId:id,done:false});return true;
   }
   const s=runs.get(b.runId);if(!s||s.owner!==user.id)throw Error('Vérification expirée ou inaccessible');

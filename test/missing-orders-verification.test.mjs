@@ -2,6 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {missingFromV3,missingOrdersVerification} from '../src/missing-orders-verification.mjs';
 
+test('date range supports optional end and rejects reversed or inaccessible starts',async()=>{
+ const at=Date.parse('2026-10-15T12:00:00Z');let result;
+ const service=missingOrdersVerification({query:async()=>({rows:[]})},'unused',{now:()=>at,shopify:{read:async()=>({shop:'test',data:{orders:{nodes:[],pageInfo:{hasNextPage:false}}}})}});
+ const request=async b=>service({p:'/api/missing-orders/verify',req:{method:'POST'},user:{id:'u'},permitted:()=>{},body:async()=>b,json:(_r,_s,data)=>result=data});
+ for(const startDate of ['invalid',null,'2026-08-01T00:00:00Z','2026-10-14T12:00:00Z'])await assert.rejects(()=>request({platform:'shopify',startDate}),/Date de début/);
+ await request({platform:'shopify',startDate:'2026-10-10T00:00:00+01:00'});await request({runId:result.runId});
+ assert.equal(result.start,'2026-10-09T23:00:00.000Z');assert.equal(result.end,'2026-10-14T12:00:00.000Z');
+ await assert.rejects(()=>request({platform:'shopify',startDate:'2026-10-13T00:00:00Z',beforeDate:'2026-10-12T00:00:00Z'}),/Date de début/);
+});
+
 test('calendar cutoff validates age and history, converts timezone and returns cancellation status',async()=>{
  const at=Date.parse('2026-10-15T12:00:00Z');let result,search;
  const service=missingOrdersVerification({query:async()=>({rows:[]})},'unused',{now:()=>at,shopify:{read:async(_query,args)=>{search=args.search;assert.match(_query,/cancelledAt/);return {shop:'test',data:{orders:{nodes:[{id:'1',name:'#1',createdAt:'2026-10-12T00:00:00Z',cancelledAt:'2026-10-13T00:00:00Z',displayFulfillmentStatus:'UNFULFILLED'}],pageInfo:{hasNextPage:false}}}};}}});
