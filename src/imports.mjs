@@ -1,3 +1,4 @@
+import {positiveImportQuantity} from './quantity-value.mjs';
 import {initializeImportReceptions,importCandidates,matchImport,recordImportReception,shopIdentity} from './import-reception.mjs';
 import {postalHeaders,postalCellValue,importPostalCode} from './import-postal-code.mjs';
 import {cancelledImportSql,releaseCancelledImportReferences} from './cancelled-import-reimport.mjs';
@@ -135,7 +136,7 @@ export async function readTable(buffer,filename,{exactNotes=false,shopifyRecords
 
 }
 
-function number(v){const n=Number(String(v).replace(/\s/g,'').replace(',','.'));if(!Number.isFinite(n)||n<=0)throw new Error('Quantité positive requise');return n;}
+const number=positiveImportQuantity;
 
 export async function importMapping(db,buffer,filename){
 
