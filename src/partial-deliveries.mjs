@@ -13,6 +13,7 @@ import {publishHistoricalBl,assertHistoricalBlNumber} from './bl-numbering.mjs';
 import {documentMetadata} from './erplain-document-metadata.mjs';
 import {configuredShopifyMode} from './shopify-delivery.mjs';
 import {assertStockResolved} from './stock-gate.mjs';
+import {readBeforeBlStock} from './before-bl-stock.mjs';
 import {randomUUID} from 'node:crypto';
 import {partialLabelWeight,retryPartialLabel} from './partial-label-recovery.mjs';
 import {erplainAccount} from './erplain-accounts.mjs';
@@ -80,6 +81,7 @@ export function partialService(db,directory,{api=erplainAccount(directory,'live'
  const save=async(d,status,values={})=>{Object.assign(d,values,{status});await db.query(`UPDATE partial_deliveries SET status=$2,selection=$3,bl=$4,carrier=$5,weight_kg=$6,parcel_count=$7,tracking=$8,carrier_result=$9,error=$10,stage=CASE WHEN $2='review' THEN stage ELSE $2 END,updated_at=now() WHERE id=$1`,[d.id,status,JSON.stringify(d.selection),d.bl?JSON.stringify(d.bl):null,d.carrier||null,d.weight_kg||null,d.parcel_count||null,JSON.stringify(d.tracking||[]),d.carrier_result?JSON.stringify(d.carrier_result):null,d.error||null]);};
  async function run(){if(running)return;running=true;try{const d=(await db.query("SELECT * FROM partial_deliveries WHERE NOT EXISTS(SELECT 1 FROM orders suspended_order WHERE suspended_order.id=partial_deliveries.order_id AND (coalesce(suspended_order.suspension->>'active','false')='true' OR suspended_order.suspension ? 'erplainCancellation')) AND status IN ('queued','finalizing_bl','bl_ready','awaiting_pdf') ORDER BY created_at LIMIT 1")).rows[0];if(!d)return;
  try{if(d.status==='queued')await withShipmentLock(async()=>{const s=await snapshot(d.order_id,d.id);const chosen=validatePartial(s.lines,d.selection);await assertStockResolved(db,chosen.map(l=>l.variantId),{orderId:d.order_id,deliveryId:d.id});const o=s.order,a=o.address;
+ await readBeforeBlStock(api,o.erp_live.bc.id,{selection:chosen});
  await save(d,'creating_bl');const result=await api.request('mutation V3CreatePartialDraft($input:ShippingOrderFromInput!){CreateShippingOrderFrom(input:$input){id label status update_stock line_items{id quantity parent_id variant{id}} orders(first:10){data{id}}}}',{input:{Order:[String(o.erp_live.bc.id)]}});
  const b=result.CreateShippingOrderFrom;if(!b?.id)throw new Error('BL partiel non confirmé');await save(d,'draft_ready',{bl:b});
  if(b.status!=='unpublished'||b.update_stock!==s.bc.update_stock)throw new Error('BL brouillon avec politique de stock inattendue : ne pas publier');

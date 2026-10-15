@@ -7,6 +7,7 @@ import {usesRecordedBc,readRecordedBc,recordedBcFingerprint,recordedBcPreparatio
 import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
 import {ensureMissingProduct,reconcileCreationAttempt,sourceProductName,readCreationSku,createBlockedMissingProducts,productCreationBlock} from './missing-product-creation.mjs';
+import {readBeforeBlStock} from './before-bl-stock.mjs';
 import {bindProduct} from './product-bindings.mjs';
 import {selectedProductWeights,cacheSelectedProductWeights} from './selected-product-weights.mjs';
 import {selectedPreparationRouting} from './selected-preparation-routing.mjs';
@@ -322,7 +323,11 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
      if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o,{beforeBlPublication:true});}
      else assertFullOrderStock(snapshot.Order.line_items);
      o.erp_live.stockCheckedAt=new Date().toISOString();await save(o);
-     if(!o.erp_live.bl)await batchMutation([o],'creating_bl','bl','ShippingOrderFromInput','CreateShippingOrderFrom',v=>({Order:[String(v.erp_live.bc.id)]}),'id label status update_stock');
+     if(!o.erp_live.bl){
+      o.erp_live.beforeBlStock=await readBeforeBlStock(api,o.erp_live.bc.id);
+      await save(o);
+      await batchMutation([o],'creating_bl','bl','ShippingOrderFromInput','CreateShippingOrderFrom',v=>({Order:[String(v.erp_live.bc.id)]}),'id label status update_stock');
+     }
      if(o.failed)return;
      if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o,{beforeBlPublication:true});}
      if(o.erp_live.bl.status!=='unpublished'){const numbered=assertHistoricalBlNumber(await publishHistoricalBl(api,o.erp_live.bl.id));o.erp_live.bl={...o.erp_live.bl,...numbered};await save(o);}
