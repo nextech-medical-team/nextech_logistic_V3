@@ -14,12 +14,12 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
   }
   const mall=String(order.source_payload?.sourceShop||order.source_payload?.mallId||'');
   if(!mall)throw Error('Boutique TEMU de la commande non identifiée');
-  const {clients,countryByMall,config}=await connect(),api=clients.get(mall);
+  const {clients}=await connect(),api=clients.get(mall);
   if(!api)throw Error('Boutique TEMU indisponible');
   const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:order.reference});
   const parent=detail?.parentOrderMap;
   if(parent?.parentOrderSn!==order.reference||!Number.isInteger(Number(parent.parentOrderStatus))||Number(parent.parentOrderStatus)<1||Number(parent.parentOrderStatus)>7)throw Error('Identité ou statut TEMU non confirmé');
-  return {cancelled:confirmedTemuCancellation(order,detail),source:'temu',country:parent.regionName1||order.address?.country||countryByMall?.get(mall)||config?.TEMU_COUNTRIES?.[mall]||'',observation:{reference:order.reference,status:parent.parentOrderStatus,mallId:mall,observedAt:new Date().toISOString()}};
+  return {cancelled:confirmedTemuCancellation(order,detail),source:'temu',observation:{reference:order.reference,status:parent.parentOrderStatus,mallId:mall,observedAt:new Date().toISOString()}};
  }
  async function process(input,user,apply=false){
   if(!['admin','manager','operator'].includes(user?.role))throw Object.assign(Error('Droits insuffisants'),{status:403});
@@ -31,10 +31,9 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
   if(apply&&!order)throw Error('Commande archivée ou inaccessible');
   if(!order)return {done:true};
   return withShipmentLock(async()=>{
-   let result={id:order.id,reference:order.reference,channel:order.channel,country:order.address?.country||'',status:'unchanged'};
+   let result={id:order.id,reference:order.reference,channel:order.channel,status:'unchanged'};
    try{
     const observed=await proof(order);
-    result.country=observed.country||result.country;
     await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[order.id,JSON.stringify({manualPlatformCancellation:{...observed,checkedAt:new Date().toISOString(),checkedBy:user.email}})]);
     if(observed.cancelled)result.status='cancelled';
     if(observed.cancelled&&apply){
