@@ -22,3 +22,13 @@ test('no Erplain BC still cancels the local order',async()=>{const f=fixture({bc
 test('repeated click verifies previous Erplain attempt without retrying writes',async()=>{const f=fixture();f.order.suspension={active:true,erplainCancellation:{status:'review'}};await f.service.next({},user);assert.ok(f.calls.includes('verify'));assert.ok(!f.calls.includes('cancel'));});
 test('viewer rejected before source reads',async()=>{const f=fixture();await assert.rejects(()=>f.service.next({},{role:'viewer'}),/Droits/);assert.equal(f.calls.length,0);});
 test('empty scan terminates',async()=>{const service=manualPlatformCancellation({query:async()=>({rows:[]})},'unused',{});assert.deepEqual(await service.next({},user),{done:true});});
+
+test('selected platforms constrain the database scan before any source read',async()=>{
+ for(const channels of [['temu'],['shopify'],['temu','shopify']]){
+  const service=manualPlatformCancellation({query:async(sql,args)=>{assert.match(sql,/channel=ANY\(\$2::text\[\]\)/);assert.deepEqual(args,['cursor',channels]);return {rows:[]};}},'unused',{});
+  assert.deepEqual(await service.next({cursor:'cursor',channels},user),{done:true});
+ }
+});
+test('invalid platform selection is rejected before database access',async()=>{
+ const f=fixture();for(const channels of [[],['amazon'],'temu',[null]])await assert.rejects(()=>f.service.next({channels},user),/Plateformes invalides/);assert.equal(f.calls.length,0);
+});
