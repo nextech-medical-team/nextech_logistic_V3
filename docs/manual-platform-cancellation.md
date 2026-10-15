@@ -1,6 +1,8 @@
 # Actualisation manuelle des annulations
 
-Dans le menu, ouvrir « Annulations Temu / Shopify », puis cliquer sur « Actualiser les annulations Temu / Shopify ». Ouvrir la page ne déclenche aucune vérification. Le module parcourt toutes les commandes V3 non archivées de ces deux canaux, indépendamment des filtres affichés. Il n'importe pas de nouvelles commandes et ne démarre aucun contrôle périodique.
+Dans le menu, ouvrir « Annulations Temu / Shopify », sélectionner Temu, Shopify ou les deux, puis cliquer sur « Actualiser les annulations ». Ouvrir la page ne déclenche aucune vérification. Le module parcourt toutes les commandes V3 non archivées des canaux sélectionnés, indépendamment des filtres affichés. Il n'importe pas de nouvelles commandes et ne démarre aucun contrôle périodique.
+
+Le tableau affiche le compte rendu par commande et reste disponible pendant la navigation dans l’application. Le bouton « Export Excel » télécharge les résultats affichés au format `.xlsx`. Un nouveau contrôle remplace le bilan précédent ; un rechargement du navigateur efface ce bilan.
 
 Chaque commande est relue directement sur sa plateforme. Shopify doit confirmer une date d'annulation ; un remboursement seul ne déclenche rien. Temu doit confirmer le statut 3 et la référence exacte sur la boutique identifiée de la commande.
 
