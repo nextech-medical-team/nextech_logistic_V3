@@ -171,7 +171,8 @@ async function context(db,directory,id){
  const active=(await db.query("SELECT id,action,status,stage,created_at FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting')",[id])).rows[0];
  const latest=(await db.query('SELECT status,error FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1',[id])).rows[0];order.resolution_error=latest?.status==='review'?latest.error:null;await attachEquivalentDiagnostics(db,[order]);
  const temuJob=order.channel==='temu'?(await db.query('SELECT status,error,packages,attempt_id FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]:null;
- projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob}));
+ projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob,carrier_job:job,temu_job:temuJob}));
+ if(order.order_delivered){for(const line of lines){line.message=null;line.catalog_issue=null;}return {order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active:null,temuJob,priceFingerprint:pricingFingerprint(lines)};}
  return projectSharedParcelContext({order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
 }
 export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic}={}){
@@ -350,8 +351,8 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku,quantity=Number(l.quantity);if(typeof sku!=='string'||!sku.trim()||!Number.isFinite(quantity)||quantity<=0)throw Error('Produits ou quantités du BC non vérifiables : reprise non autorisée');sums.set(sku,(sums.get(sku)||0)+quantity);}return JSON.stringify([...sums].sort());};
     if(total(desired)!==total(resumeStockLines)&&(o.source_payload?.erplainImported||o.erp_live?.bl?.id))throw Error('Commande V3 et livraison existante différentes : vérifier les quantités avant reprise');
    }
-   await assertResumeStock(api,o,r.Order,resumeStockLines);
    const recoveredDraft=await prepareMissingDraftRecovery(db,api,o,{resolutionId:j.id});
+   await assertResumeStock(api,recoveredDraft?{...o,erp_live:recoveredDraft}:o,r.Order,resumeStockLines);
    await db.transaction(async tx=>{const e=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];if(e?.status==='processing')throw Error('Traitement Erplain en cours');
     if(recoveredDraft)await commitMissingDraftRecovery(tx,o,recoveredDraft,{resolutionId:j.id,userEmail:j.user_email||'system'});
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);

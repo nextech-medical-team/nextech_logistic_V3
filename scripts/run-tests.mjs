@@ -1,4 +1,5 @@
 const quotaGroup=['--test','test/erplain-quota-admission.test.mjs'];
+const postBlPreparationReviewGroup=['--test','test/post-bl-preparation-review.test.mjs','test/carrier-postal.test.mjs'];
 const recoveredPreparationGroup=['--test','test/recovered-preparation-issue.test.mjs'];
 const manualCreatedBlWaitingGroup=['--test','test/manual-created-bl-waiting.test.mjs'];
 const excelRenewalGroup=['--test','test/temu-excel-renewal.test.mjs'];
@@ -18,7 +19,7 @@ groups.at(-1).push('test/manual-platform-cancellation-ui.test.mjs');
 groups.at(-1).push('test/missing-orders-verification.test.mjs');
 groups.at(-1).push('test/receipt-candidates.test.mjs','test/receipt-warehouse-export.test.mjs','test/receipt-provider-filter.test.mjs');
 groups.push(['--test','test/carrier-attempt-proof.test.mjs','test/carrier-attempt-proof-db.test.mjs','test/carrier-cleared-preflight.test.mjs']);
-groups.push(['--test','test/bc-document-reservation.test.mjs']);
+groups.push(['--test','test/bc-document-reservation.test.mjs','test/retired-reservation-review.test.mjs']);
 groups.at(-1).push('test/erplain-global-lock-removal.test.mjs');
 groups.at(-1).push('test/recorded-bc-preparation-scope.test.mjs');
 groups.at(-1).push('test/equivalent-label-edition.test.mjs');
@@ -28,8 +29,9 @@ groups.at(-1).push('test/equivalent-label-edition.test.mjs');
 groups.at(-1).push('test/equivalence-post-bc-policy.test.mjs');
 
 groups.push(quotaGroup);
+groups.push(postBlPreparationReviewGroup);
 groups.push(recoveredPreparationGroup);
-groups.push(['--test','test/missing-draft-recovery.test.mjs']);
+groups.push(['--test','test/missing-draft-recovery.test.mjs','test/native-bl-policy.test.mjs']);
 groups.push(manualCreatedBlWaitingGroup);
 groups.push(excelRenewalGroup);
 groups.push(['--test','test/equivalent-preview-recheck.test.mjs']);
@@ -38,14 +40,18 @@ groups.push(['--test','test/temu-excel-purchase-admission.test.mjs','test/temu-e
 groups.push(['--test','test/stock-lock-resume.test.mjs']);
 groups.push(['--test','test/tender-name-overflow.test.mjs','test/tender-bl-label-payload.test.mjs','test/partial-label-recovery.test.mjs']);
 groups.push(['--test','test/partial-complete-documents.test.mjs']);
-groups.push(['--test','test/catalogue-local-review-resume.test.mjs']);
+groups.push(['--test','test/catalogue-local-review-resume.test.mjs','test/catalogue-reconciled-review.test.mjs']);
 groups.push(['--test','test/temu-bl-quantity-data.test.mjs']);
 groups.push(['--test','test/partial-cancellation.test.mjs','test/partial-preview-read.test.mjs']);
 groups.push(['--test','test/erplain-recovery-fluidity.test.mjs']);
 groups.push(postBlHistoryGroup);
 groups.at(-1).push('test/receipt-analysis-outcome.test.mjs');
 groups.push(['--test','test/bl-identity.test.mjs']);
-groups.push(['--test','test/erplain-quota-priority.test.mjs']);
 groups.push(['--test','test/temu-partial-bl-only.test.mjs']);
+groups.push(['--test','test/gls-sku-font.test.mjs']);
+groups.push(['--test','test/erplain-quota-priority.test.mjs','test/erplain-current-reason.test.mjs']);
+groups.push(['--test','test/substitution-diagnostics.test.mjs']);
 groups.push(['--test','test/extra-parcel-count.test.mjs']);
+groups.push(['--test','test/delivered-zero-problems.test.mjs']);
+groups.push(['--test','test/erplain-quota-delay.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

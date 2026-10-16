@@ -1,3 +1,4 @@
+import {usesNativeBlCycle,readNativeBlCycle} from './native-bl-policy.mjs';
 import {assertNoHistoricalStockRemoval} from './historical-stock-proof.mjs';
 
 const fail=reason=>{throw Error('BL historique brouillon : '+reason);};
@@ -33,6 +34,7 @@ async function noBlMovement(api,bl){
 // Validate the inherited policy without attempting to rewrite the document.
 // Publication retains its full BC and BL ledger proof.
 export async function normalizeHistoricalDraft(api,o){
+ if(usesNativeBlCycle(o))return (await readNativeBlCycle(api,o)).bl;
  const bcId=String(o.erp_live?.bc?.id||''),blId=String(o.erp_live?.bl?.id||'');
  if(!/^\d+$/.test(bcId)||!/^\d+$/.test(blId))return fail('documents non identifiés');
  const read=async()=>{

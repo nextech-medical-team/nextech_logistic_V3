@@ -1,5 +1,6 @@
 // This diagnostic deliberately has no database, purchase or PDF capability.
 // Its caller must supply the API for the order's verified TEMU shop.
+import {readConfirmedTemuShipments,temuLabelFailure} from './temu-shipment-remediation.mjs';
 export async function readTemuOrderDiagnostic(api,reference,{knownPackages=[]}={}){
  if(typeof reference!=='string'||!/^PO-\d+-\d+$/.test(reference))throw Error('Référence TEMU invalide');
  if(!Array.isArray(knownPackages)||knownPackages.some(p=>typeof p!=='string'||!/^PK-\d+$/.test(p)))throw Error('TEMU · Colis locaux non vérifiables');
@@ -36,18 +37,21 @@ export async function readTemuOrderDiagnostic(api,reference,{knownPackages=[]}={
  if(packages.size){
   let response,received=false;try{response=await api.read('bg.logistics.shipment.result.get',{packageSnList:[...packages]});received=true;}catch(e){result.errors.push({message:String(e?.message||e).slice(0,450)});}
   if(received){
-   const rows=response?.packageInfoResultList;
+   let rows=response?.packageInfoResultList;
+   if(Array.isArray(rows)&&!rows.length)rows=await readConfirmedTemuShipments(api,reference,[...packages])||rows;
    if(!Array.isArray(rows)||rows.length!==packages.size||new Set(rows.map(p=>p.packageSn)).size!==packages.size)throw Error('TEMU · Résultat des colis incomplet');
    for(const p of rows)if(!packages.has(p.packageSn)||!p.orderSendInfoList?.some(l=>l.parentOrderSn===reference))throw Error('TEMU · Identité du colis non vérifiable');
    result.packages=rows;
    for(const p of rows){
-    if(Number(p.shippingLabelStatus)===2)result.errors.push({packageSn:p.packageSn,message:'TEMU · Étiquette refusée : '+String(p.failReasonText||'motif non communiqué').slice(0,450)});
+    if(p.shipmentConfirmed)continue;
+    if(Number(p.shippingLabelStatus)===2)result.errors.push({packageSn:p.packageSn,message:temuLabelFailure(p.failReasonText)});
     else if(Number(p.shippingLabelStatus)!==1)result.errors.push({packageSn:p.packageSn,message:'TEMU · Étiquette non disponible pour le colis '+p.packageSn+' : préparation à vérifier chez TEMU'});
    }
   }
  }
  result.message=result.errors.length?'Lecture TEMU partielle : certains statuts d’expédition restent indisponibles.':result.shipments.length||result.packages.length?'Informations de commande et d’expédition relues depuis TEMU.':'Commande relue depuis TEMU ; aucune expédition renvoyée. Cela ne prouve pas qu’une nouvelle étiquette doit être achetée.';
  if(result.packages.length&&!result.errors.length)result.message='TEMU confirme '+result.packages.length+' étiquette(s) disponible(s). '+result.packages.map(p=>[p.packageSn,p.shippingCompanyName,p.trackingNumber].filter(Boolean).join(' · ')).join(' ; ')+'. Les PDF et numéros de suivi existants sont conservés.';
+ if(result.packages.some(p=>p.shipmentConfirmed)&&!result.errors.length)result.message='TEMU confirme l’expédition : '+result.packages.map(p=>[p.packageSn,p.shippingCompanyName,p.trackingNumber].filter(Boolean).join(' · ')).join(' ; ')+'. La disponibilité du PDF et le paiement ne sont pas prouvés par cette lecture. Aucun rachat nécessaire.';
  if(cancellationMessage)result.message=cancellationMessage+' '+result.message;
  result.message='État source TEMU : '+status+'. '+result.message;
  return result;

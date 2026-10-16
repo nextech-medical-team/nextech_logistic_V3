@@ -545,7 +545,7 @@ const server=http.createServer(async(req,res)=>{
 
     if(await temuExcelImportRoutes({p,req,res,user,body,json,permitted,db}))return;
 
-    if(p==='/api/orders/processing'&&req.method==='POST'){const b=await body(req);const rows=await processingRows(db,b.ids);const monitors=new Map((await db.query('SELECT order_id,state FROM order_recheck_monitor WHERE order_id=ANY($1::text[])',[b.ids])).rows.map(m=>[m.order_id,m.state]));for(const row of rows)row.monitoring=monitors.get(row.id)||null;json(res,200,{rows,at:new Date().toISOString()});return;}
+    if(p==='/api/orders/processing'&&req.method==='POST'){const b=await body(req);const rows=await processingRows(db,b.ids);const monitors=new Map((await db.query('SELECT order_id,state FROM order_recheck_monitor WHERE order_id=ANY($1::text[])',[b.ids])).rows.map(m=>[m.order_id,m.state]));for(const row of rows)row.monitoring=row.order_delivered?{blocked:false,followUp:false,alert:false,result:'Livrée · aucun problème à gérer',nextStep:'Aucune action attendue'}:monitors.get(row.id)||null;json(res,200,{rows,at:new Date().toISOString()});return;}
     if(p==='/api/orders/priority'&&req.method==='POST'){const b=await body(req);json(res,200,await setOrderPriority(db,b,user));return;}
     if(p==='/api/import-corrections/context'&&req.method==='GET'){permitted(user,operational);json(res,200,await importCorrectionService.context(url.searchParams.get('id')));return;}
     if(p==='/api/import-corrections/preview'&&req.method==='POST'){permitted(user,operational);json(res,200,await importCorrectionService.preview(await body(req)));return;}

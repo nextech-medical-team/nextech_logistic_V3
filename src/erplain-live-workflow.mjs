@@ -1,3 +1,5 @@
+import {usesNativeBlCycle} from './native-bl-policy.mjs';
+import {resumeRetiredReservationReviews} from './retired-reservation-review.mjs';
 import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
 import {resumeLocalPreparationReview} from './catalogue-local-review-resume.mjs';
 import {retirePostBcCommercialControls} from './post-bc-control-recovery.mjs';
@@ -55,7 +57,7 @@ export async function initializeErplainLive(db){await initializePriority(db);awa
 
 export async function queueErplainLive(db,ids){
  if(!Array.isArray(ids)||!ids.length||ids.length>10000)throw new Error('Sélection de 1 à 10000 commandes requise');
- let resumed=0;const reviews=(await db.query("SELECT order_id FROM erp_live_jobs WHERE order_id=ANY($1::text[]) AND status='review' AND (error LIKE 'Création produit · Nom du produit manquant ou invalide : %' OR error='Client TEMU : numéro Erplain non reçu')",[ids])).rows;
+ let resumed=0;const reviews=(await db.query("SELECT order_id FROM erp_live_jobs WHERE order_id=ANY($1::text[]) AND status='review' AND (error IS NULL OR error LIKE 'Création produit · Nom du produit manquant ou invalide : %' OR error='Client TEMU : numéro Erplain non reçu')",[ids])).rows;
  for(const j of reviews)if(await resumeLocalPreparationReview(db,j.order_id))resumed++;
  return resumed+(await db.query(`INSERT INTO erp_live_jobs(order_id) SELECT id FROM orders WHERE id=ANY($1::text[]) AND coalesce(suspension->>'active','false')<>'true' AND NOT (suspension ? 'erplainCancellation') AND reference NOT LIKE 'DEMO-%' ON CONFLICT DO NOTHING RETURNING order_id`,[ids])).rows.length;
 }
@@ -106,7 +108,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     await createBlockedMissingProducts(db,api,{blocked:mutationBlock,bind:v=>bindProduct(db,v),recheck:ids=>recheckOrders(db,ids)});
    }
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.
-   if(!bcOnlyOrderId){await retirePostBcCommercialControls(db,api);await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
+   if(!bcOnlyOrderId){await retirePostBcCommercialControls(db,api);await resumeRetiredReservationReviews(db,api);await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
    if(!bcOnlyOrderId){await queueSourceVatReviews(db);await scheduleStockChecks(db);}
    // Verify admission before claiming a batch. A quota wait must leave the
    // orders queued rather than turn ten untouched orders into ten failures.
@@ -282,7 +284,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
       if(!r.Order?.line_items?.length||!r.ShippingOrder?.line_items?.length)throw Error('API Erplain · Réponse BC/BL incomplète');
       if(r.Order.status!=='active'||!(o.source_payload?.erplainImported?['pending','make_the_shipment','in_preparation','ready_to_ship']:['pending']).includes(r.ShippingOrder.status))throw Error('Statut BC/BL modifié : vérifier les documents Erplain');
       const totals=rows=>{const m=new Map();for(const l of shippingProductLines(rows)){const k=String(l.variant?.id)+':'+String(l.location?.id);m.set(k,(m.get(k)||0)+Number(l.quantity));}return JSON.stringify([...m].sort());};
-      if((!o.erp_live.pendingBlIds?.length&&totals(o.items)!==totals(r.Order.line_items))||totals(o.items)!==totals(r.ShippingOrder.line_items))throw Error('Écart BC/BL : références ou quantités à contrôler');
+      if(!usesNativeBlCycle(o)&&((!o.erp_live.pendingBlIds?.length&&totals(o.items)!==totals(r.Order.line_items))||totals(o.items)!==totals(r.ShippingOrder.line_items)))throw Error('Écart BC/BL : références ou quantités à contrôler');
       if(r.Order.update_stock===true){
        o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);
       }else if(o.source_payload?.erplainImported){
@@ -315,7 +317,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
      const snapshot=await api.request('query V3CheckFullStock($id:ID!){Order(id:$id){id update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}}}',{id:String(o.erp_live.bc.id)});
      if(!snapshot.Order?.line_items?.length)throw new Error('Stock non vérifiable : BC sans lignes');
      if(typeof snapshot.Order.update_stock!=='boolean')throw new Error('Politique de stock du BC non vérifiée');
-     {const totals=xs=>{const sums=new Map();for(const l of shippingProductLines(xs)){const key=String(l.variant?.id)+':'+String(l.location?.id);sums.set(key,(sums.get(key)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};if(totals(o.items)!==totals(snapshot.Order.line_items))throw new Error('BC modifié : vérifier les produits et quantités avant BL');}
+     {const totals=xs=>{const sums=new Map();for(const l of shippingProductLines(xs)){const key=String(l.variant?.id)+':'+String(l.location?.id);sums.set(key,(sums.get(key)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};if(!usesNativeBlCycle(o)&&totals(o.items)!==totals(snapshot.Order.line_items))throw new Error('BC modifié : vérifier les produits et quantités avant BL');}
      const stockOnBc=snapshot.Order.update_stock===true;
      if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o,{beforeBlPublication:true});}
      else assertFullOrderStock(snapshot.Order.line_items);
@@ -345,8 +347,8 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(let i=0;i<working.length;i++){
     const o=working[i],actual=checked['p'+i],bl=actual?.shipping_orders.data.find(b=>b.id===o.erp_live.bl.id);
     const totals=rows=>{const m=new Map();for(const l of shippingProductLines(rows))m.set(String(l.variant?.id),(m.get(String(l.variant?.id))||0)+Number(l.quantity));return JSON.stringify([...m].sort());};
-    if(!actual||!bl||(!o.erp_live.pendingBlIds?.length&&totals(o.items)!==totals(actual.line_items))||totals(o.items)!==totals(bl.line_items)){await fail(o,new Error('Écart BC/BL : références ou quantités à contrôler'));continue;}
-    try{const stockOnBc=actual.update_stock===true;if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}const stock=stockOnBc?null:await reconcileFullStock(api,o,{allowCreate:false});o.erp_live.bl=await confirmDeliveryReady(api,{bcId:o.erp_live.bc.id,blId:o.erp_live.bl.id,lines:o.items,stockOnBc,pendingBlScope:Boolean(o.source_payload?.erplainImported&&o.source_payload?.account==='live'&&o.erp_live.pendingBlIds?.length),stockDocument:stock,stockLabel:stock?.label,stockNotes:'LIVE : sortie de stock liée au BL '+bl.label});o.erp_live.stockPendingVariants=[];o.erp_live.phase='bl_ready';await save(o);}catch(e){await fail(o,e);continue;}
+    if(!actual||!bl||(!usesNativeBlCycle(o)&&((!o.erp_live.pendingBlIds?.length&&totals(o.items)!==totals(actual.line_items))||totals(o.items)!==totals(bl.line_items)))){await fail(o,new Error('Écart BC/BL : références ou quantités à contrôler'));continue;}
+    try{const stockOnBc=actual.update_stock===true;if(stockOnBc){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o);}const stock=stockOnBc?null:await reconcileFullStock(api,o,{allowCreate:false});o.erp_live.bl=await confirmDeliveryReady(api,{bcId:o.erp_live.bc.id,blId:o.erp_live.bl.id,lines:o.items,stockOnBc,nativeErplainCycle:usesNativeBlCycle(o),pendingBlScope:Boolean(o.source_payload?.erplainImported&&o.source_payload?.account==='live'&&o.erp_live.pendingBlIds?.length),stockDocument:stock,stockLabel:stock?.label,stockNotes:'LIVE : sortie de stock liée au BL '+bl.label});o.erp_live.stockPendingVariants=[];o.erp_live.phase='bl_ready';await save(o);}catch(e){await fail(o,e);continue;}
     const recorded=usesRecordedBc(o),mappingProof=recorded?recordedBcFingerprint({...o.erp_live.bc,line_items:o.items}):mappingSelectionFingerprint(o.selectedSourceLines,o.channel);if(!recorded&&await currentMappingFingerprint(db,o)!==mappingProof){await fail(o,new Error('Mapping modifié pendant la préparation : BC et BL à recontrôler'));continue;}o.erp_live.mappingPreparationFingerprint=mappingProof;if(recorded)o.erp_live.preparationAuthority=recordedBcPreparationAuthority(o.erp_live.bc);
     assertHistoricalBlNumber(bl);o.erp_live.bl={...o.erp_live.bl,label:bl.label};o.erp_live.verifiedAt=new Date().toISOString();o.erp_live.labelPreparationFingerprint=await shipmentFingerprint(db,(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0]);await save(o);await db.query("UPDATE orders SET erp_status='live_created' WHERE id=$1",[o.id]);await db.query("UPDATE erp_live_jobs SET status='complete',error=null,updated_at=now() WHERE order_id=$1",[o.id]);
    }
