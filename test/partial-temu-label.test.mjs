@@ -4,6 +4,8 @@ import {PGlite} from '@electric-sql/pglite';
 import {partialTemuLabelService,partialTemuLines,readyPartialBl} from '../src/partial-temu-label.mjs';
 import {initializePartialDeliveries,partialService} from '../src/partial-deliveries.mjs';
 import {temuShipping} from '../src/temu-shipping.mjs';
+import {documentBusySql} from '../src/erplain-document-read.mjs';
+import {ownsPartialPreparation} from '../src/partial-erplain-retry.mjs';
 
 const ref='PO-100-200',bl={id:30,label:'SHO00000030',status:'pending'},selection=[{lineId:'20',variantId:'60',locationId:'70',sku:'BOX',quantity:50,ordered:50},{lineId:'21',variantId:'61',locationId:'70',sku:'B',quantity:1,ordered:1}];
 async function fixture(){
@@ -11,7 +13,7 @@ async function fixture(){
  await e.exec(`CREATE TABLE orders(id text primary key,reference text,channel text,partial_mode boolean,source_payload jsonb,erp_live jsonb,suspension jsonb,archived boolean default false,tracking_status text,label_status text,transport_choice text,weight_kg numeric);
  CREATE TABLE lines(id text,order_id text,source_line text,source_sku text,target_sku text,quantity numeric,target_quantity numeric,source_payload jsonb);
  CREATE TABLE products(sku text,weight_kg numeric);
- CREATE TABLE erp_live_jobs(order_id text,status text);CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE resolution_jobs(order_id text,status text);
+ CREATE TABLE erp_live_jobs(order_id text,status text);CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE resolution_jobs(order_id text,status text);CREATE TABLE carrier_jobs(order_id text,status text);
  CREATE TABLE temu_label_jobs(reference text,status text,attempt_id text,packages jsonb);
  CREATE TABLE temu_label_documents(reference text,package text,pdf bytea);`);
  await initializePartialDeliveries(db);
@@ -117,3 +119,10 @@ test('existing label editions are frozen before the status mutation and skipped 
  const events=[];let status='pending';const api={request:async q=>{if(q.startsWith('mutation')){events.push('mutation');status='ready_to_ship';}return {ShippingOrder:{...bl,status}};}};
  await readyPartialBl(api,bl,{beforeChange:async()=>events.push('preserve')});await readyPartialBl(api,bl,{beforeChange:async()=>events.push('unexpected')});assert.deepEqual(events,['preserve','mutation']);
 });
+
+test('document refresh cannot replace a selection while its TEMU purchase is in flight',async()=>{const f=await fixture();try{
+ for(const status of ['temu_confirm','temu_wait','temu_ready_review'])assert.equal(ownsPartialPreparation({status}),true);
+ assert.equal((await f.e.query(documentBusySql,['o'])).rows.length,0);
+ await f.e.exec("UPDATE partial_deliveries SET status='temu_wait',temu_label='{\"attemptId\":\"saved\",\"state\":\"purchasing\"}'");assert.equal((await f.e.query(documentBusySql,['o'])).rows.length,1);
+ await f.e.exec("UPDATE partial_deliveries SET temu_label=jsonb_set(temu_label,'{state}','\"uncertain\"')");assert.equal((await f.e.query(documentBusySql,['o'])).rows.length,0);
+}finally{await f.e.close();}});
