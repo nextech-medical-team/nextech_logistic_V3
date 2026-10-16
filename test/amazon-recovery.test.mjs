@@ -2,7 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {canRetryFailedCarrier} from '../src/carrier-attempt-proof.mjs';
 import {readTransientBlIdentity} from '../src/transient-bl-identity.mjs';
-import {assertImportedPostalAddress} from '../src/imported-postal-authority.mjs';
+import {assertImportedPostalAddress,preserveImportedPostalAddress} from '../src/imported-postal-authority.mjs';
+import {workspaceApi} from '../src/workspace-api.mjs';
+test('address API rejects divergence before updating order or scheduling a label',async()=>{
+ const tx={query:async sql=>{assert.match(sql,/^SELECT id,channel,source_payload FROM orders/);return {rows:[{id:'o',channel:'amazon',source_payload:{shippostalcode:'78120'}}]};}};
+ await assert.rejects(workspaceApi({p:'/api/orders/address',req:{method:'POST'},user:{},permitted:()=>{},body:async()=>({id:'o',address:{name:'Test',street:'17 rue Test',city:'Rambouillet',postal:'78230',country:'FR'}}),db:{transaction:fn=>fn(tx)}}),/code postal de l’import/);
+});
+test('ERP refresh preserves imported postal without changing source or issued labels',()=>{
+ const source={shippostalcode:'78120'},address={postal:'78230',city:'Rambouillet'};
+ assert.deepEqual(preserveImportedPostalAddress({channel:'amazon',source_payload:source},address),{postal:'78120',city:'Rambouillet'});
+ assert.equal(address.postal,'78230');assert.equal(source.shippostalcode,'78120');
+ assert.equal(preserveImportedPostalAddress({channel:'tender',source_payload:source},address),address);
+});
 test('city correction cannot overwrite imported Amazon postal code',()=>{
  const o={channel:'amazon',source_payload:{shippostalcode:'78120'},address:{postal:'78230'}};
  assert.throws(()=>assertImportedPostalAddress(o,{postal:'78230',city:'Rambouillet'}),/code postal de l’import/);

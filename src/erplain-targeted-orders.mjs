@@ -1,3 +1,4 @@
+import {preserveImportedPostalAddress} from './imported-postal-authority.mjs';
 import {existingRecoveryCandidate,attachExistingDocuments} from './erplain-existing-recovery.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {recoveredPreparationIssue} from './recovered-preparation-issue.mjs';
@@ -85,7 +86,7 @@ export async function synchronizeRecoveredOrder(db,o,d){
  const messages=(o.erp_live.stockDocument?.id||d.update_stock===true)?problems.filter(p=>!/stock insuffisant/i.test(p)):problems;
  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bc}',$2::jsonb),erplain_refresh=erplain_refresh||$3::jsonb,resolution_pending_resume=CASE WHEN NOT $4 AND NOT archived THEN true ELSE resolution_pending_resume END WHERE id=$1",[o.id,JSON.stringify(scope?scopeSnapshot(d,scope):d),JSON.stringify({issues:[...new Set(messages)],at:new Date().toISOString(),account:'live'}),Boolean(issued)]);
  if(!issued&&!o.partial_mode&&!o.archived&&address.street&&address.country){
-  await db.query('UPDATE orders SET address=$2,recipient=$3 WHERE id=$1',[o.id,JSON.stringify({...address,street1:a.address_1||'',street2:a.address_2||''}),d.customer?.label||o.recipient]);
+  await db.query('UPDATE orders SET address=$2,recipient=$3 WHERE id=$1',[o.id,JSON.stringify(preserveImportedPostalAddress(o,{...address,street1:a.address_1||'',street2:a.address_2||''})),d.customer?.label||o.recipient]);
   // Only retire a definite preflight rejection, never a carrier creation with
   // uncertain outcome, tracking, response or documents. Preserve its audit.
   const old=(await db.query("SELECT error FROM carrier_jobs c WHERE c.order_id=$1 AND c.status='failed' AND c.creation_started_at IS NULL AND coalesce(c.failure_phase,'preflight')='preflight' AND c.result IS NULL AND c.reference IS NULL AND coalesce(c.tracking,'[]'::jsonb)='[]'::jsonb AND NOT EXISTS(SELECT 1 FROM carrier_documents x WHERE x.order_id=c.order_id)",[o.id])).rows[0];

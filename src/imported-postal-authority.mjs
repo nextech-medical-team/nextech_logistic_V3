@@ -7,3 +7,8 @@ export function assertImportedPostalAddress(order,address){
  const normalize=value=>String(value??'').trim().toUpperCase().replace(/\s+/g,'');
  if(normalize(address?.postal)!==normalize(source))throw Error('Adresse Amazon : conserver le code postal de l’import ('+source+'). Corriger la ville ne modifie pas le code postal.');
 }
+
+export function preserveImportedPostalAddress(order,address){
+ const postal=order?.channel==='amazon'?String(order.source_payload?.shippostalcode??'').trim():'';
+ return postal?{...address,postal}:address;
+}
