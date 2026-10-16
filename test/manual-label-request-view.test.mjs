@@ -44,3 +44,11 @@ test('browser acknowledgement matches backend queued/running messages and escape
  }
  context.order={manual_label_request:{message:'<script>bad',received_at:null}};assert(!vm.runInContext('manualLabelRequestHtml(order)',context).includes('<script>'));
 });
+
+test('excluded tender and persisting projection retain installed behavior',()=>{
+ const tender=fixture();tender.channel='tender';assert.equal(manualLabelRequestView(tender),null);
+ const persisted=fixture(),before=structuredClone(persisted);projectCurrentDiagnostics(persisted,{delivery:false});assert.equal(persisted.manual_label_request,undefined);assert.equal(persisted.temu_job.error,before.temu_job.error);
+});
+test('terminal delivery stays authoritative over an old active request',()=>{
+ const o=fixture();o.tracking_status='delivered';const p=projectCurrentDiagnostics(o);assert.equal(p.order_delivered,true);assert.equal(p.manual_label_request,undefined);
+});

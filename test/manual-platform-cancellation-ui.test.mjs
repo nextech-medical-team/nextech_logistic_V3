@@ -29,9 +29,9 @@ test('missing application surface does not throw or call sources',()=>{const f=f
 test('report table is visible before verification with headings and an empty state',()=>{
  const f=fixture(),table=f.find('platform-cancellation-results');assert.ok(table);
  const head=table.children.find(el=>el.tag==='thead').children[0];
- assert.deepEqual(Array.from(head.children,el=>el.textContent),['Plateforme','Référence commande','Résultat','Compte rendu']);
+ assert.deepEqual(Array.from(head.children,el=>el.textContent),['Plateforme','Référence commande','Pays','Annulée sur Temu / Shopify','Annulée dans V3','Résultat','Compte rendu']);
  const empty=table.children.find(el=>el.tag==='tbody').children[0].children[0];
- assert.equal(empty.attributes.colspan,'4');assert.match(empty.textContent,/Aucun compte rendu/);assert.equal(f.calls.length,0);
+ assert.equal(empty.attributes.colspan,'7');assert.match(empty.textContent,/Aucun compte rendu/);assert.equal(f.calls.length,0);
 });
 
 test('table remains visible while verification is running and displays the resulting detail',async()=>{
@@ -40,7 +40,7 @@ test('table remains visible while verification is running and displays the resul
  assert.match(f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children[0].textContent,/Vérification en cours/);
  f.context.api=async()=>({done:true});finish({done:false,cursor:'a',result:{channel:'shopify',reference:'REF-42',status:'review',error:'Stock à rapprocher'}});await pending;
  const cells=f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children;
- assert.equal(cells[0].textContent,'Shopify');assert.equal(cells[1].textContent,'REF-42');assert.equal(cells[2].children[0].textContent,'À vérifier');assert.equal(cells[3].textContent,'Stock à rapprocher');
+ assert.equal(cells[0].textContent,'Shopify');assert.equal(cells[1].textContent,'REF-42');assert.equal(cells[5].children[0].textContent,'À vérifier');assert.equal(cells[6].textContent,'Stock à rapprocher');
 });
 
 for(const [selection,channels] of [['temu',['temu']],['shopify',['shopify']],['both',['temu','shopify']]]){
@@ -60,4 +60,59 @@ test('Excel button downloads displayed results without running verification agai
  let payload,downloaded=false;f.context.fetch=async(url,options)=>{assert.equal(url,'/api/orders/platform-cancellations/export');payload=JSON.parse(options.body);return {ok:true,blob:async()=>({})};};
  f.context.URL={createObjectURL:()=> 'blob:export',revokeObjectURL(){}};f.context.setTimeout=fn=>fn();f.context.document.body={append(link){link.click=()=>{downloaded=true;assert.match(link.download,/\.xlsx$/);};link.remove=()=>{};}};
  await f.find('platform-cancellation-export').onclick();assert.equal(payload.results[0].reference,'REF');assert.equal(downloaded,true);assert.equal(count,2);
+});
+
+test('refresh previews cancellations and Apply alone calls the application endpoint',async()=>{
+ const f=fixture(),apply=f.find('platform-cancellation-apply');assert.equal(apply.disabled,true);
+ let reads=0;f.context.api=async(url)=>{assert.equal(url,'/api/orders/refresh-platform-cancellations');return reads++===0?{done:false,cursor:'a',result:{id:'a',channel:'temu',reference:'REF',status:'cancelled'}}:{done:true};};
+ await f.find('platform-cancellation-refresh').onclick();assert.equal(apply.disabled,false);
+ const detail=()=>f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children[6].textContent;
+ assert.match(detail(),/appliquer/);
+ let writes=0;f.context.api=async(url,input)=>{writes++;assert.equal(url,'/api/orders/apply-platform-cancellations');assert.equal(input.id,'a');assert.deepEqual(Array.from(input.channels),['temu']);return {result:{id:'a',channel:'temu',reference:'REF',status:'cancelled',applied:true}};};
+ await apply.onclick();assert.equal(writes,1);assert.equal(apply.disabled,true);assert.match(detail(),/appliqu.e dans V3/);
+ await apply.onclick();assert.equal(writes,1);
+});
+
+test('an interrupted refresh keeps Apply disabled',async()=>{
+ const f=fixture();let reads=0;f.context.api=async()=>{if(reads++)throw Error('Source unavailable');return {done:false,cursor:'a',result:{id:'a',channel:'temu',reference:'REF',status:'cancelled'}};};
+ await f.find('platform-cancellation-refresh').onclick();assert.equal(f.find('platform-cancellation-apply').disabled,true);
+});
+
+test('table exposes cancellation confirmed on platform but not in V3',async()=>{
+ const f=fixture();let page=0;f.context.api=async()=>page++===0?{done:false,cursor:'a',result:{id:'a',channel:'temu',reference:'REF',status:'cancelled',platformCancelled:true,v3Cancelled:false}}:{done:true};
+ await f.find('platform-cancellation-refresh').onclick();
+ const cells=f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children;
+ assert.equal(cells[3].textContent,'Oui');assert.equal(cells[4].textContent,'Non');
+ assert.equal(f.find('platform-cancellation-apply').disabled,false);
+});
+
+test('calendar sends the same UTC creation range on every page and skips excluded orders',async()=>{
+ const f=fixture();f.find('platform-cancellation-from').value='2026-10-14T00:00';
+ let page=0,cutoff;f.context.api=async(_url,input)=>{cutoff??=input.createdTo;
+  assert.equal(input.createdFrom,new Date('2026-10-14T00:00').toISOString());assert.equal(input.createdTo,cutoff);assert.ok(Math.abs(Date.now()-Date.parse(cutoff))<5000);assert.equal(f.find('platform-cancellation-to'),undefined);
+  if(page++===0)return {done:false,cursor:'a',skipped:true,unknownDate:true};
+  if(page===2)return {done:false,cursor:'b',result:{id:'b',reference:'IN-RANGE',channel:'temu',status:'cancelled'}};
+  return {done:true};
+ };
+ await f.find('platform-cancellation-refresh').onclick();
+ const report=f.find('platform-cancellation-report');assert.match(report.children[0].textContent,/1 commandes/);
+ assert.ok(report.children.some(el=>/date de création inconnue/.test(el.textContent||'')));
+ assert.equal(f.find('platform-cancellation-from').disabled,false);
+});
+
+test('future calendar date does not call the API',async()=>{
+ const f=fixture();f.find('platform-cancellation-from').value='2999-10-15T00:00';
+ await f.find('platform-cancellation-refresh').onclick();assert.equal(f.calls.length,0);
+});
+
+test('status filter shows only cancellations and retains full French country names',async()=>{
+ const f=fixture();let page=0;
+ const rows=[{id:'a',channel:'temu',reference:'CANCEL',status:'cancelled',country:'IT'},{id:'b',channel:'shopify',reference:'KEEP',status:'unchanged',country:'NL'}];
+ f.context.api=async()=>page<rows.length?{done:false,cursor:rows[page].id,result:rows[page++]}:{done:true};
+ await f.find('platform-cancellation-refresh').onclick();
+ const filter=f.find('platform-cancellation-status');filter.value='cancelled';filter.onchange();
+ const body=()=>f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody');
+ assert.equal(body().children.length,1);assert.equal(body().children[0].children[1].textContent,'CANCEL');assert.equal(body().children[0].children[2].textContent,'Italie');
+ filter.value='all';filter.onchange();assert.equal(body().children.length,2);assert.equal(body().children[1].children[2].textContent,'Pays-Bas');
+ filter.value='review';filter.onchange();assert.match(body().children[0].children[0].textContent,/filtre/);
 });

@@ -55,7 +55,7 @@ export async function reconcileFullStock(api,o,{allowCreate=false,allowRecoverMi
  }
  if(!allowCreate)return null;
  if(bl.status!=='pending')throw Error('Stock Erplain : BL déjà prêt sans mouvement identifié, aucune nouvelle déduction');
- assertFullOrderStock(bc.line_items);
+ assertFullOrderStock(bc.line_items,{preserveInstalled:o.channel==='tender'});
  const source=String(o.source_date||''),fr=source.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);const datedAt=fr?`${fr[3]}-${fr[2]}-${fr[1]}`:/^\d{4}-\d{2}-\d{2}/.test(source)?source.slice(0,10):new Date().toISOString().slice(0,10);
  const stockLines=await prepareFifoStockLines(api,o.items);
  await beforeCreate();

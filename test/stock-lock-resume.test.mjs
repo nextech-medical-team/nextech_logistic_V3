@@ -78,3 +78,19 @@ test('stock unavailable or incomplete still prevents resume after blocker resolu
   await stockResumeWorker(db,'unused',{api}).run();assert.equal((await db.query('SELECT * FROM resolution_jobs')).rows.length,0);assert.match((await db.query('SELECT last_error FROM stock_resume_watch')).rows[0].last_error,/stock insuffisant/);
  }finally{await db.close();}
 });
+
+
+test('excluded tender keeps installed retry delay and interrupted lease on startup',async()=>{
+ const db=await fixture();
+ await db.query("UPDATE orders SET channel='tender' WHERE id='target'");
+ await db.query("INSERT INTO stock_resume_watch(order_id,next_at,outcome) VALUES('target',now()+interval '5 minutes','checking')");
+ const before=(await db.query("SELECT next_at,outcome FROM stock_resume_watch WHERE order_id='target'")).rows[0];
+ await initializeStockResumeWatch(db,{resumeReadLeases:true});
+ assert.deepEqual((await db.query("SELECT next_at,outcome FROM stock_resume_watch WHERE order_id='target'")).rows[0],before);
+ await db.query("UPDATE stock_resume_watch SET next_at=now()-interval '1 second' WHERE order_id='target'");
+ const api={verify:async()=>{throw Error('timeout');},request:async()=>{throw Error('unexpected provider call');}};
+ await stockResumeWorker(db,'unused',{api}).run();
+ const w=(await db.query("SELECT extract(epoch from next_at-checked_at) seconds FROM stock_resume_watch WHERE order_id='target'")).rows[0];
+ assert.equal(Number(w.seconds),300);
+ assert.equal((await db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+});

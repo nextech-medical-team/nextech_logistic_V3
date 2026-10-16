@@ -109,6 +109,10 @@ for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-
   assert.equal(verifyImportBcAmounts(bc,proof).total,legacy?73:moneyDrift?42:30);
  }
  assert.deepEqual(state.documentSource.lines.map(l=>[l.sku,l.quantity]).sort(),[['B',20],['D',20]]);
+ assert.deepEqual(state.bc.line_items,bc.line_items,'confirmed BC snapshot must match the actual replacement response');
+ assert.deepEqual(state.bc.shipping_orders,bc.shipping_orders);
+ assert.equal(state.bc.id,bc.id);assert.equal(state.verifiedAt,null);assert.equal(state.stockCheckedAt,null);
+ assert(state.substitutionDiagnostics.retiredSkus.includes('C'));
  const orderRows=[{id:'o',channel:'shopify'}];await attachSkuSubstitutions(db,orderRows);
  const ui=vm.createContext({});vm.runInContext(await readFile(new URL('../public/diagnostics.js',import.meta.url),'utf8'),ui);
  assert.equal(ui.skuLineText(orderRows[0],{sku:'B',quantity:20}),'A (20) → B (20)');

@@ -1,6 +1,7 @@
 // Read-only acknowledgement of the actual persisted human request, not an order
 // carrier choice and never proof that the provider accepted a purchase.
 export function manualLabelRequestView(o){
+ if(o.channel==='tender')return null;
  const r=o.resolution_active;
  if(typeof r?.id!=='string'||!r.id||r.action!=='choose-carrier'||!['queued','running','waiting'].includes(r.status)||!['gls','gofo'].includes(r.carrier))return null;
  const carrier=r.carrier.toUpperCase(),c=o.carrier_job;
