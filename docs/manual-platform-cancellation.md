@@ -2,7 +2,11 @@
 
 Dans le menu, ouvrir « Annulations Temu / Shopify », sélectionner Temu, Shopify ou les deux, puis cliquer sur « Actualiser les annulations ». Ouvrir la page ne déclenche aucune vérification. Le module parcourt toutes les commandes V3 non archivées des canaux sélectionnés, indépendamment des filtres affichés. Il n'importe pas de nouvelles commandes et ne démarre aucun contrôle périodique.
 
-Le tableau affiche le compte rendu par commande et reste disponible pendant la navigation dans l’application. Le bouton « Export Excel » télécharge les résultats affichés au format `.xlsx`. Un nouveau contrôle remplace le bilan précédent ; un rechargement du navigateur efface ce bilan.
+Le tableau affiche le compte rendu par commande. Chaque contrôle crée un rapport enregistré en base au fur et à mesure des résultats. La liste « Rapports récents » permet de rouvrir les 25 derniers rapports après navigation ou rechargement. Un nouveau contrôle conserve les anciens rapports. Le bouton « Export Excel » télécharge les résultats affichés au format `.xlsx`.
+
+L’application des annulations met à jour le même rapport, y compris les refus et les commandes à vérifier. La vérification initiale est conservée séparément en base. Un rapport interrompu reste consultable mais ne permet pas l’application : lancer une nouvelle vérification complète. Les rapports terminés peuvent être rouverts pour appliquer les annulations restantes ; la plateforme est toujours relue avant toute application.
+
+Dans « Commandes et livraisons », une annulation confirmée par la plateforme ou enregistrée dans V3 colore la ligne et ses actions en rouge. La couleur signale l’annulation ; elle ne remplace pas l’étape « Appliquer les annulations ».
 
 Le calendrier unique « Commandes créées depuis le » vérifie le statut actuel des commandes créées entre la date choisie et le moment du lancement, bornes incluses. La fin est automatique et reste fixe pendant toute la lecture. Les heures locales sont converties en UTC. Sans date, tout l’historique est consulté. Les dates futures sont refusées. Les commandes sans date de création exploitable sont exclues et signalées lorsqu’une date est choisie ; la date d’import V3 ne remplace pas la date de création. Le bilan et l’export conservent la période vérifiée.
 
