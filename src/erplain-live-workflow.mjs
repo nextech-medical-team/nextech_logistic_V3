@@ -2,6 +2,8 @@ import {usesNativeBlCycle,assertNativeBcSnapshot} from './native-bl-policy.mjs';
 import {resumeRetiredReservationReviews} from './retired-reservation-review.mjs';
 import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
 import {resumeLocalPreparationReview} from './catalogue-local-review-resume.mjs';
+import {resumeAuditedCatalogueReviews} from './catalogue-reconciled-review.mjs';
+import {resumeUnchangedExcelReviews} from './unchanged-excel-review.mjs';
 import {retirePostBcCommercialControls} from './post-bc-control-recovery.mjs';
 import {usesRecordedBc,readRecordedBc,recordedBcFingerprint,recordedBcPreparationAuthority,verifyRecordedOrSourceTotals,withRecordedOrSourceGuard,assertRecordedBc} from './existing-bc-execution.mjs';
 import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
@@ -79,7 +81,7 @@ export function creationResumeBlock(o){
  return null;
 }
 export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'live'),refreshTemuPricing=temuBcPricingLoader(db,directory)}={}){
- let running=false,activeBcOnlyOrderId=null,nextRunAt=0;
+ let running=false,activeBcOnlyOrderId=null,nextRunAt=0,catalogueRecoveryAfterId='',excelRecoveryAfterId='';
  const save=async o=>db.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(o.erp_live)]);
  const fail=async(o,e)=>{let message=stockFailureMessage(o,e.message);message=await stockCheckFailure(db,o,e,message);if(o.erp_live?.phase==='creating_stock'&&!/sortie non confirmée, aucune nouvelle déduction automatique/.test(message)){o.erp_live.stockLastFailure={at:new Date().toISOString(),message};await save(o);}const waiting=await recordTransientFailure(db,o,message,e);if(e?.httpStatus===429)nextRunAt=Date.now()+Math.max(2000,Number(e.retryAfter||60)*1000);if(await queueQuotaRead(db,o,e))return;e=new Error(waiting);await db.query("UPDATE erp_live_jobs SET status='review',error=$2,updated_at=now() WHERE order_id=$1",[o.id,e.message]);await db.query("UPDATE orders SET erp_status='live_review' WHERE id=$1",[o.id]);};
  async function batchMutation(orders,phase,field,type,operation,input,selection){
@@ -108,7 +110,11 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     await createBlockedMissingProducts(db,api,{blocked:mutationBlock,bind:v=>bindProduct(db,v),recheck:ids=>recheckOrders(db,ids)});
    }
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.
-   if(!bcOnlyOrderId){await retirePostBcCommercialControls(db,api);await resumeRetiredReservationReviews(db,api);await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);}
+   if(!bcOnlyOrderId){
+    const catalogue=await resumeAuditedCatalogueReviews(db,{afterId:catalogueRecoveryAfterId});catalogueRecoveryAfterId=catalogue.afterId;
+    const excel=await resumeUnchangedExcelReviews(db,{afterId:excelRecoveryAfterId});excelRecoveryAfterId=excel.afterId;
+    await retirePostBcCommercialControls(db,api);await resumeRetiredReservationReviews(db,api);await recoverInitialCommercialReviews(db);await resumeInitialTemuHolds(db);await resumeStaleHoldReviews(db,api);await closeStockChecks(db);await closeTransientReviews(db);await resumeTransientErplain(db,api);await resumeTemuFinancialReviews(db);await resumeAcceptedCommercialReviews(db,api);
+   }
    if(!bcOnlyOrderId){await queueSourceVatReviews(db);await scheduleStockChecks(db);}
    // Verify admission before claiming a batch. A quota wait must leave the
    // orders queued rather than turn ten untouched orders into ten failures.

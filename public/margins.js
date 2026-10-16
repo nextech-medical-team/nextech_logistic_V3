@@ -18,7 +18,15 @@ function positionCountryMargins(){
 }
 function paintMarginChip(target,r,id){
  let chip=target.querySelector('[data-margin-chip]');
- if(target.closest('tr')?.dataset.orderDelivered==='true'&&(!r||r.status==='incomplete')){chip?.remove();if(target.textContent!=='—')target.textContent='—';return;}
+ // This painter also runs from a subtree observer. Rewriting identical text
+ // would enqueue itself forever and starve input, timers and browser paints.
+ let empty=target.querySelector('[data-margin-empty]');
+ if(target.closest('tr')?.dataset.orderDelivered==='true'&&(!r||r.status==='incomplete')){
+  chip?.remove();
+  if(!empty){empty=document.createElement('span');empty.dataset.marginEmpty='';empty.textContent='—';if(target.hasAttribute('data-temu-margin'))target.replaceChildren(empty);else target.append(empty);}
+  return;
+ }
+ empty?.remove();
  if(!r){if(chip)chip.remove();const text=loadError?'Marge indisponible · actualisez la liste':data?'Marge à compléter':'Chargement de la marge…';if(target.textContent!==text)target.textContent=text;return;}
  const label=r.status==='incomplete'?'Marge à compléter':(r.profit>0?'+':'')+money(r.profit)+'\nRecettes : '+pct(r.margin)+'\nCoûts nets : '+pct(r.markup);
  if(!chip){chip=document.createElement('button');chip.dataset.marginChip='';if(target.hasAttribute('data-temu-margin'))target.textContent='';target.append(chip);chip.onclick=()=>openMargin(id);}
@@ -32,6 +40,10 @@ function badges(){positionCountryMargins();if(data){const byId=new Map(data.rows
 async function refresh(){if(busy)return;busy=true;$('margin-refresh').disabled=true;$('margin-state').textContent='Lecture des commandes et calcul des marges…';try{const latest=await api('/api/margins');if(!Array.isArray(latest?.rows))throw Error('Réponse du calcul des marges invalide');data=latest;loadError=null;render();badges();}catch(e){loadError=e.message;$('margin-state').textContent=e.message;temuBadges();}finally{window.dispatchEvent(new Event('v3-margins-updated'));busy=false;$('margin-refresh').disabled=false;}}
 window.V3Margins={refresh,paintTemu:temuBadges,row:id=>loadError?null:data?.rows.find(r=>r.id===id)};
 $('margin-refresh').onclick=refresh;$('margin-filter').onchange=render;$('margin-search').oninput=render;
-new MutationObserver(badges).observe($('order-rows'),{childList:true,subtree:true});
+// Processing clocks and stock readouts change independently of margins. Only
+// structural changes to the references/country/margin hosts need repainting.
+const marginNodes='[data-detail],[data-delivery-detail],.order-country,[data-country-margin],[data-margin-chip],[data-temu-margin]';
+function touchesMargins(node){return node.nodeType===1&&(node.matches(marginNodes)||!!node.querySelector(marginNodes));}
+new MutationObserver(records=>{if(records.some(r=>r.target===$('order-rows')||[...r.addedNodes,...r.removedNodes].some(touchesMargins)))badges();}).observe($('order-rows'),{childList:true,subtree:true});
 setInterval(()=>{if(user&&!document.hidden&&(currentView==='orders'||currentView==='temu'||dialog.open))refresh();},60000);const ready=setInterval(()=>{if(user){clearInterval(ready);refresh();}},1500);
 })();

@@ -29,6 +29,7 @@ groups.at(-1).push('test/equivalent-label-edition.test.mjs');
 
 groups.at(-1).push('test/equivalence-post-bc-policy.test.mjs');
 
+groups.push(['--test','test/post-bl-margin-cost.test.mjs']);
 groups.push(quotaGroup);
 groups.push(postBlPreparationReviewGroup);
 groups.push(recoveredPreparationGroup);
@@ -57,4 +58,6 @@ groups.push(['--test','test/extra-parcel-count.test.mjs']);
 groups.push(['--test','test/delivered-zero-problems.test.mjs']);
 groups.push(['--test','test/erplain-quota-delay.test.mjs']);
 groups.push(['--test','test/manager-tender-filter.test.mjs']);
+groups.push(['--test','test/recorded-bc-mapping-stock.test.mjs']);
+groups.push(['--test','test/margin-observer-stability.test.mjs','test/temu-refusal-details-ui.test.mjs','test/platform-cancellation-reports.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
