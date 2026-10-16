@@ -126,3 +126,7 @@ test('document refresh cannot replace a selection while its TEMU purchase is in 
  await f.e.exec("UPDATE partial_deliveries SET status='temu_wait',temu_label='{\"attemptId\":\"saved\",\"state\":\"purchasing\"}'");assert.equal((await f.e.query(documentBusySql,['o'])).rows.length,1);
  await f.e.exec("UPDATE partial_deliveries SET temu_label=jsonb_set(temu_label,'{state}','\"uncertain\"')");assert.equal((await f.e.query(documentBusySql,['o'])).rows.length,0);
 }finally{await f.e.close();}});
+
+
+test('status changed after quote blocks purchase without persisting an attempt',async()=>{for(const status of ['cancelled','shipped','delivered','completed']){const f=await fixture();try{await f.service.advance('d');const plan=(await f.row()).temu_label.plan;f.setStatus(status);await assert.rejects(f.service.buy('d',plan.id,plan.amount,true),/annulé ou déjà expédié/);assert(!f.calls.some(c=>c.type==='buy'));assert.equal((await f.row()).temu_label.attemptId,undefined);}finally{await f.e.close();}}});
+test('source status is rechecked after label preservation before ready mutation',async()=>{let status='pending',mutations=0;const api={request:async q=>{if(q.startsWith('mutation'))mutations++;return {ShippingOrder:{...bl,status}};}};await assert.rejects(readyPartialBl(api,bl,{beforeChange:async()=>{status='in_preparation';}}),/interdit/);assert.equal(mutations,0);});

@@ -38,13 +38,18 @@ export function partialTemuLines(o,d,source,detail){
  return lines;
 }
 
+async function readCurrentPartialBl(api,bl){const r=await api.request('query V3PartialReadySource($id:ID!){ShippingOrder(id:$id){id label status}}',{id:String(bl.id)});const b=r.ShippingOrder;if(String(b?.id)!==String(bl.id)||b.label!==bl.label)throw Error('ERPLAIN · Statut du BL partiel non vérifiable');assertHistoricalBlNumber(b);if(['cancelled','shipped','delivered','completed'].includes(b.status))throw Object.assign(Error('ERPLAIN · BL annulé ou déjà expédié : aucun nouvel achat'),{code:'PARTIAL_BL_INACTIVE',observedBl:b});return b;}
+
 // Status-only operation: no BC/stock/quantity prerequisites and no stock writes.
 export async function readyPartialBl(api,bl,{beforeChange=async()=>{}}={}){
- const read=async()=>{const r=await api.request('query V3PartialReadySource($id:ID!){ShippingOrder(id:$id){id label status}}',{id:String(bl.id)});const b=r.ShippingOrder;if(String(b?.id)!==String(bl.id)||b.label!==bl.label)throw Error('ERPLAIN · Statut du BL partiel non vérifiable');assertHistoricalBlNumber(b);if(['cancelled','shipped','delivered','completed'].includes(b.status))throw Object.assign(Error('ERPLAIN · BL annulé ou déjà expédié : aucun nouvel achat'),{code:'PARTIAL_BL_INACTIVE',observedBl:b});return b;};
- const before=await read();try{assertErplainReadyTransition(before.status,'ready_to_ship');}catch(e){e.observedBl=before;throw e;}
+ const read=()=>readCurrentPartialBl(api,bl);
+ let before=await read();try{assertErplainReadyTransition(before.status,'ready_to_ship');}catch(e){e.observedBl=before;throw e;}
  if(before.status==='ready_to_ship')return {...bl,...before};
  if(!['pending','make_the_shipment'].includes(before.status))throw Error('ERPLAIN · Statut du BL incompatible : '+before.status);
  await beforeChange();
+ before=await read();try{assertErplainReadyTransition(before.status,'ready_to_ship');}catch(e){e.observedBl=before;throw e;}
+ if(before.status==='ready_to_ship')return {...bl,...before};
+ if(!['pending','make_the_shipment'].includes(before.status))throw Error('ERPLAIN · Statut du BL incompatible : '+before.status);
  await api.request('mutation V3PartialDeliveryReady($id:ID!,$input:ShippingOrderInput!){UpdateShippingOrder(id:$id,input:$input){id label status}}',{id:String(bl.id),input:{label:before.label,status:'ready_to_ship'}});
  const after=await read();if(after.status!=='ready_to_ship')throw Error('ERPLAIN · Passage du BL partiel prêt à livrer non confirmé');
  return {...bl,...after};
@@ -122,6 +127,7 @@ export function partialTemuLabelService(db,local,erplain,{enabled=()=>true,prese
   if(confirmPurchase!==true)throw Error('Confirmation explicite de l’achat TEMU requise');if(!enabled())throw Error('Parcours TEMU suspendu');const {o,d}=await context(id),saved=d.temu_label?.plan;if(d.status!=='temu_confirm'||!saved||saved.id!==planId||saved.amount!==Number(amount)||saved.expiresAt<=Date.now()||saved.identity!==identity(d))throw Error('Devis absent, expiré ou livraison modifiée : actualiser');
   const api=await supplier(o,d);if(api.canBuy===false)throw Error('TEMU · Accès en lecture seule : achat indisponible');const {detail,lines}=await selection(o,d,api),parcels=await existing(o,d,api,detail,lines);if(parcels.length)return recover(o,d,api,parcels);
   const current=await quote(o,d,api,detail,lines);if(current.id!==saved.id){await persist(d,'temu_confirm',{plan:current,nextAt:null},d.temu_label?.readyError);throw Error('Devis modifié : relire le nouveau montant');}
+  await readCurrentPartialBl(erplain,d.bl);
   const attemptId=randomUUID();await db.transaction(async tx=>{const locked=(await tx.query('SELECT * FROM partial_deliveries WHERE id=$1 FOR UPDATE',[id])).rows[0],order=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[o.id])).rows[0];admissible(order,locked);if(identity(locked)!==saved.identity||locked.status!=='temu_confirm'||locked.temu_label?.attemptId||locked.temu_label?.plan?.id!==planId)throw Error('Achat déjà engagé ou livraison modifiée');
    const active=(await tx.query("SELECT order_id FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT order_id FROM correction_jobs WHERE order_id=$1 AND status IN ('applying','checking') UNION ALL SELECT order_id FROM resolution_jobs WHERE order_id=$1 AND status='running'",[o.id])).rows;if(active.length)throw Error('Traitement en cours : attendre sa fin avant achat');
    if((await tx.query('SELECT 1 FROM partial_documents WHERE delivery_id=$1 LIMIT 1',[id])).rows.length||locked.tracking?.length||locked.carrier_result)throw Error('Étiquette existante à préserver');
