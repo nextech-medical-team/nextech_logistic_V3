@@ -7,7 +7,7 @@ import {carrierEligible,priorityOrder} from '../src/order-priority.mjs';
 async function fixture({existing=false,missingTable=false}={}){
  const engine=new PGlite();await engine.waitReady;
  await engine.exec(`CREATE TABLE schema_migrations(version TEXT PRIMARY KEY);
- INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); INSERT INTO schema_migrations VALUES('partial-erplain-retry-20261016-1');
+ INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); INSERT INTO schema_migrations VALUES('partial-erplain-retry-20261016-1'); INSERT INTO schema_migrations VALUES('partial-temu-label-20261016-1');
  CREATE TABLE orders(id TEXT PRIMARY KEY,suspension JSONB DEFAULT '{}',resolution_pending_resume BOOLEAN DEFAULT true,processing_priority_at TIMESTAMPTZ);
  INSERT INTO orders(id) VALUES('pending'),('creating'),('ready'),('review');`);
  if(!missingTable)await engine.exec(`CREATE TABLE carrier_jobs(order_id TEXT PRIMARY KEY,carrier TEXT,status TEXT,stock_override JSONB,creation_id TEXT,updated_at TIMESTAMPTZ DEFAULT now(),attempts INT DEFAULT 0,tracking JSONB DEFAULT '[]',result JSONB${existing?',manual_bl_request JSONB':''});

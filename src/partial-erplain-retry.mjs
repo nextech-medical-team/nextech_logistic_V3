@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 const checkpoints=new Set(['queued','draft_confirmed','lines_confirmed','bl_confirmed']);
-export function ownsPartialPreparation(d){return ['erplain_wait','draft_confirmed','lines_confirmed','bl_confirmed'].includes(d.status);}
+export function ownsPartialPreparation(d){return ['erplain_wait','draft_confirmed','lines_confirmed','bl_confirmed','temu_wait','temu_confirm','temu_ready_review'].includes(d.status);}
 function identity(d){const selection=d.selection.map(l=>({lineId:String(l.lineId),variantId:String(l.variantId),locationId:String(l.locationId),quantity:Number(l.quantity),price:Number(l.price)})).sort((a,b)=>a.lineId.localeCompare(b.lineId));return createHash('sha256').update(JSON.stringify({id:d.id,orderId:d.order_id,requestId:d.request_id,selection,blId:d.bl?.id||null,stock:d.stock_document||null,labelChoice:d.label_choice})).digest('hex');}
 export function assertPartialRetryIdentity(d){if(!checkpoints.has(d.erplain_retry?.checkpoint)||d.erplain_retry.identity!==identity(d))throw Error('Préparation modifiée pendant l’attente Erplain : rapprochement requis');}
 export function partialRetryPlan(error,d,checkpoint,now=Date.now()){

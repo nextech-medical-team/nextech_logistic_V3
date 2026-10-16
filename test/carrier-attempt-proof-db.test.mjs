@@ -13,7 +13,7 @@ async function fixture(){
  CREATE TABLE lines(id text,order_id text,source_line text,source_sku text,target_sku text,quantity numeric,target_quantity numeric);
  CREATE TABLE settings(key text,value jsonb);CREATE TABLE resolution_jobs(id text,order_id text,status text);CREATE TABLE extra_parcels(id text,order_id text);
  CREATE TABLE audit(user_email text,action text,detail jsonb,created_at timestamptz DEFAULT now());
- CREATE TABLE schema_migrations(version text PRIMARY KEY);INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); INSERT INTO schema_migrations VALUES('partial-erplain-retry-20261016-1');`);
+ CREATE TABLE schema_migrations(version text PRIMARY KEY);INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); INSERT INTO schema_migrations VALUES('partial-erplain-retry-20261016-1'); INSERT INTO schema_migrations VALUES('partial-temu-label-20261016-1');`);
  await initializeCarrierJobs(db);
  const erp={bc:{id:'bc',status:'active'},bl:{id:'bl',status:'in_preparation'},pricing:{status:'blocked'},preparationAuthority:{kind:'recorded_bc',fingerprint:'wrong'}};
  await db.query("INSERT INTO orders(id,channel,reference,carrier,address,erp_live,label_status,weight_kg,parcel_count) VALUES('o','amazon','SYNTHETIC','gofo',$1,$2,'simulated',1,1)",[JSON.stringify({name:'Synthetic',street:'1 rue Test',city:'Paris',postal:'75001',country:'FR'}),JSON.stringify(erp)]);

@@ -24,6 +24,9 @@ export async function initializeAppSchema(db,initializers,{background=false}={})
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['partial-erplain-retry-20261016-1'])).rows.length){
    await db.transaction(async tx=>{await tx.exec('ALTER TABLE partial_deliveries ADD COLUMN IF NOT EXISTS erplain_retry JSONB');await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['partial-erplain-retry-20261016-1']);});
   }
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['partial-temu-label-20261016-1'])).rows.length){
+   await db.transaction(async tx=>{await tx.exec('ALTER TABLE partial_deliveries ADD COLUMN IF NOT EXISTS temu_label JSONB');await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['partial-temu-label-20261016-1']);});
+  }
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['negative-stock-history-20261016-1'])).rows.length){
    await db.transaction(async tx=>{await initializeNegativeStocks(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['negative-stock-history-20261016-1']);});
   }
