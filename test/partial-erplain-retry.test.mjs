@@ -9,6 +9,11 @@ import {retryPartialLabel} from '../src/partial-label-recovery.mjs';
 const order=()=>({id:'o',reference:'PO-100-200',channel:'temu',carrier:'temu',address:{country:'SI'},source_payload:{},erp_live:{bc:{id:'10',status:'active'}},suspension:{},tracking_status:'unknown'});
 import {partialRetryPlan,assertPartialRetryIdentity} from '../src/partial-erplain-retry.mjs';
 import {refreshPartialFromErplain} from '../src/partial-erplain-sync.mjs';
+test('an already published reserved-stock BL finishes despite zero remaining stock, without another stock write',async()=>{const f=await fixture();try{
+ f.bc.update_stock=true;f.bc.line_items[0].on_hand=0;f.bc.line_items[0].available=0;f.bc.shipping_orders.data=[{id:'30',label:'SHO00000030',status:'pending',update_stock:true,orders:{data:[{id:'10'}]},line_items:[{id:'31',parent_id:'20',quantity:2,variant:{id:'60'},location:{id:'70'}}]}];
+ const bl=f.bc.shipping_orders.data[0];await f.e.query("INSERT INTO partial_deliveries(id,order_id,request_id,status,stage,selection,bl,label_choice,environment) VALUES('reserved','o','reserved','bl_confirmed','bl_confirmed',$1,$2,'bl_only_temu','production')",[JSON.stringify([{lineId:'20',variantId:'60',locationId:'70',sku:'B',quantity:2,price:1}]),JSON.stringify(bl)]);
+ const original=f.api.request;f.api.request=async(q,v)=>q.includes('V3ResumePartialBL')?{ShippingOrder:bl}:original(q,v);await f.worker.run();const d=(await f.e.query('SELECT * FROM partial_deliveries')).rows[0];assert.equal(d.status,'bl_only',d.error);assert.equal(d.stock_document.notRequired,true);assert.equal(f.calls.length,0);
+ }finally{await f.e.close();}});
 test('refresh preserves a waiting draft selection; suspension and modified identity prevent replay',async()=>{const f=await fixture();try{
  let draft;const original=f.api.request;f.api.request=async(q,v)=>{if(q.includes('V3SelectPartialLines'))throw Object.assign(Error('429'),{httpStatus:429,confirmedRateLimitRejection:true});const r=await original(q,v);if(r.CreateShippingOrderFrom)draft=r.CreateShippingOrderFrom;return r;};
  await f.worker.prepare('o',[{lineId:'20',quantity:1}],'71111111-1111-4111-8111-111111111111','bl_only_temu');await f.worker.run();const before=(await f.e.query('SELECT * FROM partial_deliveries')).rows[0];
