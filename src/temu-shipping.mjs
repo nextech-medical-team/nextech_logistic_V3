@@ -1,4 +1,5 @@
 import {recoverMissingTemuPdfs} from './temu-pdf-archive.mjs';
+import {readConfirmedTemuShipments,temuLabelFailure} from './temu-shipment-remediation.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {hasCreatedBl} from './created-bl-label.mjs';
 import {recordedBlQuantityData} from './temu-bl-quantity-data.mjs';
@@ -112,14 +113,22 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   if(!packages.length)throw new Error('Aucun colis retrouvé : vérifier TEMU avant tout nouvel achat');if(packages.some(p=>!/^PK-\d+$/.test(p)))throw new Error('Identifiant de colis invalide');
   await db.query(`INSERT INTO temu_label_jobs(reference,status,packages) VALUES($1,'pending',$2) ON CONFLICT(reference) DO UPDATE SET packages=excluded.packages`,[reference,JSON.stringify(packages)]);
   const result=await api.read('bg.logistics.shipment.result.get',{packageSnList:packages});result.source='temu_direct';result.observedAt=new Date().toISOString();
+  if(Array.isArray(result.packageInfoResultList)&&result.packageInfoResultList.length===0){
+   const confirmed=await readConfirmedTemuShipments(api,reference,packages);
+   if(confirmed){
+    for(const p of j?.result?.packageInfoResultList||[]){const current=confirmed.find(c=>c.packageSn===p.packageSn);if(p.trackingNumber&&current?.trackingNumber!==p.trackingNumber)throw Error('TEMU · Suivi existant différent : conserver les documents et vérifier le colis');}
+    result.packageInfoResultList=confirmed;result.confirmedShipmentSource='bg.logistics.shipment.v2.get';result.previousLabelResult=j?.result?.previousLabelResult||{status:j?.status,error:j?.error,result:j?.result};
+   }
+  }
   for(const p of result.packageInfoResultList||[]){p.carrier=p.shippingCompanyName||p.carrier;p.amount=p.estimatedAmount??p.amount;p.currency=p.estimatedCurrencyCode||p.currency;p.costEstimated=p.estimatedAmount!==undefined;}
   const details=result.packageInfoResultList||[];for(const p of details){if(!packages.includes(p.packageSn)||!p.orderSendInfoList?.length||!p.orderSendInfoList.some(l=>l.parentOrderSn===reference))throw new Error('Identité du colis non vérifiable');}
   if(new Set(details.map(p=>p.packageSn)).size!==packages.length||details.length!==packages.length)throw new Error('Résultat TEMU incomplet : récupération à relancer');
   const {count,documentWarnings}=await recoverMissingTemuPdfs(db,api,reference,details);
   const refused=details.find(p=>Number(p.shippingLabelStatus)===2);
-  const unavailable=count<packages.length&&documentWarnings.length>0;
+  const confirmedOnly=!!result.confirmedShipmentSource;
+  const unavailable=count<packages.length&&(documentWarnings.length>0||confirmedOnly);
   const status=refused?'shipment_error':count===packages.length?'complete':unavailable?'document_unavailable':'pending';
-  const error=refused?('TEMU · Étiquette refusée : '+String(refused.failReasonText||'motif non communiqué').slice(0,250)):unavailable?(documentWarnings.some(w=>/picked up.*cannot be printed/i.test(w))?'TEMU · PDF non réimprimable : colis déjà collecté':'TEMU · PDF indisponible : '+documentWarnings.join(' ; ').slice(0,300)):status==='pending'?'TEMU · PDF en attente chez TEMU':null;
+  const error=refused?temuLabelFailure(refused.failReasonText):unavailable?(confirmedOnly?'TEMU · Expédition confirmée avec suivi ; PDF absent de l’archive. Récupérer le document existant, sans rachat.':documentWarnings.some(w=>/picked up.*cannot be printed/i.test(w))?'TEMU · PDF non réimprimable : colis déjà collecté':'TEMU · PDF indisponible : '+documentWarnings.join(' ; ').slice(0,300)):status==='pending'?'TEMU · PDF en attente chez TEMU':null;
   await db.query('UPDATE temu_label_jobs SET status=$2,error=$3,result=$4::jsonb,updated_at=now() WHERE reference=$1',[reference,status,error,JSON.stringify({...result,documentWarnings})]);return job(reference);
  });}
  return {list:()=>api.read('bg.order.list.v2.get',{pageNumber:1,pageSize:20,sortby:'createTime'}),history:async()=>(await db.query('SELECT *, (SELECT count(*)::int FROM temu_label_documents d WHERE d.reference=j.reference) documents FROM temu_label_jobs j ORDER BY updated_at DESC LIMIT 100')).rows,

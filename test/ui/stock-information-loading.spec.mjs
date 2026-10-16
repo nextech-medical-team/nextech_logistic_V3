@@ -64,3 +64,29 @@ test('unknown quantity and expired session never become zero or keep loading',as
  await expect(page.locator('#unknown')).toContainText('non vérifiée');await expect(page.locator('#unknown [data-stock-retry]')).toHaveCount(1);
  await expect(page.locator('#auth')).toContainText('session V3 expirée');await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
 });
+
+for(const width of [1440,390])test(`tender keeps installed loading and failure behavior ${width}`,async({page})=>{
+ await page.setViewportSize({width,height:844});
+ await page.clock.install();
+ await page.setContent('<div id="view-orders"><div id="order-rows"><button class="compact-problem" data-stock-channel="tender" data-problem-type="stock" data-problem-sku="AO">Stock</button></div></div>');
+ await page.evaluate(()=>{window.esc=String;window.reads=[];window.api=(url)=>{reads.push(url);return new Promise(()=>{});};});
+ await page.addScriptTag({content:script});
+ const info=page.locator('[data-stock-information="AO"]');
+ await expect(info).toContainText('lecture en cours');
+ await expect(info).not.toHaveAttribute('aria-busy','true');
+ await page.clock.fastForward(20001);
+ await expect(info).toContainText('lecture indisponible ou différée');
+ await expect(info).not.toContainText('quantité non vérifiée');
+ expect(await page.evaluate(()=>reads.length)).toBe(1);
+ await page.evaluate(()=>{const info=document.querySelector('[data-stock-information="AO"]');V3StockInformation.populate(info,'AO');});
+ await expect(info).toContainText('lecture indisponible ou différée');
+ expect(await page.evaluate(()=>reads.length)).toBe(1);
+});
+test('same SKU in tender and Amazon keeps separate states',async({page})=>{
+ await page.setContent('<div id="view-orders"><div id="order-rows"><button class="compact-problem" data-stock-channel="tender" data-problem-type="stock" data-problem-sku="SAME">Stock</button><button class="compact-problem" data-stock-channel="amazon" data-problem-type="stock" data-problem-sku="SAME">Stock</button></div></div>');
+ await page.evaluate(()=>{window.esc=String;window.reads=[];window.api=(url)=>{reads.push(url);return new Promise(()=>{});};});
+ await page.addScriptTag({content:script});
+ await expect(page.locator('[data-stock-information][data-stock-channel="tender"]')).toContainText('lecture en cours');
+ await expect(page.locator('[data-stock-information][data-stock-channel="amazon"]')).toContainText('lecture demandée à V3');
+ await expect.poll(()=>page.evaluate(()=>reads.length)).toBe(2);
+});

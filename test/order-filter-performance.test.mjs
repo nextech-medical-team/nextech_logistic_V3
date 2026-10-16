@@ -86,7 +86,9 @@ test('one statistics query preserves document families, unique counts, filters, 
   assert.deepEqual(subset,{transportStats:[{family:'mixed',orders:1}],summary:{total:2,blocked:2,delivered:0,labels:1}});
   assert.deepEqual(await orderStatistics(db,new URLSearchParams(),[]),{transportStats:[],summary:{total:0,blocked:0,delivered:0,labels:0}});
   assert.deepEqual((await orderStatistics(db,new URLSearchParams('country=BE'))).summary,{total:0,blocked:0,delivered:0,labels:0});
-  assert.equal((await orderStatistics(db,new URLSearchParams('status=production_ready&status=sandbox_ready'))).summary.total,3);
+  // Delivered is now its own display status, never an active label/preparation state.
+  assert.equal((await orderStatistics(db,new URLSearchParams('status=production_ready&status=sandbox_ready'))).summary.total,2);
+  assert.equal((await orderStatistics(db,new URLSearchParams('status=delivered'))).summary.total,1);
  }finally{await db.close();}
 });
 

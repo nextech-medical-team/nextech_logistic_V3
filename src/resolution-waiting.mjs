@@ -35,7 +35,7 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
      const manualCreatedBlLabel=j.action==='choose-carrier'&&o.channel!=='temu'&&!j.result?.erpOnly&&hasCreatedBl(o);
      if(manualCreatedBlLabel)assertPreparedLabelOrder(o,erp);
-     if(erp?.status==='review'&&!manualCreatedBlLabel){await update(j.id,'review','Erplain à compléter',j.result,erp.error);return;}
+     if(erp?.status==='review'&&!manualCreatedBlLabel&&!hasCreatedBl(o)){await update(j.id,'review','Erplain à compléter',j.result,erp.error);return;}
 
      const automatic=await advanceEquivalentLabel(db,j,{repair:j.status==='review'&&j.error===temuLabelPolicyMessage});
      if(automatic.handled){
@@ -59,9 +59,9 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
      if(preparationOnly){
 
-      if(erp?.status!=='complete')return;
+      if(erp?.status!=='complete'&&!hasCreatedBl(o))return;
 
-      if(!o.erp_live?.bl?.id||o.erp_live.bl.status!=='ready_to_ship'||!o.erp_live?.verifiedAt||!o.erp_live?.stockCheckedAt)throw Error('Validation stock/BL absente : contrôler les documents Erplain avant étiquette.');
+      if(!hasCreatedBl(o))throw Error('BL publié absent : terminer la préparation des documents.');
 
       await db.query("UPDATE orders SET resolution_pending_resume=true WHERE id=$1 AND NOT EXISTS(SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status='ready')",[o.id]);
 
@@ -71,15 +71,16 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
      }
 
-     if(erp?.status!=='complete'&&!manualCreatedBlLabel)return;
+     if(o.channel==='temu')throw Error(temuLabelPolicyMessage);
+     if(erp?.status!=='complete'&&!hasCreatedBl(o))return;
 
-     if(!manualCreatedBlLabel&&(!o.erp_live?.bl?.id||!o.erp_live?.verifiedAt||!o.erp_live?.stockCheckedAt))throw Error('Validation stock/BL absente : contrôler les documents Erplain avant étiquette.');
+     if(!hasCreatedBl(o))throw Error('BL publié absent : terminer la préparation des documents.');
 
      if(j.result?.regenerateExisting&&!j.result?.labelRequested){const r=await regenerate(db,{ids:[o.id],batchId:'resolution-'+j.id,allowReady:true});if(r.skipped.length)throw Error(r.skipped[0].reason);await update(j.id,'waiting','Nouvelle étiquette GLS/GOFO · réimpression nécessaire',{...j.result,labelRequested:true});return;}
 
      if(!j.result?.labelRequested){
       const existing=(await db.query('SELECT * FROM carrier_jobs WHERE order_id=$1',[o.id])).rows[0];
-      if(manualCreatedBlLabel&&existing?.status==='failed'&&!await canRetryFailedCarrier(db,existing))throw Error('Création transport à vérifier : aucune preuve de refus avant envoi');
+      if(manualCreatedBlLabel&&existing?.status==='failed'&&!await canRetryFailedCarrier(db,existing,{manualRequest:true}))throw Error('Création transport à vérifier : aucune preuve de refus avant envoi');
       if(manualCreatedBlLabel&&(!existing||['failed','review'].includes(existing.status))&&(await db.query('SELECT 1 FROM carrier_documents WHERE order_id=$1 LIMIT 1',[o.id])).rows.length)throw Error('Création transport à vérifier : conserver le PDF existant');
       if(existing&&(['ready','pending','creating','awaiting_pdf','review'].includes(existing.status)||existing.result||existing.reference||existing.tracking?.length)){
        if(['failed','review'].includes(existing.status))throw Error('Création transport à vérifier : aucune recréation automatique');

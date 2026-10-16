@@ -65,7 +65,7 @@ test('only a provably unsent read at stable checkpoints can return to the queue'
  assert.equal(safeQuotaReadQueue(o,e),true);
  for(const phase of ['creating_bc','creating_bl','creating_customer','creating_stock','publishing_bl','finalizing_bl'])assert.equal(safeQuotaReadQueue({...o,erp_live:{phase}},e),false);
  assert.equal(safeQuotaReadQueue({...o,suspension:{active:true}},e),false);assert.equal(safeQuotaReadQueue(o,{...e,erplainReadOnly:false}),false);assert.equal(safeQuotaReadQueue(o,{...e,erplainRequestNotSent:false}),false);
- assert.equal(Date.parse(quotaReadRetryAt(e,0)),2000);assert.equal(Date.parse(quotaReadRetryAt({...e,erplainProviderRateLimited:true},0)),60000);
+ assert.equal(Date.parse(quotaReadRetryAt(e,0)),2000);assert.equal(Date.parse(quotaReadRetryAt({...e,erplainProviderRateLimited:true},0)),2000);
 });
 test('quota waiting is shown as queued, while unrelated stock errors stay blocked',()=>{
  const r={id:'1',erp_status:'review',erp_error:'Erplain temporairement limité : vérification et reprise automatiques programmées',quotaRecovery:{readRateLimited:true,nextReadCheckAt:'2099-10-15T15:00:00Z'},resolution_status:'review',resolution_error:'Erplain temporairement limité : vérification et reprise automatiques programmées'};
@@ -107,14 +107,15 @@ test('completed BC/BL flow retires only older transient reviews without inventin
  const engine=new PGlite();await engine.waitReady;
  try{
   await engine.exec(`CREATE TABLE orders(id text PRIMARY KEY,erp_live jsonb,source_payload jsonb DEFAULT '{}',suspension jsonb DEFAULT '{}',resolution_pending_resume boolean DEFAULT false,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,label_status text,tracking_status text);
-   CREATE TABLE erp_live_jobs(order_id text,status text,error text);
+   CREATE TABLE erp_live_jobs(order_id text,status text,error text,updated_at timestamptz);
+   CREATE TABLE correction_jobs(order_id text,status text);
    CREATE TABLE resolution_jobs(id text PRIMARY KEY,order_id text,status text,stage text,error text,updated_at timestamptz,result jsonb);`);
   const old='Erplain temporairement limité : vérification et reprise automatiques programmées';
   const state={bc:{id:1,status:'active',update_stock:true},bl:{id:2,status:'ready_to_ship'},phase:'bl_ready',verifiedAt:'2026-10-15T01:10:00Z',transientRecovery:{readRateLimited:true,lastError:'Erplain HTTP 429'}};
   for(const id of ['good','no-proof','pending','newer','suspended','stock-error','legacy','forbidden','active-resolution']){
    const s=structuredClone(state);if(id==='no-proof')s.bc.update_stock=false;if(id==='legacy'){s.bc.update_stock=false;s.phase='ready';s.stockDocument={id:3,status:'completed',update_stock:true};}if(id==='forbidden')s.bl.status='in_preparation';
    await engine.query('INSERT INTO orders(id,erp_live,suspension) VALUES($1,$2,$3)',[id,JSON.stringify(s),JSON.stringify(id==='suspended'?{active:true}:{})]);
-   await engine.query('INSERT INTO erp_live_jobs VALUES($1,$2,null)',[id,id==='pending'?'pending':'complete']);
+   await engine.query('INSERT INTO erp_live_jobs VALUES($1,$2,null,now())',[id,id==='pending'?'pending':'complete']);
    await engine.query("INSERT INTO resolution_jobs VALUES($1,$1,'review','Erplain à compléter',$2,$3,null)",[id,id==='stock-error'?'Stock insuffisant':old,id==='newer'?'2026-10-15T01:20:00Z':'2026-10-15T01:00:00Z']);
   }
   await engine.exec("INSERT INTO resolution_jobs VALUES('active','active-resolution','queued','Attente',null,now(),null)");

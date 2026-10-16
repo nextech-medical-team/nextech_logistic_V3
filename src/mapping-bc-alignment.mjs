@@ -41,7 +41,7 @@ export async function assertAdditionalMappingStock(api,bc,items){
   if(v.track_inventory===false)continue;
   if(!Array.isArray(v.stock_levels?.data)||v.stock_levels.paginatorInfo?.hasMorePages!==false)throw Error('Additional mapping stock response incomplete');
   const levels=v.stock_levels.data.filter(l=>String(l.location?.id)===locationId);if(levels.length!==1)throw Error('Additional mapping stock location not confirmed');
-  assertFullOrderStock([{variant:v,location:{id:locationId},quantity:additional,available:levels[0].available,on_hand:levels[0].on_hand,reserved_quantity:0}]);
+  assertFullOrderStock([{variant:v,location:{id:locationId},quantity:additional,available:levels[0].available,on_hand:levels[0].on_hand,reserved_quantity:0}],{preserveInstalled:true});
  }
 }
 // Uses the normal Erplain BC edit. Erplain owns its stock adjustment; V3 never

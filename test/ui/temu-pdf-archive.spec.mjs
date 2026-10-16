@@ -10,7 +10,10 @@ for(const width of [1366,390])test('archived PDF and existing shipment are clear
  await page.goto('/');
  await expect(page.locator('a[href="/api/temu/pdf?reference=PO-020-123456789&package=PK-123"]')).toHaveText('▤ PDF TEMU ↗');
  expect(await page.evaluate(()=>temuOrderLabelAction({temu_documents:[{package:'PK-123'}]}))).toContain('Étiquette TEMU enregistrée');
- await expect(page.locator('[data-temu-order="PO-020-987654321"]')).toHaveText('Expédition existante');
+ await expect(page.locator('[data-temu-order="PO-020-987654321"]')).toHaveCount(0);
+ await expect(page.locator('#order-rows tr[data-order-delivered="true"]')).toHaveCount(3);
+ await expect(page.locator('#order-rows .badge').filter({hasText:'Livrée · aucun problème à gérer'})).toHaveCount(3);
+ await expect(page.locator('[data-exact-problem], [data-resume-order], [data-choose-carrier]')).toHaveCount(0);
  await expect(page.locator('[data-temu-purchase]')).toHaveCount(0);
  await expect(page.locator('.temu-pdf-archive-note summary')).toHaveText('Historique PDF · expédition livrée');
  await expect(page.locator('[data-correction-issue]').filter({hasText:'PDF original indisponible'})).toHaveCount(0);
