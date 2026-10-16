@@ -461,7 +461,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   get running(){return running;},
   async routes({p,url,req,res,user,body,json,permitted}){
    if(p==='/api/resolutions/context'&&req.method==='GET'){json(res,200,await context(db,directory,url.searchParams.get('id')));return true;}
-   if(p==='/api/resolutions/job'&&req.method==='GET'){const j=(await db.query('SELECT id,order_id,action,status,stage,result,error,created_at,updated_at,state_since FROM resolution_jobs WHERE id=$1',[url.searchParams.get('id')])).rows[0];if(!j)throw Error('Intervention introuvable');json(res,200,j);return true;}
+   if(p==='/api/resolutions/job'&&req.method==='GET'){const j=(await db.query("SELECT id,order_id,action,status,stage,result,error,created_at,updated_at,state_since,to_jsonb(resolution_jobs)->'payload'->>'carrier' AS requested_carrier FROM resolution_jobs WHERE id=$1",[url.searchParams.get('id')])).rows[0];if(!j)throw Error('Intervention introuvable');json(res,200,j);return true;}
    if(p!=='/api/resolutions'||req.method!=='POST')return false;
    permitted(user,['admin','manager']);const b=validateResolution(await body(req));json(res,202,await queueResolutionRequest(db,b,user));return true;
   },

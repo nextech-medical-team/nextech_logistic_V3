@@ -48,6 +48,7 @@ groups.push(['--test','test/erplain-recovery-fluidity.test.mjs']);
 groups.push(postBlHistoryGroup);
 groups.at(-1).push('test/receipt-analysis-outcome.test.mjs');
 groups.push(['--test','test/bl-identity.test.mjs']);
+groups.push(['--test','test/manual-label-request-view.test.mjs']);
 groups.push(['--test','test/temu-partial-bl-only.test.mjs']);
 groups.push(['--test','test/gls-sku-font.test.mjs']);
 groups.push(['--test','test/erplain-quota-priority.test.mjs','test/erplain-current-reason.test.mjs']);

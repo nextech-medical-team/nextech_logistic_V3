@@ -368,11 +368,11 @@ function resolutionDialog(title,reference){
 
 
 
-   let queued=ctx.active||queuedHandle;if(!queued){const requested={id:ctx.order.id,action,type,...data};if(pendingRequest){const {requestId,...previous}=pendingRequest;if(JSON.stringify(previous)!==JSON.stringify(requested))throw Error('L’enregistrement précédent reste à vérifier. Ne changez pas son contenu avant de vérifier la commande.');}else pendingRequest=JSON.parse(JSON.stringify({...requested,requestId:crypto.randomUUID()}));queued=await api('/api/resolutions',pendingRequest);}queuedHandle={...queued,action:queued.action||action};pendingRequest=null;if((queued.action||action)==='replace-equivalent'){modal.dataset.equivalentSubmitted='true';delete modal.dataset.unsavedEquivalent;}
+   let queued=ctx.active||queuedHandle;if(!queued){const requested={id:ctx.order.id,action,type,...data};if(pendingRequest){const {requestId,...previous}=pendingRequest;if(JSON.stringify(previous)!==JSON.stringify(requested))throw Error('L’enregistrement précédent reste à vérifier. Ne changez pas son contenu avant de vérifier la commande.');}else pendingRequest=JSON.parse(JSON.stringify({...requested,requestId:crypto.randomUUID()}));queued=await api('/api/resolutions',pendingRequest);}queuedHandle={...queued,action:queued.action||action,carrier:queued.carrier||data.carrier};pendingRequest=null;if((queued.action||action)==='replace-equivalent'){modal.dataset.equivalentSubmitted='true';delete modal.dataset.unsavedEquivalent;}
 
 
 
-   let readFailures=0;
+   let readFailures=0,receiptShown=false;
 
 
 
@@ -429,10 +429,12 @@ function resolutionDialog(title,reference){
 
 
 
-    state.textContent=r.error||r.stage;
+    queuedHandle.carrier=r.requested_carrier||queuedHandle.carrier;
+    const receipt=ctx.order.channel!=='tender'&&r.action==='choose-carrier'&&r.requested_carrier?manualRequestFeedbackText(r.status,r.requested_carrier):null;
+    state.textContent=r.error||receipt||r.stage;if(receipt&&!r.error&&!receiptShown){flash(receipt);receiptShown=true;}
     clearInterval(timer);
     const observation=Date.now();let observedStatus=r.status,observedSince=r.state_since,observedService=['equivalent-preview','replace-equivalent','check-sku','compare-bc','weight','reconcile-bc'].includes(r.action||action)?'V3 → Erplain':'V3',observedStep=r.stage||'';
-    if(r.status==='waiting'){try{const follow=await api('/api/orders/processing',{ids:[ctx.order.id]});const current=follow.rows?.[0];if(current?.state){observedStatus=({active:'running',queued:'queued',blocked:'review'})[current.state];observedSince=current.since;observedService='V3 → '+current.service;observedStep=current.step;}}catch{observedStatus='unconfirmed';}}
+    if(r.status==='waiting'){try{const follow=await api('/api/orders/processing',{ids:[ctx.order.id]});const current=follow.rows?.[0];if(current?.manual_label_request)state.textContent=current.manual_label_request.message;if(current?.state){observedStatus=({active:'running',queued:'queued',blocked:'review'})[current.state];observedSince=current.since;observedService='V3 → '+current.service;observedStep=current.step;}}catch{observedStatus='unconfirmed';}}
     if(closed)break;
     const updateClock=()=>{const valid=observedSince&&Number.isFinite(new Date(observedSince).getTime());const duration=valid?Math.max(0,Math.floor((Date.now()-new Date(observedSince).getTime())/1000))+' s':'début non disponible';clock.textContent=observedService+' · '+(observedStatus==='running'?'traitement actif depuis '+duration:observedStatus==='queued'?'attente depuis '+duration:observedStatus==='waiting'?'suite du traitement en attente':['review','failed','cancelled'].includes(observedStatus)?'blocage depuis '+duration:observedStatus==='unconfirmed'?'état actuel non confirmé':'vérification terminée')+(observedStep?' · '+observedStep:'')+' · état reçu à '+new Date(observation).toLocaleTimeString('fr-FR');};updateClock();if(['running','queued','review'].includes(observedStatus))timer=setInterval(updateClock,1000);
 

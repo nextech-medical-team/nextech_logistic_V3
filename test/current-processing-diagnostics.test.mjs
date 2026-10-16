@@ -55,3 +55,16 @@ test('SQL processing reclassifies a historical post-BL mapping refusal without c
   assert(row.label_diagnostic_history.some(h=>h.reason===error));assert.equal(JSON.stringify((await db.query('SELECT * FROM carrier_jobs')).rows),before);
  }finally{await db.close();}
 });
+
+test('SQL processing acknowledges queued GLS choice before carrier changes and preserves database state',async()=>{
+ const {db,at,before}=await fixture();try{
+  await db.exec('ALTER TABLE resolution_jobs ADD COLUMN id text; ALTER TABLE resolution_jobs ADD COLUMN payload jsonb;');
+  await db.query("UPDATE orders SET source_payload='{}',issue=null,erp_live=$1",[{bl:{id:'BL',status:'ready_to_ship'}}]);
+  await db.exec("UPDATE erp_live_jobs SET status='complete',error=null");
+  await db.query("INSERT INTO resolution_jobs(id,order_id,status,action,payload,created_at,updated_at,state_since,stage) VALUES('request','A','queued','choose-carrier',$1,$2,$2,$2,'En attente')",[{carrier:'gls'},at]);
+  await db.query("INSERT INTO temu_label_jobs(reference,status,error,state_since,updated_at) VALUES('PO-TARGET','shipment_error','TEMU · Étiquette refusée : ancien essai',$1,$1)",[before]);
+  const original=JSON.stringify((await db.query('SELECT * FROM resolution_jobs')).rows);
+  const [row]=await processingRows(db,['A']);assert.equal(row.service,'GLS');assert.equal(row.state,'queued');assert.match(row.stage,/Demande GLS reçue/);assert.equal(Date.parse(row.manual_label_request.received_at),Date.parse(at));assert(!row.activities.some(a=>a.service==='TEMU'&&a.state==='blocked'));
+  assert.equal(JSON.stringify((await db.query('SELECT * FROM resolution_jobs')).rows),original);
+ }finally{await db.close();}
+});
