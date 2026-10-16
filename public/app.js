@@ -214,9 +214,44 @@ async function users(){const r=await api('/api/users');$('user-rows').innerHTML=
 
 async function audit(){const r=await api('/api/audit');$('audit-rows').innerHTML=r.rows.map(a=>`<tr><td>${esc(new Date(a.created_at).toLocaleString('fr-FR'))}</td><td>${esc(a.user_email)}</td><td>${esc(a.action)}</td><td>${esc(JSON.stringify(a.detail))}</td></tr>`).join('');}
 
-async function show(view){currentView=view;document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+view);document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));$('title').textContent=({orders:'Commandes',imports:'Imports','import-shopify':'Import Shopify',mappings:'Correspondances SKU',products:'Poids produits',connections:'Connexions',users:'Équipe',audit:'Journal des actions'})[view];try{if(view==='orders')await Promise.all([stats(),orders()]);if(view==='products')await products();if(view==='mappings')await mappings();if(view==='users')await users();if(view==='audit')await audit();if(view==='connections')await catalogStatus();}catch(e){flash(e.message,true);}}
+async function show(view){currentView=view;document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+view);document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===view));$('title').textContent=({orders:'Commandes',imports:'Imports','import-shopify':'Import Shopify',mappings:'Correspondances SKU','negative-stocks':'Stocks négatifs',products:'Poids produits',connections:'Connexions',users:'Équipe',audit:'Journal des actions'})[view];try{if(view==='orders')await Promise.all([stats(),orders()]);if(view==='products')await products();if(view==='mappings')await mappings();if(view==='users')await users();if(view==='audit')await audit();if(view==='connections')await catalogStatus();}catch(e){flash(e.message,true);}}
 
-async function enter(){user=await api('/api/me');$('session-loading').hidden=true;$('login').hidden=true;$('app').hidden=false;$('identity').textContent=user.email+' · '+user.role;document.querySelector('[data-view="users"]').hidden=user.role!=='admin';document.querySelector('[data-view="audit"]').hidden=!['admin','manager'].includes(user.role);document.querySelectorAll('[data-view="imports"],[data-view="import-shopify"]').forEach(el=>el.hidden=!['admin','manager','operator'].includes(user.role));$('deliver').hidden=!['admin','manager'].includes(user.role);$('tracking').hidden=!['admin','manager','operator'].includes(user.role);await show('orders');await refreshErplainProgress();}
+// Persist the active workspace module across reloads, scoped to each signed-in user.
+let workspaceNavigationReady=false;
+const workspaceNavigationKey=()=> 'v3.workspace.view:'+user.email;
+function workspaceViewAllowed(view){
+ if(!/^[a-z0-9-]+$/.test(view||'')||!document.getElementById('view-'+view))return false;
+ if(view==='users'&&user.role!=='admin')return false;
+ if(view==='audit'&&!['admin','manager'].includes(user.role))return false;
+ if(['imports','import-shopify'].includes(view)&&!['admin','manager','operator'].includes(user.role))return false;
+ const navigation=document.querySelector('[data-view="'+view+'"]');
+ return !navigation?.hidden;
+}
+function saveWorkspaceView(){
+ if(!workspaceNavigationReady||!user||$('app').hidden)return;
+ const visible=[...document.querySelectorAll('.view')].find(view=>!view.hidden);
+ if(!visible)return;
+ const view=visible.id.slice(5);if(!workspaceViewAllowed(view))return;
+ try{sessionStorage.setItem(workspaceNavigationKey(),view);}catch{}
+ const hash=new URLSearchParams(location.hash.slice(1));hash.set('view',view);
+ history.replaceState(history.state,'',location.pathname+location.search+'#'+hash.toString());
+}
+async function restoreWorkspaceView(){
+ workspaceNavigationReady=false;
+ // All extension scripts must have registered their screens and navigation wrappers.
+ if(document.readyState==='loading')await new Promise(resolve=>document.addEventListener('DOMContentLoaded',resolve,{once:true}));
+ let view=new URLSearchParams(location.hash.slice(1)).get('view');
+ if(!view){try{view=sessionStorage.getItem(workspaceNavigationKey());}catch{}}
+ await show(workspaceViewAllowed(view)?view:'orders');
+ workspaceNavigationReady=true;saveWorkspaceView();
+}
+function observeWorkspaceView(){
+ new MutationObserver(saveWorkspaceView).observe($('app'),{subtree:true,attributes:true,attributeFilter:['hidden']});
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',observeWorkspaceView,{once:true});else observeWorkspaceView();
+// End workspace navigation persistence.
+
+async function enter(){user=await api('/api/me');$('session-loading').hidden=true;$('login').hidden=true;$('app').hidden=false;$('identity').textContent=user.email+' · '+user.role;document.querySelector('[data-view="users"]').hidden=user.role!=='admin';document.querySelector('[data-view="audit"]').hidden=!['admin','manager'].includes(user.role);document.querySelectorAll('[data-view="imports"],[data-view="import-shopify"]').forEach(el=>el.hidden=!['admin','manager','operator'].includes(user.role));$('deliver').hidden=!['admin','manager'].includes(user.role);$('tracking').hidden=!['admin','manager','operator'].includes(user.role);await restoreWorkspaceView();await refreshErplainProgress();}
 
 $('login-form').onsubmit=async e=>{e.preventDefault();try{if(setup)await api('/api/setup',{email:$('email').value,password:$('password').value,token:$('setup-token').value});await api('/api/login',{email:$('email').value,password:$('password').value});$('password').value='';$('setup-token').value='';history.replaceState(null,'','/');await enter();}catch(e){$('login-error').textContent=e.message;}};
 

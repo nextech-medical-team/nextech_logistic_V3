@@ -28,6 +28,8 @@ import {initializeShopifyObservation,shopifyObservationWorker,shopifyObservation
 import {readingService} from './temu-reading.mjs';
 import {initializeEquivalences,equivalenceApi} from './equivalence-catalog.mjs';
 import {stockInformationService} from './stock-information.mjs';
+import {negativeStocksService,initializeNegativeStocks,negativeStocksHistory} from './negative-stocks.mjs';
+import {exportNegativeStocks} from './negative-stocks-export.mjs';
 import {initializeV2Followup,v2Worker,v2Routes} from './v2-followup.mjs';
 import {currentPartialSkuPdf} from './label-sku-copy.mjs';
 import {initializeSkuCopies} from './label-sku-copy.mjs';
@@ -122,7 +124,7 @@ const config=runtimeConfig();
 const db=await openDatabase({directory:path.join(directory,'postgres'),url:process.env.DATABASE_URL});
 db.recoverInterrupted=config.background;
 const releaseLeader=config.background?await db.acquireLeader():async()=>{};
-await initializeAppSchema(db,[initializeCarrierJobs,initializeComments2005,initializeTemuShipping,initializeStocks,initializeErplainLive,initializePartialDeliveries,initializeCorrections,initializeTemuAutomaticPurchase,initializeResolutions,initializeProcurement,initializeLifecycle,initializeErplainRefresh,initializeMarketplaceInbox,initializeLabelDownloads,initializeReadServiceJobs,initializeProcessingClock],{background:config.background});
+await initializeAppSchema(db,[initializeCarrierJobs,initializeComments2005,initializeTemuShipping,initializeStocks,initializeNegativeStocks,initializeErplainLive,initializePartialDeliveries,initializeCorrections,initializeTemuAutomaticPurchase,initializeResolutions,initializeProcurement,initializeLifecycle,initializeErplainRefresh,initializeMarketplaceInbox,initializeLabelDownloads,initializeReadServiceJobs,initializeProcessingClock],{background:config.background});
 await db.withLocks(['schema'],()=>initializeImportReceptions(db));
 await db.withLocks(['schema'],()=>initializeSkuCopies(db));
 await db.withLocks(['schema'],()=>initializeReceiptRecovery(db));
@@ -222,6 +224,8 @@ const partialTimer=backgroundInterval(()=>partialWorker.run(),1500,'partials');p
 
 for(const carrier of ['gls','gofo'])backgroundInterval(async()=>{if(carrierWorkers)await carrierWorkers.run(carrier);},1000,'carrier-'+carrier);
 
+const negativeStocks=negativeStocksService(erplainAccount(directory,'source'),directory);
+const negativeStockHistory=negativeStocksHistory(db,negativeStocks);
 const stockInformation=stockInformationService(db,erplainAccount(directory,'source'),directory);
 const catalog=createCatalogSync(db,directory); const allWeights=fullWeightSync(db,directory),equivalents=equivalentService(db,directory);
 
@@ -447,6 +451,14 @@ const server=http.createServer(async(req,res)=>{
     if(await receiptRecovery.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await resolutions.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await correctionsApi({p,url,req,res,db,user,body,json,permitted,directory}))return;
+    if(p==='/api/stocks/negative/export'&&req.method==='POST'){
+      const bytes=await exportNegativeStocks((await body(req)).rows);
+      res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition','attachment; filename="stocks-negatifs.xlsx"');res.setHeader('Cache-Control','no-store');res.end(bytes);return;
+    }
+    if(p==='/api/stocks/negative/scan'&&req.method==='POST'){json(res,200,await negativeStockHistory.scan(await body(req),user));return;}
+    if(p==='/api/stocks/negative/history'&&req.method==='GET'){json(res,200,await negativeStockHistory.list(url.searchParams.get('page')||'1'));return;}
+    if(p==='/api/stocks/negative/history/detail'&&req.method==='GET'){json(res,200,await negativeStockHistory.get(url.searchParams.get('id')));return;}
+    if(p==='/api/stocks/negative'&&req.method==='GET'){json(res,200,await negativeStocks.page(url.searchParams.get('page')||'1'));return;}
     if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku')));return;}
     if(await equivalenceApi({p,url,req,res,db,user,body,json,permitted,api:erplainAccount(directory,'source'),directory}))return;
     if(await workspaceApi({p,url,req,res,db,user,body,json,permitted,audit,catalog,carrierConfigured:!!carrierWorkers&&!!productionConfig}))return;
