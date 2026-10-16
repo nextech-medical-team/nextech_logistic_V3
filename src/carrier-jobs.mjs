@@ -137,9 +137,9 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
     if(carrier==='gofo'&&!result&&(e.zoneRejected||(orderChannel==='amazon'&&e.rejected===true&&e.cityRejected===true&&!e.uncertain&&!e.partialResult))){
      const refusalKind=e.cityRejected?'city':'zone';
      await db.transaction(async tx=>{
-      await tx.query("UPDATE orders SET carrier='gls',parcel_count=ceil(weight_kg/30),source_payload=source_payload||$2::jsonb WHERE id=$1",[job.order_id,JSON.stringify({gofoZoneRefusal:{reason:e.message,kind:refusalKind,at:new Date().toISOString(),fallback:'gls'}})]);
+      await tx.query("UPDATE orders SET carrier='gls',parcel_count=ceil(weight_kg/30),source_payload=source_payload||$2::jsonb WHERE id=$1",[job.order_id,JSON.stringify({gofoZoneRefusal:{reason:e.message,...(orderChannel==='amazon'?{kind:refusalKind}:{}),at:new Date().toISOString(),fallback:'gls'}})]);
       await tx.query("UPDATE carrier_jobs SET carrier='gls',status='pending',attempts=0,error=$2,failure_phase=null,creation_started_at=null,updated_at=now() WHERE order_id=$1",[job.order_id,'Bascule GLS après refus explicite '+(refusalKind==='city'?'de ville':'de zone')+' GOFO : '+e.message]);
-      await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','carrier.gofo_zone_fallback',$1)",[JSON.stringify({orderId:job.order_id,reason:e.message,kind:refusalKind,previousAttempt:{...job,creationStarted,error:e.message},addressUnchanged:true})]);
+      await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','carrier.gofo_zone_fallback',$1)",[JSON.stringify({orderId:job.order_id,reason:e.message,...(orderChannel==='amazon'?{kind:refusalKind,previousAttempt:{...job,creationStarted,error:e.message},addressUnchanged:true}:{})})]);
      });return;
     }
     const status=result?(carrier==='gofo'&&job.attempts+1<5?'awaiting_pdf':'review'):(e.uncertain?'review':'failed');

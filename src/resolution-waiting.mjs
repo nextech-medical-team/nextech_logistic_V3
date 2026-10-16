@@ -80,7 +80,7 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
 
      if(!j.result?.labelRequested){
       const existing=(await db.query('SELECT * FROM carrier_jobs WHERE order_id=$1',[o.id])).rows[0];
-      if(manualCreatedBlLabel&&existing?.status==='failed'&&!await canRetryFailedCarrier(db,existing,{manualRequest:true}))throw Error('Création transport à vérifier : aucune preuve de refus avant envoi');
+      if(manualCreatedBlLabel&&existing?.status==='failed'&&!await canRetryFailedCarrier(db,existing,{manualRequest:true,channel:o.channel}))throw Error('Création transport à vérifier : aucune preuve de refus avant envoi');
       if(manualCreatedBlLabel&&(!existing||['failed','review'].includes(existing.status))&&(await db.query('SELECT 1 FROM carrier_documents WHERE order_id=$1 LIMIT 1',[o.id])).rows.length)throw Error('Création transport à vérifier : conserver le PDF existant');
       if(existing&&(['ready','pending','creating','awaiting_pdf','review'].includes(existing.status)||existing.result||existing.reference||existing.tracking?.length)){
        if(['failed','review'].includes(existing.status))throw Error('Création transport à vérifier : aucune recréation automatique');
