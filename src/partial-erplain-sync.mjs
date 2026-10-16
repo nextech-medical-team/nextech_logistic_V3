@@ -51,7 +51,7 @@ export async function refreshPartialFromErplain(db,api,id,{document=null,identit
   const issue=stockMismatch({status:bl.status==='cancelled'?'cancelled':'active',stock_document:o.erp_live.stockDocument,bl,selection:bl.status==='cancelled'?[]:syncedSelection(bc,bl)},stock);if(issue)holds.push({bl:bl.label,stockId:stock.id,stockLabel:stock.label,message:issue});
  }
 
- for(const d of deliveries){if(!d.bl?.id||ownsPartialPreparation(d))continue;const bl=bc.shipping_orders.data.find(b=>String(b.id)===String(d.bl.id));if(!bl)throw Error('Erplain · BL '+d.bl.label+' absent : vérifier avant nouvelle allocation');
+ for(const d of deliveries){if(!d.bl?.id||(o.channel!=='tender'&&ownsPartialPreparation(d)))continue;const bl=bc.shipping_orders.data.find(b=>String(b.id)===String(d.bl.id));if(!bl)throw Error('Erplain · BL '+d.bl.label+' absent : vérifier avant nouvelle allocation');
 
   const cancelled=bl.status==='cancelled',selection=cancelled?d.selection:syncedSelection(bc,bl);let stock=null;
 

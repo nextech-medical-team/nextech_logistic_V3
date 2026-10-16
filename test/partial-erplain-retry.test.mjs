@@ -52,3 +52,14 @@ async function fixture(){const e=new PGlite();const db={query:(...a)=>e.query(..
  const bc={id:'10',label:'BC TEST',external_reference:'RECORDED-REFERENCE',status:'active',update_stock:false,total:2,currency:{label:'EUR'},customer:{id:'50'},line_items:[{id:'20',quantity:2,price:1,tax_amount:0,available:4,on_hand:4,reserved_quantity:0,variant:{id:'60',sku:'B',track_inventory:true},location:{id:'70'}}],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}};
  const calls=[];const api={verify:async()=>({id:100174}),request:async(q,v)=>{calls.push({q,v});if(q.includes('V3CreatePartialDraft'))return {CreateShippingOrderFrom:{id:'30',status:'unpublished',update_stock:false,line_items:[{id:'31',parent_id:'20',quantity:2,variant:{id:'60'}}]}};if(q.includes('V3SelectPartialLines'))return {UpdateShippingOrder:{id:'30',label:'V3P-test',status:'unpublished',update_stock:false,orders:{data:[{id:'10'}]},line_items:v.input.line_items}};if(q.includes('V3BlBeforeNumber'))return {ShippingOrder:{id:'30',label:'SHO00000030',status:'pending'}};if(q.includes('Variant(id:'))return {Variant:{id:'60',sku:'B',has_batch_numbers:false,has_serial_numbers:false}};if(q.includes('V3PartialStockMovement'))return {CreateStockRemoval:{id:'40',label:v.input.label,status:'completed',update_stock:true}};assert.fail('Unexpected provider call '+q);}};
  const clients=new Proxy({},{get:()=>()=>assert.fail('No carrier call allowed')});const worker=partialService(db,'unused',{api,clients,refreshDocuments:async()=>({bc}),metadata:async()=>assert.fail('BL-only keeps the recorded BC metadata without a new representative mapping')});return {e,db,worker,calls,bc,api};}
+
+
+test('tender keeps installed quota behavior and only processes the selected delivery',async()=>{const f=await fixture();try{
+ await f.e.query("UPDATE orders SET channel='tender'");
+ await f.e.query("INSERT INTO partial_deliveries(id,order_id,request_id,status,selection,label_choice,environment) VALUES('ao','o','ao','queued',$1,'new','production')",[JSON.stringify([{lineId:'20',variantId:'60',locationId:'70',sku:'B',quantity:1,price:1}])]);
+ const seen=[];const db={...f.db,query:(sql,args)=>{seen.push({sql,args});return f.db.query(sql,args);}};
+ const worker=partialService(db,'unused',{api:f.api,clients:{},refreshDocuments:async()=>{throw Object.assign(Error('read quota'),{httpStatus:429,erplainReadOnly:true});}});
+ await worker.run();const d=(await f.e.query("SELECT * FROM partial_deliveries WHERE id='ao'")).rows[0];
+ assert.equal(d.status,'review');assert.equal(d.erplain_retry,null);assert.equal(d.error,'read quota');assert.equal(f.calls.length,0);
+ assert(seen.some(x=>x.sql.includes('WHERE partial_deliveries.id=$1 AND NOT EXISTS')&&x.args[0]==='ao'));
+ }finally{await f.e.close();}});
