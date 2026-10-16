@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {manualPlatformCancellation} from '../src/manual-platform-cancellation.mjs';
+import {withShipmentLock} from '../src/shipment-lock.mjs';
 
 function fixture({channel='shopify',cancelled=true,error=null,bc=true,shipped=false,documentError=null}={}){
  const order={id:'a',reference:'REF',channel,source_payload:{mallId:'42'},suspension:{},erp_live:bc?{bc:{id:'123'}}:{},tracking_status:shipped?'shipped':'not_shipped'},calls=[];
@@ -11,6 +12,48 @@ function fixture({channel='shopify',cancelled=true,error=null,bc=true,shipped=fa
  return {order,calls,service:manualPlatformCancellation(db,'unused',suspension,{shopify,connect})};
 }
 const user={role:'operator',email:'test@example.test'};
+
+test('200 Temu checks reuse shop authorization but read every order status afresh',async()=>{
+ const order={id:'a',reference:'REF',channel:'temu',source_payload:{mallId:'42'}};
+ let connections=0,reads=0;
+ const db={query:async sql=>({rows:sql.startsWith('SELECT *')?[order]:[]})};
+ const service=manualPlatformCancellation(db,'unused',{}, {connect:async()=>{
+  connections++;
+  return {clients:new Map([['42',{read:async()=>{
+   reads++;
+   return {parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:reads%2?3:2}};
+  }}]])};
+ }});
+ for(let i=0;i<200;i++)assert.equal((await service.next({},user)).result.platformCancelled,i%2===0);
+ assert.equal(connections,1);
+ assert.equal(reads,200);
+});
+
+test('failed Temu shop initialization is retried on the next check',async()=>{
+ const order={id:'a',reference:'REF',channel:'temu',source_payload:{mallId:'42'}};
+ let attempts=0;
+ const service=manualPlatformCancellation({query:async sql=>({rows:sql.startsWith('SELECT *')?[order]:[]})},'unused',{}, {connect:async()=>{
+  if(++attempts===1)throw Error('Temporary connection failure');
+  return {clients:new Map([['42',{read:async()=>({parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:3}})}]])};
+ }});
+ assert.equal((await service.next({},user)).result.status,'review');
+ assert.equal((await service.next({},user)).result.status,'cancelled');
+ assert.equal(attempts,2);
+});
+
+test('read-only checks complete while stock mutations are locked',async()=>{
+ const f=fixture();
+ let release,entered,timer;
+ const held=new Promise(resolve=>entered=resolve);
+ const gate=new Promise(resolve=>release=resolve);
+ const stock=withShipmentLock(async()=>{entered();await gate;},['stock-mutations']);
+ await held;
+ try{
+  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Check blocked by stock lock')),1000);});
+  await Promise.race([f.service.next({},user),timeout]);
+  assert.equal((await f.service.next({},user)).result.platformCancelled,true);
+ }finally{clearTimeout(timer);release();await stock;}
+});
 
 test('report recognizes a cancelled Erplain BC even before local tracking and labels are cancelled',async()=>{
  for(const channel of ['temu','shopify']){
@@ -107,4 +150,25 @@ test('apply requires a valid order and operational role',async()=>{
  await assert.rejects(()=>f.service.apply({id:'a'},{role:'viewer'}),/Droits/);
  const service=manualPlatformCancellation({query:async()=>({rows:[]})},'unused',{});
  await assert.rejects(()=>service.apply({id:'archived'},user),/inaccessible/);
+});
+
+test('shop clients expire after five minutes without caching order status',async t=>{
+ const order={id:'expiry',reference:'REF',channel:'temu',source_payload:{mallId:'42'}};
+ let connections=0,reads=0,now=1000;t.mock.method(Date,'now',()=>now);
+ const service=manualPlatformCancellation({query:async sql=>({rows:sql.startsWith('SELECT *')?[order]:[]})},'unused',{}, {connect:async()=>{connections++;return {clients:new Map([['42',{read:async()=>{reads++;return {parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:2}};}}]])};}});
+ await service.next({},user);now+=299999;await service.next({},user);assert.equal(connections,1);
+ now++;await service.next({},user);assert.equal(connections,2);assert.equal(reads,3);
+});
+test('a newly configured mall refreshes cached clients immediately',async()=>{
+ const order={id:'newmall',reference:'REF',channel:'temu',source_payload:{mallId:'42'}};let connections=0;
+ const api={read:async()=>({parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:2}})};
+ const service=manualPlatformCancellation({query:async sql=>({rows:sql.startsWith('SELECT *')?[order]:[]})},'unused',{}, {connect:async()=>({clients:new Map(++connections===1?[['42',api]]:[['42',api],['43',api]])})});
+ assert.equal((await service.next({},user)).result.status,'unchanged');order.source_payload.mallId='43';assert.equal((await service.next({},user)).result.status,'unchanged');assert.equal(connections,2);
+});
+test('applying cancellation still waits for the stock mutation lock',async()=>{
+ const f=fixture();let release,entered,done=false;const held=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+ const stock=withShipmentLock(async()=>{entered();await gate;},['stock-mutations']);await held;
+ const pending=f.service.apply({id:'a'},user).then(r=>{done=true;return r;});
+ try{await new Promise(resolve=>setTimeout(resolve,30));assert.equal(done,false);assert.ok(!f.calls.includes('suspend'));assert.ok(!f.calls.includes('cancel'));}finally{release();await stock;}
+ assert.equal((await pending).result.applied,true);
 });

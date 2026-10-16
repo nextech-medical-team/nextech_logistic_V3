@@ -16,6 +16,18 @@ export function cancellationOrderCreatedAt(order){
 
 // One order per request: the browser advances the cursor only after receiving a result.
 export function manualPlatformCancellation(db,directory,suspension,{shopify=shopifyCancellationWorker(db,directory),connect=()=>connectTemuShops(directory)}={}){
+ // Reuse verified shop clients, never order statuses. Share initialization across
+ // requests and retry failed connections instead of caching their rejection.
+ let connection=null,connectionExpires=0;
+ async function shops(){
+  if(!connection||Date.now()>=connectionExpires){
+   connectionExpires=Date.now()+5*60*1000;
+   const pending=Promise.resolve().then(connect);
+   connection=pending;
+   pending.catch(()=>{if(connection===pending){connection=null;connectionExpires=0;}});
+  }
+  return connection;
+ }
  async function proof(order){
   if(order.channel==='shopify'){
    const result=await shopify.cancel(order);
@@ -25,7 +37,10 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
   }
   const mall=String(order.source_payload?.sourceShop||order.source_payload?.mallId||'');
   if(!mall)throw Error('Boutique TEMU de la commande non identifiée');
-  const {clients,countryByMall,config}=await connect(),api=clients.get(mall);
+  let connected=await shops();
+  // A newly configured shop may appear before the connection cache expires.
+  if(!connected.clients.has(mall)){connection=null;connected=await shops();}
+  const {clients,countryByMall,config}=connected,api=clients.get(mall);
   if(!api)throw Error('Boutique TEMU indisponible');
   const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:order.reference});
   const parent=detail?.parentOrderMap;
@@ -77,7 +92,7 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
    }catch(error){result.status='review';result.error=String(error.message).slice(0,1000);}
    await db.query('INSERT INTO audit(user_email,action,detail) VALUES($1,$2,$3)',[user.email,apply?'order.manual_platform_cancellation':'order.manual_platform_cancellation_check',JSON.stringify(result)]);
    return {done:false,cursor:order.id,result};
-  },['manual-platform-cancellation:'+order.id,'stock-mutations','temu-order:'+order.reference,'suspension:'+order.id]);
+  },apply?['manual-platform-cancellation:'+order.id,'stock-mutations','temu-order:'+order.reference,'suspension:'+order.id]:['manual-platform-cancellation:'+order.id]);
  }
  return {next:(input,user)=>process(input,user),apply:(input,user)=>process(input,user,true)};
 }
