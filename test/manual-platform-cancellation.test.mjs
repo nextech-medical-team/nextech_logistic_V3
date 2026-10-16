@@ -12,6 +12,26 @@ function fixture({channel='shopify',cancelled=true,error=null,bc=true,shipped=fa
 }
 const user={role:'operator',email:'test@example.test'};
 
+test('report recognizes a cancelled Erplain BC even before local tracking and labels are cancelled',async()=>{
+ for(const channel of ['temu','shopify']){
+  const f=fixture({channel});
+  f.order.erp_live.bc.status='cancelled';
+  const result=(await f.service.next({},user)).result;
+  assert.equal(result.platformCancelled,true);
+  assert.equal(result.v3Cancelled,true);
+  assert.ok(!f.calls.includes('suspend'));
+  assert.ok(!f.calls.includes('cancel'));
+ }
+});
+
+test('a cancelled BL or a pending Erplain cancellation does not mean the whole order is cancelled',async()=>{
+ const f=fixture();
+ f.order.erp_live.bc.status='active';
+ f.order.erp_live.bl={status:'cancelled'};
+ f.order.suspension={active:true,erplainCancellation:{status:'review'}};
+ assert.equal((await f.service.next({},user)).result.v3Cancelled,false);
+});
+
 test('report distinguishes platform cancellation from V3 and retains proof on Erplain refusal',async()=>{
  const f=fixture();let result=(await f.service.next({},user)).result;
  assert.equal(result.platformCancelled,true);assert.equal(result.v3Cancelled,false);

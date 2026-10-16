@@ -1,6 +1,7 @@
 import {cancellationBlock,retryDecision,transientErpError} from './erp-transient-policy.mjs';
 import {recoverOrder} from './erplain-document-metadata.mjs';
 import {quotaReadRetryAt,quotaWaitingMessage} from './erplain-quota-wait.mjs';
+import {reconcilePublicationState} from './publication-recovery.mjs';
 
 export async function recordTransientFailure(db,o,message,error){
  const old=o.erp_live?.transientRecovery||{};
@@ -30,7 +31,7 @@ export async function resumeTransientErplain(db,api){
   // worker run guard serializes passes; the short commit below also rejects any
   // concurrent edit, cancellation, or job replacement made during the read.
   const rows=(await db.query(`SELECT o.*,e.error,e.updated_at retry_updated,e.updated_at::text retry_version FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
-   WHERE e.status='review' AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL)
+   WHERE e.status='review' AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu'))
    AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
    AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
@@ -65,7 +66,7 @@ export async function resumeTransientErplain(db,api){
      if(found){state.bc={id:found.id,label:found.label,status:found.status};state.phase='bc_created';}
      else state.phase='customer_created';
     }else{
-     const result=await reader.request('query V3TransientBL($id:ID!){Order(id:$id){id status shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}}}',{id:String(state.bc.id)});
+     const result=await reader.request('query V3TransientBL($id:ID!){Order(id:$id){id status update_stock shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}}}',{id:String(state.bc.id)});
      const bc=result.Order,list=bc?.shipping_orders;
      if(String(bc?.id)!==String(state.bc.id)||bc.status!=='active'||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
      const bl=list.data[0];
@@ -73,6 +74,7 @@ export async function resumeTransientErplain(db,api){
      if(state.bl?.id&&!bl)throw Error(state.bl.status==='unpublished'?'Brouillon BL introuvable dans Erplain : reprendre depuis le BC après rapprochement':'BL introuvable dans Erplain : rapprochement nécessaire');
      if(state.bl?.id&&String(bl?.id)!==String(state.bl.id))throw Error('BL différent : contrôle nécessaire');
      if(bl)state.bl=bl;
+     if(o.channel!=='tender')state=reconcilePublicationState(state,bc);
     }
    }catch(e){
     state.transientRecovery.lastError=transientErpError(e.message)?e.message:null;

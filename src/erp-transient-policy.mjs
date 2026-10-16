@@ -11,7 +11,8 @@ export function mutationBlock(o,{allowHeldBc=false}={}){return !o||o.archived?'C
 export function retryDecision(o,error,updatedAt,now=Date.now()){
  const attempts=Number(o.erp_live?.transientRecovery?.attempts||0);
  const readLimited=o.erp_live?.transientRecovery?.readRateLimited===true&&/Erplain HTTP 429\b/.test(error||'');
- if(!transientErpError(error)||!Number.isInteger(attempts)||(attempts>=3&&!readLimited)||attempts<0)return false;
+ const interruptedPublication=o.channel!=='tender'&&o.erp_live?.phase==='publishing_bl'&&/Publication à vérifier|Traitement interrompu/.test(error||'');
+ if((!transientErpError(error)&&!interruptedPublication)||!Number.isInteger(attempts)||(attempts>=3&&!readLimited)||attempts<0)return false;
  if(o.archived||o.partial_mode||o.resolution_pending_resume||cancellationBlock(o)||(!usesRecordedBc(o)&&Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection'))||['shipped','delivered','in_transit'].includes(o.tracking_status))return false;
  if(['cancelled','closed'].includes(o.erp_live?.bc?.status)||['cancelled','closed'].includes(o.erp_live?.bl?.status))return false;
  const phase=o.erp_live?.phase;
