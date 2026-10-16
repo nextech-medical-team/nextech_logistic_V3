@@ -54,3 +54,14 @@ for(const name of ['wrongScope','unrelatedRetiredError','wrongTimestamp','incomp
 }finally{await f.e.close();}});
 
 test('known catalogue absence may also resume after its own exact reconciliation',async()=>{const f=await fixture();try{f.detail.retired[0].previousMessage='BC · SKU Erplain LIVE introuvable : IDE82311430';await f.changeAudit();assert.equal(await queueErplainLive(f.db,['o']),1);}finally{await f.e.close();}});
+
+test('unknown tracking resumes only the audited local catalogue refusal, with no uncertain label attempt',async()=>{const f=await fixture();try{
+ await f.e.exec("UPDATE orders SET tracking_status='unknown'");
+ // Legacy name and customer errors still require not_shipped.
+ for(const error of ['Client TEMU : numéro Erplain non reçu','Création produit · Nom du produit manquant ou invalide : IDE82311430']){await f.e.query('UPDATE erp_live_jobs SET error=$1',[error]);assert.equal(await queueErplainLive(f.db,['o']),0);}
+ await f.e.exec('UPDATE erp_live_jobs SET error=NULL');
+ for(const tracking of ['shipped','delivered','in_transit','delivered_simulated','cancelled',null,'']){await f.e.query('UPDATE orders SET tracking_status=$1',[tracking]);assert.equal(await queueErplainLive(f.db,['o']),0);}
+ await f.e.exec("UPDATE orders SET tracking_status='unknown',source_payload='{\"temuDirect\":{\"attemptedAt\":\"2026-10-10T10:00:00Z\"}}'");assert.equal(await queueErplainLive(f.db,['o']),0);
+ await f.e.exec("UPDATE orders SET source_payload='{}'");assert.equal(await queueErplainLive(f.db,['o']),1);assert.equal(await queueErplainLive(f.db,['o']),0);
+ assert.equal((await f.e.query('SELECT tracking_status FROM orders')).rows[0].tracking_status,'unknown');
+}finally{await f.e.close();}});

@@ -7,10 +7,13 @@ export async function resumeLocalCatalogueReview(db,id){return resumeLocalPrepar
 export async function resumeLocalPreparationReview(db,id,{catalogueOnly=false}={}){
  return db.transaction(async tx=>{
   const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];
-  if(!o||o.archived||o.suspension?.active||Object.hasOwn(o.suspension||{},'erplainCancellation')||o.partial_mode||o.erp_live?.bc?.id||o.erp_live?.bl?.id||o.label_status==='cancelled'||o.tracking_status!=='not_shipped')return false;
+  if(!o||o.archived||o.suspension?.active||Object.hasOwn(o.suspension||{},'erplainCancellation')||o.partial_mode||o.erp_live?.bc?.id||o.erp_live?.bl?.id||o.label_status==='cancelled'||!['not_shipped','unknown'].includes(o.tracking_status))return false;
   const j=(await tx.query('SELECT * FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[id])).rows[0];
   if(j?.status!=='review')return false;
   if(j.error===null)return resumeReconciledCatalogueReview(tx,o,j);
+  // Unknown tracking is admissible only with the complete audited catalogue
+  // reconciliation above. Other local review recovery keeps its existing rule.
+  if(o.tracking_status!=='not_shipped')return false;
   // The retired generator failed before CreateCustomer. Its replacement uses
   // the existing deterministic V3 number; never replay the number allocation.
   if(!catalogueOnly&&j.error==='Client TEMU : numéro Erplain non reçu'){
