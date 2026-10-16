@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {excludedTemuCarrier,automaticTemuMarginDecision} from '../src/temu-purchase-policy.mjs';
-import {temuShipping} from '../src/temu-shipping.mjs';
+import {temuShipping,temuParcelWeight} from '../src/temu-shipping.mjs';
+import {temuLocalService} from '../src/temu-local.mjs';
 const now=Date.now(),reference='PO-069-123456789';
 const offer=(id,name,amount)=>({channelId:id,shipCompanyId:id,shipCompanyName:name,estimatedAmount:String(amount),estimatedCurrencyCode:'EUR'});
 const detail={parentOrderMap:{parentOrderSn:reference,parentOrderStatus:2,expectShipLatestTime:Math.floor(now/1000)+86400},orderList:[{orderSn:'line-1',quantity:1}]};
@@ -66,4 +67,24 @@ test('quote never understates the known order weight when recomputing transport 
  const h=harness([offer(1,'GLS',2)]),read=h.db.query;
  h.db.query=async(sql,args)=>sql.startsWith('SELECT * FROM orders WHERE reference=')?{rows:[{suspension:{},weight_kg:'1.2345'}]}:read(sql,args);
  const p=await temuShipping(h.db,h.api).prepare(reference);assert.equal(p.request.sendRequestList[0].weight,'1.235');
+});
+
+test('Excel and direct orders share kilogram rounding while explicit sandbox weights remain explicit',()=>{
+ for(const origin of ['temu_excel','temu_direct_receipt',undefined])for(const [weight,expected] of [[0.405,'0.405'],[1.2345,'1.235'],['0.755','0.755'],[25,'25'],[0.1,'0.25'],[null,'0.25'],[undefined,'0.25']])assert.equal(temuParcelWeight({weight_kg:weight,source_payload:{origin}}),expected);
+ assert.equal(temuParcelWeight({weight_kg:5},'0.25'),'0.25');
+});
+
+test('a cached quote at the former weight refreshes without buying; matching weight reuses it',async()=>{
+ const h=harness([offer(1,'FedEx',6.65)]),query=h.db.query,read=h.api.read;
+ const order={id:'o',reference,channel:'temu',suspension:{},address:{country:'SI'},source_payload:{mallId:'shop'},weight_kg:0.25};let quotes=0;
+ h.db.query=async(sql,args)=>{
+  if(sql.includes('FROM orders'))return {rows:[order]};
+  if(sql.startsWith('UPDATE orders')||sql.startsWith('UPDATE temu_label_jobs'))return {rows:[]};
+  return query(sql,args);
+ };
+ h.api.read=async(method,args)=>{if(method==='bg.open.accesstoken.info.get')return {mallId:'shop'};if(method==='bg.logistics.shippingservices.get')quotes++;return read(method,args);};
+ await temuShipping(h.db,h.api).prepare(reference);quotes=0;order.weight_kg=0.405;
+ const local=temuLocalService(h.db,'unused',{configLoader:async()=>({}),shopLoader:async()=>[],apiFactory:()=>h.api});
+ const refreshed=await local.recover(reference);assert.equal(refreshed.plan.request.sendRequestList[0].weight,'0.405');assert.equal(quotes,1);assert.equal(h.bought,0);
+ const same=await local.recover(reference);assert.equal(same.plan.id,refreshed.plan.id);assert.equal(quotes,1);assert.equal(h.bought,0);
 });

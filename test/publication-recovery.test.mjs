@@ -26,3 +26,5 @@ test('interrupted publication is eligible but suspended orders remain blocked',(
  assert.equal(retryDecision({...o,label_status:'cancelled'},error,updated),false);
  assert.equal(retryDecision({...o,erp_live:{...o.erp_live,transientRecovery:{attempts:3}}},error,updated),false);
 });
+
+test('tender interrupted publication remains excluded',()=>{const o={channel:'tender',erp_live:state('unpublished'),source_payload:{}};assert.equal(retryDecision(o,'Publication à vérifier',new Date(Date.now()-60000).toISOString()),false);});

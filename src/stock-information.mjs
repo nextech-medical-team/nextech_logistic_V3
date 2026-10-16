@@ -1,4 +1,5 @@
 import {stockChoiceLocation} from './stock-choice-location.mjs';
+import {readIncomingReceipts} from './incoming-receipts.mjs';
 
 const quantity=value=>['number','string'].includes(typeof value)&&String(value).trim()!==''&&Number.isFinite(Number(value))?Number(value):null;
 export async function readStockInformationProduct(api,sku,locationId){
@@ -17,23 +18,24 @@ export async function readStockInformationProduct(api,sku,locationId){
 
 export function stockInformationService(db,api,directory,{location=()=>stockChoiceLocation(directory),now=Date.now}={}){
  const cache=new Map();
- async function read(sku,locationId){
+ async function read(sku,locationId,includeIncomingDates){
   const rows=(await db.query('SELECT sku_a,sku_b FROM product_equivalences WHERE active AND (sku_a=$1 OR sku_b=$1) ORDER BY sku_a,sku_b',[sku])).rows;
   const equivalentSkus=[...new Set(rows.map(r=>r.sku_a===sku?r.sku_b:r.sku_a))].filter(s=>s!==sku);
   await api.verify();
   const product=async target=>{try{return await readStockInformationProduct(api,target,locationId);}catch{return {sku:target,incoming:null,available:null,error:'Lecture ERPLAIN non vérifiée'};}};
   const original=await product(sku),equivalents=[];
+  if(includeIncomingDates)try{original.incomingReceipts=await readIncomingReceipts(api,original);}catch{original.incomingReceipts={status:'unverified',receipts:[]};}
   // Bounded reads; recorded equivalences only, no implicit matching or replacement.
   for(const target of equivalentSkus.slice(0,20))equivalents.push(await product(target));
   return {sku,locationId,original,equivalents,equivalentCount:equivalentSkus.length,checkedAt:new Date(now()).toISOString(),expiresAt:new Date(now()+300000).toISOString()};
  }
- return {async get(sku){
+ return {async get(sku,{includeIncomingDates=false}={}){
   if(typeof sku!=='string'||!sku.trim()||sku.length>199)throw Error('SKU Erplain requis');sku=sku.trim();
-  const locationId=String(await location()),key=JSON.stringify([sku,locationId]);
+  const locationId=String(await location()),key=JSON.stringify([sku,locationId,includeIncomingDates]);
   const existing=cache.get(key);if(existing&&existing.until>now())return existing.promise;
   if(cache.size>=500)cache.delete(cache.keys().next().value);
   const entry={until:now()+300000,promise:null};
-  entry.promise=read(sku,locationId).then(result=>{entry.until=Date.parse(result.expiresAt);return result;},error=>{cache.delete(key);throw error;});cache.set(key,entry);
+  entry.promise=read(sku,locationId,includeIncomingDates).then(result=>{entry.until=Date.parse(result.expiresAt);return result;},error=>{cache.delete(key);throw error;});cache.set(key,entry);
   return entry.promise;
  }};
 }

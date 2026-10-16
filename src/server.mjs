@@ -459,7 +459,7 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/stocks/negative/history'&&req.method==='GET'){json(res,200,await negativeStockHistory.list(url.searchParams.get('page')||'1'));return;}
     if(p==='/api/stocks/negative/history/detail'&&req.method==='GET'){json(res,200,await negativeStockHistory.get(url.searchParams.get('id')));return;}
     if(p==='/api/stocks/negative'&&req.method==='GET'){json(res,200,await negativeStocks.page(url.searchParams.get('page')||'1'));return;}
-    if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku')));return;}
+    if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku'),{includeIncomingDates:url.searchParams.get('includeIncomingDates')==='1'}));return;}
     if(await equivalenceApi({p,url,req,res,db,user,body,json,permitted,api:erplainAccount(directory,'source'),directory}))return;
     if(await workspaceApi({p,url,req,res,db,user,body,json,permitted,audit,catalog,carrierConfigured:!!carrierWorkers&&!!productionConfig}))return;
 
