@@ -1,6 +1,7 @@
 import {installCarrierAttemptProof} from './carrier-attempt-proof.mjs';
 import {initializeOperations} from './runtime.mjs';
 import {installEventTriggers} from './live-events.mjs';
+import {initializeNegativeStocks} from './negative-stocks.mjs';
 const version='application-20261005-robustness-5';
 const carrierBlRequestVersion='carrier-manual-bl-request-20261013-1';
 export async function initializeAppSchema(db,initializers,{background=false}={}){
@@ -19,6 +20,9 @@ export async function initializeAppSchema(db,initializers,{background=false}={})
   }
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['carrier-attempt-proof-20261014-1'])).rows.length){
    await db.transaction(async tx=>{await installCarrierAttemptProof(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['carrier-attempt-proof-20261014-1']);});
+  }
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['negative-stock-history-20261016-1'])).rows.length){
+   await db.transaction(async tx=>{await initializeNegativeStocks(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['negative-stock-history-20261016-1']);});
   }
  });
  if(background)await recoverInterruptedJobs(db);
