@@ -71,17 +71,22 @@ export async function resumeTransientErplain(db,api){
      if(found){state.bc={id:found.id,label:found.label,status:found.status};state.phase='bc_created';}
      else state.phase='customer_created';
     }else{
-     // Reuse the manual recovery's absence/ledger/transport proof. This only
-     // retires a stale local pointer; the normal worker owns all ERP mutations.
-     if(o.channel==='amazon'&&usesNativeBlCycle(o))retiredDraft=await prepareMissingDraftRecovery(db,reader,o,{resolutionId:recoveryId});
-     if(retiredDraft){state={...retiredDraft,transientRecovery:recovery};}
-     else{
      const result=await reader.request('query V3TransientBL($id:ID!){Order(id:$id){id status update_stock shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}}}',{id:String(state.bc.id)});
      const bc=result.Order,list=bc?.shipping_orders;
      if(String(bc?.id)!==String(state.bc.id)||bc.status!=='active'||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
-     const bl=await readTransientBlIdentity(reader,state,bc,{lookupDraft:o.channel!=='tender'});
-     if(bl)state.bl=bl;
-     if(o.channel!=='tender')state=reconcilePublicationState(state,bc);
+     let bl;
+     try{bl=await readTransientBlIdentity(reader,state,bc,{lookupDraft:o.channel!=='tender'});}
+     catch(e){
+      // Only a confirmed absent draft needs the existing no-movement proof.
+      // An existing draft must not acquire new transport or stock prerequisites.
+      if(e.code!=='V3_MISSING_DRAFT'||o.channel!=='amazon'||!usesNativeBlCycle(o))throw e;
+      retiredDraft=await prepareMissingDraftRecovery(db,reader,o,{resolutionId:recoveryId});
+      if(!retiredDraft)throw Error('Brouillon BL réapparu pendant le rapprochement : relire avant reprise');
+     }
+     if(retiredDraft)state={...retiredDraft,transientRecovery:recovery};
+     else{
+      if(bl)state.bl=bl;
+      if(o.channel!=='tender')state=reconcilePublicationState(state,bc);
      }
     }
    }catch(e){

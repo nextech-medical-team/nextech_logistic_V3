@@ -11,7 +11,7 @@ export async function readTransientBlIdentity(reader,state,bc,{lookupDraft=true}
    bl=draft;
   }
  }
- if(state.bl?.id&&!bl)throw Error(state.bl.status==='unpublished'?'Brouillon BL introuvable dans Erplain : reprendre depuis le BC après rapprochement':'BL introuvable dans Erplain : rapprochement nécessaire');
+ if(state.bl?.id&&!bl)throw Object.assign(Error(state.bl.status==='unpublished'?'Brouillon BL introuvable dans Erplain : reprendre depuis le BC après rapprochement':'BL introuvable dans Erplain : rapprochement nécessaire'),{code:state.bl.status==='unpublished'?'V3_MISSING_DRAFT':'V3_MISSING_BL'});
  if(state.bl?.id&&String(bl?.id)!==String(state.bl.id))throw Error('BL différent : contrôle nécessaire');
  return bl;
 }

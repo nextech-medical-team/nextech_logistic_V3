@@ -4,6 +4,16 @@ import {PGlite} from '@electric-sql/pglite';
 import {resumeTransientErplain} from '../src/erplain-transient-recovery.mjs';
 
 const error='Erplain HTTP 429 · attente du quota partagé différée, aucune requête envoyée';
+test('existing Amazon draft resumes without missing-document transport or ledger guards',async t=>{
+ const {engine,db,api}=await fixture(t,1);
+ await engine.exec("ALTER TABLE orders ADD COLUMN channel text DEFAULT 'amazon'");
+ await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'publishing_bl',bcReservationPolicy:'erplain_bc_bl',bc:{id:123,status:'active',update_stock:true},bl:{id:456,label:'SHO00745115',status:'unpublished',update_stock:true}})]);
+ await engine.query('UPDATE erp_live_jobs SET error=$1',['BL Erplain · Publication à vérifier']);
+ let reads=0;api.request=async q=>{reads++;if(q.includes('V3TransientBL'))return {Order:{id:123,status:'active',update_stock:true,shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}}};
+ assert.match(q,/^query V3TransientSavedDraft/);return {ShippingOrder:{id:456,label:'SHO00745115',status:'unpublished',update_stock:true,orders:{data:[{id:123}],paginatorInfo:{hasMorePages:false}}}};};
+ assert.equal(await resumeTransientErplain(db,api),1);assert.equal(reads,2);
+ assert.equal((await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live.phase,'bl_created');
+});
 for(const scenario of ['absent','movement','concurrent-suspension','concurrent-label'])test('Amazon missing draft recovery: '+scenario,async t=>{
  const {engine,db,api}=await fixture(t,1);
  await engine.exec(`ALTER TABLE orders ADD COLUMN channel text DEFAULT 'amazon';ALTER TABLE resolution_jobs ADD COLUMN id text;
@@ -14,6 +24,8 @@ for(const scenario of ['absent','movement','concurrent-suspension','concurrent-l
  let mutations=0;
  api.request=async q=>{
   if(!q.startsWith('query ')){mutations++;assert.fail('read-only reconciliation');}
+  if(q.includes('V3TransientBL'))return {Order:{id:123,status:'active',update_stock:true,shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}}};
+  if(q.includes('V3TransientSavedDraft'))return {ShippingOrder:null};
   if(q.includes('V3MissingDraftRead'))return {Order:{id:123,created_at:'2026-10-15 08:00:00',status:'active',update_stock:true,line_items:[{type:'normal',variant:{id:1}}],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}},ShippingOrder:null};
   if(q.includes('V3MissingNativeDraftLedger'))return {InventoryLogs:{data:scenario==='movement'?[{id:9,document_id:456,order_type:'ShippingOrder'}]:[],paginatorInfo:{hasMorePages:false}}};
   if(q.includes('V3MissingDraftStock'))return {StockRemovals:{data:[],paginatorInfo:{hasMorePages:false}}};
