@@ -52,7 +52,7 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
    if(!Number.isFinite(created)||bounds.createdFrom!=null&&created<bounds.createdFrom||bounds.createdTo!=null&&created>bounds.createdTo)return {done:false,cursor:order.id,skipped:true,unknownDate:!Number.isFinite(created)};
   }
   return withShipmentLock(async()=>{
-   let result={id:order.id,reference:order.reference,channel:order.channel,country:order.address?.country||'',status:'unchanged',platformCancelled:null,v3Cancelled:order.label_status==='cancelled'||order.tracking_status==='cancelled'};
+   let result={id:order.id,reference:order.reference,channel:order.channel,country:order.address?.country||'',status:'unchanged',platformCancelled:null,v3Cancelled:order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'};
    try{
     const observed=await proof(order);
     result.platformCancelled=observed.cancelled;
