@@ -447,7 +447,7 @@ const server=http.createServer(async(req,res)=>{
     if(await receiptRecovery.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await resolutions.routes({p,url,req,res,user,body,json,permitted}))return;
     if(await correctionsApi({p,url,req,res,db,user,body,json,permitted,directory}))return;
-    if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku')));return;}
+    if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku'),{includeIncomingDates:url.searchParams.get('includeIncomingDates')==='1'}));return;}
     if(await equivalenceApi({p,url,req,res,db,user,body,json,permitted,api:erplainAccount(directory,'source'),directory}))return;
     if(await workspaceApi({p,url,req,res,db,user,body,json,permitted,audit,catalog,carrierConfigured:!!carrierWorkers&&!!productionConfig}))return;
 
