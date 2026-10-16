@@ -3,10 +3,12 @@ import {reconcileTemuParcelDiagnostics} from './temu-parcel-count.mjs';
 import {completedHistoricalPreparation,reconcileHistoricalPreparation,currentReplacementPreview,currentResolutionState,resolutionStateSql} from './historical-preparation-completion.mjs';
 import {reconcileVerifiedWeights} from './verified-weight-diagnostics.mjs';
 import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
+import {isDeliveredOrder} from './delivered-order.mjs';
 
 // Local diagnostic reconciliation only: no provider mutation, preparation,
 // document, stock or label operations. A successful correction is not delivery.
 export function correctionStatusSnapshot(order,{erpJob,carrierJob,temuJob,otherReviews=[]}={}){
+ if(isDeliveredOrder(order))return {checkedAt:new Date().toISOString(),state:'observed',blockers:[],businessCompleted:false,delivered:true,source:'current-local-diagnostics',providerFreshness:'existing-verified-proofs-only'};
  const current=projectCurrentDiagnostics({...order,erp_live_job:erpJob?{...erpJob}:null});
  const blockers=[current.issue,current.erp_live_job?.error,carrierJob?.error,...otherReviews.map(j=>j.error)].filter(Boolean).map(reason=>/^Pr[ée]paration bloqu[ée]e(?:\s*:\s*v[ée]rification [àa] reprendre| à vérifier)?$/i.test(reason)?currentHoldDiagnostic(order,{erpJob,carrierJob,temuJob}).label:reason);
  if(order.pendingReplacement)blockers.push('Remplacement à confirmer');

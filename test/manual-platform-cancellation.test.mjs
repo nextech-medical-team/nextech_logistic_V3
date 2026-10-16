@@ -11,6 +11,43 @@ function fixture({channel='shopify',cancelled=true,error=null,bc=true,shipped=fa
  return {order,calls,service:manualPlatformCancellation(db,'unused',suspension,{shopify,connect})};
 }
 const user={role:'operator',email:'test@example.test'};
+
+test('report distinguishes platform cancellation from V3 and retains proof on Erplain refusal',async()=>{
+ const f=fixture();let result=(await f.service.next({},user)).result;
+ assert.equal(result.platformCancelled,true);assert.equal(result.v3Cancelled,false);
+ result=(await f.service.apply({id:'a'},user)).result;assert.equal(result.v3Cancelled,true);
+ const refused=fixture({documentError:'Stock à rapprocher'});result=(await refused.service.apply({id:'a'},user)).result;
+ assert.equal(result.status,'review');assert.equal(result.platformCancelled,true);assert.equal(result.v3Cancelled,false);
+ const unavailable=fixture({error:'Source unavailable'});unavailable.order.label_status='cancelled';result=(await unavailable.service.next({},user)).result;
+ assert.equal(result.platformCancelled,null);assert.equal(result.v3Cancelled,true);
+});
+
+test('creation range includes both bounds, respects timezone and skips other orders before source reads',async()=>{
+ const range={createdFrom:'2026-10-14T00:00:00+01:00',createdTo:'2026-10-15T00:00:00+01:00'};
+ for(const [date,included] of [['2026-10-13T22:59:59Z',false],['2026-10-13T23:00:00Z',true],['2026-10-14T23:00:00Z',true],['2026-10-14T23:00:01Z',false],[null,false]]){
+  const f=fixture();f.order.source_date=date;const response=await f.service.next(range,user);
+  assert.equal(!!response.skipped,!included);
+  if(included)assert.equal(response.result.status,'cancelled');
+  else{assert.equal(response.cursor,'a');assert.equal(response.unknownDate,date===null);assert.equal(f.calls.length,1);}
+ }
+});
+
+test('creation range allows either bound and rejects invalid intervals before database access',async()=>{
+ for(const range of [{createdFrom:'2026-10-14T00:00:00Z'},{createdTo:'2026-10-15T00:00:00Z'}]){
+  const f=fixture();f.order.source_date='2026-10-14T12:00:00Z';assert.equal((await f.service.next(range,user)).result.status,'cancelled');
+ }
+ const f=fixture();
+ for(const range of [{createdFrom:'bad'},{createdTo:42},{createdTo:'2026-10-14T00:00'},{createdFrom:'2026-10-15T00:00:00Z',createdTo:'2026-10-14T00:00:00Z'}])await assert.rejects(()=>f.service.next(range,user),/Date|date/);
+ assert.equal(f.calls.length,0);
+});
+
+test('refresh and apply retain the order destination country for both platforms',async()=>{
+ for(const channel of ['shopify','temu']){
+  const f=fixture({channel});f.order.address={country:'IT'};
+  assert.equal((await f.service.next({},user)).result.country,'IT');
+  assert.equal((await f.service.apply({id:'a'},user)).result.country,'IT');
+ }
+});
 test('confirmed cancellations suspend V3 before cancelling Erplain for both channels',async()=>{
  for(const channel of ['shopify','temu']){const f=fixture({channel});const result=await f.service.apply({id:'a'},user);assert.equal(result.result.status,'cancelled');assert.ok(f.calls.indexOf('suspend')<f.calls.indexOf('cancel'));assert.ok(f.calls.some(s=>s.includes("label_status='cancelled'")));}
 });
