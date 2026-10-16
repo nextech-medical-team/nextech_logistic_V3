@@ -151,7 +151,7 @@ test('automatic TEMU purchase uses existing BL without Excel, ERP, stock or prep
  const erp={bl:{id:'existing-bl',status:'in_preparation'},bc:{id:'bc'},stock:{error:'Stock insuffisant'},pricing:{status:'blocked'}};
  await f.db.query("UPDATE orders SET simulation=true,suspension='{}',issue='Mapping modifié',resolution_pending_resume=true,erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);
  await f.db.query("INSERT INTO temu_label_jobs(reference,status) VALUES($1,'to_buy')",[reference]);
- const shipping=temuShipping(f.db,f.api),local={amounts:async()=>({}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
+ const shipping=temuShipping(f.db,f.api),local={recover:async r=>({status:'ready',plan:await shipping.prepare(r)}),amounts:async()=>({}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
  const margins={get:async()=>({calculatedAt:new Date().toISOString(),rows:[{reference,status:'positive',profit:1,shipping:2.5/1.2,shippingSource:'Devis TEMU final',issues:[]}]})};
  const worker=temuAutomaticPurchaseWorker(f.db,local,margins,{stockGate:()=>assert.fail('No post-BL stock read'),refreshPreparation:()=>assert.fail('No post-BL ERP read')});
  await worker.run();assert.equal(f.bought,1);assert.equal((await f.db.query('SELECT status FROM temu_label_jobs')).rows[0].status,'complete');
@@ -195,7 +195,7 @@ test('Excel uses the existing automatic worker: only positive quote-matched marg
  await f.db.query("INSERT INTO temu_label_jobs(reference,status) VALUES($1,'to_buy')",[reference]);
  await f.db.query("UPDATE orders SET source_payload=jsonb_set(source_payload,'{temuDirect,state}','\"verified\"') WHERE id='o'");
  let profit=null;
- const shipping=temuShipping(f.db,f.api),local={amounts:async()=>({source:'temu_excel'}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
+ const shipping=temuShipping(f.db,f.api),local={recover:async r=>({status:'ready',plan:await shipping.prepare(r)}),amounts:async()=>({source:'temu_excel'}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
  const margins={get:async()=>({calculatedAt:new Date().toISOString(),rows:[{reference,status:profit===null?'incomplete':profit>0?'positive':'negative',profit,shipping:2.5/1.2,shippingSource:'Devis TEMU final',issues:[]}]})};
  const worker=temuAutomaticPurchaseWorker(f.db,local,margins,{refreshPreparation:async()=>({stockHolds:[]})});
  for(profit of [null,-1,0]){
