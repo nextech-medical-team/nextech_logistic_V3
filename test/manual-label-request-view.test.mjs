@@ -52,3 +52,12 @@ test('excluded tender and persisting projection retain installed behavior',()=>{
 test('terminal delivery stays authoritative over an old active request',()=>{
  const o=fixture();o.tracking_status='delivered';const p=projectCurrentDiagnostics(o);assert.equal(p.order_delivered,true);assert.equal(p.manual_label_request,undefined);
 });
+
+test('dialog receipt preserves tender stage while acknowledging eligible persisted requests',()=>{
+ const source=readFileSync(new URL('../public/problem-corrections.js',import.meta.url),'utf8');
+ const expression=source.match(/const receipt=([^;]+);/)[1];
+ for(const channel of ['tender','amazon','temu']){
+  const context={ctx:{order:{channel}},r:{action:'choose-carrier',requested_carrier:'gls',status:'queued'},manualRequestFeedbackText:()=> 'received'};
+  assert.equal(vm.runInNewContext(expression,context),channel==='tender'?null:'received');
+ }
+});
