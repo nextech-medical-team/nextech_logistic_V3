@@ -1,3 +1,4 @@
+import {existingRecoveryCandidate,attachExistingDocuments} from './erplain-existing-recovery.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {recoveredPreparationIssue} from './recovered-preparation-issue.mjs';
 import {completeShippingOrders} from './erplain-document-read.mjs';
@@ -107,18 +108,30 @@ export function targetedOrderService(db,api){
   return withShipmentLock(()=>db.transaction(async tx=>{
    const existing=await existingBcOrder(tx,id),r=(await tx.query('SELECT * FROM erplain_manual_review WHERE bc_id=$1',[String(id)])).rows[0];
    await tx.query("INSERT INTO erplain_refresh_cache(account,section,entity_id,reference,detail) VALUES('live','orders',$1,$2,$3) ON CONFLICT(account,section,entity_id) DO UPDATE SET reference=excluded.reference,detail=excluded.detail,missing=false,seen_at=now()",[String(id),d.external_reference||d.label,JSON.stringify(d)]);
-   if(existing&&r?.status!=='pending'){
-    const issues=documentIssues(d,existing),messages=await synchronizeRecoveredOrder(tx,existing,d);
-    return {document:d,...issues,preparationIssues:messages,alreadyRecovered:true,orderId:existing.id,archived:existing.archived,readAt:new Date().toISOString()};
+   const candidate=await existingRecoveryCandidate(tx,d);
+   const pendingAdmission=existing&&r?.status==='pending'&&existing.source_payload?.erplainValidationHold===true&&existing.source_payload.erplainValidation!=='approved';
+   if(candidate&&!pendingAdmission){
+    const issues=documentIssues(d,existing);
+    return {document:d,reviewHash:manualReviewHash(d),...issues,admissionIssues:candidate.blocked?[candidate.blocked]:[],reconcileCandidate:candidate.blocked?null:candidate,readAt:new Date().toISOString()};
    }
    if(r&&r.status!=='pending')throw Error('Ce BC a fait l’objet d’un refus ou d’une annulation : vérifier son historique');
    await queueManualReview(tx,d,existing?.id||null);
-   const duplicate=(await tx.query('SELECT id FROM orders WHERE reference=$1 AND id IS DISTINCT FROM $2 LIMIT 1',[String(d.external_reference||d.label).trim(),existing?.id||null])).rows.length;
-   const issues=documentIssues(d);if(duplicate)issues.admissionIssues.push('Référence déjà présente dans V3 : rapprochement requis');
+   const issues=documentIssues(d);
    return {document:d,reviewHash:manualReviewHash(d),...issues,readAt:new Date().toISOString()};
   }));
  }
  return {
+  async reconcile(b,user){
+   if(b.confirmed!==true||typeof b.bcId!=='string'||!b.bcId.trim()||typeof b.orderId!=='string'||!b.orderId||typeof b.reviewHash!=='string')throw Error('Confirmer le rattachement à une commande V3 existante');
+   const d=await read(b.bcId);
+   if(manualReviewHash(d)!==b.reviewHash)throw Error('Le BC ou ses BL ont changé : relire avant de confirmer');
+   return withShipmentLock(()=>db.transaction(async tx=>{
+    if(db.kind==='postgres')await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('nextech:import-order-identity',0))");
+    const candidate=await existingRecoveryCandidate(tx,d);
+    if(!candidate||candidate.blocked||candidate.orderId!==b.orderId)throw Error(candidate?.blocked||'Correspondance V3 modifiée : relire le BC');
+    return attachExistingDocuments(tx,d,b.orderId,user);
+   }));
+  },
   async lookup(b){
    const reference=targetedReference(b.reference);if(b.bcId!==undefined&&(typeof b.bcId!=='string'||!b.bcId.trim()||b.bcId.length>100))throw Error('Sélectionner un seul BC');
    await api.verify();const matches=new Map();let page=1;
@@ -132,7 +145,7 @@ export function targetedOrderService(db,api){
    if(!b.bcId&&candidates.length>1)return {selectionRequired:true,candidates,reference};
    return {...await preview(b.bcId||String(candidates[0].id)),reference};
   },
-  async reread(b){if(typeof b.bcId!=='string'||!b.bcId.trim())throw Error('BC requis');const r=(await db.query('SELECT bc_id FROM erplain_manual_review WHERE bc_id=$1',[b.bcId])).rows[0];if(!r)throw Error('Récupérer ce BC avant de le relire');return preview(b.bcId);},
+  async reread(b){if(typeof b.bcId!=='string'||!b.bcId.trim())throw Error('BC requis');return preview(b.bcId);},
   async list({search='',page=1}={}){
    page=Math.max(1,Math.min(10000,Number(page)||1));
    const where="o.source_payload->>'erplainImported'='true' AND o.source_payload->>'account'='live' AND (o.reference ILIKE $1 OR o.erp_live->'bc'->>'label' ILIKE $1 OR o.recipient ILIKE $1)";

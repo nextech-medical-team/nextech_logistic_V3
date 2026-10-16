@@ -7,7 +7,7 @@ panel.innerHTML=`<div class="panel padded"><h2>Commandes Erplain LIVE</h2><p>Ré
 <p>Cette recherche consulte les commandes présentes dans V3.</p><div id="erplain-recovered-rows" class="table-wrap"></div><div class="pagination"><button id="erplain-recovered-prev">Précédent</button><span id="erplain-recovered-pages"></span><button id="erplain-recovered-next">Suivant</button></div>
 <details><summary>Connexion ERPLAIN LIVE</summary><div id="live-reference-summary"></div></details></div>`;
 document.querySelector('.view').parentElement.append(panel);
-const button=document.createElement('button');button.dataset.view='erplain-refresh';button.textContent='Commandes Erplain LIVE';document.querySelector('nav').append(button);button.onclick=()=>show('erplain-refresh');
+const button=document.createElement('button');button.dataset.view='erplain-refresh';button.textContent='Commandes Erplain LIVE';(document.querySelector('nav details:last-of-type > div')||document.querySelector('nav')).append(button);button.onclick=()=>show('erplain-refresh');
 const el=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=v=>v?new Date(v).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'Pas encore relu';
 let page=1,busy=false,preview=null,listGeneration=0;
@@ -28,10 +28,11 @@ function renderPreview(r){
  const admission=r.admissionIssues||[],preparation=r.preparationIssues||[];
  const labels={label:'Numéro BC',external_reference:'Référence externe',dated_at:'Date',status:'Statut',total:'Montant',tax_type:'TVA',update_stock:'Politique de stock',currency:'Devise',customer:'Client',shipping_address:'Adresse',account_representative:'Gestionnaire',line_items:'Produits, quantités, prix ou stock',shipping_orders:'BL associés'};
  const changed=r.previousDocument?Object.keys({...r.previousDocument,...r.document}).filter(k=>JSON.stringify(r.previousDocument[k])!==JSON.stringify(r.document[k])):[];
- box.innerHTML=`<h3>${r.alreadyRecovered?'Commande déjà récupérée':'Vérifier le BC avant son entrée dans V3'}</h3><p>Dernière lecture Erplain : ${esc(date(r.readAt))}</p>${r.changed?`<p role="alert"><strong>Le BC a changé. Relisez les nouvelles données avant une nouvelle validation.</strong></p><p>Informations modifiées : ${esc(changed.map(k=>labels[k]||k).join(', '))}</p><details><summary>Données consultées précédemment</summary>${documentHtml(r.previousDocument)}</details>`:''}${documentHtml(r.document)}
+ box.innerHTML=`<h3>${r.reconcileCandidate?'Récupérer les documents sur la commande existante':r.alreadyRecovered?'Commande déjà récupérée':'Vérifier le BC avant son entrée dans V3'}</h3><p>Dernière lecture Erplain : ${esc(date(r.readAt))}</p>${r.changed?`<p role="alert"><strong>Le BC a changé. Relisez les nouvelles données avant une nouvelle validation.</strong></p><p>Informations modifiées : ${esc(changed.map(k=>labels[k]||k).join(', '))}</p><details><summary>Données consultées précédemment</summary>${documentHtml(r.previousDocument)}</details>`:''}${documentHtml(r.document)}
  ${admission.length?`<h4>Admission bloquée</h4><ul>${admission.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:''}
  ${preparation.length?`<h4>Points à résoudre avant préparation</h4><ul>${preparation.map(i=>`<li>${esc(i)}</li>`).join('')}</ul><p>La validation de l’entrée dans V3 ne résout pas ces blocages logistiques.</p>`:''}
- <div class="actions">${r.alreadyRecovered?`<button data-erplain-open="${esc(r.orderId)}">Voir la commande</button>${r.archived?'<span>Commande archivée : aucune réactivation automatique.</span>':''}`:`<button class="primary" data-erplain-approve ${admission.length?'disabled':''}>Valider l’entrée dans V3</button><button data-erplain-reread>Relire ce BC dans Erplain</button>`}<button data-erplain-abandon>Abandonner</button></div><p>Abandonner ne modifie pas le BC dans Erplain.</p>`;
+ ${r.reconcileCandidate?`<p>La commande ${esc(r.reconcileCandidate.reference)} existe déjà dans V3. Le rattachement récupère le BC et tous ses BL, y compris le deuxième BL, en conservant les étiquettes et l’historique. La préparation reste une action séparée.</p>`:''}
+ <div class="actions">${r.reconcileCandidate?`<button class="primary" data-erplain-reconcile>Rattacher le BC et les BL à la commande existante</button><button data-erplain-open="${esc(r.reconcileCandidate.orderId)}">Voir la commande existante</button><button data-erplain-reread>Relire ce BC dans Erplain</button>`:r.alreadyRecovered?`<button data-erplain-open="${esc(r.orderId)}">Voir la commande</button>${r.archived?'<span>Commande archivée : aucune réactivation automatique.</span>':''}`:`<button class="primary" data-erplain-approve ${admission.length?'disabled':''}>Valider l’entrée dans V3</button><button data-erplain-reread>Relire ce BC dans Erplain</button>`}<button data-erplain-abandon>Abandonner</button></div><p>Abandonner ne modifie pas le BC dans Erplain.</p>`;
 }
 async function lookup(reference,bcId){
  if(busy)return;reference=String(reference||'').trim();if(!reference){note('Saisissez un numéro de BC ou une référence externe.',true);return;}
@@ -65,6 +66,10 @@ panel.addEventListener('click',async event=>{
   if(b.dataset.erplainPartial)return await openPartial(b.dataset.erplainPartial);
   if(b.dataset.erplainPrepare){b.disabled=true;try{await refreshAndResumeOrder(b.dataset.erplainPrepare);}finally{await loadRecovered();}return;}
   if(b.hasAttribute('data-erplain-reread')){setBusy(true);renderPreview(await post('targeted-reread',{bcId:String(preview.document.id)}));note('BC relu. Vérifiez les données avant validation.');}
+  if(b.hasAttribute('data-erplain-reconcile')){
+   setBusy(true);const r=await post('targeted-reconcile',{bcId:String(preview.document.id),orderId:preview.reconcileCandidate.orderId,reviewHash:preview.reviewHash,confirmed:true});
+   renderPreview({...preview,...r,reconcileCandidate:null,admissionIssues:[]});note(r.message);await orders();return;
+  }
   if(b.hasAttribute('data-erplain-approve')){
    setBusy(true);const r=await post('manual-review/approve',{bcId:String(preview.document.id),reviewHash:preview.reviewHash,confirmed:true});
    if(r.changed){renderPreview(r);note('Le BC a changé : une nouvelle validation est nécessaire.',true);}

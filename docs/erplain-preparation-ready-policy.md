@@ -13,3 +13,10 @@ Pour `https://api.erplain.app/graphql`, les connecteurs utilisent un espacement 
 Un `Retry-After` valide est respecté sans imposer systématiquement une minute supplémentaire (minimum local de 1 seconde au transport et 2 secondes pour la remise en file). En l’absence de délai exploitable, le repli progressif de 60 secondes à 15 minutes reste appliqué. Une pause partagée plus longue déjà enregistrée ne peut pas être raccourcie. Les écritures ne sont pas rejouées par le transport ; les réponses partielles sont préservées.
 
 Source vérifiée le 15 octobre 2026 : [limites officielles Erplain v2](https://erplain.readme.io/v2.0/reference/throttling). Il s’agit d’une capacité d’envoi, pas d’un délai garanti de préparation d’une commande.
+
+
+## Récupérer des documents sur une commande existante
+
+Le parcours ciblé propose un rattachement explicite lorsque le BC, sa référence externe ou la référence source correspondent à une seule commande V3. Il relit le BC et tous les BL avant validation ; une modification depuis l’aperçu impose une nouvelle lecture. Plusieurs correspondances, un autre BC déjà rattaché ou un traitement actif bloquent le rattachement.
+
+Cette action récupère tous les BL, notamment un deuxième BL en préparation à côté d’un premier BL livré. Elle conserve le BL principal déjà sélectionné, les lignes source, les étiquettes, les traitements et l’état archivé. Elle ne lance aucune préparation et ne modifie aucun document Erplain. Les avertissements de stock ou d’adresse restent des diagnostics de préparation et ne bloquent pas cette récupération documentaire. Les BL sont consultables dans « BL associés » de la commande existante.
