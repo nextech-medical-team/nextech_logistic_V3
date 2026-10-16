@@ -42,6 +42,13 @@ export function provesLegacyPreflight(job,audit){
  &&new Date(job.updated_at).getTime()===new Date(audit.created_at).getTime();
 }
 export async function canRetryFailedCarrier(db,job,{manualRequest=false}={}){
+ // GOFO's explicit city-validation refusal is not an uncertain shipment.
+ // Require its original persisted provider failure and a fresh manual request.
+ if(manualRequest&&job?.status==='failed'&&job.carrier==='gofo'&&job.environment==='production'
+ &&job.failure_phase==='provider'&&job.attempts===1&&job.creation_id
+ &&Number.isFinite(Date.parse(job.creation_started_at))&&noCreationEvidence(job)
+ &&job.original_error==='GOFO 200301000 : City information is incorrect'
+ &&job.error===job.original_error)return true;
  if(job?.status!=='failed'||!noCreationEvidence(job)||job.creation_started_at)return false;
  if(job.failure_phase==='preflight')return job.creation_started_at===null;
  if(job.failure_phase)return false;
