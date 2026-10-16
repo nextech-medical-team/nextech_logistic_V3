@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {createTemuExcelTestDatabase} from './support/temu-excel-db.mjs';
 import {temuExcelPreparation} from '../src/temu-excel-preparation.mjs';
 import {excelRenewalCandidate} from '../src/temu-excel-renewal.mjs';
+import {excelCommercialSource} from '../src/temu-excel-commercial.mjs';
+import {resumeUnchangedExcelReviews} from '../src/unchanged-excel-review.mjs';
 const reference='PO-141-FIXTURE',error='Excel : prix ou articles modifiés depuis la validation',user={role:'manager',email:'fixture@example.invalid'};
 const candidate={channel:'temu',tracking_status:'not_shipped',source_payload:{origin:'temu_excel',temuExcelPreparation:{fingerprint:'old',jobId:'old-job'}},erp_live:{},suspension:{active:false}};
 async function fixture(t){
@@ -49,7 +51,7 @@ test('changing source, mapping, address or suspension after preview prevents ren
 });
 test('operational and document boundaries cannot be renewed',()=>{
  const job={status:'review',error};assert.equal(excelRenewalCandidate(candidate,job),true);
- for(const patch of [{channel:'tender'},{archived:true},{partial_mode:true},{transport_choice:'gls'},{issue:'Consigne humaine'},{tracking_status:'shipped'},{label_status:'cancelled'},{suspension:{active:true}},{suspension:{erplainCancellation:null}},...['bc','bl','customer','customerNumber','phase'].map(key=>({erp_live:{[key]:key==='phase'?'creating_customer':{id:'existing'}}})),...['marketplacePendingCorrection','manualPreparationRequired','visibilityHold','erplainValidationHold'].map(key=>({source_payload:{...candidate.source_payload,[key]:true}})),{source_payload:{...candidate.source_payload,manualPlatformCancellation:{cancelled:true}}}])assert.equal(excelRenewalCandidate({...candidate,...patch},job),false,JSON.stringify(patch));
+ for(const patch of [{channel:'tender'},{archived:true},{partial_mode:true},{transport_choice:'gls'},{issue:'Consigne humaine'},{tracking_status:'shipped'},{label_status:'cancelled'},{suspension:{active:true}},{suspension:{erplainCancellation:null}},...['bc','bl','customer','customerNumber','phase'].map(key=>({erp_live:{[key]:key==='phase'?'creating_customer':{id:'existing'}}})),...['marketplacePendingCorrection','manualPreparationRequired','visibilityHold','erplainValidationHold'].map(key=>({source_payload:{...candidate.source_payload,[key]:true}}))])assert.equal(excelRenewalCandidate({...candidate,...patch},job),false,JSON.stringify(patch));
  for(const status of ['pending','processing','complete'])assert.equal(excelRenewalCandidate(candidate,{status,error}),false);
  assert.equal(excelRenewalCandidate(candidate,{status:'review',error:'HTTP 500 : résultat inconnu'}),false);
 });
@@ -58,3 +60,46 @@ test('uncertain writes, unrelated reviews, existing labels and active correction
   await t.test(sql,async t=>{const f=await fixture(t),input=await f.input();await f.db.exec(sql);await assert.rejects(f.service.prepare(input,user),/Revalidation Excel/);assert.equal((await f.read()).source_payload.temuExcelCommercial.total,4.30);});
  }
 });
+
+async function sameSourceFixture(t){
+ const f=await fixture(t),o=await f.read(),lines=(await f.db.query('SELECT * FROM lines')).rows;
+ const current=excelCommercialSource(o,lines),saved={...current,net:3.55,total:4.30};
+ await f.db.query("UPDATE orders SET source_payload=jsonb_set(source_payload,'{temuExcelCommercial}',$1::jsonb)",[JSON.stringify(saved)]);
+ return f;
+}
+test('automatic renewal repairs changed arithmetic of unchanged validated source once, preserving raw data and old results',async t=>{
+ const f=await sameSourceFixture(t),before=await f.read(),lines=(await f.db.query('SELECT * FROM lines')).rows;
+ await f.db.query("UPDATE resolution_jobs SET error='BC · Taux de TVA source à préciser' WHERE id='old-job'");
+ const result=await resumeUnchangedExcelReviews(f.db);assert.equal(result.resumed,1);assert.equal(result.providerWrites,0);
+ assert.equal((await resumeUnchangedExcelReviews(f.db)).resumed,0);
+ const after=await f.read();assert.equal(after.source_payload.temuExcelCommercial.total,8.66);
+ assert.deepEqual(after.erp_live,before.erp_live);assert.deepEqual(after.suspension,before.suspension);
+ assert.deepEqual((await f.db.query('SELECT * FROM lines')).rows,lines);
+ assert.deepEqual(after.source_payload.temuExcelValidationHistory[0].commercial,before.source_payload.temuExcelCommercial);
+ const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;
+ assert.equal(jobs.length,2);assert.equal(jobs.filter(j=>j.status==='queued'&&j.action==='resume').length,1);
+ assert.equal(jobs.find(j=>j.id==='old-job').result.previousReview.error,'BC · Taux de TVA source à préciser');
+ assert.equal((await f.db.query('SELECT detail FROM audit')).rows[0].detail.externalWritesIssued,0);
+});
+test('automatic unchanged-source recovery retains every actual source edit, operational hold and uncertain write',async t=>{
+ const f=await sameSourceFixture(t);
+ const pairs=[
+  ["UPDATE lines SET quantity=2","UPDATE lines SET quantity=1"],
+  ["UPDATE orders SET suspension='{\"active\":true}'","UPDATE orders SET suspension='{\"active\":false}'"],
+  ["UPDATE orders SET erp_live='{\"bc\":{\"id\":1}}'","UPDATE orders SET erp_live='{}'"],
+  ["UPDATE orders SET channel='tender'","UPDATE orders SET channel='temu'"],
+  ["UPDATE erp_live_jobs SET error='HTTP 500 : résultat incertain'","UPDATE erp_live_jobs SET error='Excel : prix ou articles modifiés depuis la validation'"],
+  ["UPDATE erp_live_jobs SET status='processing'","UPDATE erp_live_jobs SET status='review'"],
+  ["INSERT INTO temu_label_documents VALUES('PO-141-FIXTURE')","DELETE FROM temu_label_documents"],
+  ["INSERT INTO erplain_product_creation_attempts VALUES('6963')","DELETE FROM erplain_product_creation_attempts"],
+  ["INSERT INTO correction_jobs VALUES('o','review')","DELETE FROM correction_jobs"],
+  ["INSERT INTO resolution_jobs(id,order_id,action,status,error) VALUES('uncertain','o','replace-equivalent','review','HTTP 500')","DELETE FROM resolution_jobs WHERE id='uncertain'"]
+ ];
+ for(const [change,restore] of pairs){await f.db.exec(change);const before=await f.read();assert.equal((await resumeUnchangedExcelReviews(f.db)).resumed,0,change);assert.deepEqual(await f.read(),before);await f.db.exec(restore);}
+ assert.equal((await f.db.query('SELECT * FROM audit')).rows.length,0);
+ await assert.rejects(resumeUnchangedExcelReviews(f.db,{limit:0}),/invalide/);
+});
+
+// A platform cancellation check only records an observation; applying a local
+// cancellation separately sets suspension/label/tracking guards above.
+test('platform cancellation observation alone does not veto an existing Excel preparation',()=>{assert.equal(excelRenewalCandidate({...candidate,source_payload:{...candidate.source_payload,manualPlatformCancellation:{cancelled:true}}},{status:'review',error}),true);});
