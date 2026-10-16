@@ -25,7 +25,7 @@ test('latest negative margin prevents buy claim',async()=>{
  if(sql.startsWith('UPDATE temu_automatic')){saved.push(JSON.parse(args[1]));return {rows:[]};}
  throw Error(sql);
  }};
- const local={async amounts(){return {};},async prepare(){return plan;},async buy(ref,id,amount,opts){await opts.beforeClaim(plan);bought++;return {status:'complete'};}};
+ const local={async recover(){return {status:'ready',plan};},async amounts(){return {};},async prepare(){return plan;},async buy(ref,id,amount,opts){await opts.beforeClaim(plan);bought++;return {status:'complete'};}};
  const margins={async get(options){assert.equal(options.fresh,true);calls++;return {calculatedAt:new Date().toISOString(),rows:[{reference:order.reference,status:calls===1?'positive':'negative',profit:calls===1?1:-1,shipping:5,shippingSource:'Devis TEMU final',issues:[]}]};}};
  await temuAutomaticPurchaseWorker(db,local,margins,{stockGate:async()=>{},refreshPreparation:async()=>({notFound:false,stockHolds:[]})}).run();assert.equal(calls,2);assert.equal(bought,0);assert.equal(saved[0].status,'held');assert.match(saved[0].message,/confirmer/);
 });
