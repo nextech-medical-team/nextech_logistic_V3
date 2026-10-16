@@ -173,8 +173,8 @@ async function context(db,directory,id){
  const temuJob=order.channel==='temu'?(await db.query('SELECT status,error,packages,attempt_id,result FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]:null;
  if(temuJob){temuJob.refusalReasons=(temuJob.result?.packageInfoResultList||[]).filter(p=>Number(p.shippingLabelStatus)===2).map(p=>({packageSn:p.packageSn,reason:p.failReasonText||null}));delete temuJob.result;}
  projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob,carrier_job:job,temu_job:temuJob}));
- if(order.order_delivered){for(const line of lines){line.message=null;line.catalog_issue=null;}return {order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active:null,temuJob,priceFingerprint:pricingFingerprint(lines)};}
- return projectSharedParcelContext({order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
+ if(order.order_delivered){for(const line of lines){line.message=null;line.catalog_issue=null;}return {order,lines:resolveReplacementLines(lines,order.channel,{bc:order.erp_live?.bc}),job,erpJob,products,active:null,temuJob,priceFingerprint:pricingFingerprint(lines)};}
+ return projectSharedParcelContext({order,lines:resolveReplacementLines(lines,order.channel,{bc:order.erp_live?.bc}),job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
 }
 export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic}={}){
  const diagnoseCarrier=refreshCarrierDiagnostic||carrierDiagnosticReader(db,directory).read;
@@ -262,11 +262,12 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    return {...found,...await refreshLookupDiagnostics(db,o,proof)};
   }
   if(j.action==='mapping'){
+   if(b.scope==='order'&&o.erp_live?.bc?.id)throw Error('BC déjà créé : utilisez « Remplacer un produit » pour modifier ce BC.');
    if(b.channel!==o.channel)throw Error('Ce gestionnaire ne correspond pas à la commande. Utiliser Mapping SKU pour un autre gestionnaire.');
    if(!(await db.query('SELECT id FROM lines WHERE order_id=$1 AND source_sku=$2',[o.id,b.source_sku.trim()])).rows.length)throw Error('SKU gestionnaire absent de cette commande');
    await stage('Vérification du produit Erplain');await api.verify();const v=chooseProduct(await readOrderSku(b.target_sku.trim()),b.variantId);
    await bindProduct(db,v);await stage(b.scope==='permanent'?'Enregistrement dans Mapping SKU':'Correction de cette commande uniquement');const saved=await applyMappingScope(db,b,o.id,saveMapping);
-   await stage('Recalcul des commandes concernées');return {message:b.scope==='permanent'?'Mapping permanent enregistré et réutilisé pour ce gestionnaire.':'Correction enregistrée uniquement pour cette commande. La base de mapping reste inchangée.',...saved,checks:await recheckOrders(db,saved.affected)};
+   await stage('Recalcul des commandes concernées');return {message:b.scope==='permanent'?'Mapping permanent enregistré pour les prochaines commandes sans BC. Les BC existants sont conservés ; utilisez « Remplacer un produit » pour les modifier.':'Correction enregistrée uniquement pour cette commande. La base de mapping reste inchangée.',...saved,checks:await recheckOrders(db,saved.affected)};
   }
   if(['weight','create-product','activate-product','select-product'].includes(j.action)){
    await stage('Lecture du produit Erplain LIVE');await api.verify();let found=await readOrderSku(b.sku.trim()),v;

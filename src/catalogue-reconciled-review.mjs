@@ -1,10 +1,10 @@
 import {currentMappingLine} from './current-mapping-line.mjs';
 import {productCreationBlock} from './missing-product-creation.mjs';
 
-// Only an explicit preparation request may resume this historical local refusal.
+// Admission requires the exact historical reconciliation, never just a NULL error.
 // Reconciliation deliberately changes diagnostics only; a NULL error by itself
 // never proves that a stopped job can safely run again.
-export async function resumeReconciledCatalogueReview(tx,o,j){
+export async function resumeReconciledCatalogueReview(tx,o,j,{automatic=false}={}){
  if(o.source_payload?.temuDirect?.attemptedAt)return false;
  if(j.error!==null||o.issue||o.duplicate_of||o.simulation||o.reference?.startsWith('DEMO-')||o.resolution_pending_resume||o.erp_live?.phase||o.erp_live?.customer||o.erp_live?.stockDocument||o.erp_live?.stockCreationAttemptedAt||productCreationBlock(o))return false;
  const events=(await tx.query("SELECT detail FROM audit WHERE action='diagnostic.catalogue_lookup_reconciled' AND detail->>'orderId'=$1 ORDER BY created_at DESC LIMIT 1",[o.id])).rows;
@@ -27,7 +27,30 @@ export async function resumeReconciledCatalogueReview(tx,o,j){
  }
  const busy=(await tx.query("SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting','review') UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status IN ('pending','creating','awaiting_pdf','ready') UNION ALL SELECT 1 FROM correction_jobs WHERE order_id=$1 AND status IN ('queued','applying','checking','waiting','review')",[o.id])).rows;
  if(busy.length)return false;
- await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','erplain.reconciled_catalogue_review_resumed',$1)",[JSON.stringify({orderId:o.id,sku:proof.sku,originalUpdatedAt:j.updated_at,retired,proof,providerReplay:false,explicitPreparationRequest:true})]);
+ await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','erplain.reconciled_catalogue_review_resumed',$1)",[JSON.stringify({orderId:o.id,sku:proof.sku,originalUpdatedAt:j.updated_at,retired,proof,providerReplay:false,explicitPreparationRequest:!automatic,automaticRecovery:automatic})]);
  await tx.query("UPDATE erp_live_jobs SET status='pending',error=null,updated_at=now() WHERE order_id=$1",[o.id]);
  return true;
+}
+
+// The initial automatic queue used ON CONFLICT DO NOTHING, so an audited review
+// could remain stopped forever after its obsolete catalogue error was removed.
+// Rotate through eligible history without changing timestamps of rejected jobs.
+// Only the existing guarded admission below changes a job, not any document or
+// label. The normal worker rereads the provider before creating the first BC.
+export async function resumeAuditedCatalogueReviews(db,{afterId='',limit=25}={}){
+ if(!Number.isInteger(limit)||limit<1||limit>100)throw Error('Lot catalogue invalide');
+ return db.transaction(async tx=>{
+  const rows=(await tx.query(`SELECT o.*,e.updated_at review_updated FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
+   WHERE e.status='review' AND e.error IS NULL AND o.channel IN ('temu','amazon','shopify')
+   AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
+   AND coalesce(o.suspension->>'active','false')<>'true' AND NOT (o.suspension ? 'erplainCancellation')
+   AND coalesce(o.issue,'')='' AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL
+   AND coalesce(o.erp_live->>'phase','')='' AND o.erp_live->'customer'->>'id' IS NULL
+   AND coalesce(o.tracking_status,'') IN ('not_shipped','unknown') AND coalesce(o.label_status,'')<>'cancelled'
+   AND EXISTS(SELECT 1 FROM audit a WHERE a.action='diagnostic.catalogue_lookup_reconciled' AND a.detail->>'orderId'=o.id)
+   ORDER BY (o.id>$1) DESC,o.id LIMIT $2 FOR UPDATE OF o,e SKIP LOCKED`,[afterId,limit])).rows;
+  let resumed=0;
+  for(const o of rows)if(await resumeReconciledCatalogueReview(tx,o,{error:null,updated_at:o.review_updated},{automatic:true}))resumed++;
+  return {resumed,checked:rows.length,afterId:rows.at(-1)?.id||'',providerWrites:0};
+ });
 }

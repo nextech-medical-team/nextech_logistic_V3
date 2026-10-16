@@ -40,6 +40,9 @@ export function excelCommercialSource(order,lines){
 export function verifiedExcelCommercial(order,lines){
  const saved=order.source_payload?.temuExcelCommercial;
  if(!saved?.fingerprint||saved.source!=='temu_excel'||!Number.isFinite(saved.total)||!Number.isFinite(saved.tax)||!/^[A-Z]{3}$/.test(saved.currency||''))throw Error('Excel : validation commerciale requise avant préparation');
- if(lines){const current=excelCommercialSource(order,excelOriginalLines(order,lines));if(current.fingerprint!==saved.fingerprint||current.total!==saved.total||current.tax!==saved.tax||current.currency!==saved.currency)throw Error('Excel : prix ou articles modifiés depuis la validation');return current;}
+ // The fingerprint contains the complete original Excel rows. Equal source
+ // fingerprints cannot become a source edit merely because the parser changed.
+ // Use current source arithmetic, never the historical calculated cache.
+ if(lines){const current=excelCommercialSource(order,excelOriginalLines(order,lines));if(current.fingerprint!==saved.fingerprint||current.currency!==saved.currency)throw Error('Excel : prix ou articles modifiés depuis la validation');return current;}
  return saved;
 }

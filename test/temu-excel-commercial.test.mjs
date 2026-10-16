@@ -26,7 +26,8 @@ test('Excel BC uses seller settlement 9.44 instead of buyer payment 10.03',async
  const pricing=excelPricing(o,[l],[{variant:{id:'v'},tax_codes:[{id:'tax'}],quantity:1}],[{id:'tax',active:true,tax_rates:[{rate:20}]}]);
  assert.equal(pricing.total,9.44);assert.equal(pricing.items[0].price,6.45);assert.equal(pricing.items[1].price,2.99);
  o.source_payload.temuExcelCommercial={...amounts,total:10.03};
- assert.throws(()=>verifiedExcelCommercial(o,[l]),/modifiés/);
+ assert.equal(verifiedExcelCommercial(o,[l]).total,9.44);
+ const changed={...l,quantity:2};assert.throws(()=>verifiedExcelCommercial(o,[changed]),/modifiés/);
  delete l.source_payload.excel['Total du prix de base après réduction'];
  assert.throws(()=>excelAmounts([l]),/montant absent.*prix de base/);
 });

@@ -6,7 +6,9 @@ export async function applyMappingScope(db,b,orderId,saveMapping){
  const sourceQty=Number(b.source_qty),targetQty=Number(b.target_qty);
  if(!(sourceQty>0&&targetQty>0&&Number.isFinite(sourceQty)&&Number.isFinite(targetQty)))throw Error('Quantités de correspondance invalides');
  return db.transaction(async tx=>{
-  await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[orderId]);
+  const order=(await tx.query('SELECT id,erp_live FROM orders WHERE id=$1 FOR UPDATE',[orderId])).rows[0];
+  if(!order)throw Error('Commande introuvable');
+  if(order.erp_live?.bc?.id)throw Error('BC déjà créé : utilisez « Remplacer un produit » pour enregistrer le changement dans le BC et la commande. Un mapping seul ne modifie pas le BC.');
   await preserveSubstitutionLabels(tx,orderId);
   const r=await tx.query(`UPDATE lines SET target_sku=$3,target_quantity=round(quantity*$4::numeric/$5::numeric,6),source_payload=source_payload||$6::jsonb WHERE order_id=$1 AND source_sku=$2 RETURNING id`,[orderId,b.source_sku.trim(),b.target_sku.trim(),targetQty,sourceQty,JSON.stringify({mappingScope:'order',mappingSourceQty:sourceQty,mappingTargetQty:targetQty})]);
   if(!r.rows.length)throw Error('SKU absent de cette commande');
