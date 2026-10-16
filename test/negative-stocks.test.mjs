@@ -43,3 +43,10 @@ test('an incomplete catalog fails instead of claiming no negative stocks',async(
  const service=negativeStocksService({verify:async()=>{},request:async()=>({Variants:{data:[],paginatorInfo:{}}})},'',{location:async()=>'7'});
  await assert.rejects(()=>service.page(),/incomplète/);
 });
+
+test('supplier uses the primary supplier then associated suppliers without inventing missing data',async()=>{
+ const variant=(id,product,suppliers)=>({id,sku:String(id),active:true,track_inventory:true,product,suppliers,stock_levels:{data:[{location:{id:7},available:-1,on_hand:0}],paginatorInfo:{hasMorePages:false}}});
+ const api={verify:async()=>{},request:async()=>({Variants:{data:[variant(1,{default_supplier:{label:'Principal'}},[{supplier:{label:'Autre'}}]),variant(2,{},[{supplier:{label:'Associe'}},{supplier:{label:'Associe'}}]),variant(3,{},[])],paginatorInfo:{lastPage:1}}})};
+ const result=await negativeStocksService(api,'',{location:async()=>'7'}).page();
+ assert.deepEqual(result.rows.map(row=>row.supplier),['Principal','Associe',null]);
+});

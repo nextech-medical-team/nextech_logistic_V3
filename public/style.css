@@ -413,7 +413,7 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
  #view-negative-stocks>p[role=status]{padding:12px 14px;background:#f0f6f5;border-radius:8px;margin:0 0 18px;line-height:1.5}
  #view-negative-stocks table{width:100%;min-width:540px;border-collapse:collapse}
  #view-negative-stocks th,#view-negative-stocks td{padding:14px 16px}
- #view-negative-stocks th:nth-child(n+3),#view-negative-stocks td:nth-child(n+3){text-align:right;font-variant-numeric:tabular-nums}
+ #view-negative-stocks th:nth-child(n+4),#view-negative-stocks td:nth-child(n+4){text-align:right;font-variant-numeric:tabular-nums}
  #view-negative-stocks td[colspan]{text-align:center;padding:32px 16px;color:#627b81;background:#fafcfc}
  #view-negative-stocks .negative-stock-search{display:flex;flex-direction:column;gap:6px;margin:0;min-width:0;order:1}
  #view-negative-stocks .negative-stock-search label{font-weight:600;font-size:13px;line-height:18px;margin:0}

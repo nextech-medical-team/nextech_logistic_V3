@@ -94,7 +94,7 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
   }
  }
  const panel=document.createElement('section');panel.id='view-negative-stocks';panel.className='view panel padded';panel.hidden=true;
- panel.innerHTML='<h2>Stocks négatifs</h2><p>Produits actifs à stock disponible ou physique négatif dans l’emplacement ERPLAIN configuré.</p><button type="button" id="negative-stocks-load">Afficher les stocks négatifs</button><p role="status" aria-live="polite"></p><div style="overflow-x:auto"><table hidden><thead><tr><th>SKU</th><th>Produit</th><th>Disponible</th><th>Physique</th></tr></thead><tbody></tbody></table></div>';
+ panel.innerHTML='<h2>Stocks négatifs</h2><p>Produits actifs à stock disponible ou physique négatif dans l’emplacement ERPLAIN configuré.</p><button type="button" id="negative-stocks-load">Afficher les stocks négatifs</button><p role="status" aria-live="polite"></p><div style="overflow-x:auto"><table hidden><thead><tr><th>SKU</th><th>Produit</th><th>Fournisseur</th><th>Disponible</th><th>Physique</th></tr></thead><tbody></tbody></table></div>';
  const history=document.createElement('section');
  history.innerHTML='<label for="negative-stock-reports" style="display:block;margin-bottom:6px">Rapports récents</label><select id="negative-stock-reports" style="width:420px;max-width:100%;min-height:44px"><option value="">Rapports récents...</option></select><p role="status" aria-live="polite"></p>';
  panel.append(history);
@@ -126,7 +126,7 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
 
  button.textContent='Actualiser les stocks négatifs';
  function emptyRow(target,text,columns){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=columns;cell.textContent=text;row.append(cell);target.replaceChildren(row);}
- table.hidden=false;emptyRow(body,'Chargement des stocks négatifs à l’ouverture du module…',4);
+ table.hidden=false;emptyRow(body,'Chargement des stocks négatifs à l’ouverture du module…',5);
  function renderRows(rows){
   displayedRows=rows;
   const query=normalizeSearch(searchInput.value.trim());
@@ -134,8 +134,8 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
   exportRows=[...filtered].sort((a,b)=>a.sku.localeCompare(b.sku,'fr'));exportButton.disabled=false;
   searchCount.textContent=filtered.length+' produit(s) affiché(s) sur '+rows.length;
   body.replaceChildren();
-  for(const row of [...filtered].sort((a,b)=>a.sku.localeCompare(b.sku,'fr'))){const tr=document.createElement('tr');for(const value of [row.sku,row.label,row.available,row.onHand]){const td=document.createElement('td');td.textContent=value===null?'Non vérifié':typeof value==='number'?value.toLocaleString('fr-FR'):value;tr.append(td);}body.append(tr);}
-  table.hidden=false;if(!filtered.length)emptyRow(body,rows.length?'Aucun produit ne correspond à votre recherche.':'Aucun stock négatif dans ce rapport.',4);
+  for(const row of [...filtered].sort((a,b)=>a.sku.localeCompare(b.sku,'fr'))){const tr=document.createElement('tr');for(const value of [row.sku,row.label,row.supplier||'Non renseigné',row.available,row.onHand]){const td=document.createElement('td');td.textContent=value===null?'Non vérifié':typeof value==='number'?value.toLocaleString('fr-FR'):value;tr.append(td);}body.append(tr);}
+  table.hidden=false;if(!filtered.length)emptyRow(body,rows.length?'Aucun produit ne correspond à votre recherche.':'Aucun stock négatif dans ce rapport.',5);
  }
  async function loadHistory(){
   const selected=reportSelect.value;reportSelect.disabled=true;historyStatus.textContent='';
@@ -160,7 +160,7 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
  button.onclick=async()=>{
   if(button.disabled)return;
   displayedRows=null;exportRows=[];exportButton.disabled=true;searchCount.textContent='';
-  button.disabled=true;panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des stocks ERPLAIN en cours…',4);loadHistory();
+  button.disabled=true;panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des stocks ERPLAIN en cours…',5);loadHistory();
   try{
    let page=1,lastPage=1,locationId=null,unverified=0,runId=null;const rows=[];
    do{
@@ -174,7 +174,7 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
    renderRows(rows);
    status.textContent=`${rows.length} produit(s) à stock négatif · emplacement ${locationId} · lecture terminée à ${new Date().toLocaleTimeString('fr-FR')}.`+(unverified?` ${unverified} produit(s) avec stock non vérifié : résultat potentiellement incomplet.`:'');
    await loadHistory();
-  }catch(error){status.textContent=error.message.includes('Route inexistante')?'Le service de stocks négatifs n’est pas encore actif. Redémarrez le serveur pour charger les stocks et les rapports.':'Lecture interrompue : '+error.message;emptyRow(body,'Aucun résultat à afficher pour le moment.',4);}
+  }catch(error){status.textContent=error.message.includes('Route inexistante')?'Le service de stocks négatifs n’est pas encore actif. Redémarrez le serveur pour charger les stocks et les rapports.':'Lecture interrompue : '+error.message;emptyRow(body,'Aucun résultat à afficher pour le moment.',5);}
   finally{button.disabled=false;panel.setAttribute('aria-busy','false');}
  };
 })();

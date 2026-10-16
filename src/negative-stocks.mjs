@@ -47,7 +47,7 @@ export function negativeStocksService(api,directory,{location=()=>stockChoiceLoc
   if(!/^[1-9]\d{0,5}$/.test(String(rawPage)))throw Error('Page de stock invalide');
   const page=Number(rawPage),locationId=String(await location());
   await api.verify();
-  const {Variants:v}=await api.request('query V3NegativeStocks($page:Int!){Variants(first:100,page:$page){paginatorInfo{lastPage total} data{id sku active track_inventory product{label active} stock_levels(first:100){data{location{id} available on_hand} paginatorInfo{hasMorePages}}}}}',{page});
+  const {Variants:v}=await api.request('query V3NegativeStocks($page:Int!){Variants(first:100,page:$page){paginatorInfo{lastPage total} data{id sku active track_inventory product{label active default_supplier{id label}} suppliers{supplier{id label}} stock_levels(first:100){data{location{id} available on_hand} paginatorInfo{hasMorePages}}}}}',{page});
   if(!Array.isArray(v?.data)||!Number.isInteger(v.paginatorInfo?.lastPage)||v.paginatorInfo.lastPage<page)throw Error('Lecture des stocks incomplète');
   const rows=[];let unverified=0;
   for(const variant of v.data){
@@ -58,7 +58,7 @@ export function negativeStocksService(api,directory,{location=()=>stockChoiceLoc
    if(matches.length!==1){unverified++;continue;}
    const available=quantity(matches[0].available),onHand=quantity(matches[0].on_hand);
    if(available===null||onHand===null)unverified++;
-   if((available!==null&&available<0)||(onHand!==null&&onHand<0))rows.push({variantId:String(variant.id),sku:variant.sku||'',label:variant.product?.label||'',available,onHand});
+   if((available!==null&&available<0)||(onHand!==null&&onHand<0))rows.push({variantId:String(variant.id),sku:variant.sku||'',label:variant.product?.label||'',supplier:variant.product?.default_supplier?.label||[...new Set((variant.suppliers||[]).map(entry=>entry.supplier?.label).filter(Boolean))].join(' ; ')||null,available,onHand});
   }
   return {rows,unverified,locationId,page,lastPage:v.paginatorInfo.lastPage,checkedAt:new Date().toISOString()};
  }};
