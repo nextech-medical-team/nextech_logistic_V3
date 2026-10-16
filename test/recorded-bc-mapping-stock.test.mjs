@@ -8,6 +8,7 @@ import {currentMappingLine} from '../src/current-mapping-line.mjs';
 import {applyMappingScope} from '../src/mapping-scope.mjs';
 import {saveMapping} from '../src/mapping-store.mjs';
 import {prepareLabel} from '../src/workflow.mjs';
+import {recordedBcRoutingLines} from '../src/recorded-bc-routing-lines.mjs';
 
 const line={id:'local',source_sku:'LSP20061930',quantity:12,target_sku:'LSFE3151-05',target_quantity:360,mapped_sku:'LSFE3151-05',source_qty:1,target_qty:30};
 const bc={id:1939214,line_items:[{id:27945412,type:'normal',quantity:360,variant:{id:641966,sku:'LSP20061930'}}]};
@@ -47,6 +48,30 @@ test('recorded preparation keeps its saved selection when a future permanent map
  const writes=[];const db={query:async(sql,args)=>{if(sql.startsWith('SELECT l.')){assert.equal(args[2],true);return {rows:[{...line,target_sku:'RECORDED',target_quantity:10,weight_kg:.04}]};}if(sql.startsWith('SELECT value'))return {rows:[]};writes.push({sql,args});return {rows:[]};}};
  await prepareLabel(db,{id:'o',channel:'amazon',reference:'test',erp_live:{bc:{id:'bc'}},address:{name:'Test',street:'Street',postal:'75001',city:'Paris',country:'FR'}});
  assert.equal(writes.some(w=>w.sql.startsWith('UPDATE lines')),false);assert.equal(writes.find(w=>w.sql.startsWith('UPDATE orders SET label_status')).args[1],.4);
+});
+test('legacy null or divergent target caches cannot change the product or units of a complete BC',async()=>{
+ const source=structuredClone(line),db={query:async(sql,args)=>{assert.match(sql,/FROM products p/);assert.deepEqual(args,[['LSP20061930']]);return {rows:[{sku:'LSP20061930',weight_kg:.04}]};}};
+ for(const target_sku of [null,'LSFE3151-05']){
+  const rows=await recordedBcRoutingLines(db,{channel:'shopify',erp_live:{bc}},[{...line,target_sku,target_quantity:null}]);assert.equal(rows[0].target_sku,'LSP20061930');assert.equal(rows[0].target_quantity,360);assert.equal(rows[0].weight_kg,.04);
+ }
+ assert.deepEqual(line,source);
+});
+test('routing preserves partial and AO scopes and never carries a weight proof to a different physical product',async()=>{
+ const preserved=[{...line,source_payload:{erplainSourceVariantId:'OTHER',erplainCorrectedWeightKg:999}}];
+ for(const patch of [{channel:'tender'},{channel:'shopify',partial_mode:true}])assert.equal(await recordedBcRoutingLines({query:()=>assert.fail('no extra read')},{...patch,erp_live:{bc}},preserved),preserved);
+ const rows=await recordedBcRoutingLines({query:async()=>({rows:[{sku:'LSP20061930',weight_kg:.04}]})},{channel:'shopify',erp_live:{bc}},preserved);assert.equal(rows[0].weight_kg,.04);
+});
+test('routing reuses only a weight verified for the recorded physical variant, without catalog blockers for another product',async()=>{
+ const rows=await recordedBcRoutingLines({query:async()=>({rows:[{sku:'LSP20061930',weight_kg:.04,message:'old lookup error'}]})},{channel:'shopify',erp_live:{bc}},[{target_sku:'LSP20061930',source_payload:{erplainSourceVariantId:'641966',erplainCorrectedWeightKg:.05}}]);assert.equal(rows[0].weight_kg,.05);assert.equal(rows[0].message,null);
+});
+test('real preparation routes legacy BC caches from the recorded SKU without rewriting lines or mappings',async()=>{
+ const writes=[],db={query:async(sql,args)=>{
+  if(sql.startsWith('SELECT l.'))return {rows:[{...line,target_sku:null,target_quantity:null,weight_kg:999}]};
+  if(sql.startsWith('SELECT p.sku'))return {rows:[{sku:'LSP20061930',weight_kg:.04}]};
+  if(sql.startsWith('SELECT value'))return {rows:[]};writes.push({sql,args});return {rows:[]};
+ }};
+ await prepareLabel(db,{id:'o',reference:'test',channel:'shopify',source_payload:{shopifyDeliveryMode:'direct'},transport_choice:'gls',erp_live:{bc},address:{name:'Test',street:'Street',postal:'75001',city:'Paris',country:'FR'}});
+ assert.equal(writes.some(w=>w.sql.startsWith('UPDATE lines')),false);assert.equal(writes.find(w=>w.sql.startsWith('UPDATE orders SET label_status')).args[1],14.4);
 });
 test('real permanent mapping SQL preserves all BC orders, their lines and jobs while preparing unrecorded orders',async()=>{
  const db=new PGlite();try{
