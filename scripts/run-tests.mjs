@@ -56,4 +56,5 @@ groups.push(['--test','test/substitution-diagnostics.test.mjs']);
 groups.push(['--test','test/extra-parcel-count.test.mjs']);
 groups.push(['--test','test/delivered-zero-problems.test.mjs']);
 groups.push(['--test','test/erplain-quota-delay.test.mjs']);
+groups.push(['--test','test/manager-tender-filter.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
