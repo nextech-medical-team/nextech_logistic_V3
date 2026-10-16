@@ -17,7 +17,7 @@
    const r=latest.get(ref.dataset.detail),cell=ref.closest('tr').cells[index];if(!cell)continue;
    let box=cell.querySelector('.order-processing'),button=ref.parentElement.querySelector('.processing-priority');
    // Completed documents suppress current blockers without modifying processing jobs.
-   if(ref.closest('tr').dataset.completeOrderDocuments==='true'){box?.remove();button?.remove();continue;}
+   if(ref.closest('tr').dataset.completeOrderDocuments==='true'||ref.closest('tr').dataset.orderDelivered==='true'||r?.order_delivered){box?.remove();button?.remove();continue;}
    if(!r?.stage&&!r?.previewPending&&!r?.priority&&!r?.canPrioritize&&!r?.monitoring?.blocked&&!r?.monitoring?.followUp){box?.remove();button?.remove();continue;}
    if(!box){box=document.createElement('div');box.className='order-processing';box.style.minWidth='0';box.style.fontSize='12px';box.style.lineHeight='1.4';
     for(const cls of ['processing-stage','processing-position','processing-elapsed','processing-reason','processing-preview','processing-signals','processing-other','monitoring-last','monitoring-next','monitoring-result','monitoring-step','monitoring-alert']){const line=document.createElement('div');line.className=cls;line.style.overflowWrap='anywhere';if(cls==='processing-other')line.style.whiteSpace='pre-line';if(cls==='processing-preview'){line.style.fontWeight='bold';line.style.color='#8a4b00';}box.append(line);}
@@ -38,8 +38,8 @@
     return parts.map(part=>part.trim()).filter(part=>part&&part!=='Transporteur non déterminé').join(' ; ')||null;
    };
    const recordedMonitor=r.monitoring;
-   const retiredMonitor=r.label_manual_request_required&&(r.label_diagnostic_history||[]).some(h=>h.reason===recordedMonitor?.result);
-   const monitor=retiredMonitor?{...recordedMonitor,result:'Ancien refus conservé dans l’historique de l’étiquette',nextStep:'Nouvelle demande manuelle d’étiquette attendue',nextCheck:null,blocked:false,followUp:false,alert:false}:recordedMonitor?{...recordedMonitor,result:carrierMessage(recordedMonitor.result)||(recordedMonitor.result?'Transporteur déterminé · contrôle de préparation à actualiser':recordedMonitor.result)}:null;
+   const retiredMonitor=r.label_manual_request_required&&(r.label_diagnostic_history||[]).some(h=>h.reason===recordedMonitor?.result)||r.manual_label_request&&r.previous_temu_label_refusal?.reason===recordedMonitor?.result;
+   const monitor=retiredMonitor?{...recordedMonitor,result:'Ancien refus conservé dans l’historique de l’étiquette',nextStep:r.manual_label_request?.message||'Nouvelle demande manuelle d’étiquette attendue',nextCheck:null,blocked:false,followUp:false,alert:false}:recordedMonitor?{...recordedMonitor,result:carrierMessage(recordedMonitor.result)||(recordedMonitor.result?'Transporteur déterminé · contrôle de préparation à actualiser':recordedMonitor.result)}:null;
    const stamp=value=>value?new Date(value).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'À vérifier';
    setText(box.querySelector('.monitoring-last'),monitor?.lastCheck?'Dernière vérification : '+stamp(monitor.lastCheck):'');
    setText(box.querySelector('.monitoring-next'),monitor?.nextCheck?'Prochain contrôle : '+stamp(monitor.nextCheck):'');

@@ -1,15 +1,23 @@
+import {assertInstalledStock} from './stock-gate-preserved.mjs';
+import {exactStockAvailability} from './stock-decimal.mjs';
 const stockNumeric=value=>(typeof value==='number'||typeof value==='string'&&value.trim()!=='')&&Number.isFinite(Number(value));
-export function assertFullOrderStock(lines){
- const groups=new Map();
- for(const l of lines){if(!l.variant)continue;if(l.variant.track_inventory===false)continue;
+export function assertFullOrderStock(lines,{preserveInstalled=false}={}){
+ if(preserveInstalled)return assertInstalledStock(lines);
+ if(!Array.isArray(lines))throw new Error('Stock non vérifiable : lignes produit absentes');
+ const groups=new Map();let products=0;
+ for(const l of lines){if(l?.type==='shipping_cost'&&!l.variant)continue;
+ if(!l?.variant?.id)throw new Error('Stock non vérifiable : identité produit absente');
+ products++;
+ if(!stockNumeric(l.quantity)||Number(l.quantity)<=0)throw new Error('Quantité produit invalide : '+l.variant.sku);
+ if(l.variant.track_inventory===false)continue;
  const key=l.variant.id+':'+l.location?.id;if(!l.location?.id)throw new Error('Lieu de stockage absent : '+l.variant.sku);
  const qty=stockNumeric(l.quantity)?Number(l.quantity):NaN,available=l.available,onHand=l.on_hand,reserved=l.reserved_quantity;
  if(!stockNumeric(l.quantity)||qty<=0||![available,onHand,reserved].every(stockNumeric))throw new Error('Stock non vérifiable : '+l.variant.sku);
- const g=groups.get(key)||{sku:l.variant.sku,need:0,reserved:0,available:Number(available),onHand:Number(onHand)};
- g.need+=qty;g.reserved+=Math.max(0,Number(reserved));g.available=Math.min(g.available,Number(available));g.onHand=Math.min(g.onHand,Number(onHand));groups.set(key,g);
+ const g=groups.get(key)||{sku:l.variant.sku,rows:[]};g.rows.push(l);groups.set(key,g);
  }
- const missing=[...groups.values()].map(g=>({...g,usable:Math.max(0,Math.min(g.onHand,g.available+g.reserved))})).filter(g=>g.usable+1e-6<g.need);
- if(missing.length)throw new Error('BL bloqué — stock insuffisant : '+missing.map(g=>`${g.sku} : ${g.need} nécessaires, ${g.usable} utilisables, manque ${Math.round((g.need-g.usable)*1e6)/1e6}`).join(' ; '));
+ if(!products)throw new Error('Stock non vérifiable : commande sans produit');
+ const missing=[...groups.values()].map(g=>({sku:g.sku,...exactStockAvailability(g.rows)})).filter(g=>!g.sufficient);
+ if(missing.length)throw new Error('BL bloqué — stock insuffisant : '+missing.map(g=>`${g.sku} : ${g.need} nécessaires, ${g.usable} utilisables, manque ${g.missing}`).join(' ; '));
  return true;
 }
 

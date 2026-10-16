@@ -1,3 +1,5 @@
+import {publishStockWatchObservations} from './grouped-stock-watch.mjs';
+import {initializeImportReceptions,readImportReceptions} from './import-reception.mjs';
 import {cancelPartialDelivery} from './partial-cancellation.mjs';
 import {priceVerification} from './price-verification.mjs';
 import {missingOrdersVerification} from './missing-orders-verification.mjs';
@@ -120,11 +122,12 @@ const db=await openDatabase({directory:path.join(directory,'postgres'),url:proce
 db.recoverInterrupted=config.background;
 const releaseLeader=config.background?await db.acquireLeader():async()=>{};
 await initializeAppSchema(db,[initializeCarrierJobs,initializeComments2005,initializeTemuShipping,initializeStocks,initializeErplainLive,initializePartialDeliveries,initializeCorrections,initializeTemuAutomaticPurchase,initializeResolutions,initializeProcurement,initializeLifecycle,initializeErplainRefresh,initializeMarketplaceInbox,initializeLabelDownloads,initializeReadServiceJobs,initializeProcessingClock],{background:config.background});
+await db.withLocks(['schema'],()=>initializeImportReceptions(db));
 await db.withLocks(['schema'],()=>initializeSkuCopies(db));
 await db.withLocks(['schema'],()=>initializeReceiptRecovery(db));
 await db.withLocks(['schema'],()=>initializeEquivalences(db));
 await db.withLocks(['schema'],()=>initializeEquivalenceImports(db));
-await db.withLocks(['schema'],()=>initializeStockResumeWatch(db));
+await db.withLocks(['schema'],()=>initializeStockResumeWatch(db,{resumeReadLeases:config.background}));
 await db.withLocks(['schema'],()=>initializeV2Followup(db));
 await db.withLocks(['schema'],()=>initializeShopifyObservation(db));
 await db.withLocks(['schema'],()=>initializeManualReview(db));
@@ -177,13 +180,13 @@ const margins=await createMarginsService(db,{confirmedAmazonIds:fbmConfirmation.
 const lifecycle=lifecycleWorker(db,directory);const tracking=trackingWorker(db,directory);await db.query("UPDATE carrier_tracking t SET next_at=now() WHERE error IS NOT NULL AND NOT EXISTS(SELECT 1 FROM carrier_tracking_cooldown c WHERE c.carrier=t.carrier AND c.environment=t.environment AND c.until_at>now())");const trackingTimer=backgroundInterval(async()=>{try{await tracking.run();const totals=(await db.query('SELECT count(*)::int total,count(*) FILTER(WHERE checked_at IS NOT NULL)::int checked FROM carrier_tracking')).rows[0],errors=(await db.query('SELECT carrier,error FROM carrier_tracking WHERE error IS NOT NULL LIMIT 30')).rows,counts=(await db.query('SELECT carrier,count(*)::int n FROM carrier_tracking WHERE checked_at IS NOT NULL AND error IS NULL GROUP BY carrier')).rows;await writeFile(path.join(directory,'tracking-progress.json'),JSON.stringify({at:new Date().toISOString(),running:tracking.running,...totals,errors,success:Object.fromEntries(counts.map(r=>[r.carrier,r.n]))}));}catch(e){console.error('Suivi transporteurs : '+e.message);}},10000,'tracking');trackingTimer.unref();const lifecycleTimer=backgroundInterval(()=>lifecycle.run().catch(e=>console.error('Cycle Erplain LIVE : '+e.message)),5000,'lifecycle');lifecycleTimer.unref();
 const documentStatuses=erplainStatusSync(db,directory);
 const stocks=stockSync(db,directory),erpWorker=erplainLiveWorker(db,directory);
-const rechecks=orderRecheckMonitor(db,erplainAccount(directory,'live'),{canResume:()=>runtime.enabled('automatic-preparation')&&runtime.enabled('erplain-preparation'),enabled:()=>!runtime.stopping&&runtime.enabled('resolutions')});
+const rechecks=orderRecheckMonitor(db,erplainAccount(directory,'live'),{stockWatchActive:()=>process.env.ERPLAIN_GROUPED_STOCK_WATCH!=='0'&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation'),canResume:()=>runtime.enabled('automatic-preparation')&&runtime.enabled('erplain-preparation'),enabled:()=>!runtime.stopping&&runtime.enabled('resolutions')});
 backgroundInterval(()=>rechecks.runLocal().catch(e=>console.error('Recontrôle local : '+e.message)),5000,'order-rechecks');
 backgroundInterval(()=>rechecks.runExternal().catch(e=>console.error('Recontrôle externe : '+e.message)),60000,'order-rechecks-external');
 const movementWatch=movementWatchWorker(db,directory,{shouldStop:()=>runtime.stopping});
 backgroundInterval(()=>movementWatch.run(),1000,'movement-watch');
 backgroundInterval(()=>movementWatchdog(db),300000,'movement-watchdog');
-const stockResume=stockResumeWorker(db,directory,{enabled:()=>!runtime.stopping&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation')});
+const stockResume=stockResumeWorker(db,directory,{observe:rows=>publishStockWatchObservations(db,rows),enabled:()=>!runtime.stopping&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation')});
 backgroundInterval(()=>stockResume.run(),30000,'stock-resume');
 const interruptedErplain=interruptedErplainRecovery(db,directory,{shouldStop:()=>runtime.stopping});
 backgroundInterval(()=>interruptedErplain.run(),15000,'erplain-interrupted-recovery');
@@ -326,6 +329,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     const user=await authenticate(db,req.headers.cookie);if(!user){json(res,401,{error:'Connexion requise'});return;}
+    if(p==='/api/import/receptions'&&req.method==='GET'){permitted(user,['admin','manager','operator']);json(res,200,{rows:await readImportReceptions(db,{orderId:url.searchParams.get('orderId')||'',reference:url.searchParams.get('reference')||''})});return;}
     if(await temuReading.routes(req,res,url,user,json))return;
     if(p==='/api/import/preview'&&req.method==='POST'){
       const b=await body(req);permitted(user,operational);
@@ -476,7 +480,7 @@ const server=http.createServer(async(req,res)=>{
       const {ids}=await body(req);if(!Array.isArray(ids)||ids.length>200||ids.some(id=>typeof id!=='string'))throw new Error('Page de commandes invalide');
       const rows=(await db.query("SELECT d.id,d.order_id,o.reference,o.channel,o.recipient,o.address,o.erp_live,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.label_choice,d.environment,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE d.order_id=ANY($1::text[]) ORDER BY d.created_at,d.id",[ids])).rows;json(res,200,{rows});return;
     }
-    if(p==='/api/partial/list'&&req.method==='GET'){const rows=(await db.query("SELECT d.id,d.order_id,o.reference,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.environment,d.stock_document,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE ($1='' OR d.order_id=$1) ORDER BY d.created_at DESC LIMIT 100",[url.searchParams.get('id')||''])).rows;json(res,200,{rows});return;}
+    if(p==='/api/partial/list'&&req.method==='GET'){const rows=(await db.query("SELECT d.id,d.order_id,o.reference,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.environment,d.label_choice,d.stock_document,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE ($1='' OR d.order_id=$1) ORDER BY d.created_at DESC LIMIT 100",[url.searchParams.get('id')||''])).rows;json(res,200,{rows});return;}
     const partialDoc=p.match(/^\/api\/partial\/documents\/([^/]+)\/(\d+)$/);
     if(partialDoc&&req.method==='GET'){const row=(await db.query('SELECT pdf FROM partial_documents WHERE delivery_id=$1 AND document_index=$2',[partialDoc[1],Number(partialDoc[2])])).rows[0];if(!row)throw new Error('PDF partiel indisponible');res.setHeader('Content-Type','application/pdf');await labelAttachment(db,res,'partial',partialDoc[1],Number(partialDoc[2])+1);res.end(await currentPartialSkuPdf(db,row.pdf,partialDoc[1],Number(partialDoc[2])));return;}
 
@@ -545,7 +549,7 @@ const server=http.createServer(async(req,res)=>{
 
     if(await temuExcelImportRoutes({p,req,res,user,body,json,permitted,db}))return;
 
-    if(p==='/api/orders/processing'&&req.method==='POST'){const b=await body(req);const rows=await processingRows(db,b.ids);const monitors=new Map((await db.query('SELECT order_id,state FROM order_recheck_monitor WHERE order_id=ANY($1::text[])',[b.ids])).rows.map(m=>[m.order_id,m.state]));for(const row of rows)row.monitoring=monitors.get(row.id)||null;json(res,200,{rows,at:new Date().toISOString()});return;}
+    if(p==='/api/orders/processing'&&req.method==='POST'){const b=await body(req);const rows=await processingRows(db,b.ids);const monitors=new Map((await db.query('SELECT order_id,state FROM order_recheck_monitor WHERE order_id=ANY($1::text[])',[b.ids])).rows.map(m=>[m.order_id,m.state]));for(const row of rows)row.monitoring=row.order_delivered?{blocked:false,followUp:false,alert:false,result:'Livrée · aucun problème à gérer',nextStep:'Aucune action attendue'}:monitors.get(row.id)||null;json(res,200,{rows,at:new Date().toISOString()});return;}
     if(p==='/api/orders/priority'&&req.method==='POST'){const b=await body(req);json(res,200,await setOrderPriority(db,b,user));return;}
     if(p==='/api/import-corrections/context'&&req.method==='GET'){permitted(user,operational);json(res,200,await importCorrectionService.context(url.searchParams.get('id')));return;}
     if(p==='/api/import-corrections/preview'&&req.method==='POST'){permitted(user,operational);json(res,200,await importCorrectionService.preview(await body(req)));return;}
