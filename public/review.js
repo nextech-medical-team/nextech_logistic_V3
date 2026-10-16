@@ -94,7 +94,7 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
   }
  }
  const panel=document.createElement('section');panel.id='view-negative-stocks';panel.className='view panel padded';panel.hidden=true;
- panel.innerHTML='<h2>Stocks négatifs</h2><p>Produits actifs à stock disponible ou physique négatif dans l’emplacement ERPLAIN configuré.</p><button type="button" id="negative-stocks-load">Afficher les stocks négatifs</button><p role="status" aria-live="polite"></p><div style="overflow-x:auto"><table hidden><thead><tr><th>SKU</th><th>Produit</th><th>Fournisseur</th><th>Disponible</th><th>Physique</th></tr></thead><tbody></tbody></table></div>';
+ panel.innerHTML='<h2>Stocks négatifs</h2><p>Commandes ERP avec BL contenant des produits dont le stock disponible actuel est négatif, dans l’emplacement ERPLAIN configuré.</p><button type="button" id="negative-stocks-load">Afficher les stocks négatifs</button><p role="status" aria-live="polite"></p><div class="table-wrap"><table hidden><thead><tr><th>BC ERP</th><th>BL associés</th><th>SKU</th><th>Produit</th><th>Fournisseur</th><th>Quantité commandée</th><th>Disponible actuel</th><th>Physique actuel</th><th>Emplacement</th></tr></thead><tbody></tbody></table></div>';
  const history=document.createElement('section');
  history.innerHTML='<label for="negative-stock-reports" style="display:block;margin-bottom:6px">Rapports récents</label><select id="negative-stock-reports" style="width:420px;max-width:100%;min-height:44px"><option value="">Rapports récents...</option></select><p role="status" aria-live="polite"></p>';
  panel.append(history);
@@ -126,23 +126,23 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
 
  button.textContent='Actualiser les stocks négatifs';
  function emptyRow(target,text,columns){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=columns;cell.textContent=text;row.append(cell);target.replaceChildren(row);}
- table.hidden=false;emptyRow(body,'Chargement des stocks négatifs à l’ouverture du module…',5);
+ table.hidden=false;emptyRow(body,'Chargement des stocks négatifs à l’ouverture du module…',9);
  function renderRows(rows){
   displayedRows=rows;
   const query=normalizeSearch(searchInput.value.trim());
   const filtered=rows.filter(row=>normalizeSearch(row.sku).includes(query)||normalizeSearch(row.label).includes(query));
-  exportRows=[...filtered].sort((a,b)=>a.sku.localeCompare(b.sku,'fr'));exportButton.disabled=false;
-  searchCount.textContent=filtered.length+' produit(s) affiché(s) sur '+rows.length;
+  exportRows=[...filtered].sort((a,b)=>(a.bcLabel||'').localeCompare(b.bcLabel||'','fr')||a.sku.localeCompare(b.sku,'fr'));exportButton.disabled=false;
+  searchCount.textContent=filtered.length+' ligne(s) de commande affichée(s) sur '+rows.length;
   body.replaceChildren();
-  for(const row of [...filtered].sort((a,b)=>a.sku.localeCompare(b.sku,'fr'))){const tr=document.createElement('tr');for(const value of [row.sku,row.label,row.supplier||'Non renseigné',row.available,row.onHand]){const td=document.createElement('td');td.textContent=value===null?'Non vérifié':typeof value==='number'?value.toLocaleString('fr-FR'):value;tr.append(td);}body.append(tr);}
-  table.hidden=false;if(!filtered.length)emptyRow(body,rows.length?'Aucun produit ne correspond à votre recherche.':'Aucun stock négatif dans ce rapport.',5);
+  for(const row of [...filtered].sort((a,b)=>(a.bcLabel||'').localeCompare(b.bcLabel||'','fr')||a.sku.localeCompare(b.sku,'fr'))){const tr=document.createElement('tr');for(const value of [row.bcLabel||'Non renseigné',row.blLabel||'Aucun BL',row.sku,row.label,row.supplier||'Non renseigné',row.orderQuantity??null,row.available,row.onHand,row.locationLabel||'Non renseigné']){const td=document.createElement('td');td.textContent=value===null?'Non vérifié':typeof value==='number'?value.toLocaleString('fr-FR'):value;tr.append(td);}body.append(tr);}
+  table.hidden=false;if(!filtered.length)emptyRow(body,rows.length?'Aucun produit ne correspond à votre recherche.':'Aucune commande ERP contenant un produit à stock disponible négatif.',9);
  }
  async function loadHistory(){
   const selected=reportSelect.value;reportSelect.disabled=true;historyStatus.textContent='';
   try{
    const data=await api('/api/stocks/negative/history');
    reportSelect.replaceChildren(new Option('Rapports récents...',''));
-   for(const entry of data.rows){reportSelect.append(new Option(new Date(entry.completed_at).toLocaleString('fr-FR')+' · '+entry.product_count+' produit(s) · emplacement '+entry.location_id,entry.id));}
+   for(const entry of data.rows){reportSelect.append(new Option(new Date(entry.completed_at).toLocaleString('fr-FR')+' · '+entry.product_count+' ligne(s) de commande · emplacement '+entry.location_id,entry.id));}
    if([...reportSelect.options].some(option=>option.value===selected))reportSelect.value=selected;
    if(!data.rows.length)historyStatus.textContent='Aucun rapport enregistré.';
   }catch(error){historyStatus.textContent=error.message.includes('Route inexistante')?'Les rapports seront disponibles après activation du service.':'Chargement des rapports impossible. Réessayez en actualisant les stocks.';}
@@ -160,11 +160,11 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
  button.onclick=async()=>{
   if(button.disabled)return;
   displayedRows=null;exportRows=[];exportButton.disabled=true;searchCount.textContent='';
-  button.disabled=true;panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des stocks ERPLAIN en cours…',5);loadHistory();
+  button.disabled=true;panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des stocks ERPLAIN en cours…',9);loadHistory();
   try{
    let page=1,lastPage=1,locationId=null,unverified=0,runId=null;const rows=[];
    do{
-    status.textContent=`Lecture des stocks ERPLAIN : page ${page} / ${lastPage}…`;
+    status.textContent=`Lecture des commandes ERP : page ${page} / ${lastPage}…`;
     const data=await api('/api/stocks/negative/scan',{page,runId},{timeoutMs:60000});
     runId=data.runId;
     if(!Array.isArray(data.rows)||data.page!==page||!Number.isInteger(data.lastPage)||data.lastPage<page)throw Error('Réponse stock incomplète');
@@ -172,9 +172,9 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
     locationId=data.locationId;lastPage=data.lastPage;unverified+=data.unverified;rows.push(...data.rows);page++;
    }while(page<=lastPage);
    renderRows(rows);
-   status.textContent=`${rows.length} produit(s) à stock négatif · emplacement ${locationId} · lecture terminée à ${new Date().toLocaleTimeString('fr-FR')}.`+(unverified?` ${unverified} produit(s) avec stock non vérifié : résultat potentiellement incomplet.`:'');
+   status.textContent=`${new Set(rows.map(row=>row.bcId)).size} BC ERP · ${rows.length} ligne(s) à stock disponible négatif · emplacement ${locationId} · lecture terminée à ${new Date().toLocaleTimeString('fr-FR')}.`+(unverified?` ${unverified} produit(s) avec stock non vérifié : résultat potentiellement incomplet.`:'');
    await loadHistory();
-  }catch(error){status.textContent=error.message.includes('Route inexistante')?'Le service de stocks négatifs n’est pas encore actif. Redémarrez le serveur pour charger les stocks et les rapports.':'Lecture interrompue : '+error.message;emptyRow(body,'Aucun résultat à afficher pour le moment.',5);}
+  }catch(error){status.textContent=error.message.includes('Route inexistante')?'Le service de stocks négatifs n’est pas encore actif. Redémarrez le serveur pour charger les stocks et les rapports.':'Lecture interrompue : '+error.message;emptyRow(body,'Aucun résultat à afficher pour le moment.',9);}
   finally{button.disabled=false;panel.setAttribute('aria-busy','false');}
  };
 })();
