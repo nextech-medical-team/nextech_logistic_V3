@@ -29,7 +29,7 @@ export function orderQuery(params,orderIds=null){
   // One bound pattern array keeps large pasted lists from repeating correlated joins.
   args.push(terms.map(term=>'%'+term.replace(/[%_\\]/g,'\\$&')+'%'));
   const p='$'+args.length+'::text[]';
-  const fields=["reference","recipient","erp_live->'bc'->>'label'","erp_live->'bc'->>'id'","erp_live->'bl'->>'label'","erp_live->'bl'->>'id'","source_payload->>'externalreference'","source_payload->>'external_reference'","source_payload->>'externalReference'","erp_live->'bc'->>'external_reference'"];
+  const fields=["reference","source_reference","recipient","erp_live->'bc'->>'label'","erp_live->'bc'->>'id'","erp_live->'bl'->>'label'","erp_live->'bl'->>'id'","source_payload->>'externalreference'","source_payload->>'external_reference'","source_payload->>'externalReference'","erp_live->'bc'->>'external_reference'"];
   const clauses=fields.map(field=>field+' ILIKE ANY('+p+')');
   clauses.push("EXISTS (SELECT 1 FROM partial_deliveries search_delivery WHERE search_delivery.order_id=orders.id AND (search_delivery.bl->>'label' ILIKE ANY("+p+") OR search_delivery.bl->>'id' ILIKE ANY("+p+")))");
   clauses.push("EXISTS (SELECT 1 FROM lines search_line LEFT JOIN mappings search_mapping ON search_mapping.channel=orders.channel AND search_mapping.source_sku=search_line.source_sku WHERE search_line.order_id=orders.id AND (search_line.source_sku ILIKE ANY("+p+") OR coalesce(search_line.target_sku,search_mapping.target_sku) ILIKE ANY("+p+")))");
