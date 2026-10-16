@@ -1,5 +1,5 @@
 import {retiredCommercialControl} from './post-bc-control-recovery.mjs';
-import {hasCreatedBl} from './created-bl-label.mjs';
+import {hasCreatedBl,createdBlSql} from './created-bl-label.mjs';
 import {releaseExcelPurchaseHold} from './temu-excel-purchase-admission.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
@@ -49,6 +49,11 @@ export function automaticPreparationHold(o,now=Date.now()){
  if(o.source_payload?.temuDirect?.state!=='verified')return 'Commande TEMU à vérifier';
  return null;
 }
+// Only untouched attempts may be rediscovered. A published BL also admits a
+// missing job or a failed read; uncertain/paid/package states never do.
+const discoverableJobSql=`(j.status IN ('ready','to_buy') OR
+ ((j.status='api_error' OR j.reference IS NULL) AND ${createdBlSql.replaceAll('erp_live','o.erp_live')}))
+ AND j.attempt_id IS NULL AND coalesce(jsonb_array_length(j.packages),0)=0`;
 export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,stockGate=assertLabelStockGate,refreshPreparation=async()=>{throw Error('Relecture Erplain avant achat non configurée');}}={}){
  let running=false;
  async function admission(reference,plan){
@@ -79,14 +84,12 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,s
   if(running||!enabled())return;running=true;
   try{
    await db.query(`INSERT INTO temu_automatic_purchase_checks(reference)
-    SELECT o.reference FROM orders o JOIN temu_label_jobs j ON j.reference=o.reference
-    WHERE o.channel='temu' AND NOT o.archived AND j.status IN ('ready','to_buy')
-    AND j.attempt_id IS NULL AND jsonb_array_length(j.packages)=0
+    SELECT o.reference FROM orders o LEFT JOIN temu_label_jobs j ON j.reference=o.reference
+    WHERE o.channel='temu' AND NOT o.archived AND ${discoverableJobSql}
     ON CONFLICT DO NOTHING`);
    const candidate=(await db.query(`SELECT c.reference FROM temu_automatic_purchase_checks c
-    JOIN orders o ON o.reference=c.reference JOIN temu_label_jobs j ON j.reference=c.reference
-    WHERE NOT o.archived AND c.next_at<=now() AND j.status IN ('ready','to_buy')
-    AND j.attempt_id IS NULL AND jsonb_array_length(j.packages)=0
+    JOIN orders o ON o.reference=c.reference LEFT JOIN temu_label_jobs j ON j.reference=c.reference
+    WHERE o.channel='temu' AND NOT o.archived AND c.next_at<=now() AND ${discoverableJobSql}
     ORDER BY c.next_at,c.reference LIMIT 1`)).rows[0];
    if(!candidate)return;
    const reference=candidate.reference;let result;
@@ -97,11 +100,20 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true,s
      if(documents.notFound||!Array.isArray(documents.stockHolds)||documents.stockHolds.length)throw Error(documents.stockHolds?.map(h=>h.message).filter(Boolean).join(' ; ')||'Documents ou stock Erplain à rapprocher avant achat');
     }
     await admission(reference);
-    const amounts=await local.amounts(reference,{force:true});if(amounts.error)throw Error('Achat d’étiquette TEMU à confirmer : '+amounts.error);
-    const plan=await local.prepare(reference);
-    await admission(reference,plan);
-    const purchased=await local.buy(reference,plan.id,plan.amount,{beforeClaim:current=>admission(reference,current)});
-    result={status:purchased.status,message:purchased.status==='complete'?'Étiquette TEMU disponible':purchased.error||'Résultat TEMU en cours de vérification',at:new Date().toISOString()};
+    // Recover before requiring commercial reads. An already-paid PDF must
+    // remain recoverable even if today's margin/amount API is unavailable.
+    const recovered=hasCreatedBl(admitted)?await local.recover(reference):null;
+    if(recovered&&(recovered.documents||['complete','external','pending','shipment_error','document_unavailable','uncertain'].includes(recovered.status))){
+     result={status:recovered.status,message:recovered.status==='complete'?'Étiquette TEMU récupérée, aucun nouvel achat':recovered.error||'Expédition TEMU existante à rapprocher, aucun nouvel achat',at:new Date().toISOString()};
+    }else{
+     if(recovered?.deferred)throw Error(recovered.message||'Lecture TEMU en attente');
+     if(recovered?.error)throw Error(recovered.error);
+     const amounts=await local.amounts(reference,{force:true});if(amounts.error)throw Error('Achat d’étiquette TEMU à confirmer : '+amounts.error);
+     const plan=recovered?.plan||await local.prepare(reference);
+     await admission(reference,plan);
+     const purchased=await local.buy(reference,plan.id,plan.amount,{beforeClaim:current=>admission(reference,current)});
+     result={status:purchased.status,message:purchased.status==='complete'?'Étiquette TEMU disponible':purchased.error||'Résultat TEMU en cours de vérification',at:new Date().toISOString()};
+    }
    }catch(e){result={status:'held',message:String(e.message).slice(0,600),at:new Date().toISOString()};}
    await db.query(`UPDATE temu_automatic_purchase_checks SET checked_at=now(),next_at=now()+interval '15 minutes',result=$2::jsonb WHERE reference=$1`,[reference,JSON.stringify(result)]);
   }finally{running=false;}
