@@ -112,7 +112,7 @@ export function targetedOrderService(db,api){
    const pendingAdmission=existing&&r?.status==='pending'&&existing.source_payload?.erplainValidationHold===true&&existing.source_payload.erplainValidation!=='approved';
    if(candidate&&!pendingAdmission){
     const issues=documentIssues(d,existing);
-    return {document:d,reviewHash:manualReviewHash(d),...issues,admissionIssues:candidate.blocked?[candidate.blocked]:[],reconcileCandidate:candidate.blocked?null:candidate,readAt:new Date().toISOString()};
+    return {document:d,reviewHash:manualReviewHash(d),...issues,admissionIssues:candidate.blocked?[candidate.blocked]:[],reconcileCandidate:candidate.blocked?null:candidate,existingMatches:candidate.matches,readAt:new Date().toISOString()};
    }
    if(r&&r.status!=='pending')throw Error('Ce BC a fait l’objet d’un refus ou d’une annulation : vérifier son historique');
    await queueManualReview(tx,d,existing?.id||null);
@@ -148,7 +148,7 @@ export function targetedOrderService(db,api){
   async reread(b){if(typeof b.bcId!=='string'||!b.bcId.trim())throw Error('BC requis');return preview(b.bcId);},
   async list({search='',page=1}={}){
    page=Math.max(1,Math.min(10000,Number(page)||1));
-   const where="o.source_payload->>'erplainImported'='true' AND o.source_payload->>'account'='live' AND (o.reference ILIKE $1 OR o.erp_live->'bc'->>'label' ILIKE $1 OR o.recipient ILIKE $1)";
+   const where="(EXISTS(SELECT 1 FROM erplain_order_identity identity WHERE identity.account='live' AND identity.order_id=o.id) OR (o.source_payload->>'erplainImported'='true' AND o.source_payload->>'account'='live')) AND (o.reference ILIKE $1 OR o.source_reference ILIKE $1 OR o.erp_live->'bc'->>'label' ILIKE $1 OR o.recipient ILIKE $1)";
    const params=['%'+String(search).slice(0,200)+'%'];const total=Number((await db.query('SELECT count(*) n FROM orders o WHERE '+where,params)).rows[0].n);
    const rows=(await db.query(`SELECT o.id,o.reference,o.recipient,o.archived,o.partial_mode,o.source_payload,o.erp_live,o.issue,o.erplain_refresh,o.label_status,o.tracking_status,greatest((o.erplain_refresh->>'manualCheckedAt')::timestamptz,c.seen_at) AS read_at,r.status AS validation_status,EXISTS(SELECT 1 FROM carrier_jobs j WHERE j.order_id=o.id AND (j.result IS NOT NULL OR j.tracking<>'[]'::jsonb OR j.status IN ('pending','creating','awaiting_pdf','ready','review'))) AS has_label,EXISTS(SELECT 1 FROM resolution_jobs j WHERE j.order_id=o.id AND j.status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM erp_live_jobs j WHERE j.order_id=o.id AND j.status IN ('pending','processing')) AS busy FROM orders o LEFT JOIN erplain_refresh_cache c ON c.account='live' AND c.section='orders' AND c.entity_id=o.erp_live->'bc'->>'id' LEFT JOIN erplain_manual_review r ON r.bc_id=o.erp_live->'bc'->>'id' WHERE ${where} ORDER BY o.received_at DESC,o.id LIMIT 25 OFFSET $2`,[...params,(page-1)*25])).rows;
    for(const row of rows){const d=documentIssues(row.erp_live.bc||{},row);row.preparationIssues=[...d.admissionIssues,...d.preparationIssues];if(row.has_label||row.erp_live.stockDocument?.id||row.erp_live.bc?.update_stock===true)row.preparationIssues=row.preparationIssues.filter(p=>!/stock insuffisant/i.test(p));}

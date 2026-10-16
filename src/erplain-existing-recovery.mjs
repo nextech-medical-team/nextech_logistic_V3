@@ -5,11 +5,12 @@ export async function existingRecoveryCandidate(db,d){
  const ref=String(d.external_reference||d.label).trim();
  const rows=(await db.query("SELECT o.* FROM orders o WHERE reference=$1 OR source_reference=$1 OR erp_live->'bc'->>'id'=$2 OR id IN (SELECT order_id FROM erplain_order_identity WHERE account='live' AND bc_id=$2)",[ref,String(d.id)])).rows;
  if(!rows.length)return null;
- if(rows.length!==1)return {blocked:'Plusieurs commandes V3 correspondent : rapprochement manuel requis'};
+ const matches=rows.map(o=>({orderId:o.id,reference:o.reference,sourceReference:o.source_reference||null,channel:o.channel||null,recipient:o.recipient||'',archived:!!o.archived,bcId:o.erp_live?.bc?.id||null,bcLabel:o.erp_live?.bc?.label||null,matchReason:String(o.erp_live?.bc?.id)===String(d.id)?'Même BC Erplain':o.reference===ref?'Même référence de commande':o.source_reference===ref?'Même référence source':'Identité BC déjà enregistrée'}));
+ if(rows.length!==1)return {matches,blocked:'Plusieurs commandes V3 correspondent : sélection manuelle requise, voir les commandes ci-dessous'};
  const o=rows[0];
- if(o.source_payload?.erplainImported&&o.source_payload.account!=='live')return {blocked:'Commande issue d’un autre compte Erplain : rattachement LIVE interdit'};
- if(o.erp_live?.bc?.id&&String(o.erp_live.bc.id)!==String(d.id))return {blocked:'Cette référence est rattachée à un autre BC Erplain : aucun document remplacé'};
- return {orderId:o.id,reference:o.reference,archived:!!o.archived};
+ if(o.source_payload?.erplainImported&&o.source_payload.account!=='live')return {matches,blocked:'Commande issue d’un autre compte Erplain : rattachement LIVE interdit'};
+ if(o.erp_live?.bc?.id&&String(o.erp_live.bc.id)!==String(d.id))return {matches,blocked:'Cette référence est rattachée à un autre BC Erplain : aucun document remplacé'};
+ return {...matches[0],matches};
 }
 export async function attachExistingDocuments(tx,d,orderId,user){
  const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[orderId])).rows[0];
