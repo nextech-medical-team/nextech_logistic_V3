@@ -40,8 +40,8 @@ export function partialTemuLines(o,d,source,detail){
 
 // Status-only operation: no BC/stock/quantity prerequisites and no stock writes.
 export async function readyPartialBl(api,bl,{beforeChange=async()=>{}}={}){
- const read=async()=>{const r=await api.request('query V3PartialReadySource($id:ID!){ShippingOrder(id:$id){id label status}}',{id:String(bl.id)});const b=r.ShippingOrder;if(String(b?.id)!==String(bl.id)||b.label!==bl.label)throw Error('ERPLAIN · Statut du BL partiel non vérifiable');assertHistoricalBlNumber(b);if(['cancelled','shipped','delivered','completed'].includes(b.status))throw Object.assign(Error('ERPLAIN · BL annulé ou déjà expédié : aucun nouvel achat'),{code:'PARTIAL_BL_INACTIVE'});return b;};
- const before=await read();assertErplainReadyTransition(before.status,'ready_to_ship');
+ const read=async()=>{const r=await api.request('query V3PartialReadySource($id:ID!){ShippingOrder(id:$id){id label status}}',{id:String(bl.id)});const b=r.ShippingOrder;if(String(b?.id)!==String(bl.id)||b.label!==bl.label)throw Error('ERPLAIN · Statut du BL partiel non vérifiable');assertHistoricalBlNumber(b);if(['cancelled','shipped','delivered','completed'].includes(b.status))throw Object.assign(Error('ERPLAIN · BL annulé ou déjà expédié : aucun nouvel achat'),{code:'PARTIAL_BL_INACTIVE',observedBl:b});return b;};
+ const before=await read();try{assertErplainReadyTransition(before.status,'ready_to_ship');}catch(e){e.observedBl=before;throw e;}
  if(before.status==='ready_to_ship')return {...bl,...before};
  if(!['pending','make_the_shipment'].includes(before.status))throw Error('ERPLAIN · Statut du BL incompatible : '+before.status);
  await beforeChange();
@@ -110,7 +110,7 @@ export function partialTemuLabelService(db,local,erplain,{enabled=()=>true,prese
  }
  async function advance(id){return withShipmentLock(async()=>{
   if(!enabled())return {status:'paused'};const {o,d}=await context(id);
-  let readyError=null;try{const bl=await readyPartialBl(erplain,d.bl,{beforeChange:()=>db.transaction(tx=>preserveLabels(tx,o))});d.bl=bl;await db.query('UPDATE partial_deliveries SET bl=$2 WHERE id=$1',[d.id,JSON.stringify(bl)]);}catch(e){readyError=e.message;if(e.code==='PARTIAL_BL_INACTIVE'){await persist(d,'temu_ready_review',{readyError,nextAt:null},readyError);return {status:d.status,error:readyError};}}
+  let readyError=null;try{const bl=await readyPartialBl(erplain,d.bl,{beforeChange:()=>db.transaction(tx=>preserveLabels(tx,o))});d.bl=bl;await db.query('UPDATE partial_deliveries SET bl=$2 WHERE id=$1',[d.id,JSON.stringify(bl)]);}catch(e){readyError=e.message;if(e.observedBl){d.bl={...d.bl,...e.observedBl};await db.query('UPDATE partial_deliveries SET bl=$2 WHERE id=$1',[d.id,JSON.stringify(d.bl)]);}if(e.code==='PARTIAL_BL_INACTIVE'){await persist(d,'temu_ready_review',{readyError,nextAt:null},readyError);return {status:d.status,error:readyError};}}
   d.temu_label={...d.temu_label,readyError};
   try{const api=await supplier(o,d),{detail,lines}=await selection(o,d,api),parcels=await existing(o,d,api,detail,lines);if(parcels.length)return await recover(o,d,api,parcels);
    if(d.temu_label?.attemptId)throw Error('TEMU · Résultat d’achat incertain : aucun rachat, vérifier les colis fournisseur');

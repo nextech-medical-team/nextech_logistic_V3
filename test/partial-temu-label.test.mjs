@@ -53,7 +53,7 @@ test('confirmation buys once, archives the unchanged PDF and ends ready with the
 }finally{await f.e.close();}});
 
 test('forbidden in_preparation never changes ERPLAIN and never blocks quote, purchase or PDF',async()=>{const f=await fixture();try{
- f.setStatus('in_preparation');await f.service.advance('d');let d=await f.row();assert.equal(d.status,'temu_confirm');assert.match(d.temu_label.readyError,/interdit/);const plan=d.temu_label.plan;
+ f.setStatus('in_preparation');await f.service.advance('d');let d=await f.row();assert.equal(d.status,'temu_confirm');assert.equal(d.bl.status,'in_preparation');assert.match(d.temu_label.readyError,/interdit/);const plan=d.temu_label.plan;
  await f.service.buy('d',plan.id,plan.amount,true);d=await f.row();assert.equal(d.status,'temu_ready_review');assert.deepEqual(d.tracking,['TRACK']);assert.equal((await f.e.query('SELECT count(*) n FROM partial_documents')).rows[0].n,1);assert(!f.erplainCalls.some(c=>c.q.startsWith('mutation')));
  f.setStatus('pending');await f.service.advance('d');assert.equal((await f.row()).status,'ready');assert.equal(f.calls.filter(c=>c.type==='buy').length,1);assert.equal(f.calls.filter(c=>c.type==='pdf').length,1);
 }finally{await f.e.close();}});
@@ -88,7 +88,7 @@ test('expired, changed price or changed selected quantity never sends a purchase
 
 test('suspension and provider cancellation prevent purchase; no direct carrier fallback exists',async()=>{for(const kind of ['suspension','cancelled']){const f=await fixture();try{
  if(kind==='suspension'){await f.e.exec("UPDATE orders SET suspension='{\"active\":true}'");await assert.rejects(f.service.advance('d'));}
- else {f.setStatus('cancelled');await f.service.advance('d');assert.equal((await f.row()).status,'temu_ready_review');}
+ else {f.setStatus('cancelled');await f.service.advance('d');assert.equal((await f.row()).status,'temu_ready_review');assert.equal((await f.row()).bl.status,'cancelled');}
  assert.equal(f.calls.length,0);assert(!f.erplainCalls.some(c=>c.q.startsWith('mutation')));
 }finally{await f.e.close();}}});
 

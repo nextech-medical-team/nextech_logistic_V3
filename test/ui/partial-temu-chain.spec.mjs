@@ -18,9 +18,9 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await expect(page.locator('.delivery-row').getByRole('button',{name:'Acheter l’étiquette TEMU · 2.4 EUR',exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Préparer une nouvelle livraison',exact:true}).click();const dialog=page.locator('dialog.partial-quantity-dialog');
  await expect(dialog).toContainText('Le BL partiel sera créé');await expect(dialog).toContainText('TEMU Partner · 2.4 EUR');
- await dialog.locator('#partial-history article').screenshot({path:'proofs/partial-temu-quote-'+name+'.png'});
+ await dialog.locator('#partial-history').screenshot({path:'proofs/partial-temu-quote-'+name+'.png'});
  page.once('dialog',d=>d.accept());await dialog.getByRole('button',{name:'Acheter l’étiquette TEMU · 2.4 EUR',exact:true}).click();
  await expect(dialog).toContainText('BL et étiquette prêts');await expect(dialog).toContainText('TRACK');await expect(dialog.getByRole('link',{name:'PDF PROD 1',exact:true})).toBeVisible();
  await expect(dialog.locator('[data-partial-temu-buy]')).toHaveCount(0);expect(writes.filter(w=>w.path==='/api/partial/temu/buy')).toHaveLength(1);expect(errors).toEqual([]);
- await dialog.locator('#partial-history article').screenshot({path:'proofs/partial-temu-ready-'+name+'.png'});
+ await dialog.locator('#partial-history').screenshot({path:'proofs/partial-temu-ready-'+name+'.png'});
 });
