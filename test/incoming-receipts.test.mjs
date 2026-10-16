@@ -30,6 +30,9 @@ test('pagination is complete or fails closed, duplicated lines never double coun
 test('no incoming stock performs no purchase reads',async()=>{
  const unused={request:()=>assert.fail('unexpected read')};assert.equal((await readIncomingReceipts(unused,{...product,incoming:0})).status,'none');assert.equal((await readIncomingReceipts(unused,{...product,incoming:null})).status,'unverified');
 });
+test('inconsistent purchase totals cannot promise more units than the incoming stock',async()=>{
+ await assert.rejects(readIncomingReceipts(api([page([purchase([line(1,30,null)])])]),product));
+});
 test('date provider failure preserves the verified incoming quantity and stock',async()=>{
  const db={query:async()=>({rows:[]})};
  const provider={verify:async()=>{},request:async(q)=>{

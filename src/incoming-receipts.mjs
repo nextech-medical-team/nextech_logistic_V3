@@ -27,6 +27,7 @@ export async function readIncomingReceipts(api,{sku,variantId,locationId,incomin
    }
   }
   if(!purchases.paginatorInfo.hasMorePages){
+   if(total>incoming+0.000001)throw Error('Réceptions supérieures au stock à venir : rapprochement requis');
    return {status:Math.abs(total-incoming)<0.000001&&undated===0?'verified':'partial',receipts:[...receipts].sort(([a],[b])=>a.localeCompare(b)).map(([date,quantity])=>({date,quantity})),undatedQuantity:undated,matchedQuantity:total};
   }
  }
