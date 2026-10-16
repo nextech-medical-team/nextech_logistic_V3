@@ -1,5 +1,6 @@
 import {configuredShopifyMode} from './shopify-delivery.mjs';
 import {currentMappingLine} from './current-mapping-line.mjs';
+import {recordedBcRoutingLines} from './recorded-bc-routing-lines.mjs';
 import {loadRouting,chosenRoute} from './routing.mjs';
 
 import {randomUUID} from 'node:crypto';
@@ -31,16 +32,17 @@ export async function prepareLabel(db,o){
 
   const issue=addressIssue(o.address);if(issue)throw new Error(issue);
 
-  const {rows}=await db.query(`SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty,coalesce((l.source_payload->>'erplainCorrectedWeightKg')::numeric,p.weight_kg) AS weight_kg,p.origin,CASE WHEN l.source_payload->>'erplainSourceVariantId' IS NOT NULL AND l.source_payload->>'erplainCorrectedWeightKg' IS NOT NULL THEN null ELSE c.message END AS message FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku LEFT JOIN products p ON p.sku=CASE WHEN l.source_payload->>'mappingScope'='order' THEN l.target_sku ELSE coalesce(m.target_sku,l.target_sku,CASE WHEN $2 IN ('tender','samples') THEN l.source_sku END) END LEFT JOIN catalog_results c ON c.sku=p.sku WHERE l.order_id=$1`,[o.id,o.channel]);
+  const local=await db.query(`SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty,coalesce((l.source_payload->>'erplainCorrectedWeightKg')::numeric,p.weight_kg) AS weight_kg,p.origin,CASE WHEN l.source_payload->>'erplainSourceVariantId' IS NOT NULL AND l.source_payload->>'erplainCorrectedWeightKg' IS NOT NULL THEN null ELSE c.message END AS message FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku LEFT JOIN products p ON p.sku=CASE WHEN $3 OR l.source_payload->>'mappingScope'='order' THEN l.target_sku ELSE coalesce(m.target_sku,l.target_sku,CASE WHEN $2 IN ('tender','samples') THEN l.source_sku END) END LEFT JOIN catalog_results c ON c.sku=p.sku WHERE l.order_id=$1`,[o.id,o.channel,o.channel!=='tender'&&!!o.erp_live?.bc?.id]);
+  const rows=await recordedBcRoutingLines(db,o,local.rows);
 
   let weight=0;const missing=[],invalid=[],unmapped=[];
 
   for(const l of rows){
 
-    const {sku,quantity:qty}=currentMappingLine(l,o.channel);
+    const {sku,quantity:qty}=currentMappingLine(l,o.channel,{recordedBc:o.channel!=='tender'&&!!o.erp_live?.bc?.id});
 
 
-    if(sku)await db.query('UPDATE lines SET target_sku=$2,target_quantity=$3 WHERE id=$1',[l.id,sku,qty]);
+    if(sku&&(o.channel==='tender'||!o.erp_live?.bc?.id))await db.query('UPDATE lines SET target_sku=$2,target_quantity=$3 WHERE id=$1',[l.id,sku,qty]);
 
     if(!sku)unmapped.push(l.source_sku);
 

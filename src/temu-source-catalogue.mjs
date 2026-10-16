@@ -5,15 +5,16 @@ import {withShipmentLock} from './shipment-lock.mjs';
 export const incompleteCatalogueSelection=`SELECT o.*,q.observation AS catalogue_observation,r.last_checked FROM orders o
  JOIN temu_source_catchup q ON q.order_id=o.id LEFT JOIN LATERAL(SELECT max(updated_at) last_checked FROM erplain_product_creation_reviews WHERE order_id=o.id AND line_id LIKE 'temu-source:%') r ON true
  WHERE o.channel='temu' AND NOT o.archived AND o.duplicate_of IS NULL AND o.source_payload->>'visibilityHold'='true'
- AND q.observation->>'sourceStage' IN ('pending','fulfillment') AND NOT EXISTS(SELECT 1 FROM lines WHERE order_id=o.id)
+ AND q.observation->>'sourceStage' IN ('pending','fulfillment','cancelled') AND NOT EXISTS(SELECT 1 FROM lines WHERE order_id=o.id)
  AND (r.last_checked IS NULL OR r.last_checked<now()-interval '15 minutes' OR q.updated_at>r.last_checked) ORDER BY r.last_checked NULLS FIRST,q.last_attempt_at DESC,o.id LIMIT 20`;
 export function sourceCatalogueBlock(order,observation,settings,now=Date.now()){
  if(!order||order.channel!=='temu'||order.duplicate_of||!observation)return 'Catalogue: source absente';
  const proof=partialTemuReadProof(order,observation),p=order?.source_payload||{},e=order?.erp_live||{};
- if(!proof||!Number.isFinite(Date.parse(proof.checkedAt))||Date.parse(proof.checkedAt)>now||now-Date.parse(proof.checkedAt)>15*60000||!['pending','fulfillment'].includes(proof.sourceStage))return 'Catalogue · Détail source stable et récent requis';
- const parent=observation.payload?.detail?.parentOrderMap,flags=[...(parent?.parentOrderLabel||[]),...(observation.payload?.detail?.orderList||[]).flatMap(l=>l.orderLabel||[])];
- if(![1,2].includes(Number(parent?.parentOrderStatus))||flags.some(f=>f?.name==='pending_buyer_cancellation'&&[1,'1',true].includes(f.value)))return 'Catalogue: etat source a verifier';
- if(p.visibilityHold!==true||p.marketplacePendingCorrection||p.temuDirect?.attemptedAt||p.externalLabel||e.phase||e.customer?.id||e.bc?.id||e.bl?.id||e.stockDocument?.id||e.stockCreationAttemptedAt||order.suspension?.active||order.suspension?.erplainCancellation)return 'Catalogue · Commande protégée';
+ if(!proof||!Number.isFinite(Date.parse(proof.checkedAt))||Date.parse(proof.checkedAt)>now||now-Date.parse(proof.checkedAt)>15*60000||!['pending','fulfillment','cancelled'].includes(proof.sourceStage))return 'Catalogue · Détail source stable et récent requis';
+ // Platform declarations never veto the catalogue needed for the first BC.
+ // Positive source quantities, local cancellations and uncertain writes remain
+ // independently checked; this does not import or reactivate an order.
+ if(p.visibilityHold!==true||p.marketplacePendingCorrection||p.temuDirect?.attemptedAt||p.externalLabel||e.phase||e.customer?.id||e.bc?.id||e.bl?.id||e.stockDocument?.id||e.stockCreationAttemptedAt||order.suspension?.active||Object.hasOwn(order.suspension||{},'erplainCancellation'))return 'Catalogue · Commande protégée';
  const sourceOnly=!order.issue||pureTemuSourceReadError(order.issue)||order.issue===p.temuCatchupPartial?.currentReason||order.issue==='TEMU · Import incomplet : coordonnées ou détail indisponibles, reprise après nouvelle lecture TEMU'||order.issue==='TEMU · Coordonnées de livraison absentes · Lecture automatique planifiée';
  if(!sourceOnly)return 'Catalogue · Blocage indépendant à conserver';
  // This exception applies only to creating a catalogue record. No order flag is changed.
@@ -29,7 +30,7 @@ export async function prepareIncompleteTemuCatalogue(db,api,{bind,now=()=>Date.n
  if(settings.automatic_live?.enabled!==true||settings.marketplace_automatic?.enabled!==true||settings.marketplace_automatic.channels?.temu===false)return {skipped:true};
  const orders=(await db.query(incompleteCatalogueSelection)).rows,report=[];
  for(const order of orders){const reportStart=report.length,observation=order.catalogue_observation;for(const line of observation?.payload?.detail?.orderList||[]){
-  if(!(Number(line.quantity)>0)||Number(line.orderStatus)===3||[true,1,'1'].includes(line.isCancelledDuringPending)||Number(line.canceledQuantityBeforeShipment)>=Number(line.quantity))continue;const codes=[...new Set((line.productList||[]).map(p=>p.extCode).filter(Boolean))],sourceSku=codes.length===1?codes[0]:null;
+  if(!(Number(line.quantity)>0))continue;const codes=[...new Set((line.productList||[]).map(p=>p.extCode).filter(Boolean))],sourceSku=codes.length===1?codes[0]:null;
   let sku=sourceSku||'[source-ambiguous]',status='review',error=null,variantId=null;
   try{await withLock(async()=>{
    const protection=sourceCatalogueBlock(order,observation,settings,now());if(protection)throw Error(protection);if(!sourceSku)throw Error('Catalogue · SKU source absent ou ambigu');
