@@ -22,6 +22,7 @@ export async function readConfirmedTemuShipments(api,reference,packages){
 }
 export function temuLabelFailure(reason){
  const text=String(reason||'motif non communiqué');
- if(/shipping address contains non-English characters/i.test(text))return 'TEMU · Étiquette refusée : adresse avec caractères non pris en charge par le service d’expédition. Correction de l’adresse dans TEMU requise ; aucun rachat automatique.';
- return 'TEMU · Étiquette refusée : '+text.slice(0,250);
+ if(/shipping address contains non-English characters/i.test(text))return 'TEMU · Étiquette refusée : adresse avec caractères non pris en charge par le service d’expédition. TEMU ne précise pas ici quel caractère est refusé. Correction de l’adresse dans TEMU requise ; aucun rachat automatique. Motif exact TEMU : '+text;
+ if(/(?:destination|location|region|area|postal code|postcode|country) (?:is )?not (?:supported|served|serviceable)|outside (?:the )?(?:delivery|service) area/i.test(text))return 'TEMU · Étiquette refusée : destination non desservie par le service d’expédition indiqué. Vérifiez les options de livraison dans TEMU. Motif exact TEMU : '+text;
+ return 'TEMU · Étiquette refusée : '+text;
 }

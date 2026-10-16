@@ -1,4 +1,10 @@
 let resolutionContextRequestVersion=0;
+function temuRefusalDetailsHtml(problem,ctx){
+ if(problem.type!=='temu-label-refused')return '';
+ const reasons=ctx.temuJob?.refusalReasons||ctx.order?.temu_job?.refusalReasons||[];
+ if(!reasons.length)return '<p>TEMU ne fournit pas de motif original supplémentaire dans les données enregistrées. Actualisez les informations TEMU pour relire le refus.</p>';
+ return '<h3>Motif exact renvoyé par TEMU</h3>'+reasons.map(p=>'<p class="resolution-diagnostic">'+(p.packageSn?'Colis '+esc(p.packageSn)+' : ':'')+esc(p.reason||'Motif non communiqué par TEMU.')+'</p>').join('');
+}
 function invalidateResolutionContextReads(){resolutionContextRequestVersion++;}
 function resolutionContextIsCurrent(request){return request.version===resolutionContextRequestVersion&&request.user===user&&request.view===currentView;}
 function sharedParcelResolutionNotice(problem,order){
@@ -1172,7 +1178,7 @@ function renderResolution(ctx,problem){
 
 
 
-  fields.innerHTML='<p class="resolution-diagnostic">'+esc(problem.detail||'Le motif détaillé n’a pas été enregistré.')+'</p>';
+  fields.innerHTML='<p class="resolution-diagnostic">'+esc(problem.detail||'Le motif détaillé n’a pas été enregistré.')+'</p>'+temuRefusalDetailsHtml(problem,ctx);
 
 
 

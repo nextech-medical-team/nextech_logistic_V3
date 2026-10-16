@@ -31,8 +31,20 @@ test('fallback archives the historical refusal, preserves attempt and never buys
  await assert.rejects(service.prepare(reference),/tentative ou expédition/);
 });
 test('address refusal gets actionable diagnosis; unrelated dimensions refusal stays distinct',()=>{
- assert.match(temuLabelFailure('Unable to create order. The shipping address contains non-English characters.'),/Étiquette refusée : adresse.*aucun rachat/);
+ const raw='Unable to create order. The shipping address contains non-English characters.';
+ assert.match(temuLabelFailure(raw),/Étiquette refusée : adresse.*aucun rachat/);
+ assert.ok(temuLabelFailure(raw).endsWith('Motif exact TEMU : '+raw));
+ assert.match(temuLabelFailure(raw),/ne précise pas ici quel caractère/);
  assert.match(temuLabelFailure('Invalid parcel dimensions'),/Étiquette refusée : Invalid parcel dimensions/);
+});
+
+test('destination refusal is distinguished only when TEMU explicitly identifies coverage',()=>{
+ const raw='Destination is not supported by this shipping service.';
+ assert.match(temuLabelFailure(raw),/destination non desservie/);
+ assert.ok(temuLabelFailure(raw).endsWith(raw));
+ assert.doesNotMatch(temuLabelFailure('Unable to create order. Check address.'),/non desservie/);
+ const long='Provider detail: '+ 'x'.repeat(400)+' END';
+ assert.ok(temuLabelFailure(long).endsWith(long),'original reason must not be truncated');
 });
 test('read-only diagnostic reports confirmed shipment, never a label or payment inferred from tracking',async()=>{
  const diagnostic=await readTemuOrderDiagnostic(api(),reference,{knownPackages:packages});
