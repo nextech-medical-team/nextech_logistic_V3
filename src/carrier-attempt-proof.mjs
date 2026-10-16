@@ -41,10 +41,10 @@ export function provesLegacyPreflight(job,audit){
  &&Date.parse(p.previousFailureAt)<Date.parse(p.validationAt)
  &&new Date(job.updated_at).getTime()===new Date(audit.created_at).getTime();
 }
-export async function canRetryFailedCarrier(db,job,{manualRequest=false}={}){
+export async function canRetryFailedCarrier(db,job,{manualRequest=false,channel=null}={}){
  // GOFO's explicit city-validation refusal is not an uncertain shipment.
  // Require its original persisted provider failure and a fresh manual request.
- if(manualRequest&&job?.status==='failed'&&job.carrier==='gofo'&&job.environment==='production'
+ if(channel==='amazon'&&manualRequest&&job?.status==='failed'&&job.carrier==='gofo'&&job.environment==='production'
  &&job.failure_phase==='provider'&&job.attempts===1&&job.creation_id
  &&Number.isFinite(Date.parse(job.creation_started_at))&&noCreationEvidence(job)
  &&job.original_error==='GOFO 200301000 : City information is incorrect'
@@ -71,11 +71,11 @@ export async function canRetryFailedCarrier(db,job,{manualRequest=false}={}){
  ORDER BY created_at DESC`,[job.order_id,job.updated_at]);
  return rows.some(a=>provesLegacyPreflight(job,a)||provesImportedFieldsPreflight(job,a)||provesClearedImportedPreflight(job,a));
 }
-export async function hasUncertainCarrierHistory(db,id,{manualRequest=false}={}){
+export async function hasUncertainCarrierHistory(db,id,{manualRequest=false,channel=null}={}){
  const {rows}=await db.query(`SELECT h.id,h.job,
  EXISTS(SELECT 1 FROM carrier_label_history_documents d WHERE d.history_id=h.id) AS documents
  FROM carrier_label_history h WHERE h.order_id=$1 FOR SHARE`,[id]);
- for(const h of rows)if(h.documents||!await canRetryFailedCarrier(db,h.job,{manualRequest}))return true;
+ for(const h of rows)if(h.documents||!await canRetryFailedCarrier(db,h.job,{manualRequest,channel}))return true;
  return false;
 }
 export async function markCarrierCreationStarted(db,id){

@@ -53,7 +53,7 @@ groups.push(postBlHistoryGroup);
 groups.at(-1).push('test/receipt-analysis-outcome.test.mjs');
 groups.push(['--test','test/bl-identity.test.mjs']);
 groups.push(['--test','test/manual-label-request-view.test.mjs']);
-groups.push(['--test','test/temu-partial-bl-only.test.mjs']);
+groups.push(['--test','test/temu-partial-bl-only.test.mjs','test/partial-erplain-retry.test.mjs','test/partial-retry-upgrade.test.mjs']);
 groups.push(['--test','test/gls-sku-font.test.mjs']);
 groups.push(['--test','test/erplain-quota-priority.test.mjs','test/erplain-current-reason.test.mjs']);
 groups.push(['--test','test/substitution-diagnostics.test.mjs']);
@@ -63,5 +63,6 @@ groups.push(['--test','test/erplain-quota-delay.test.mjs']);
 groups.push(['--test','test/manager-tender-filter.test.mjs']);
 groups.push(['--test','test/recorded-bc-mapping-stock.test.mjs']);
 groups.push(['--test','test/margin-observer-stability.test.mjs','test/temu-refusal-details-ui.test.mjs','test/platform-cancellation-reports.test.mjs']);
+groups.push(['--test','test/negative-stocks-upgrade.test.mjs','test/negative-stocks.test.mjs','test/workspace-navigation.test.mjs']);
 groups.push(['--test','test/erplain-existing-recovery.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {canRetryFailedCarrier} from '../src/carrier-attempt-proof.mjs';
+import {canRetryFailedCarrier,hasUncertainCarrierHistory} from '../src/carrier-attempt-proof.mjs';
 import {readTransientBlIdentity} from '../src/transient-bl-identity.mjs';
 import {assertImportedPostalAddress,preserveImportedPostalAddress} from '../src/imported-postal-authority.mjs';
 import {workspaceApi} from '../src/workspace-api.mjs';
@@ -25,11 +25,11 @@ test('city correction cannot overwrite imported Amazon postal code',()=>{
 const refused={status:'failed',carrier:'gofo',environment:'production',failure_phase:'provider',attempts:1,creation_id:'attempt',creation_started_at:'2026-10-16T08:00:00Z',result:null,reference:null,tracking:[],error:'GOFO 200301000 : City information is incorrect',original_error:'GOFO 200301000 : City information is incorrect'};
 const db={query:async()=>({rows:[]})};
 test('explicit GOFO city refusal permits a fresh manual request only',async()=>{
- assert.equal(await canRetryFailedCarrier(db,refused,{manualRequest:true}),true);
+ assert.equal(await canRetryFailedCarrier(db,refused,{manualRequest:true,channel:'amazon'}),true);
  assert.equal(await canRetryFailedCarrier(db,refused),false);
 });
 for(const [name,patch] of Object.entries({unknown:{error:'Timeout'},otherCode:{error:'GOFO 500 : Error',original_error:'GOFO 500 : Error'},oldOriginal:{original_error:'Timeout'},result:{result:{}},reference:{reference:'R'},tracking:{tracking:['T']},trackingUnknown:{tracking:null},multiple:{attempts:2},noMarker:{creation_started_at:null},invalidMarker:{creation_started_at:'invalid'},noAttempt:{creation_id:null},sandbox:{environment:'simulation'},otherCarrier:{carrier:'gls'},ready:{status:'ready'},preflight:{failure_phase:'preflight'}}))test('GOFO refusal proof rejects '+name,async()=>{
- assert.equal(await canRetryFailedCarrier(db,{...refused,...patch},{manualRequest:true}),false);
+ assert.equal(await canRetryFailedCarrier(db,{...refused,...patch},{manualRequest:true,channel:'amazon'}),false);
 });
 const state={bl:{id:2,status:'unpublished'}};
 const bc={id:1,shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}};
@@ -48,4 +48,16 @@ test('missing draft is not invented or adopted by its number',async()=>{
 });
 test('tender keeps previous list-only behavior',async()=>{
  await assert.rejects(readTransientBlIdentity({request:()=>assert.fail('excluded')},state,bc,{lookupDraft:false}),/introuvable/);
+});
+
+for(const channel of ['tender','temu','shopify',null])test('definitive city refusal preserves excluded channel '+channel,async()=>{
+ assert.equal(await canRetryFailedCarrier(db,refused,{manualRequest:true,channel}),false);
+ const history={query:async()=>({rows:[{job:refused,documents:false}]})};
+ assert.equal(await hasUncertainCarrierHistory(history,'o',{manualRequest:true,channel}),true);
+ assert.equal(await canRetryFailedCarrier(db,{...refused,creation_started_at:null,failure_phase:'preflight'},{manualRequest:true,channel}),true);
+});
+test('definitive refusal history requires explicit Amazon scope',async()=>{
+ const history={query:async()=>({rows:[{job:refused,documents:false}]})};
+ assert.equal(await hasUncertainCarrierHistory(history,'o',{manualRequest:true}),true);
+ assert.equal(await hasUncertainCarrierHistory(history,'o',{manualRequest:true,channel:'amazon'}),false);
 });

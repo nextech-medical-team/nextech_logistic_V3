@@ -38,7 +38,7 @@ for(const carrier of ['gofo','gls'])test(`existing installation: ${carrier} labe
  const db={...wrap(engine),transaction:fn=>engine.transaction(tx=>fn(wrap(tx))),withLocks:async(_keys,fn)=>fn(),recoverInterrupted:false};
  try{
   await db.exec(`CREATE TABLE schema_migrations(version text PRIMARY KEY);
-   INSERT INTO schema_migrations VALUES('application-20261005-robustness-5');
+   INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); INSERT INTO schema_migrations VALUES('partial-erplain-retry-20261016-1');
    CREATE TABLE orders(id text PRIMARY KEY,channel text,reference text,carrier text,address jsonb,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',label_status text,weight_kg numeric,parcel_count integer,tracking_status text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}',issue text);
    CREATE TABLE lines(id text,order_id text,source_line text,source_sku text,target_sku text,quantity numeric,target_quantity numeric);
    CREATE TABLE settings(key text,value jsonb);
