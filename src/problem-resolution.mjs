@@ -1,4 +1,5 @@
 import {queueResolutionRequest} from './resolution-request.mjs';
+import {assertImportedPostalAddress} from './imported-postal-authority.mjs';
 import {abandonEquivalentPreview} from './abandon-equivalent.mjs';
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
@@ -297,6 +298,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    return {message:j.action==='weight'?(binding.weightKg?'Poids pris en compte : '+new Intl.NumberFormat('fr-FR').format(binding.weightKg*1000)+' g.':'Erplain retourne encore un poids nul : correction non confirmée.'):j.action==='create-product'?'Produit créé et relu dans Erplain LIVE. Aucun stock fictif ajouté.':'Produit Erplain enregistré comme référence commune pour ce SKU.',product:binding,checks:await recheckOrders(db,ids),variant:v};
   }
   if(j.action==='address'){
+   assertImportedPostalAddress(o,b.address);
    await assertOrderEditable(o);const address={...o.address};for(const k of ['name','street','postal','city','country','phone','email'])address[k]=String(b.address[k]||'').trim();
    await stage('Mise à jour de l’adresse de cette commande dans Erplain LIVE');await api.verify();
    // Check every document before changing the first one: a closed BL must also protect its BC.

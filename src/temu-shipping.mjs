@@ -85,6 +85,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
  const job=async reference=>(await db.query('SELECT * FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
  async function quote(reference,channelId,fresh={}){
   const localOrders=(await db.query('SELECT * FROM orders WHERE reference=$1',[reference])).rows;if(quoteOrderPolicy)await quoteOrderPolicy(reference);else for(const order of localOrders){const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);}
+  if(!quoteOrderPolicy&&localOrders.some(o=>!o.archived&&o.partial_mode))throw Error('Utiliser le BL et les quantités de la livraison partielle');
   const financialOrder=!quoteOrderPolicy&&localOrders.find(o=>o.channel==='temu'&&!o.archived);
   if(financialOrder)assertTemuLabelOrder(financialOrder);
   const excelOrder=!financialOrder&&!quoteOrderPolicy&&localOrders.find(isTemuExcel);

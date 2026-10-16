@@ -68,3 +68,10 @@ test('explicit suspension and every other channel remain ineligible regardless o
  const f=await fixture({suspension:{active:true,note:'human stop'}});await assert.rejects(f.worker.process(reference),/suspendue/);assert.equal(f.reads.length,0);assert.equal(f.buys,0);
  for(const channel of ['amazon','shopify','tender'])assert.ok(automaticPreparationHold({...await f.read(),channel,suspension:{}}));
 });
+
+for(const status of ['cancelled','shipped','delivered'])test('recorded terminal BL '+status+' prevents purchase before and during financial claim',async()=>{
+ let f=await fixture();await db.query("UPDATE orders SET erp_live=erp_live||jsonb_build_object('bl',jsonb_build_object('id','BL','status',$1::text)) WHERE id='o'",[status]);
+ await assert.rejects(f.worker.process(reference),/annulé|expédié/);assert.equal(f.buys,0);assert.equal(f.reads.length,0);
+ f=await fixture({beforeClaim:async n=>{if(n===2)await db.query("UPDATE orders SET erp_live=erp_live||jsonb_build_object('bl',jsonb_build_object('id','BL','status',$1::text)) WHERE id='o'",[status]);}});
+ await assert.rejects(f.worker.process(reference),/annulé|expédié/);assert.equal(f.buys,0);assert.equal((await db.query('SELECT attempt_id FROM temu_label_jobs')).rows[0].attempt_id,null);
+});

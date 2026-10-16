@@ -7,6 +7,7 @@ export function temuLabelOrderHold(o){
  if(!o||o.channel!=='temu'||o.archived)return 'Commande hors périmètre TEMU';
  const suspension=suspensionBlock(o);if(suspension)return suspension;
  if(o.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(o.tracking_status))return 'Commande annulée ou déjà expédiée';
+ if(['cancelled','canceled','shipped','in_transit','delivered'].includes(o.erp_live?.bl?.status))return 'BL annulé ou déjà expédié : aucun nouvel achat';
  if(hasExternalLabel(o)||o.transport_choice)return 'Étiquette ou choix de transport existant à préserver';
  if(o.partial_mode)return 'Parcours partiel existant à préserver, aucun achat parent supplémentaire';
  return null;
