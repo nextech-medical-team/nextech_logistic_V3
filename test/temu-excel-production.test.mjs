@@ -65,7 +65,7 @@ test('production worker uses Excel source totals and shared pricing, without API
  assert.equal(temuSellerTotals(o).total,84.05);verifySourceCommercialTotals({total:84.05,currency:{label:'EUR'},line_items:[{tax_amount:16.8}]},temuSellerTotals(o));
  lines[0].quantity=10;await assert.rejects(ensureTemuBcPricing(f.db,o,lines,()=>assert.fail('No API amount request')),/modifiés/);
 });
-test('same TEMU shipping engine uses published BL without ERP revalidation, quotes 0.25 kg/latest slot, and buys once',async t=>{
+test('same TEMU shipping engine uses published BL without ERP revalidation, quotes known kg/latest slot, and buys once',async t=>{
  const f=await fixture(t);await f.service.prepare(await f.input(),user);const shipping=temuShipping(f.db,f.api);
  await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
  await f.db.query("UPDATE orders SET resolution_pending_resume=false,weight_kg=5 WHERE id='o'");
@@ -84,7 +84,7 @@ test('same TEMU shipping engine uses published BL without ERP revalidation, quot
  await f.db.query("UPDATE resolution_jobs SET error=null WHERE order_id='o'");
  // A successful BL retry is newer than the original Excel import job.
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,result,created_at) VALUES('bl-retry','o','resume-erp','complete','{\"erpOnly\":true}',now()+interval '1 second')");
- const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'0.25');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
+ const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'5');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
  assert.equal((await f.read()).resolution_pending_resume,true);
  assert.equal(automaticPreparationHold(await f.read()),null);
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,created_at) VALUES('later','o','refresh','queued',now()+interval '1 minute')");
