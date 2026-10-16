@@ -1,3 +1,4 @@
+import {initializePlatformCancellationReports,platformCancellationReports} from './platform-cancellation-reports.mjs';
 import {publishStockWatchObservations} from './grouped-stock-watch.mjs';
 import {initializeImportReceptions,readImportReceptions} from './import-reception.mjs';
 import {cancelPartialDelivery} from './partial-cancellation.mjs';
@@ -127,6 +128,7 @@ await db.withLocks(['schema'],()=>initializeSkuCopies(db));
 await db.withLocks(['schema'],()=>initializeReceiptRecovery(db));
 await db.withLocks(['schema'],()=>initializeEquivalences(db));
 await db.withLocks(['schema'],()=>initializeEquivalenceImports(db));
+await db.withLocks(['schema'],()=>initializePlatformCancellationReports(db));
 await db.withLocks(['schema'],()=>initializeStockResumeWatch(db,{resumeReadLeases:config.background}));
 await db.withLocks(['schema'],()=>initializeV2Followup(db));
 await db.withLocks(['schema'],()=>initializeShopifyObservation(db));
@@ -138,7 +140,7 @@ await db.withLocks(['schema'],()=>initializeOrderSuspension(db));
 await db.withLocks(['schema'],()=>initializeProblemDeferral(db));
 const deferralService=problemDeferralService(db);
 const suspensionService=orderSuspensionService(db,erplainAccount(directory,'live'));
-const platformCancellationRefresh=manualPlatformCancellation(db,directory,suspensionService);
+const platformCancellationRefresh=platformCancellationReports(db,manualPlatformCancellation(db,directory,suspensionService));
 configureApiBudget(db);configureShipmentLocks(db);const cachedOrderSummary=orderSummaryCache(db);
 await db.withLocks(['schema'],()=>initializeTrackingSync(db));
 if(config.background)await db.query("UPDATE tracking_sync_runs SET status='interrupted',finished_at=now(),error='Serveur redémarré : les résultats déjà reçus sont conservés. Relancez la synchronisation.' WHERE status='running'");
@@ -363,6 +365,15 @@ const server=http.createServer(async(req,res)=>{
       permitted(user,operational);const b=await body(req);json(res,200,await deferralService[p.endsWith('/defer')?'defer':'restore'](b,user));return;
     }
     if(p==='/api/orders/suspension'&&req.method==='GET'){json(res,200,await suspensionService.context(url.searchParams.get('id'),url.searchParams.get('requestId')));return;}
+    if(p==='/api/orders/platform-cancellations/history'&&req.method==='GET'){
+      permitted(user,operational);json(res,200,await platformCancellationRefresh.history());return;
+    }
+    if(p==='/api/orders/platform-cancellations/report'&&req.method==='GET'){
+      permitted(user,operational);json(res,200,await platformCancellationRefresh.read(url.searchParams.get('id')));return;
+    }
+    if(p==='/api/orders/platform-cancellations/finish'&&req.method==='POST'){
+      permitted(user,operational);json(res,200,await platformCancellationRefresh.finish(await body(req)));return;
+    }
     if(p==='/api/orders/refresh-platform-cancellations'&&req.method==='POST'){
       permitted(user,operational);json(res,200,await platformCancellationRefresh.next(await body(req),user));return;
     }

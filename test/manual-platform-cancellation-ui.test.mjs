@@ -13,17 +13,38 @@ function fixture({hasOrders=true,hasMain=true}={}){
  runInNewContext(script,context);
  return {calls,context,oldView,title,nav,orders,settings,settingsBody,find:id=>elements.findLast(el=>el.id===id)};
 }
-test('menu opens dedicated page without a platform call or cancellation',async()=>{
+test('menu loads saved history without consulting platforms or applying cancellations',async()=>{
  const f=fixture(),menu=f.find('platform-cancellations-menu'),panel=f.find('view-platform-cancellations');
  assert.ok(f.settingsBody.children.includes(menu));assert.equal(f.settings.open,true);assert.equal(panel.hidden,true);assert.deepEqual(f.calls,[]);
- await menu.onclick();assert.equal(panel.hidden,false);assert.equal(f.oldView.hidden,true);assert.equal(f.context.currentView,'platform-cancellations');assert.equal(f.title.textContent,'Annulations Temu / Shopify');assert.deepEqual(f.calls,[]);
- await f.context.show('products');assert.deepEqual(f.calls,[['show','products']]);
+ await menu.onclick();assert.equal(panel.hidden,false);assert.equal(f.oldView.hidden,true);assert.equal(f.context.currentView,'platform-cancellations');assert.equal(f.title.textContent,'Annulations Temu / Shopify');assert.deepEqual(f.calls,[['api','/api/orders/platform-cancellations/history']]);
+ await f.context.show('products');assert.deepEqual(f.calls,[['api','/api/orders/platform-cancellations/history'],['show','products']]);
 });
 test('verification starts only after clicking Actualiser on its page',async()=>{
  const f=fixture();await f.find('platform-cancellations-menu').onclick();await f.find('platform-cancellation-refresh').onclick();
- assert.equal(f.calls[0][0],'api');assert.equal(f.calls[0][1],'/api/orders/refresh-platform-cancellations');assert.equal(f.calls.length,1);assert.equal(f.find('platform-cancellation-refresh').disabled,false);
+ assert.equal(f.calls[1][0],'api');assert.equal(f.calls[1][1],'/api/orders/refresh-platform-cancellations');assert.equal(f.calls.length,2);assert.equal(f.find('platform-cancellation-refresh').disabled,false);
 });
 test('menu initializes without the reload control or orders menu',()=>{const f=fixture({hasOrders:false});assert.ok(f.settingsBody.children.includes(f.find('platform-cancellations-menu')));assert.deepEqual(f.calls,[]);});
+
+test('saved report reopens and application saves the same report',async()=>{
+ const f=fixture(),calls=[];
+ f.context.api=async(url,input)=>{
+  calls.push([url,input]);
+  if(url.endsWith('/history'))return {rows:[{id:'report-1',created_at:'2026-10-16T09:00:00Z',status:'ready'}]};
+  if(url.includes('/report?id='))return {id:'report-1',created_at:'2026-10-16T09:00:00Z',status:'ready',scope:{channels:['temu']},scan_complete:true,issues:[],results:[{id:'a',channel:'temu',reference:'REF',status:'cancelled',platformCancelled:true,v3Cancelled:false}]};
+  if(url.endsWith('/apply-platform-cancellations'))return {result:{id:'a',channel:'temu',reference:'REF',status:'cancelled',platformCancelled:true,v3Cancelled:true,applied:true}};
+  if(url.endsWith('/finish'))return {saved:true};
+  throw Error('Unexpected API '+url);
+ };
+ await f.find('platform-cancellations-menu').onclick();
+ const history=f.find('platform-cancellation-history');assert.equal(history.children.length,2);
+ history.value='report-1';await history.onchange();
+ assert.equal(f.find('platform-cancellation-apply').disabled,false);
+ await f.find('platform-cancellation-apply').onclick();
+ assert.equal(calls.find(([url])=>url.endsWith('/apply-platform-cancellations'))[1].reportId,'report-1');
+ assert.equal(calls.find(([url])=>url.endsWith('/finish'))[1].reportId,'report-1');
+ assert.equal(f.find('platform-cancellation-apply').disabled,true);
+ assert.ok(!calls.some(([url])=>url.endsWith('/refresh-platform-cancellations')));
+});
 test('missing application surface does not throw or call sources',()=>{const f=fixture({hasMain:false});assert.equal(f.find('platform-cancellations-menu'),undefined);assert.deepEqual(f.calls,[]);});
 
 test('report table is visible before verification with headings and an empty state',()=>{
@@ -46,7 +67,7 @@ test('table remains visible while verification is running and displays the resul
 for(const [selection,channels] of [['temu',['temu']],['shopify',['shopify']],['both',['temu','shopify']]]){
  test('selection '+selection+' persists through navigation and is sent for every request',async()=>{
   const f=fixture();f.find('platform-cancellation-channels').value=selection;
-  let count=0;f.context.api=async(url,input)=>{assert.deepEqual(Array.from(input.channels),channels);return count++===0?{done:false,cursor:'a',result:{channel:channels[0],reference:'REF',status:'cancelled'}}:{done:true};};
+  let count=0;f.context.api=async(url,input)=>{if(url.endsWith('/history'))return {rows:[]};assert.deepEqual(Array.from(input.channels),channels);return count++===0?{done:false,cursor:'a',result:{channel:channels[0],reference:'REF',status:'cancelled'}}:{done:true};};
   await f.find('platform-cancellations-menu').onclick();await f.find('platform-cancellation-refresh').onclick();
   const report=f.find('platform-cancellation-report'),summary=report.children[0].textContent;
   assert.match(summary,/1 commandes vérifiées/);assert.equal(f.find('platform-cancellation-export').disabled,false);
