@@ -1,6 +1,8 @@
+import {assertInstalledStock} from './stock-gate-preserved.mjs';
 import {exactStockAvailability} from './stock-decimal.mjs';
 const stockNumeric=value=>(typeof value==='number'||typeof value==='string'&&value.trim()!=='')&&Number.isFinite(Number(value));
-export function assertFullOrderStock(lines){
+export function assertFullOrderStock(lines,{preserveInstalled=false}={}){
+ if(preserveInstalled)return assertInstalledStock(lines);
  if(!Array.isArray(lines))throw new Error('Stock non vérifiable : lignes produit absentes');
  const groups=new Map();let products=0;
  for(const l of lines){if(l?.type==='shipping_cost'&&!l.variant)continue;

@@ -2,7 +2,15 @@
 
 Base : main 5df9641 (PR205/218 incluses). Ne pas réappliquer PR156/191/198/199/202/207/213/215/216/205/218. Les compléments 209/210/212/214 gardent leur file et leurs propriétaires. PR206 financière est exclue. Ce lot ne lève aucune suspension, n'importe aucune commande, n'achète aucune étiquette de recette et ne modifie aucun document existant pour les tests.
 
-## Modifications
+## Périmètre intégré par Section7 — exclusion des appels d’offres
+
+L’intégration part de `be67b4aacf23226b061a2c0f83a95697d0042b26` (PR219 installée). Les évolutions métier ci-dessous ne s’appliquent pas au canal `tender` : son parseur, aperçu, confirmation, autorisation de copie, prix/remises/frais, gestionnaire, référence et récupération BC gardent le comportement installé. Les modules `imports-tender-preserved.mjs` et `erplain-document-metadata-tender-preserved.mjs` conservent le code de cette base.
+
+Les AO gardent aussi leurs réveils du moniteur, échéance après publication, clé de reprise horodatée, délai de reprise stock, leases de lecture au redémarrage, confirmation indépendante de numérotation BC et blocage de mutation fiscale incertaine. Aucune conversion en cycle BL natif. Les helpers de stock sans contexte canal (preuve historique, commande ciblée, alignement mapping) conservent le validateur installé pour tous les canaux ; l’amélioration décimale exacte est différée dans ces chemins. La télémétrie technique et la mutualisation des lectures simultanées restent communes, sans nouvelle autorisation métier, cache durable, partage de mutation ou suppression de garde finale.
+
+Les tests de préservation utilisent des données synthétiques, PGlite et fournisseurs simulés. Ils n’exécutent aucune recette AO opérationnelle. Les preuves locales ne constituent pas une preuve d’installation ; la publication et les contrôles installés restent à réaliser par Section7.
+
+## Modifications hors appels d’offres
 
 - Reprises automatiques identifiées par produits, quantités, stock observé et état métier, sans horodatage par minute. Les actions manuelles restent distinctes.
 - Les diagnostics des reprises ne réveillent plus une nouvelle lecture externe. Corrections achevées et changements de lignes continuent de réveiller le moniteur. Au démarrage, les échéances externes persistées sont conservées.

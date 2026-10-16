@@ -13,7 +13,7 @@ export function partialLabelWeight(d,o,weights){
 }
 export async function retryPartialLabel(db,id){
  return db.transaction(async tx=>{
-  const d=(await tx.query('SELECT * FROM partial_deliveries WHERE id=$1 FOR UPDATE',[id])).rows[0];if(!d)throw Error('Livraison introuvable');
+  const d=(await tx.query('SELECT * FROM partial_deliveries WHERE id=$1 FOR UPDATE',[id])).rows[0];if(!d)throw Error('Livraison introuvable');if(d.label_choice==='bl_only_temu')throw Error('TEMU · BL uniquement : aucune création ou reprise d’étiquette autorisée');
   if(['bl_ready','finalizing_bl','awaiting_pdf','creating_label','ready'].includes(d.status))return {existing:true,status:d.status,blId:d.bl?.id};
   if(d.status!=='review')throw Error('Création incertaine : rapprochement requis, aucun nouvel envoi automatique');
   if(d.carrier_result!==null&&d.carrier_result!==undefined){await tx.query("UPDATE partial_deliveries SET status='awaiting_pdf',error=null WHERE id=$1",[id]);return {recoveryOnly:true,originalError:d.error,blId:d.bl?.id};}

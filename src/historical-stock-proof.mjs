@@ -102,7 +102,7 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
     const number=v=>typeof v==='number'&&Number.isFinite(v);
     if(!number(l.on_hand)||!number(l.shipped_quantity)||l.shipped_quantity!==0)return fail('stock physique ou expédition non vérifiable');
    }
-   assertFullOrderStock(bc.line_items);
+   assertFullOrderStock(bc.line_items,{preserveInstalled:true});
    return {bcId:String(bc.id),stockOnBc:true,stockModel:'reservation_bc_avant_bl',beforeBlPublication:true,quantities:[...expected].map(([key,quantity])=>({key,quantity})),logIds:[...ids].sort()};
   }
   if(!bl||bl.update_stock!==true)return fail('réservation BC sans mouvement BL vérifiable');

@@ -40,7 +40,7 @@ export function documentIssues(d,existingOrder=null){
  if(bls.length>1)preparation.push('Plusieurs BL : choisir la livraison dans le circuit des livraisons partielles');
  if(!scope.scoped&&(bls.some(b=>['shipped','delivered'].includes(b.status))||lines.some(l=>Number(l.shipped_quantity)>0)))preparation.push('Commande déjà expédiée en totalité ou en partie : utiliser les livraisons partielles');
  if(!['label','address_1','postal_code','city','country'].every(k=>String(d.shipping_address?.[k]||'').trim()))preparation.push('Adresse de livraison à compléter');
- try{assertFullOrderStock(lines);}catch(e){preparation.push(e.message);}
+ try{assertFullOrderStock(lines,{preserveInstalled:true});}catch(e){preparation.push(e.message);}
  return {admissionIssues:[...new Set(admission)],preparationIssues:[...new Set(preparation)]};
 }
 export async function initializeTargetedOrders(db){await db.exec(`CREATE TABLE IF NOT EXISTS erplain_order_identity(account TEXT NOT NULL CHECK(account='live'),bc_id TEXT NOT NULL,order_id TEXT NOT NULL REFERENCES orders(id),PRIMARY KEY(account,bc_id),UNIQUE(account,order_id));`);}

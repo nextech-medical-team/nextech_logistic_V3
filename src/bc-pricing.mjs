@@ -149,7 +149,19 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
     if(rate!==undefined)add(null,ship,st,rate,'Livraison Amazon · '+l.source_sku,'gross');
    }
   });
- }else if(['tender','samples'].includes(order.channel)){
+ }else if(order.channel==='tender'){
+  lines.forEach((l,i)=>{const r=l.source_payload||{},unit=r.puht??r.prixunitaireht??r.prix;
+   const net=present(unit)?amount(unit,'Prix HT · '+l.source_sku)*Number(l.quantity):amount(r.totalht,'Total HT · '+l.source_sku);
+   if(optional(r.rem,'Remise ligne')||optional(r.remiseglobale,'Remise globale'))throw Error('BC · Remise source à préciser avant création');
+   const rate=amount(r.taxes,'Taux TVA · '+l.source_sku),tax=cents(net*rate/100)/100;
+   add(products[i],cents(net)/100+tax,tax,rate,l.source_sku);
+   // Tender prices retain Excel precision; Erplain computes totals and taxes.
+   if(order.channel==='tender')entries.at(-1).item.price=present(unit)&&Number(products[i].quantity)===Number(l.quantity)?amount(unit,'Prix HT · '+l.source_sku):net/Number(products[i].quantity);
+  });
+  if(optional(src.coutsdexpedition,'Frais de livraison'))throw Error('BC · TVA des frais de livraison à renseigner');
+  // Excel's "Total" is a line total, not the order total copied on its first row.
+  if(lines.every(l=>present(l.source_payload?.total)))expected=lines.reduce((s,l)=>s+amount(l.source_payload.total,'Total ligne'),0);
+ }else if(order.channel==='samples'){
   lines.forEach((l,i)=>{const r=l.source_payload||{},unit=r.puht??r.prixunitaireht??r.prix;
    const net=present(unit)?amount(unit,'Prix HT · '+l.source_sku)*Number(l.quantity):amount(r.totalht,'Total HT · '+l.source_sku);
    const sourceDiscount=optional(r.rem,'Remise ligne')||optional(r.remiseglobale,'Remise globale');if(sourceDiscount)commercialObservations.push({code:'source_discount_supplier_rules',sku:l.source_sku,received:sourceDiscount,blocking:false});
@@ -170,6 +182,10 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
   if(lines.every(l=>present(l.source_payload?.total)))expected=lines.reduce((s,l)=>s+amount(l.source_payload.total,'Total ligne'),0);
  }else throw Error('BC · Source des prix non configurée : '+order.channel);
  const total=cents(entries.reduce((s,e)=>s+e.gross,0))/100,tax=cents(entries.reduce((s,e)=>s+e.tax,0))/100;
+ if(order.channel==='tender'){
+ if(expected!==undefined&&!acceptedBcTotal({total},{total:expected,currency,eurExchangeRate}))throw Error('BC · Total source incohérent : détail '+total.toFixed(2)+' / attendu '+expected.toFixed(2)+' '+currency);
+ return {version:2,currency,eurExchangeRate,tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:e.item.tax_codes.map(t=>String(t.id)).sort(),unitPrice:e.item.price,gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
+ }
  if(commercialObservations.some(x=>x.code==='source_discount_supplier_rules'))for(const entry of entries)entry.item.apply_discount_rules=true;
  const sourceTotalObservation=expected===undefined?null:{received:expected,calculated:total,difference:total-expected,blocking:false};
  return {version:2,currency,eurExchangeRate,sourceTotalObservation,commercialObservations,taxSourceComplete:!entries.some(e=>e.taxUnspecified),tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:(e.item.tax_codes||[]).map(t=>String(t.id)).sort(),taxUnspecified:e.taxUnspecified===true,unitPrice:e.item.price,gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};

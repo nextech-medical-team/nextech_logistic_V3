@@ -1,3 +1,4 @@
+import * as tenderImports from './imports-tender-preserved.mjs';
 import {positiveImportQuantity} from './quantity-value.mjs';
 import {initializeImportReceptions,importCandidates,matchImport,recordImportReception,shopIdentity} from './import-reception.mjs';
 import {postalHeaders,postalCellValue,importPostalCode} from './import-postal-code.mjs';
@@ -169,6 +170,7 @@ export async function importMapping(db,buffer,filename){
 
 
 export async function parseOrders(buffer,filename,channel){
+  if(channel==='tender')return tenderImports.parseOrders(buffer,filename,channel);
 
   if(!['amazon','tender','samples','shopify'].includes(channel))throw new Error('Canal d’import invalide');
 
@@ -227,6 +229,7 @@ export async function parseOrders(buffer,filename,channel){
 }
 
 export async function previewOrders(db,buffer,filename,channel,options={}){
+  if(channel==='tender')return tenderImports.previewOrders(db,buffer,filename,channel,options);
   const parsed=await parseOrders(buffer,filename,channel);
   if(channel==='shopify')await completeShopifyFileOrders(parsed,options.shopifyReader);
   const candidates=await importCandidates(db,parsed.valid,channel);
@@ -239,6 +242,7 @@ export async function previewOrders(db,buffer,filename,channel,options={}){
 }
 
 export async function importOrders(db,buffer,filename,channel,selection,options={}){
+  if(channel==='tender')return tenderImports.importOrders(db,buffer,filename,channel,selection,options);
   await initializeImportReceptions(db);
   const parsed=await parseOrders(buffer,filename,channel),rows=parsed.rows,errors=parsed.errors;
   if(selection!==undefined&&(!Array.isArray(selection)||selection.some(r=>typeof r!=='string')))throw new Error('Sélection de commandes invalide');

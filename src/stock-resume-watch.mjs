@@ -7,7 +7,7 @@ import {cancellationBlock,transientErpError} from './erp-transient-policy.mjs';
 import {shipmentFingerprint} from './label-stock-gate.mjs';
 import {erplainAccount} from './erplain-accounts.mjs';
 
-export async function initializeStockResumeWatch(db,{resumeReadLeases=false}={}){await initializeGroupedStockWatch(db);await db.exec(`CREATE TABLE IF NOT EXISTS stock_resume_watch(order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,next_at TIMESTAMPTZ NOT NULL DEFAULT now(),checked_at TIMESTAMPTZ,failures INT NOT NULL DEFAULT 0,outcome TEXT,last_error TEXT); CREATE INDEX IF NOT EXISTS stock_resume_watch_due ON stock_resume_watch(next_at);`);if(resumeReadLeases)await db.query("UPDATE stock_resume_watch SET next_at=now(),outcome='waiting' WHERE outcome='checking'");}
+export async function initializeStockResumeWatch(db,{resumeReadLeases=false}={}){await initializeGroupedStockWatch(db);await db.exec(`CREATE TABLE IF NOT EXISTS stock_resume_watch(order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,next_at TIMESTAMPTZ NOT NULL DEFAULT now(),checked_at TIMESTAMPTZ,failures INT NOT NULL DEFAULT 0,outcome TEXT,last_error TEXT); CREATE INDEX IF NOT EXISTS stock_resume_watch_due ON stock_resume_watch(next_at);`);if(resumeReadLeases)await db.query("UPDATE stock_resume_watch SET next_at=now(),outcome='waiting' WHERE outcome='checking' AND order_id IN (SELECT id FROM orders WHERE channel<>'tender')");}
 export const stockCandidateSql=`SELECT o.*,e.error stock_error,e.updated_at erp_updated_at,c.stock_override,c.status carrier_state,
  (SELECT action FROM resolution_jobs r WHERE r.order_id=o.id ORDER BY created_at DESC LIMIT 1) latest_action,
  (SELECT status FROM resolution_jobs r WHERE r.order_id=o.id ORDER BY created_at DESC LIMIT 1) latest_status
@@ -28,16 +28,16 @@ export function candidateAllowed(o){
  return true;
 }
 export function retryMinutes(failures){return Math.min(60,5*2**Math.min(4,Math.max(0,Number(failures)||0)));}
-export function verifiedStock(snapshot,bcId,{native=false}={}){
+export function verifiedStock(snapshot,bcId,{native=false,preserveInstalled=false}={}){
  if(!snapshot||String(snapshot.id)!==String(bcId)||snapshot.status!=='active'||snapshot.update_stock!==(native?true:false))throw Error('BC à vérifier avant reprise automatique');
  if(!Array.isArray(snapshot.shipping_orders?.data)||snapshot.shipping_orders.paginatorInfo?.hasMorePages!==false||snapshot.shipping_orders.data.length)throw Error('BL existant ou réponse BL incomplète : rapprochement requis');
  if(!Array.isArray(snapshot.line_items)||!snapshot.line_items.some(l=>l.variant))throw Error('Lignes produit absentes');
- assertFullOrderStock(snapshot.line_items);
+ assertFullOrderStock(snapshot.line_items,{preserveInstalled});
 }
 const fields='id status update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id} paginatorInfo{hasMorePages}}';
 export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'source'),enabled=()=>true,grouped=groupedStockEnabled,observe=async()=>{},now=()=>Date.now()}={}){
  let running=false;
- async function record(id,problem){const error=typeof problem==='string'?problem:problem?.message||null,lock=isStockLockMessage(error),quota=problem?.httpStatus===429||problem?.erplainRequestNotSent===true,retrySeconds=quota?Math.max(2,Number(problem.retryAfter)||30):transientErpError(error)?30:null;await db.query(`INSERT INTO stock_resume_watch(order_id,checked_at,next_at,failures,outcome,last_error) VALUES($1,now(),now()+coalesce($5::double precision,300)*interval '1 second',$3,$4,$2) ON CONFLICT(order_id) DO UPDATE SET checked_at=now(),next_at=now()+CASE WHEN $5::double precision IS NOT NULL THEN $5::double precision*interval '1 second' ELSE make_interval(mins=>CASE WHEN $3=0 THEN 5 ELSE least(60,5*power(2,least(4,stock_resume_watch.failures))::int) END) END,failures=CASE WHEN $3=0 THEN 0 ELSE stock_resume_watch.failures+1 END,outcome=$4,last_error=$2`,[id,error||null,error&&!lock&&!/stock insuffisant/i.test(error)?1:0,lock?'waiting_reconciliation':error?'waiting':'queued',retrySeconds]);
+ async function record(id,problem,preserveInstalled=false){const error=typeof problem==='string'?problem:problem?.message||null,lock=isStockLockMessage(error),quota=problem?.httpStatus===429||problem?.erplainRequestNotSent===true,retrySeconds=preserveInstalled?null:quota?Math.max(2,Number(problem.retryAfter)||30):transientErpError(error)?30:null;await db.query(`INSERT INTO stock_resume_watch(order_id,checked_at,next_at,failures,outcome,last_error) VALUES($1,now(),now()+coalesce($5::double precision,300)*interval '1 second',$3,$4,$2) ON CONFLICT(order_id) DO UPDATE SET checked_at=now(),next_at=now()+CASE WHEN $5::double precision IS NOT NULL THEN $5::double precision*interval '1 second' ELSE make_interval(mins=>CASE WHEN $3=0 THEN 5 ELSE least(60,5*power(2,least(4,stock_resume_watch.failures))::int) END) END,failures=CASE WHEN $3=0 THEN 0 ELSE stock_resume_watch.failures+1 END,outcome=$4,last_error=$2`,[id,error||null,error&&!lock&&!/stock insuffisant/i.test(error)?1:0,lock?'waiting_reconciliation':error?'waiting':'queued',retrySeconds]);
   if(lock)await db.query("UPDATE erp_live_jobs SET error=$2 WHERE order_id=$1 AND status='review' AND (error=$3 OR error LIKE $4)",[id,error,'Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison','Mouvement de stock précédent à rapprocher pour ces produits avant nouvelle livraison · %']);
  }
  async function enqueue(o,fingerprint){return db.transaction(async tx=>{
@@ -68,19 +68,19 @@ export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'so
    if(!rows.length)return;
    // Lease each read before any network call, preventing rapid repeats after a failure.
    for(const o of rows)await db.query(`INSERT INTO stock_resume_watch(order_id,next_at,outcome) VALUES($1,now()+interval '5 minutes','checking') ON CONFLICT(order_id) DO UPDATE SET next_at=now()+interval '5 minutes',outcome='checking'`,[o.id]);
-   try{await api.verify();}catch(e){for(const o of rows)await record(o.id,e.message);return;}
+   try{await api.verify();}catch(e){for(const o of rows)await record(o.id,e.message,o.channel==='tender');return;}
    for(let start=0;start<rows.length&&enabled();start+=5){
     const batch=rows.slice(start,start+5),fingerprints=await Promise.all(batch.map(o=>shipmentFingerprint(db,o)));
     const q='query V3StockResume('+batch.map((_,i)=>'$b'+i+':ID!').join(',')+'){'+batch.map((_,i)=>`b${i}:Order(id:$b${i}){${fields}}`).join(' ')+'}';
-    let result;try{result=await api.request(q,Object.fromEntries(batch.map((o,i)=>['b'+i,String(o.erp_live.bc.id)])));}catch(e){for(const o of batch)await record(o.id,e.message);break;}
+    let result;try{result=await api.request(q,Object.fromEntries(batch.map((o,i)=>['b'+i,String(o.erp_live.bc.id)])));}catch(e){for(const o of batch)await record(o.id,e.message,o.channel==='tender');break;}
     for(let i=0;i<batch.length;i++){const o=batch[i];try{
      if(!enabled())break;
      if(usesNativeBlCycle(o))assertNativeBlOrder(o);
-     verifiedStock(result['b'+i],o.erp_live.bc.id,{native:usesNativeBlCycle(o)});
+     verifiedStock(result['b'+i],o.erp_live.bc.id,{native:usesNativeBlCycle(o),preserveInstalled:o.channel==='tender'});
      if(!usesNativeBlCycle(o))await assertStockResolved(db,result['b'+i].line_items.filter(l=>l.variant).map(l=>l.variant.id),{orderId:o.id});
      if(o.resolution_pending_resume&&o.stock_override.fingerprint!==fingerprints[i])throw Error('Préparation modifiée depuis l’étiquette forcée : validation manuelle requise');
-     const queued=await enqueue(o,fingerprints[i]);await record(o.id,queued?null:'Commande modifiée ou déjà traitée : relecture différée');
-    }catch(e){await record(o.id,e.message);}}
+     const queued=await enqueue(o,fingerprints[i]);await record(o.id,queued?null:'Commande modifiée ou déjà traitée : relecture différée',o.channel==='tender');
+    }catch(e){await record(o.id,e.message,o.channel==='tender');}}
    }
   }finally{running=false;}
  }};

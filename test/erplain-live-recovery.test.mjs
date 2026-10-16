@@ -70,5 +70,18 @@ test('approval stores completed history without creating preparation work',async
    await assert.rejects(()=>refreshManualOrder(db,api,o),/Aucun BL en attente|activer le BC/);
    assert.ok(queries.every(q=>q.startsWith('query ')));
   }
+  for(const tender of [true,false]){
+   const d=document();d.id='scope-'+tender;d.label='REF-'+tender;
+   d.account_representative={label:tender?"Appels d'offres":'Amazon'};
+   await db.query("INSERT INTO orders(id,channel,reference,source_reference,erp_live,source_payload) VALUES($1,'amazon',$2,$3,'{}','{}')",['shadow-'+tender,'OTHER-'+tender,d.label]);
+   await db.query("INSERT INTO erplain_manual_review(bc_id,document,review_hash,status) VALUES($1,$2,$3,'pending')",[d.id,JSON.stringify(d),manualReviewHash(d)]);
+   const api={verify:async()=>{},request:async q=>{assert.ok(q.startsWith('query '));return {Order:d};}};
+   const approve=()=>manualReviewService(db,api).approve({confirmed:true,bcId:d.id,reviewHash:manualReviewHash(d)},{email:'test@example.test'});
+   if(tender){
+    const result=await approve();assert.equal(result.preparationStarted,false);
+    assert.equal((await db.query('SELECT reference FROM orders WHERE id=$1',[result.orderId])).rows[0].reference,d.label);
+   }else await assert.rejects(approve,/Référence déjà présente/);
+   assert.equal((await db.query('SELECT reference FROM orders WHERE id=$1',['shadow-'+tender])).rows[0].reference,'OTHER-'+tender);
+  }
  }finally{await engine.close();}
 });

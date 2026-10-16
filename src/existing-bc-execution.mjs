@@ -7,6 +7,7 @@ export const usesRecordedBc=o=>!!o?.erp_live?.bc?.id;
 export function fiscalAttemptHasNoLogisticsChange(order,bc){
  const attempt=order.erp_live?.sourceVatAttempt;
  if(attempt?.status!=='uncertain')return true;
+ if(order.channel==='tender')return false;
  // Exceptional old-write reconciliation only: never compare tax, price or
  // totals. The persisted pre-write products, quantities and stock policy must
  // prove that this uncertainty has no logistical effect.

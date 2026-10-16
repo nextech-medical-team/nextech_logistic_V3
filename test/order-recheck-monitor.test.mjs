@@ -352,3 +352,22 @@ test('actual carrier stages count as progress while polling timestamps do not',(
  const a=monitoringObservation(o,{},now),b=monitoringObservation({...o,carrier_job:{status:'creating'}},a,now+1000),c=monitoringObservation({...o,carrier_job:{status:'creating',updated_at:new Date(now+5000)}},b,now+5000);
  assert.match(a.result,/worker/);assert.match(b.result,/cours/);assert.notEqual(a.progress,b.progress);assert.equal(b.progress,c.progress);assert.equal(b.lastProgress,c.lastProgress);
 });
+
+test('excluded tender retains no-op wake and publication external deadline',async()=>{
+ const db=await fixture();try{
+  await db.query("UPDATE orders SET channel='tender' WHERE id='a'");
+  await initializeOrderRecheckMonitor(db,{stableRechecks:true});
+  const before=(await db.query("SELECT requested FROM order_recheck_monitor WHERE order_id='a'")).rows[0];
+  await db.query("UPDATE orders SET issue=issue WHERE id='a'");
+  const after=(await db.query("SELECT requested FROM order_recheck_monitor WHERE order_id='a'")).rows[0];
+  assert.equal(Number(after.requested),Number(before.requested)+1);
+  await db.query("UPDATE order_recheck_monitor SET next_external='2099-01-01T00:00:00Z' WHERE order_id='a'");
+  await initializeOrderRecheckMonitor(db,{afterPublication:true,stableRechecks:true});
+  const row=(await db.query("SELECT next_external FROM order_recheck_monitor WHERE order_id='a'")).rows[0];
+  assert.ok(new Date(row.next_external).getTime()<Date.parse('2098-01-01'));
+  await db.query("UPDATE orders SET channel='amazon' WHERE id='a'");
+  const normal=(await db.query("SELECT requested FROM order_recheck_monitor WHERE order_id='a'")).rows[0];
+  await db.query("UPDATE orders SET issue=issue WHERE id='a'");
+  assert.equal(Number((await db.query("SELECT requested FROM order_recheck_monitor WHERE order_id='a'")).rows[0].requested),Number(normal.requested));
+ }finally{await db.close();}
+});
