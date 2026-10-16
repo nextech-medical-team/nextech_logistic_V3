@@ -1,0 +1,23 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+const row={id:'sku-refresh',reference:'#TEST',channel:'shopify',recipient:'Client fictif',address:{country:'FR',city:'Ville',postal:'00000'},source_date:'2026-10-14',source_payload:{},sku_lines:[{sku:'712144',quantity:72}],line_count:1,item_quantity:72,weight_kg:1,parcel_count:1,carrier:'gls',label_status:'production_ready',tracking_status:'not_shipped',document_count:1,carrier_job:{status:'ready',environment:'production',tracking:['TEST-TRACK']},erp_live_job:{status:'complete'},erp_live:{bc:{id:'BC-TEST',label:'C-TEST',status:'active'},bl:{id:'BL-TEST',label:'SHO-TEST',status:'ready_to_ship'}}};
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])for(const failed of [false,true])test(`BL busy icon and SKU edition ${name} ${failed?'failure':'success'}`,async({page})=>{
+ await page.setViewportSize(viewport);const errors=[],writes=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:[row],total:1,page:1,pages:1,summary:{total:1},transportStats:[]}}));
+ await page.route('**/api/orders/processing',r=>r.fulfill({json:{rows:[]}}));
+ let release;const gate=new Promise(resolve=>release=resolve);
+ await page.route('**/api/erplain/documents/refresh',async r=>{writes.push(r.request().postDataJSON());await gate;await r.fulfill({status:failed?500:200,json:failed?{error:'Lecture temporairement indisponible'}:{message:'BL relu'}})});
+ await page.route('**/api/labels/sku-copy?*',r=>r.fulfill({json:{reference:'#TEST',message:'Même suivi',documents:[{key:'carrier:sku-refresh:0',kind:'gls',tracking:'TEST-TRACK',skus:['712144','17 800 50'],mentions:[{sku:'712144',units:'72'},{sku:'17 800 50',units:'100'}],token:'TEST-TOKEN'}]}}));
+ const saves=[];await page.route('**/api/labels/sku-copy',r=>{saves.push(r.request().postDataJSON());return r.fulfill({json:{message:'SKU actualisés — même suivi'}})});
+ await page.goto('/');if(name==='mobile')await page.locator('[data-order-more-info]').click();const button=page.locator('#order-rows [data-erplain-document-kind="bl"]');await expect(button.locator('svg')).toBeVisible();
+ const originalLabel=await button.getAttribute('aria-label');await button.click();await expect(button).toBeDisabled();await expect(button).toHaveAttribute('aria-busy','true');await expect(button.locator('svg')).toBeVisible();
+ expect(await button.innerText()).not.toContain('Lecture Erplain');
+ const bounds=await button.boundingBox();expect(bounds.height).toBeLessThan(40);expect(bounds.width).toBeLessThan(40);
+ fs.mkdirSync('proofs',{recursive:true});await button.scrollIntoViewIfNeeded();await page.screenshot({path:`proofs/bl-refresh-${name}-${failed?'failure':'success'}.png`});
+ release();await expect(button).toBeEnabled({timeout:20000});await expect(button).not.toHaveAttribute('aria-busy');await expect(button.locator('svg')).toBeVisible();await expect(button).toHaveAttribute('aria-label',originalLabel);
+ await page.locator('#order-rows [data-sku-copy]').click();await expect(page.getByRole('heading',{name:'Actualiser les SKU et unités sur l’étiquette — suivi inchangé'})).toBeVisible();
+ await page.locator('input[name="units0"]').fill('48');await page.locator('input[name="confirmed"]').check();await page.screenshot({path:`proofs/sku-edition-${name}-${failed?'failure':'success'}.png`});await page.getByRole('button',{name:'Enregistrer les SKU et unités — conserver le suivi'}).click();
+ await expect(page.getByRole('link',{name:'Télécharger l’étiquette corrigée'})).toBeVisible();
+ expect(writes).toEqual([{id:row.id,kind:'bl'}]);expect(saves).toEqual([{id:row.id,key:'carrier:sku-refresh:0',token:'TEST-TOKEN',replacements:[{from:'712144',to:'712144',units:48}],confirmed:true}]);expect(errors).toEqual([]);
+ fs.writeFileSync(`proofs/bl-refresh-${name}-${failed?'failure':'success'}.json`,JSON.stringify({status:'PASS',viewport,bounds,failed,iconPreserved:true,restoredLabel:true,skuEdition:48,trackingUnchanged:true,scope:'Synthetic mocked API; no production writes',errors}));
+});

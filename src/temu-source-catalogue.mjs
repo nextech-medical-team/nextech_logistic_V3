@@ -47,7 +47,12 @@ export async function prepareIncompleteTemuCatalogue(db,api,{bind,now=()=>Date.n
    const label=typeof line.originalGoodsName==='string'&&line.originalGoodsName.trim()?line.originalGoodsName.trim():typeof line.goodsName==='string'?line.goodsName.trim():'';
    const linked=(await db.query('SELECT live_variant_id FROM erplain_product_bindings WHERE sku=$1',[sku])).rows[0];
    const read=async key=>{const rows=await readCreationSku(api,key);if(linked&&(rows.length!==1||String(rows[0].id)!==String(linked.live_variant_id)))throw Error('Catalogue: identite liee a rapprocher');return rows;};
-   const result=await ensureMissingProduct(db,api,{sku,label,read,guard:async()=>{await guard();if(sku!==sourceSku||Number(mapping.source_qty)!==1||Number(mapping.target_qty)!==1)throw Error('Catalogue · Nom de la référence convertie à confirmer : '+sku);}});
+   const result=await ensureMissingProduct(db,api,{sku,label,read,guard:async()=>{await guard();
+    // A pack-to-unit ratio does not change the identity or source product name.
+    // A different target SKU still needs its own authoritative catalogue name.
+    if(sku!==sourceSku)throw Error('Catalogue · Nom de la référence convertie à confirmer : '+sku);
+    if(![mapping.source_qty,mapping.target_qty].every(v=>(typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v))&&Number(v)>0))throw Error('Catalogue · Conversion de quantité invalide : '+sku);
+   }});
    await guard();if(bind)await bind(result.variant);variantId=String(result.variant.id);status=result.created?'created':'existing';
    await db.query("INSERT INTO audit(user_email,action,detail) VALUES('system:temu-source-catalogue','temu.source.catalogue_prepared',$1::jsonb)",[JSON.stringify({orderId:order.id,sku,variantId,created:result.created,financialHoldUnchanged:true,orderWrites:0,stockWrites:0,labelWrites:0})]);
   });}catch(e){error=String(e.message).slice(0,700);}

@@ -44,7 +44,7 @@ test('rejects unrelated spreadsheets and orphan product rows',async()=>{
 });
 
 test('preview excludes existing Shopify orders by default',async()=>{
- const db={query:async(sql,params)=>{assert.equal(params[0],'shopify');return {rows:[{reference:'#1001',recipient:'Alice',source_payload:{}}]};}};
+ const db={query:async(sql,params)=>{if(sql.startsWith('SELECT order_id'))return {rows:[]};assert.equal(params[0],'shopify');return {rows:[{id:'existing',channel:'shopify',reference:'#1001',recipient:'Alice',source_payload:{}}]};}};
  const result=await previewOrders(db,csv(),'orders.csv','shopify',{shopifyReader:reader});
  assert.equal(result.newCount,1);assert.equal(result.duplicateCount,1);
  assert.equal(result.orders[0].quantity,3);
@@ -57,7 +57,7 @@ test('selected Shopify orders use shared persistence and preparation jobs',async
   if(sql.startsWith('INSERT INTO orders'))return {rows:JSON.parse(params[0]).map(o=>({id:o.id}))};
   return {rows:[]};
  }};
- const result=await importOrders({transaction:fn=>fn(tx)},csv(),'orders.csv','shopify',['#1002'],{shopifyReader:reader});
+ const result=await importOrders({exec:async()=>{},transaction:fn=>fn(tx)},csv(),'orders.csv','shopify',['#1002'],{shopifyReader:reader});
  assert.equal(result.created,1);assert.equal(result.excluded,1);
  const orders=JSON.parse(writes.find(w=>w.sql.startsWith('INSERT INTO orders')).params[0]);
  assert.equal(orders[0].reference,'#1002');assert.equal(orders[0].channel,'shopify');
@@ -123,7 +123,7 @@ test('API refunds use the same cancellation flag as API normalization',async()=>
 test('API is only called for selected orders on confirmation',async()=>{
  const called=[];
  const tx={query:async(sql,params)=>sql.startsWith('INSERT INTO orders')?{rows:JSON.parse(params[0]).map(o=>({id:o.id}))}:{rows:[]}};
- await importOrders({transaction:fn=>fn(tx)},csv(),'orders.csv','shopify',['#1002'],{shopifyReader:{order:async id=>{called.push(id);return reader.order(id);}}});
+ await importOrders({exec:async()=>{},transaction:fn=>fn(tx)},csv(),'orders.csv','shopify',['#1002'],{shopifyReader:{order:async id=>{called.push(id);return reader.order(id);}}});
  assert.deepEqual(called,['1002']);
 });
 

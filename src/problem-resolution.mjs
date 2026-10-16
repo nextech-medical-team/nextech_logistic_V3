@@ -170,8 +170,10 @@ async function context(db,directory,id){
  let products=[];try{products=await correctionCatalog(directory,{cachedOnly:true});}catch{}
  const active=(await db.query("SELECT id,action,status,stage,created_at FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting')",[id])).rows[0];
  const latest=(await db.query('SELECT status,error FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1',[id])).rows[0];order.resolution_error=latest?.status==='review'?latest.error:null;await attachEquivalentDiagnostics(db,[order]);
- const temuJob=order.channel==='temu'?(await db.query('SELECT status,error,packages,attempt_id FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]:null;
- projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob}));
+ const temuJob=order.channel==='temu'?(await db.query('SELECT status,error,packages,attempt_id,result FROM temu_label_jobs WHERE reference=$1',[order.reference])).rows[0]:null;
+ if(temuJob){temuJob.refusalReasons=(temuJob.result?.packageInfoResultList||[]).filter(p=>Number(p.shippingLabelStatus)===2).map(p=>({packageSn:p.packageSn,reason:p.failReasonText||null}));delete temuJob.result;}
+ projectCurrentDiagnostics(Object.assign(order,{erp_live_job:erpJob,carrier_job:job,temu_job:temuJob}));
+ if(order.order_delivered){for(const line of lines){line.message=null;line.catalog_issue=null;}return {order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active:null,temuJob,priceFingerprint:pricingFingerprint(lines)};}
  return projectSharedParcelContext({order,lines:resolveReplacementLines(lines,order.channel),job,erpJob,products,active,temuJob,priceFingerprint:pricingFingerprint(lines)});
 }
 export function resolutionService(db,directory,{api=erplainAccount(directory,'live'),clients,refreshTemuDiagnostic,refreshCarrierDiagnostic,refreshShopifyDiagnostic}={}){
@@ -320,7 +322,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   }
   if(j.action==='reconcile-bc'){
    await stage('Recherche du BC existant dans Erplain LIVE');await api.verify();
-   let found;if(o.erp_live?.bc?.id){const r=await api.request('query V3ReconcileExistingBC($id:ID!){Order(id:$id){id label status}}',{id:String(o.erp_live.bc.id)});found=r.Order;}else found=await recoverOrder(api,o);
+   let found;if(o.erp_live?.bc?.id){const r=await api.request('query V3ReconcileExistingBC($id:ID!){Order(id:$id){id label status}}',{id:String(o.erp_live.bc.id)});found=r.Order;}else found=await recoverOrder(api,o,{db});
    const current={...o.erp_live,bcReconciliation:{status:found?'found':'missing',checkedAt:new Date().toISOString()}};
    if(found){current.bc=found;if(!current.bl?.id)current.phase='bc_created';}
    await db.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(current)]);
@@ -350,8 +352,8 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku,quantity=Number(l.quantity);if(typeof sku!=='string'||!sku.trim()||!Number.isFinite(quantity)||quantity<=0)throw Error('Produits ou quantités du BC non vérifiables : reprise non autorisée');sums.set(sku,(sums.get(sku)||0)+quantity);}return JSON.stringify([...sums].sort());};
     if(total(desired)!==total(resumeStockLines)&&(o.source_payload?.erplainImported||o.erp_live?.bl?.id))throw Error('Commande V3 et livraison existante différentes : vérifier les quantités avant reprise');
    }
-   await assertResumeStock(api,o,r.Order,resumeStockLines);
    const recoveredDraft=await prepareMissingDraftRecovery(db,api,o,{resolutionId:j.id});
+   await assertResumeStock(api,recoveredDraft?{...o,erp_live:recoveredDraft}:o,r.Order,resumeStockLines);
    await db.transaction(async tx=>{const e=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];if(e?.status==='processing')throw Error('Traitement Erplain en cours');
     if(recoveredDraft)await commitMissingDraftRecovery(tx,o,recoveredDraft,{resolutionId:j.id,userEmail:j.user_email||'system'});
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
@@ -379,7 +381,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku;sums.set(sku,(sums.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};
    const stockLines=resolutionBcLines(o,r.Order);
    if(!usesRecordedBc(o)&&total(desired)!==total(stockLines))throw Error('Commande V3 et BC différents : vérifier les quantités avant dérogation');
-   let reason;try{assertFullOrderStock(stockLines);}catch(e){if(!/stock insuffisant/i.test(e.message))throw e;reason=e.message;}
+   let reason;try{assertFullOrderStock(stockLines,{preserveInstalled:o.channel==='tender'});}catch(e){if(!/stock insuffisant/i.test(e.message))throw e;reason=e.message;}
    if(!reason)throw Error('Stock suffisant : utiliser la reprise normale avec création du BL');
    // Keep the normal ERP worker on hold: a forced label is not a preparation order.
    await db.query('UPDATE orders SET resolution_pending_resume=true WHERE id=$1',[o.id]);
@@ -460,7 +462,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   get running(){return running;},
   async routes({p,url,req,res,user,body,json,permitted}){
    if(p==='/api/resolutions/context'&&req.method==='GET'){json(res,200,await context(db,directory,url.searchParams.get('id')));return true;}
-   if(p==='/api/resolutions/job'&&req.method==='GET'){const j=(await db.query('SELECT id,order_id,action,status,stage,result,error,created_at,updated_at,state_since FROM resolution_jobs WHERE id=$1',[url.searchParams.get('id')])).rows[0];if(!j)throw Error('Intervention introuvable');json(res,200,j);return true;}
+   if(p==='/api/resolutions/job'&&req.method==='GET'){const j=(await db.query("SELECT id,order_id,action,status,stage,result,error,created_at,updated_at,state_since,to_jsonb(resolution_jobs)->'payload'->>'carrier' AS requested_carrier FROM resolution_jobs WHERE id=$1",[url.searchParams.get('id')])).rows[0];if(!j)throw Error('Intervention introuvable');json(res,200,j);return true;}
    if(p!=='/api/resolutions'||req.method!=='POST')return false;
    permitted(user,['admin','manager']);const b=validateResolution(await body(req));json(res,202,await queueResolutionRequest(db,b,user));return true;
   },
