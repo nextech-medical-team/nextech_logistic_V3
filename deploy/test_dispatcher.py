@@ -54,4 +54,24 @@ class DispatcherTests(unittest.TestCase):
    self.assertEqual(result['rollbackHealth'],'PASS')
    self.assertEqual((app/'public/x.js').read_bytes(),b'old');self.assertEqual((app/'public/other.js').read_bytes(),b'colleague')
    self.assertEqual(json.loads((state/'baseline.json').read_text())['commit'],'a'*40)
+ def test_isolated_test_timeout_fails_before_backup_or_install(self):
+  # Exercise the real pre-install gate; a larger finite budget must not bypass failures.
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);app=root/'app';(app/'public').mkdir(parents=True);target=app/'public/x.js';target.write_bytes(b'old')
+   state=root/'state';state.mkdir();baseline={'commit':'a'*40,'serverHashes':{'public/x.js':d.digest(b'old')}};(state/'baseline.json').write_text(json.dumps(baseline))
+   archive=io.BytesIO()
+   with tarfile.open(fileobj=archive,mode='w'):pass
+   seen=[]
+   def isolated_run(args,**kwargs):
+    if args[-2:]==['npm','test']:
+     seen.append(kwargs)
+     raise d.subprocess.TimeoutExpired(args,kwargs['timeout'])
+    return b''
+   with patch.object(d,'validate_manifest',return_value=True),patch.object(d,'BUILD_ROOT',td),patch.object(d,'STATE',state),patch.object(d,'APP',app),patch.object(d,'fetch',return_value='b'*40),patch.object(d,'git',side_effect=lambda *args:archive.getvalue() if args[0]=='archive' else b''),patch.object(d,'tree',side_effect=[{'public/x.js':b'old'},{'public/x.js':b'new'}]),patch.object(d,'verify_environment',return_value='hash'),patch.object(d,'run',side_effect=isolated_run),patch.object(d,'install_file') as install,patch.object(d,'guard') as guard:
+    result=d.deploy('b'*40,{'manifest':{},'proofs':{}})
+   self.assertEqual(len(seen),1);self.assertEqual(seen[0]['timeout'],1200)
+   self.assertEqual(seen[0]['env'],{'PATH':'/usr/bin:/bin','HOME':'/var/lib/nextech-build','NODE_ENV':'test','CI':'true'})
+   self.assertEqual(result['status'],'failed');self.assertFalse(result['installed']);self.assertFalse(result['paused']);self.assertNotIn('backup',result)
+   install.assert_not_called();guard.assert_not_called()
+   self.assertEqual(target.read_bytes(),b'old');self.assertEqual(json.loads((state/'baseline.json').read_text()),baseline)
 if __name__=='__main__':unittest.main()
