@@ -42,7 +42,7 @@ window.V3Margins={refresh,paintTemu:temuBadges,row:id=>loadError?null:data?.rows
 $('margin-refresh').onclick=refresh;$('margin-filter').onchange=render;$('margin-search').oninput=render;
 // Processing clocks and stock readouts change independently of margins. Only
 // structural changes to the references/country/margin hosts need repainting.
-const marginNodes='[data-detail],[data-delivery-detail],.order-country,[data-country-margin],[data-margin-chip]';
+const marginNodes='[data-detail],[data-delivery-detail],.order-country,[data-country-margin],[data-margin-chip],[data-temu-margin]';
 function touchesMargins(node){return node.nodeType===1&&(node.matches(marginNodes)||!!node.querySelector(marginNodes));}
 new MutationObserver(records=>{if(records.some(r=>r.target===$('order-rows')||[...r.addedNodes,...r.removedNodes].some(touchesMargins)))badges();}).observe($('order-rows'),{childList:true,subtree:true});
 setInterval(()=>{if(user&&!document.hidden&&(currentView==='orders'||currentView==='temu'||dialog.open))refresh();},60000);const ready=setInterval(()=>{if(user){clearInterval(ready);refresh();}},1500);
