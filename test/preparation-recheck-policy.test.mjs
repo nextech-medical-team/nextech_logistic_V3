@@ -39,3 +39,12 @@ test('two missed external cycles alert; an attempt never substitutes a complete 
  assert.equal(externalCoverage({attemptedAt:new Date(now).toISOString(),checkedAt:new Date(now-1800000).toISOString(),now}).overdue,true);
  assert.equal(externalCoverage({checkedAt:new Date(now-60000).toISOString(),now}).overdue,false);
 });
+
+test('an unstarted BC exposes the stopped ERP job and its actual reason independently of TEMU status',()=>{
+ for(const status of [1,2,3,4,5,99]){
+  const base={channel:'temu',source_payload:{temuDirect:{status}},erp_live:{},erp_live_job:{status:'review',error:null}};
+  const d=currentHoldDiagnostic(base);assert.equal(d.code,'bc_review');assert.match(d.label,/traitement ERP arrêté sans motif actif/);assert.doesNotMatch(d.label,/prérequis non validés/);
+  assert.equal(currentHoldDiagnostic({...base,erp_live_job:{status:'review',error:'BC · Mapping manquant : SKU'}}).label,'BC non créé : BC · Mapping manquant : SKU');
+  assert.equal(currentHoldDiagnostic({...base,erp_live_job:{status:'pending'}}).code,'erp_processing');
+ }
+});

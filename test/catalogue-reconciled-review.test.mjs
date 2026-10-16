@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {queueErplainLive} from '../src/erplain-live-workflow.mjs';
 import {currentMappingLine} from '../src/current-mapping-line.mjs';
+import {resumeAuditedCatalogueReviews} from '../src/catalogue-reconciled-review.mjs';
 
 async function fixture(){
  const e=new PGlite();await e.waitReady;
@@ -65,3 +66,48 @@ test('unknown tracking resumes only the audited local catalogue refusal, with no
  await f.e.exec("UPDATE orders SET source_payload='{}'");assert.equal(await queueErplainLive(f.db,['o']),1);assert.equal(await queueErplainLive(f.db,['o']),0);
  assert.equal((await f.e.query('SELECT tracking_status FROM orders')).rows[0].tracking_status,'unknown');
 }finally{await f.e.close();}});
+
+test('automatic worker resumes the exact historical catalogue case once for every indicative TEMU status',async()=>{
+ const f=await fixture();try{
+  const original=(await f.e.query('SELECT * FROM orders')).rows[0];
+  for(const status of [1,2,3,4,5,99,null]){
+   await f.e.exec("UPDATE erp_live_jobs SET status='review',error=null,updated_at='2026-10-09T18:16:26.916166Z'");
+   await f.e.query('UPDATE orders SET source_payload=$1',[JSON.stringify({temuDirect:{status},temuOrderDetail:{parentOrderMap:{parentOrderStatus:status}},platformStatusObservation:{indicative:true,status}})]);
+   const before=(await f.e.query('SELECT * FROM orders')).rows;
+   assert.deepEqual(await resumeAuditedCatalogueReviews(f.db),{resumed:1,checked:1,afterId:'o',providerWrites:0});
+   assert.equal((await resumeAuditedCatalogueReviews(f.db)).resumed,0);
+   assert.deepEqual((await f.e.query('SELECT * FROM orders')).rows,before);
+  }
+  const events=(await f.e.query("SELECT detail FROM audit WHERE action='erplain.reconciled_catalogue_review_resumed'")).rows;
+  assert.equal(events.length,7);assert.ok(events.every(a=>a.detail.automaticRecovery===true&&a.detail.explicitPreparationRequest===false&&a.detail.providerReplay===false));
+  assert.equal((await f.e.query('SELECT erp_live FROM orders')).rows[0].erp_live.phase,original.erp_live.phase);
+ }finally{await f.e.close();}
+});
+
+test('automatic admission preserves operational holds, unknown reviews, provider attempts and AO scope',async()=>{
+ const f=await fixture();try{
+  const changes=["channel='tender'","channel='samples'","suspension='{\"active\":true}'","suspension='{\"erplainCancellation\":null}'","resolution_pending_resume=true","erp_live='{\"phase\":\"creating_customer\"}'","erp_live='{\"bl\":{\"id\":1}}'","source_payload='{\"temuDirect\":{\"attemptedAt\":\"2026-10-11\"}}'","tracking_status='shipped'","tracking_status='delivered'","tracking_status='cancelled'","label_status='cancelled'","issue='Stock insuffisant'","duplicate_of='another'"];
+  for(const sql of changes){
+   await f.e.exec("UPDATE orders SET channel='temu',suspension='{}',resolution_pending_resume=false,erp_live='{}',source_payload='{}',tracking_status='not_shipped',label_status='blocked',issue=null,duplicate_of=null");
+   await f.e.exec('UPDATE orders SET '+sql);
+   assert.equal((await resumeAuditedCatalogueReviews(f.db)).resumed,0,sql);
+  }
+  await f.e.exec("UPDATE orders SET duplicate_of=null;DELETE FROM audit");
+  assert.equal((await resumeAuditedCatalogueReviews(f.db)).resumed,0);
+  assert.equal((await f.e.query('SELECT status FROM erp_live_jobs')).rows[0].status,'review');
+  await assert.rejects(resumeAuditedCatalogueReviews(f.db,{limit:0}),/invalide/);
+ }finally{await f.e.close();}
+});
+
+test('bounded automatic scan rotates past rejected histories without altering their review timestamps',async()=>{
+ const f=await fixture();try{
+  await f.e.exec(`INSERT INTO orders(id) SELECT 'a'||lpad(n::text,2,'0') FROM generate_series(1,30) n;
+   INSERT INTO erp_live_jobs SELECT id,'review',null,'2026-10-09T00:00:00Z' FROM orders WHERE id<>'o';
+   INSERT INTO audit(user_email,action,detail) SELECT 'system','diagnostic.catalogue_lookup_reconciled',jsonb_build_object('orderId',id) FROM orders WHERE id<>'o';`);
+  const before=(await f.e.query("SELECT * FROM erp_live_jobs WHERE order_id<>'o' ORDER BY order_id")).rows;
+  const first=await resumeAuditedCatalogueReviews(f.db);assert.equal(first.checked,25);assert.equal(first.resumed,0);
+  const second=await resumeAuditedCatalogueReviews(f.db,{afterId:first.afterId});assert.equal(second.resumed,1);assert.equal(second.checked,25);
+  assert.deepEqual((await f.e.query("SELECT * FROM erp_live_jobs WHERE order_id<>'o' ORDER BY order_id")).rows,before);
+  assert.equal((await resumeAuditedCatalogueReviews(f.db,{afterId:second.afterId})).resumed,0);
+ }finally{await f.e.close();}
+});

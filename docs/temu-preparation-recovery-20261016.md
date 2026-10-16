@@ -1,0 +1,17 @@
+# Reprise des BC initiaux restés en revue
+
+Deux défauts empêchaient des préparations déjà demandées de continuer. Le retrait audité d'un ancien refus catalogue laissait le job ERP en `review`, tandis que le rattrapage automatique n'insérait que les jobs absents. PR207/214 permettaient la reprise sur demande explicite, sans raccorder le worker automatique. Un autre refus comparait un ancien montant calculé à celui du parseur courant malgré des empreintes strictement identiques des données Excel originales.
+
+Le worker parcourt maintenant les revues catalogue réconciliées par lots bornés et tournants. Il réutilise les preuves exactes de PR207/214 : ancien motif et horodatage, identités produit/variante, mapping courant et journal de création sans incertitude. Une revue sans preuve reste arrêtée. Aucun appel fournisseur n'est émis par cette admission locale ; la préparation native relit ensuite ERPLAIN et recherche un BC existant avant toute création.
+
+Une préparation Excel déjà confirmée, arrêtée sur le seul ancien refus de prix/articles, peut aussi reprendre si les lignes originales ont exactement la même empreinte et la même devise. Les montants sont recalculés depuis la source courante ; ancien calcul, validation et refus sont conservés en historique/audit. Les protections natives de revalidation restent obligatoires : aucun document, tentative catalogue/étiquette, correction concurrente, suspension ou reprise incertaine. Une modification réelle de source conserve sa revalidation explicite. Les commandes avec BC/BL ne sont pas modifiées par cette réparation.
+
+Le diagnostic distingue un BC absent d'un job ERP arrêté sans motif actif. Il ne prétend plus qu'un prérequis a échoué sur la seule absence d'un identifiant BC. Dans le parcours secondaire de catalogue incomplet, les statuts et indicateurs TEMU restent informatifs : quantité positive et données stables sont nécessaires, mais un code plateforme n'interdit pas le catalogue. Aucune commande n'est importée ou réactivée par ce changement.
+
+Les suspensions d'import/achat, annulations locales, résultats externes incertains, parcours exclusif TEMU et interdiction `in_preparation` vers `ready_to_ship` sont conservés. Les appels d'offres et échantillons sont exclus du nouveau rattrapage. Aucun PDF, suivi, document, mouvement ou achat n'est annulé, remplacé ou rejoué. Les tests utilisent une base et des fournisseurs isolés ; une admission de test ne prouve pas un BC créé en production.
+
+Une vérification manuelle du statut plateforme ne vaut pas application d'une annulation V3. Son observation n'interdit plus la revalidation Excel ; les marqueurs effectifs de suspension/annulation V3 continuent de l'interdire.
+
+Publication exclusivement Section7 après CI, empreintes fraîches, sauvegarde, verrou intégral et fin naturelle des traitements. Vérifier les sept sources installées, les diagnostics servis et les deux familles sur une lecture fraîche. Les recettes métier réservées aux propriétaires restent distinctes.
+
+Retour arrière : préparer depuis main une inversion ciblée de ces sept sources après prise en compte des changements ultérieurs, tester puis publier par Section7. Ne restaurer aucune base ni aucun état ERP antérieur. Conserver les historiques ajoutés et les préparations qui ont déjà avancé ; ne remettre aucun job globalement en attente et ne recréer aucun document/achat. Un résultat incertain exige un rapprochement en lecture avant toute reprise.
