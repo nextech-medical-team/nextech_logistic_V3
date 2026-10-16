@@ -1,3 +1,4 @@
+import {positiveImportQuantity} from './quantity-value.mjs';
 import {randomUUID} from 'node:crypto';
 import {normalizeShopifyOrders} from './marketplace-local-import.mjs';
 import {shopifyCancellationReason} from './shopify-cancellation-policy.mjs';
@@ -18,7 +19,7 @@ export function parseShopifyRows(rows){
   for(const [k,v] of Object.entries(row))if(k!=='row'&&v!=='')order.source_payload[k]=v;
   try{
    if(!row.lineitemsku)throw Error('SKU absent');
-   const quantity=Number(String(row.lineitemquantity).replace(',','.'));
+   const quantity=positiveImportQuantity(row.lineitemquantity,{integer:true});
    if(!Number.isSafeInteger(quantity)||quantity<=0)throw Error('Quantité entière positive requise');
    order.lines.push({id:randomUUID(),order_id:order.id,source_line:String(row.row),source_sku:row.lineitemsku,quantity,source_payload:row});
   }catch(e){order.visibilityHold=true;order.visibilityReason='Import ligne '+row.row+' : '+e.message;errors.push({row:row.row,reference:ref,message:e.message});}

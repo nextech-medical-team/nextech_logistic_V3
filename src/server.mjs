@@ -1,3 +1,5 @@
+import {publishStockWatchObservations} from './grouped-stock-watch.mjs';
+import {initializeImportReceptions,readImportReceptions} from './import-reception.mjs';
 import {cancelPartialDelivery} from './partial-cancellation.mjs';
 import {priceVerification} from './price-verification.mjs';
 import {missingOrdersVerification} from './missing-orders-verification.mjs';
@@ -120,11 +122,12 @@ const db=await openDatabase({directory:path.join(directory,'postgres'),url:proce
 db.recoverInterrupted=config.background;
 const releaseLeader=config.background?await db.acquireLeader():async()=>{};
 await initializeAppSchema(db,[initializeCarrierJobs,initializeComments2005,initializeTemuShipping,initializeStocks,initializeErplainLive,initializePartialDeliveries,initializeCorrections,initializeTemuAutomaticPurchase,initializeResolutions,initializeProcurement,initializeLifecycle,initializeErplainRefresh,initializeMarketplaceInbox,initializeLabelDownloads,initializeReadServiceJobs,initializeProcessingClock],{background:config.background});
+await db.withLocks(['schema'],()=>initializeImportReceptions(db));
 await db.withLocks(['schema'],()=>initializeSkuCopies(db));
 await db.withLocks(['schema'],()=>initializeReceiptRecovery(db));
 await db.withLocks(['schema'],()=>initializeEquivalences(db));
 await db.withLocks(['schema'],()=>initializeEquivalenceImports(db));
-await db.withLocks(['schema'],()=>initializeStockResumeWatch(db));
+await db.withLocks(['schema'],()=>initializeStockResumeWatch(db,{resumeReadLeases:config.background}));
 await db.withLocks(['schema'],()=>initializeV2Followup(db));
 await db.withLocks(['schema'],()=>initializeShopifyObservation(db));
 await db.withLocks(['schema'],()=>initializeManualReview(db));
@@ -177,13 +180,13 @@ const margins=await createMarginsService(db,{confirmedAmazonIds:fbmConfirmation.
 const lifecycle=lifecycleWorker(db,directory);const tracking=trackingWorker(db,directory);await db.query("UPDATE carrier_tracking t SET next_at=now() WHERE error IS NOT NULL AND NOT EXISTS(SELECT 1 FROM carrier_tracking_cooldown c WHERE c.carrier=t.carrier AND c.environment=t.environment AND c.until_at>now())");const trackingTimer=backgroundInterval(async()=>{try{await tracking.run();const totals=(await db.query('SELECT count(*)::int total,count(*) FILTER(WHERE checked_at IS NOT NULL)::int checked FROM carrier_tracking')).rows[0],errors=(await db.query('SELECT carrier,error FROM carrier_tracking WHERE error IS NOT NULL LIMIT 30')).rows,counts=(await db.query('SELECT carrier,count(*)::int n FROM carrier_tracking WHERE checked_at IS NOT NULL AND error IS NULL GROUP BY carrier')).rows;await writeFile(path.join(directory,'tracking-progress.json'),JSON.stringify({at:new Date().toISOString(),running:tracking.running,...totals,errors,success:Object.fromEntries(counts.map(r=>[r.carrier,r.n]))}));}catch(e){console.error('Suivi transporteurs : '+e.message);}},10000,'tracking');trackingTimer.unref();const lifecycleTimer=backgroundInterval(()=>lifecycle.run().catch(e=>console.error('Cycle Erplain LIVE : '+e.message)),5000,'lifecycle');lifecycleTimer.unref();
 const documentStatuses=erplainStatusSync(db,directory);
 const stocks=stockSync(db,directory),erpWorker=erplainLiveWorker(db,directory);
-const rechecks=orderRecheckMonitor(db,erplainAccount(directory,'live'),{canResume:()=>runtime.enabled('automatic-preparation')&&runtime.enabled('erplain-preparation'),enabled:()=>!runtime.stopping&&runtime.enabled('resolutions')});
+const rechecks=orderRecheckMonitor(db,erplainAccount(directory,'live'),{stockWatchActive:()=>process.env.ERPLAIN_GROUPED_STOCK_WATCH!=='0'&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation'),canResume:()=>runtime.enabled('automatic-preparation')&&runtime.enabled('erplain-preparation'),enabled:()=>!runtime.stopping&&runtime.enabled('resolutions')});
 backgroundInterval(()=>rechecks.runLocal().catch(e=>console.error('Recontrôle local : '+e.message)),5000,'order-rechecks');
 backgroundInterval(()=>rechecks.runExternal().catch(e=>console.error('Recontrôle externe : '+e.message)),60000,'order-rechecks-external');
 const movementWatch=movementWatchWorker(db,directory,{shouldStop:()=>runtime.stopping});
 backgroundInterval(()=>movementWatch.run(),1000,'movement-watch');
 backgroundInterval(()=>movementWatchdog(db),300000,'movement-watchdog');
-const stockResume=stockResumeWorker(db,directory,{enabled:()=>!runtime.stopping&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation')});
+const stockResume=stockResumeWorker(db,directory,{observe:rows=>publishStockWatchObservations(db,rows),enabled:()=>!runtime.stopping&&runtime.enabled('stock-resume')&&runtime.enabled('erplain-preparation')&&runtime.enabled('automatic-preparation')});
 backgroundInterval(()=>stockResume.run(),30000,'stock-resume');
 const interruptedErplain=interruptedErplainRecovery(db,directory,{shouldStop:()=>runtime.stopping});
 backgroundInterval(()=>interruptedErplain.run(),15000,'erplain-interrupted-recovery');
@@ -326,6 +329,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     const user=await authenticate(db,req.headers.cookie);if(!user){json(res,401,{error:'Connexion requise'});return;}
+    if(p==='/api/import/receptions'&&req.method==='GET'){permitted(user,['admin','manager','operator']);json(res,200,{rows:await readImportReceptions(db,{orderId:url.searchParams.get('orderId')||'',reference:url.searchParams.get('reference')||''})});return;}
     if(await temuReading.routes(req,res,url,user,json))return;
     if(p==='/api/import/preview'&&req.method==='POST'){
       const b=await body(req);permitted(user,operational);

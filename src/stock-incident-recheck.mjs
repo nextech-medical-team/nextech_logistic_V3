@@ -32,7 +32,7 @@ export function evaluateStockIncident(order,bc,{historicalProof=null}={}){
  }
  if(active.length)throw Error('BL ou débit historique existant : rapprochement requis');
  if(bc.update_stock===true&&(String(historicalProof?.bcId)!==String(bc.id)||historicalProof.reservationVerified!==true||historicalProof.physicalDebitVerified!==false))throw Error('Réservation BC sans débit physique non confirmée');
- try{assertFullOrderStock(bc.line_items);}catch(e){if(stockIncidentOnly(e.message))return {status:'active',basis:'current_available_stock',currentError:e.message,bcId:String(bc.id)};throw e;}
+ try{assertFullOrderStock(bc.line_items,{preserveInstalled:order.channel==='tender'});}catch(e){if(stockIncidentOnly(e.message))return {status:'active',basis:'current_available_stock',currentError:e.message,bcId:String(bc.id)};throw e;}
  return {status:'resolved',basis:'current_available_stock',bcId:String(bc.id),preparationRequired:true};
 }
 export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,now=()=>Date.now()}={}){

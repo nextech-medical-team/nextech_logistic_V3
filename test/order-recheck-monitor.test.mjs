@@ -4,11 +4,31 @@ import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {monitoringObservation,localObservationPatch,initializeOrderRecheckMonitor,orderRecheckMonitor,recheckCadence} from '../src/order-recheck-monitor.mjs';
 import {usesRecordedBc,recordedBcFingerprint} from '../src/existing-bc-execution.mjs';
+import {publishStockWatchObservations} from '../src/grouped-stock-watch.mjs';
+
+test('stock watcher publishes only its separate observation namespace',async()=>{
+ const db=await fixture();try{
+  await initializeOrderRecheckMonitor(db);const m=orderRecheckMonitor(db,{});await m.runLocal();
+  const old='2026-10-11T10:00:00Z';await db.query("UPDATE order_recheck_monitor SET state=state||$1::jsonb WHERE order_id='a'",[JSON.stringify({lastExternalCheck:old,externalResult:'unchanged'})]);
+  const before=(await db.query("SELECT * FROM orders WHERE id='a'")).rows[0];
+  await publishStockWatchObservations(db,[{order_id:'a',checked_at:'2026-10-16T00:00:00Z',resources:2}]);
+  const state=(await db.query("SELECT state FROM order_recheck_monitor WHERE order_id='a'")).rows[0].state;
+  assert.equal(state.lastExternalCheck,old);assert.equal(state.externalResult,'unchanged');assert.equal(state.stockWatch.resources,2);
+  assert.deepEqual((await db.query("SELECT * FROM orders WHERE id='a'")).rows[0],before);
+ }finally{await db.close();}
+});
 
 test('local diagnostic writes preserve newer external evidence and independent sweep requests',()=>{
  const old={lastExternalCheck:'2026-10-11T10:00:00Z',auditRequested:true,externalResult:'previous'},fresh={lastExternalCheck:'2026-10-11T11:00:00Z',auditRequested:false,externalResult:'complete'};
  const observation=monitoringObservation({issue:'Stock insuffisant'},old),merged={...fresh,...localObservationPatch(observation)};
  assert.equal(merged.lastExternalCheck,fresh.lastExternalCheck);assert.equal(merged.auditRequested,false);assert.equal(merged.externalResult,'complete');assert.equal(merged.blocked,true);
+});
+test('fresh grouped stock signal prevents a false overdue alert without refreshing BC continuation evidence',()=>{
+ const now=Date.now(),old=new Date(now-7200000).toISOString(),previous={firstExternalDueAt:old,lastExternalCheck:old,stockWatch:{status:'watching',checkedAt:new Date(now-1000).toISOString(),resources:1}};
+ const order={issue:'BL bloqué — stock insuffisant : A',erp_live:{bc:{id:7}}};
+ const watched=monitoringObservation(order,previous,now);assert.equal(watched.externalOverdue,false);assert.equal(watched.lastExternalCheck,old);assert.equal(watched.blocked,true);
+ assert.equal(monitoringObservation(order,previous,now+180000).externalOverdue,true);
+ assert.equal(monitoringObservation({...order,issue:'BC différent'},previous,now).externalOverdue,true);
 });
 
 test('five families retain clocks, deadlines, next actions and persistent alerts',()=>{
@@ -66,6 +86,39 @@ async function fixture(){
  INSERT INTO lines(id,order_id,source_sku,quantity) VALUES('1','a','X',1),('2','b','X',1);`);
  await initializeOrderRecheckMonitor(db,{afterPublication:true});return db;
 }
+test('restart preserves external deadlines; automatic diagnostics do not self-wake; genuine correction and line edits still wake',async()=>{
+ const db=await fixture();try{
+  await db.query("UPDATE order_recheck_monitor SET next_external=now()+interval '14 minutes'");
+  const before=(await db.query('SELECT order_id,next_external FROM order_recheck_monitor ORDER BY order_id')).rows;
+  await initializeOrderRecheckMonitor(db,{afterPublication:true});
+  assert.deepEqual((await db.query('SELECT order_id,next_external FROM order_recheck_monitor ORDER BY order_id')).rows,before);
+  await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,status,result) VALUES('auto','a','auto','resume-erp','review','{\"automaticRecheck\":true}')");
+  await db.query("UPDATE resolution_jobs SET error='stock still unavailable',result=result||'{\"diagnostic\":\"fresh\"}' WHERE id='auto'");
+  assert.deepEqual((await db.query('SELECT order_id,next_external FROM order_recheck_monitor ORDER BY order_id')).rows,before);
+  await db.query("INSERT INTO correction_jobs(order_id,status) VALUES('a','checking')");
+  await db.query("UPDATE order_recheck_monitor SET next_external=now()+interval '14 minutes'");
+  await db.query("UPDATE correction_jobs SET error='diagnostic only' WHERE order_id='a'");
+  assert.ok(new Date((await db.query("SELECT next_external FROM order_recheck_monitor WHERE order_id='a'")).rows[0].next_external)>Date.now()+10*60000);
+  await db.query("UPDATE correction_jobs SET status='complete' WHERE order_id='a'");
+  assert.ok(new Date((await db.query("SELECT next_external FROM order_recheck_monitor WHERE order_id='a'")).rows[0].next_external)<=Date.now());
+  await db.query("UPDATE lines SET quantity=2 WHERE order_id='b'");
+  assert.ok(new Date((await db.query("SELECT next_external FROM order_recheck_monitor WHERE order_id='b'")).rows[0].next_external)<=Date.now());
+ }finally{await db.close();}
+});
+test('active grouped stock watcher replaces periodic BC reads but preserves an explicit audit request',async()=>{
+ const db=await fixture();try{
+  await db.query(`UPDATE orders SET issue='Stock insuffisant',erp_live='{"phase":"bc_created","bcReservationPolicy":"erplain_bc_bl","bc":{"id":"1","status":"active"}}' WHERE id='a'`);
+  await db.query("INSERT INTO erp_live_jobs(order_id,status,error) VALUES('a','review','BL bloqué — stock insuffisant : A')");let reads=0;
+  const monitor=orderRecheckMonitor(db,{}, {stockWatchActive:()=>true,canResume:()=>false,readProduct:async()=>({usable:false,status:'missing'}),readDocuments:async()=>{reads++;return {};}});
+  await monitor.runLocal();
+  // The fixture's first hourly/daily sweep is an explicit broad audit; test
+  // the periodic path after that request has been consumed.
+  await db.query("UPDATE order_recheck_monitor SET state=state-'auditRequested'");
+  await monitor.runExternal();assert.equal(reads,0);
+  await db.query("UPDATE order_recheck_monitor SET next_external=now(),state=state||'{\"auditRequested\":true}' WHERE order_id='a'");
+  await monitor.runExternal();assert.equal(reads,1);
+ }finally{await db.close();}
+});
 for(const channel of ['temu','amazon','shopify'])test(channel+' recorded BC monitor reads documents without old mapped SKU validation or artificial source progress',async()=>{
  const db=await fixture();try{
   await db.query("UPDATE orders SET channel=$1,erp_live='{\"bc\":{\"id\":\"1\"},\"phase\":\"bc_created\"}'",[channel]);await db.query("INSERT INTO mappings VALUES($1,'X','UNRELATED',1,999)",[channel]);let docs=0;
@@ -298,4 +351,23 @@ test('actual carrier stages count as progress while polling timestamps do not',(
  const now=Date.now(),o={channel:'shopify',label_status:'production_pending',erp_live:{phase:'bl_ready',bc:{id:'bc'},bl:{id:'bl'}},carrier_job:{status:'pending'}};
  const a=monitoringObservation(o,{},now),b=monitoringObservation({...o,carrier_job:{status:'creating'}},a,now+1000),c=monitoringObservation({...o,carrier_job:{status:'creating',updated_at:new Date(now+5000)}},b,now+5000);
  assert.match(a.result,/worker/);assert.match(b.result,/cours/);assert.notEqual(a.progress,b.progress);assert.equal(b.progress,c.progress);assert.equal(b.lastProgress,c.lastProgress);
+});
+
+test('excluded tender retains no-op wake and publication external deadline',async()=>{
+ const db=await fixture();try{
+  await db.query("UPDATE orders SET channel='tender' WHERE id='a'");
+  await initializeOrderRecheckMonitor(db,{stableRechecks:true});
+  const before=(await db.query("SELECT requested FROM order_recheck_monitor WHERE order_id='a'")).rows[0];
+  await db.query("UPDATE orders SET issue=issue WHERE id='a'");
+  const after=(await db.query("SELECT requested FROM order_recheck_monitor WHERE order_id='a'")).rows[0];
+  assert.equal(Number(after.requested),Number(before.requested)+1);
+  await db.query("UPDATE order_recheck_monitor SET next_external='2099-01-01T00:00:00Z' WHERE order_id='a'");
+  await initializeOrderRecheckMonitor(db,{afterPublication:true,stableRechecks:true});
+  const row=(await db.query("SELECT next_external FROM order_recheck_monitor WHERE order_id='a'")).rows[0];
+  assert.ok(new Date(row.next_external).getTime()<Date.parse('2098-01-01'));
+  await db.query("UPDATE orders SET channel='amazon' WHERE id='a'");
+  const normal=(await db.query("SELECT requested FROM order_recheck_monitor WHERE order_id='a'")).rows[0];
+  await db.query("UPDATE orders SET issue=issue WHERE id='a'");
+  assert.equal(Number((await db.query("SELECT requested FROM order_recheck_monitor WHERE order_id='a'")).rows[0].requested),Number(normal.requested));
+ }finally{await db.close();}
 });

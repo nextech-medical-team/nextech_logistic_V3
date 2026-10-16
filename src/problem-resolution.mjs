@@ -321,7 +321,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   }
   if(j.action==='reconcile-bc'){
    await stage('Recherche du BC existant dans Erplain LIVE');await api.verify();
-   let found;if(o.erp_live?.bc?.id){const r=await api.request('query V3ReconcileExistingBC($id:ID!){Order(id:$id){id label status}}',{id:String(o.erp_live.bc.id)});found=r.Order;}else found=await recoverOrder(api,o);
+   let found;if(o.erp_live?.bc?.id){const r=await api.request('query V3ReconcileExistingBC($id:ID!){Order(id:$id){id label status}}',{id:String(o.erp_live.bc.id)});found=r.Order;}else found=await recoverOrder(api,o,{db});
    const current={...o.erp_live,bcReconciliation:{status:found?'found':'missing',checkedAt:new Date().toISOString()}};
    if(found){current.bc=found;if(!current.bl?.id)current.phase='bc_created';}
    await db.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(current)]);
@@ -380,7 +380,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku;sums.set(sku,(sums.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};
    const stockLines=resolutionBcLines(o,r.Order);
    if(!usesRecordedBc(o)&&total(desired)!==total(stockLines))throw Error('Commande V3 et BC différents : vérifier les quantités avant dérogation');
-   let reason;try{assertFullOrderStock(stockLines);}catch(e){if(!/stock insuffisant/i.test(e.message))throw e;reason=e.message;}
+   let reason;try{assertFullOrderStock(stockLines,{preserveInstalled:o.channel==='tender'});}catch(e){if(!/stock insuffisant/i.test(e.message))throw e;reason=e.message;}
    if(!reason)throw Error('Stock suffisant : utiliser la reprise normale avec création du BL');
    // Keep the normal ERP worker on hold: a forced label is not a preparation order.
    await db.query('UPDATE orders SET resolution_pending_resume=true WHERE id=$1',[o.id]);
