@@ -74,7 +74,7 @@ export async function resumeTransientErplain(db,api){
      if(state.bl?.id&&!bl)throw Error(state.bl.status==='unpublished'?'Brouillon BL introuvable dans Erplain : reprendre depuis le BC après rapprochement':'BL introuvable dans Erplain : rapprochement nécessaire');
      if(state.bl?.id&&String(bl?.id)!==String(state.bl.id))throw Error('BL différent : contrôle nécessaire');
      if(bl)state.bl=bl;
-     state=reconcilePublicationState(state,bc);
+     if(o.channel!=='tender')state=reconcilePublicationState(state,bc);
     }
    }catch(e){
     state.transientRecovery.lastError=transientErpError(e.message)?e.message:null;

@@ -73,3 +73,13 @@ test('existing BC/BL read is reconciled without provider mutation',async t=>{
  assert.equal(await resumeTransientErplain(db,api),1);
  assert.equal((await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live.bl.id,456);
 });
+
+test('tender transient recovery preserves installed publication phase',async t=>{
+ const {engine,db,api}=await fixture(t,1);
+ await engine.exec("ALTER TABLE orders ADD COLUMN channel text DEFAULT 'tender'");
+ await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'publishing_bl',bc:{id:123},bl:{id:456,status:'unpublished'},transientRecovery:{lastError:error,readRateLimited:true}})]);
+ api.request=async q=>{assert.match(q,/^query /);return {Order:{id:123,status:'active',shipping_orders:{data:[{id:456,status:'pending'}],paginatorInfo:{hasMorePages:false}}}};};
+ assert.equal(await resumeTransientErplain(db,api),1);
+ const s=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;
+ assert.equal(s.phase,'publishing_bl');assert.equal(s.publicationReconciledAt,undefined);
+});
