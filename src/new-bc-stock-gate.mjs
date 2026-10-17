@@ -1,4 +1,4 @@
-import {assertFullOrderStock} from './stock-gate.mjs';
+import {assertFullOrderStock} from './stock-gate.mjs';import {withShipmentLock} from './shipment-lock.mjs';// Resolution workers may already own stock-mutations. Always acquire that// lock before BC numbering to avoid inversion with automatic preparation.export function withSalesBcPublicationLock(fn){ return withShipmentLock(()=>withShipmentLock(fn,['erplain-bc-numbering']));}
 // Call immediately before CreateOrder while holding the shared stock lock.
 // A new BC has no reservations of its own. Incoming quantities are excluded.
 export async function assertNewBcStock(api,lines,products){

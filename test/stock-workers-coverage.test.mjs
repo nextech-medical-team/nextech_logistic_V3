@@ -4,7 +4,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {partialService,initializePartialDeliveries} from '../src/partial-deliveries.mjs';
 import {reconcileFullStock} from '../src/stock-cycle.mjs';
 import {withShipmentLock} from '../src/shipment-lock.mjs';
-import {assertNewBcStock} from '../src/new-bc-stock-gate.mjs';
+import {assertNewBcStock,withSalesBcPublicationLock} from '../src/new-bc-stock-gate.mjs';
 import {representativeLabels} from '../src/erplain-document-metadata.mjs';
 const channels=Object.keys(representativeLabels);
 const conn=data=>({data,paginatorInfo:{hasMorePages:false}});
@@ -46,9 +46,18 @@ for(const channel of channels)test(channel+' legacy full stock-removal path refu
 test('shared lock re-reads stock for concurrent BC admissions: only one covered debit',async()=>{
  let stock=300,writes=0;const item={...line(),location:{id:'70'},variant:{id:'60',sku:'TR03'}};
  const api={request:async q=>{assert.match(q,/^query /);return {Variants:conn([{id:'60',sku:'TR03',track_inventory:true,stock_levels:conn([{location:{id:'70'},on_hand:stock,available:stock}])}])};}};
- const attempt=()=>withShipmentLock(async()=>{await assertNewBcStock(api,[item]);await new Promise(r=>setTimeout(r,5));stock-=200;writes++;});
+ const attempt=()=>withSalesBcPublicationLock(async()=>{await assertNewBcStock(api,[item]);await new Promise(r=>setTimeout(r,5));stock-=200;writes++;});
  const results=await Promise.allSettled([attempt(),attempt()]);
  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
  assert.equal(results.filter(r=>r.status==='rejected').length,1);
  assert.equal(stock,100);assert.equal(writes,1);
+});
+
+test('manual resume already holding stock and automatic BC publication cannot deadlock',{timeout:2000},async()=>{
+ let entered,release;const held=new Promise(r=>entered=r),gate=new Promise(r=>release=r),done=[];
+ const manual=withShipmentLock(async()=>{entered();await gate;await withSalesBcPublicationLock(async()=>done.push('manual'));});
+ await held;
+ const automatic=withSalesBcPublicationLock(async()=>done.push('automatic'));
+ await new Promise(r=>setTimeout(r,10));release();
+ await Promise.all([manual,automatic]);assert.deepEqual(done,['manual','automatic']);
 });

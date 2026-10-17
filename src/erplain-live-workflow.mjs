@@ -1,4 +1,4 @@
-import {assertNewBcStock} from './new-bc-stock-gate.mjs';
+import {assertNewBcStock,withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
 import {withErplainOrigin} from './erplain-request-observation.mjs';
 import {usesNativeBlCycle,assertNativeBcSnapshot} from './native-bl-policy.mjs';
 import {resumeRetiredReservationReviews} from './retired-reservation-review.mjs';
@@ -251,7 +251,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of working.filter(o=>o.pricing)){
     try{
      const historical=await readPreservedHistoricalBc(api,o,usesRecordedBc(o)?null:o.channel==='temu'?temuSellerTotals(o):null);
-     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),beforePublish:bc=>bc.update_stock===true?assertNewBcStock(api,bc.line_items):undefined,lock:fn=>withShipmentLock(fn,['erplain-bc-numbering','stock-mutations'])});
+     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),beforePublish:bc=>bc.update_stock===true?assertNewBcStock(api,bc.line_items):undefined,lock:withSalesBcPublicationLock});
      const confirmed=historical?.confirmed||await verifyRecordedOrSourceTotals(api,o,actual,()=>o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
      o.erp_live.pricing={...o.erp_live.pricing,status:'verified',error:null,confirmed,verifiedAt:new Date().toISOString()};await save(o);
     }catch(e){o.failed=true;o.erp_live.pricing={...o.erp_live.pricing,status:'blocked',error:e.message};await save(o);await fail(o,e);}
