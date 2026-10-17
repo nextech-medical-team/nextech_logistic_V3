@@ -29,7 +29,10 @@ export function priceVerification(db,directory,{shopify=shopifyObservationApi(di
     scanCursor=candidates.at(-1).id;
    }
    if(!order)return {done:true};
-   const result={id:order.id,reference:order.reference,country:input.country,channel:order.channel,bcId:order.erp_live?.bc?.id,checkedAt:new Date().toISOString(),status:'review'};
+   return {done:false,cursor:order.id,result:await this.check(order,input.country)};
+  },
+  async check(order,country){
+   const result={id:order.id,reference:order.reference,country,channel:order.channel,bcId:order.erp_live?.bc?.id,checkedAt:new Date().toISOString(),status:'review'};
    try{
     const bc=order.erp_live?.bc;
     if(!bc?.id)throw Error('BC absent dans V3');
@@ -56,7 +59,7 @@ export function priceVerification(db,directory,{shopify=shopifyObservationApi(di
     }
     Object.assign(result,comparePrices({amount:bc.total,currency:bc.currency?.label},source));
    }catch(e){result.error=String(e.message).slice(0,500);}
-   return {done:false,cursor:order.id,result};
+   return result;
   }
  };
 }
