@@ -104,7 +104,20 @@ test('table exposes cancellation confirmed on platform but not in V3',async()=>{
  await f.find('platform-cancellation-refresh').onclick();
  const cells=f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children;
  assert.equal(cells[3].textContent,'Oui');assert.equal(cells[4].textContent,'Non');
+ assert.equal(cells[5].children[0].textContent,'Annulation plateforme confirmée — à appliquer dans V3');
+ assert.equal(cells[5].children[0].className,'badge warn');
+ assert.match(f.find('platform-cancellation-report').children[0].textContent,/0 annulées dans V3/);
  assert.equal(f.find('platform-cancellation-apply').disabled,false);
+});
+
+test('already cancelled V3 orders are counted separately and cannot be applied again',async()=>{
+ const f=fixture();let page=0;
+ f.context.api=async()=>page++===0?{done:false,cursor:'a',result:{id:'a',channel:'temu',reference:'REF',status:'cancelled',platformCancelled:true,v3Cancelled:true}}:{done:true};
+ await f.find('platform-cancellation-refresh').onclick();
+ const cells=f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children;
+ assert.equal(cells[5].children[0].textContent,'Annulée dans V3');
+ assert.match(f.find('platform-cancellation-report').children[0].textContent,/1 annulées dans V3/);
+ assert.equal(f.find('platform-cancellation-apply').disabled,true);
 });
 
 test('calendar sends the same UTC creation range on every page and skips excluded orders',async()=>{
