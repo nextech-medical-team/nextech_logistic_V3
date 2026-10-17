@@ -1,3 +1,4 @@
+import {withErplainOrigin} from './erplain-request-observation.mjs';
 import {usesNativeBlCycle,assertNativeBcSnapshot} from './native-bl-policy.mjs';
 import {resumeRetiredReservationReviews} from './retired-reservation-review.mjs';
 import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
@@ -8,7 +9,7 @@ import {retirePostBcCommercialControls} from './post-bc-control-recovery.mjs';
 import {usesRecordedBc,readRecordedBc,recordedBcFingerprint,recordedBcPreparationAuthority,verifyRecordedOrSourceTotals,withRecordedOrSourceGuard,assertRecordedBc} from './existing-bc-execution.mjs';
 import {prepareIncompleteTemuCatalogue} from './temu-source-catalogue.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
-import {ensureMissingProduct,reconcileCreationAttempt,sourceProductName,readCreationSku,createBlockedMissingProducts,productCreationBlock} from './missing-product-creation.mjs';
+import {ensureMissingProduct,reconcileCreationAttempt,sourceProductName,readCreationSku,createBlockedMissingProducts,productCreationBlock,sameSku} from './missing-product-creation.mjs';
 import {bindProduct} from './product-bindings.mjs';
 import {selectedProductWeights,cacheSelectedProductWeights} from './selected-product-weights.mjs';
 import {selectedPreparationRouting} from './selected-preparation-routing.mjs';
@@ -105,9 +106,8 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    const quotaDelay=await api.quotaDelay?.()||0;
    if(!bcOnlyOrderId&&quotaDelay>15000){nextRunAt=Date.now()+quotaDelay;return;}
    if(!bcOnlyOrderId&&process.env.ERPLAIN_LIVE_WRITES==='1'&&process.env.MIGRATION_PREPARATION!=='1'){
-    const {recheckOrders}=await import('./problem-resolution.mjs');
-    await prepareIncompleteTemuCatalogue(db,api,{bind:v=>bindProduct(db,v)});
-    await createBlockedMissingProducts(db,api,{blocked:mutationBlock,bind:v=>bindProduct(db,v),recheck:ids=>recheckOrders(db,ids)});
+    await withErplainOrigin('erplain-catalogue-source',()=>prepareIncompleteTemuCatalogue(db,api,{bind:v=>bindProduct(db,v)}));
+    await withErplainOrigin('erplain-catalogue-recovery',()=>createBlockedMissingProducts(db,api,{blocked:mutationBlock,bind:v=>bindProduct(db,v)}));
    }
    // Retry only the stock reconciliation checkpoint; never replay an uncertain mutation.
    if(!bcOnlyOrderId){
@@ -176,6 +176,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     const binding=bindings.get(sku);
     let lookup=await api.request('query V3BcLookup($where:QueryVariantsWhereWhereConditions!){Variants(first:100,where:$where){data{id sku active weight_amount weight_unit tax_codes{id} product{id active} stock_levels(first:100){data{location{id} available on_hand} paginatorInfo{hasMorePages}}} paginatorInfo{hasMorePages}}}',{where:{column:'SKU',operator:'EQ',value:sku}});
     if(!lookup.Variants?.data||lookup.Variants.paginatorInfo?.hasMorePages)throw Error('BC · Vérification produit Erplain LIVE incomplète : '+sku);
+    lookup.Variants.data=lookup.Variants.data.map(v=>sameSku(v.sku,sku)&&v.sku!==sku?{...v,erplainSku:v.sku,sku}:v);
     if(!lookup.Variants.data.some(v=>v.sku===sku)){
      if(binding||choiceDocument)throw Error('BC · Référence liée absente : vérifier le produit existant '+sku);
      const created=await ensureMissingProduct(db,api,{sku,label:sourceProductName(l),guard:async()=>{

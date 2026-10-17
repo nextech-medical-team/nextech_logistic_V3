@@ -1,4 +1,6 @@
-import {cancellationBlock,retryDecision,transientErpError} from './erp-transient-policy.mjs';
+import {erplainCustomerInput} from './erplain-customer-input.mjs';
+import {customerCheckpointResult} from './temu-customer-checkpoint.mjs';
+import {cancellationBlock,retryDecision,transientErpError,reconciliationError} from './erp-transient-policy.mjs';
 import {recoverOrder} from './erplain-document-metadata.mjs';
 import {quotaReadRetryAt,quotaWaitingMessage} from './erplain-quota-wait.mjs';
 import {reconcilePublicationState} from './publication-recovery.mjs';
@@ -24,7 +26,7 @@ export async function recordTransientFailure(db,o,message,error){
 
 export async function resumeTransientErplain(db,api){
  await db.transaction(async tx=>{
-  const cancelled=(await tx.query(`SELECT o.id,o.source_payload,o.label_status,o.tracking_status,o.issue,o.erp_live,e.error FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
+  const cancelled=(await tx.query(`SELECT o.id,o.suspension,o.source_payload,o.label_status,o.tracking_status,o.issue,o.erp_live,e.error FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE e.status='review' AND e.error NOT LIKE 'Demande d’annulation%' AND e.error NOT LIKE 'Commande annulée%'
    AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL)
    AND (o.label_status='cancelled' OR o.tracking_status='cancelled' OR coalesce(o.suspension->>'active','false')='true' OR o.suspension ? 'erplainCancellation')
@@ -35,7 +37,7 @@ export async function resumeTransientErplain(db,api){
   // worker run guard serializes passes; the short commit below also rejects any
   // concurrent edit, cancellation, or job replacement made during the read.
   const rows=(await db.query(`SELECT o.*,e.error,e.updated_at retry_updated,e.updated_at::text retry_version FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
-   WHERE e.status='review' AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu'))
+   WHERE e.status='review' AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu') OR (o.channel<>'tender' AND o.erp_live->'bc'->>'id' IS NOT NULL AND e.error ~ '^(BC/BL : rapprochement incomplet ou ambigu|Brouillon BL introuvable|BL Erplain · Brouillon.*introuvable)'))
    AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
    AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
@@ -45,8 +47,8 @@ export async function resumeTransientErplain(db,api){
    AND coalesce(o.erp_live->'bc'->>'status','') NOT IN ('cancelled','closed') AND coalesce(o.erp_live->'bl'->>'status','') NOT IN ('cancelled','closed')
    AND (coalesce(o.erp_live->'transientRecovery'->>'attempts','0') IN ('0','1','2') OR o.erp_live->'transientRecovery'->>'readRateLimited'='true')
    AND (o.erp_live->'transientRecovery'->>'nextReadCheckAt' IS NULL OR o.erp_live->'transientRecovery'->>'nextReadCheckAt'<=to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
-   AND (o.erp_live->>'phase' IN ('creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl') OR (o.erp_live->>'phase' IS NULL AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
-   AND ((o.erp_live->>'phase'='creating_bc' AND o.erp_live->'customer'->>'id' IS NOT NULL) OR (o.erp_live->>'phase'<>'creating_bc' AND o.erp_live->'bc'->>'id' IS NOT NULL) OR o.erp_live->>'phase' IS NULL)
+   AND (o.erp_live->>'phase' IN ('creating_customer','creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl') OR (o.erp_live->>'phase' IS NULL AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
+   AND ((o.erp_live->>'phase'='creating_bc' AND o.erp_live->'customer'->>'id' IS NOT NULL) OR (o.erp_live->>'phase'<>'creating_bc' AND o.erp_live->'bc'->>'id' IS NOT NULL) OR o.erp_live->>'phase' IS NULL OR (o.erp_live->>'phase'='creating_customer' AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
    AND e.updated_at<=now()-CASE WHEN o.erp_live->'transientRecovery'->>'readRateLimited'='true' THEN interval '0 seconds' ELSE CASE coalesce(o.erp_live->'transientRecovery'->>'attempts','0') WHEN '0' THEN interval '30 seconds' WHEN '1' THEN interval '2 minutes' ELSE interval '5 minutes' END END
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
    AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
@@ -61,11 +63,18 @@ export async function resumeTransientErplain(db,api){
    const recoveryId=randomUUID();
    try{
     // No writes in this preflight. A lost BC response is reconciled by its immutable V3 identity.
-    const reader={request:async(q,v)=>{if(!/^query\s/.test(q))throw Error('Rapprochement ERP : lecture seule obligatoire');const result=await api.request(q,v);if(result.Orders){if(!Array.isArray(result.Orders.data)||result.Orders.paginatorInfo?.hasMorePages!==false)throw Error('BC : recherche incomplète');for(const x of result.Orders.data){const identified=x.external_reference==='V3:'+o.id||String(x.internal_notes||'').includes('[V3:'+o.id+']')||x.customer?.customer_number==='V3:'+o.id;if(!identified||!x.id||!['active','unpublished'].includes(x.status))throw Error('BC de même référence ambigu ou non réutilisable : aucune nouvelle création');}}return result;}};
+    const reader={request:async(q,v)=>{if(!/^query\s/.test(q))throw Error('Rapprochement ERP : lecture seule obligatoire');const freshRead=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];if(!freshRead||freshRead.archived||freshRead.resolution_pending_resume||freshRead.partial_mode||cancellationBlock(freshRead)||['shipped','delivered','in_transit'].includes(freshRead.tracking_status)||JSON.stringify(freshRead.erp_live)!==JSON.stringify(o.erp_live))throw Error('Commande modifiée ou protégée : rapprochement suspendu');const result=await api.request(q,v);if(result.Orders){if(!Array.isArray(result.Orders.data)||result.Orders.paginatorInfo?.hasMorePages!==false)throw Error('BC : recherche incomplète');for(const x of result.Orders.data){const identified=x.external_reference==='V3:'+o.id||String(x.internal_notes||'').includes('[V3:'+o.id+']')||x.customer?.customer_number==='V3:'+o.id;if(!identified||!x.id||!['active','unpublished'].includes(x.status))throw Error('BC de même référence ambigu ou non réutilisable : aucune nouvelle création');}}return result;}};
     if(!state.phase){
      // One identity read per bounded pass, rather than one per untouched order.
      const result=await (identityRead??=reader.request('query V3RateLimitIdentity { Company { id } }'));
      if(result.Company?.id!==100174)throw Error('Identité Erplain incorrecte : aucune reprise');
+    }else if(state.phase==='creating_customer'){
+     const number=erplainCustomerInput(o).customer_number;
+     const result=await reader.request('query V3RecoverQuotaCustomer($where:QueryCustomersWhereWhereConditions){Customers(first:100,where:$where){data{id customer_number} paginatorInfo{hasMorePages}}}',{where:{column:'CUSTOMER_NUMBER',operator:'EQ',value:number}});
+     const customer=customerCheckpointResult(result,o.id,number);
+     state.customerReconciliation={checkedAt:recovery.checkedAt,completeSearch:true,customerId:customer?.id||null,externalWrites:0};
+     if(!customer)throw Error('Client Erplain : création précédente non retrouvée ; rapprochement requis, aucune nouvelle création automatique');
+     state.customer=customer;state.phase='customer_created';
     }else if(state.phase==='creating_bc'){
      const found=await recoverOrder(reader,o);
      if(found){state.bc={id:found.id,label:found.label,status:found.status};state.phase='bc_created';}
@@ -73,6 +82,11 @@ export async function resumeTransientErplain(db,api){
     }else{
      const result=await reader.request('query V3TransientBL($id:ID!){Order(id:$id){id status update_stock shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}}}',{id:String(state.bc.id)});
      const bc=result.Order,list=bc?.shipping_orders;
+     if(!bc){
+      const found=await recoverOrder(reader,o,{db});
+      state.documentReconciliation={checkedAt:recovery.checkedAt,savedBcId:String(state.bc.id),candidateBcId:found?.id?String(found.id):null,externalWrites:0};
+      throw Error(found?'BC enregistré introuvable ; autre identité V3 retrouvée : rapprochement requis, aucun rattachement automatique':'BC enregistré introuvable et aucune identité V3 retrouvée : contrôle Erplain requis, aucune nouvelle création automatique');
+     }
      if(String(bc?.id)!==String(state.bc.id)||bc.status!=='active'||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
      let bl;
      try{bl=await readTransientBlIdentity(reader,state,bc,{lookupDraft:o.channel!=='tender'});}
@@ -98,8 +112,13 @@ export async function resumeTransientErplain(db,api){
     // A refused verification read consumes no mutation-recovery attempt.
     if(state.transientRecovery.readRateLimited)state.transientRecovery.attempts=Number(o.erp_live.transientRecovery?.attempts||0);
     state.transientRecovery.reconciliationError=e.message;
+    const canCheckAgain=transientErpError(e.message)||reconciliationError(o,e.message);
+    if(!state.transientRecovery.readRateLimited)state.transientRecovery.nextReadCheckAt=canCheckAgain&&recovery.attempts<3?new Date(Date.now()+[30000,120000,300000][Math.min(2,recovery.attempts)]).toISOString():null;
+    state.transientRecovery.actionRequired=!state.transientRecovery.nextReadCheckAt;
+    state.transientRecovery.outcome=state.transientRecovery.actionRequired?'review_required':'waiting';
     failure=state.transientRecovery.readRateLimited?quotaWaitingMessage:transientErpError(e.message)?'Lecture Erplain temporairement indisponible : rapprochement '+recovery.attempts+'/3':e.message;
    }
+   if(!failure)Object.assign(state.transientRecovery,{outcome:'reconciled',actionRequired:false,nextReadCheckAt:null});
    const committed=await db.transaction(async tx=>{
     const fresh=(await tx.query(`SELECT o.*,e.error,e.updated_at retry_updated FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
      WHERE o.id=$1 AND e.status='review' AND e.updated_at::text=$2 AND o.erp_live=$3::jsonb
