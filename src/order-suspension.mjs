@@ -41,10 +41,11 @@ const busySql=`SELECT 'Erplain' AS kind FROM erp_live_jobs WHERE order_id=$1 AND
  UNION ALL SELECT 'cycle documentaire' FROM document_lifecycle WHERE order_id=$1 AND locked=true
  UNION ALL SELECT 'traitement local' FROM jobs WHERE order_id=$1 AND status='processing'
  UNION ALL SELECT 'achat TEMU' FROM temu_label_jobs WHERE reference=$2 AND status IN ('purchasing','uncertain')`;
-async function idle(db,order){
+export async function assertOrderIdle(db,order){
  const rows=(await db.query(busySql,[order.id,order.reference])).rows;
  if(rows.length)throw Error('Attendre ou rapprocher le traitement en cours : '+[...new Set(rows.map(x=>x.kind))].join(', '));
 }
+const idle=assertOrderIdle;
 function physicalBlock(order){
  if(['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status)||['shipped','delivered'].includes(order.erp_live?.bl?.status))throw Error('Commande déjà expédiée ou livrée : annulation ERPLAIN impossible');
 }

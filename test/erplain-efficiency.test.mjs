@@ -143,3 +143,7 @@ test('new worker releases only interrupted read leases and leaves operational jo
  assert.equal(watches[0].due,true);assert.equal(watches[1].due,false);assert.equal(watches[0].outcome,'waiting');
  assert.deepEqual((await db.query('SELECT * FROM orders ORDER BY id')).rows,before);assert.equal((await db.query('SELECT * FROM resolution_jobs')).rows.length,0);
 });
+
+test('missing-product discovery shares only concurrent identical reads, never a later guard',async()=>{
+ const config={url:'https://api.erplain.app/graphql',companyId:100174,apiKey:'fixture-only'},fetcher=()=>{};let calls=0,release;const query='query V3MissingProductLookup { Variants { data { id } } }';const load=async()=>{calls++;await new Promise(r=>release=r);return {Variants:{data:[]}};};const a=sharedErplainReference(config,query,{},fetcher,load),b=sharedErplainReference(config,query,{},fetcher,load);await new Promise(r=>setImmediate(r));assert.equal(calls,1);release();await Promise.all([a,b]);await sharedErplainReference(config,query,{},fetcher,async()=>{calls++;return {};});assert.equal(calls,2);
+});
