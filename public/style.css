@@ -298,7 +298,7 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
  .order-information-dialog{padding:0 16px 16px}
 }
 
-#view-orders .orders-fixed-layout tr:not(.order-row-expanded) td[data-fixed-column="reference"]>:not([data-detail]):not([data-delivery-detail]):not([data-order-more-info]){display:none!important}
+#view-orders .orders-fixed-layout tr:not(.order-row-expanded) td[data-fixed-column="reference"]>:not([data-detail]):not([data-delivery-detail]):not([data-order-more-info]):not(.order-deferral-preview){display:none!important}
 #view-orders .orders-fixed-layout .processing-details-toggle{display:none!important}
 
 /* A deliberate arrow expands original controls in place; collapsed geometry stays fixed. */
@@ -424,3 +424,22 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
 
 #view-negative-stocks #negative-stock-sort-date{display:inline-flex;align-items:center;background:transparent;border:0;padding:0;color:inherit;font:inherit;font-weight:600;white-space:nowrap;cursor:pointer}
 #view-negative-stocks #negative-stock-sort-date:focus-visible{outline:2px solid #127565;outline-offset:4px}
+
+/* Operator view: hide the technical timing panel, preserve diagnostics and actions. */
+#view-orders #order-rows .order-processing{display:none!important}
+#view-orders #order-rows .order-deferral-preview{display:block!important;margin:4px 0 0;padding:4px 5px;background:#fff5db;border-left:3px solid #b57a17;border-radius:3px;font-size:11px;line-height:1.3;color:#624713;text-align:left}
+#view-orders #order-rows .order-deferral-note{white-space:pre-wrap;overflow-wrap:anywhere;max-height:43px;overflow:auto;scrollbar-width:thin}
+#view-orders #order-rows .order-deferral-note:focus-visible{outline:2px solid #127565;outline-offset:2px}
+#view-orders #order-rows .order-deferral-preview :is(time,small){display:block;font-size:10px!important;line-height:1.2;margin:3px 0 0;color:#6f6043}
+#view-orders #order-rows tr:not(.order-row-expanded) td[data-fixed-column="reference"]:has(.order-deferral-preview)>[data-detail]{font-size:11px!important;line-height:1.2!important;max-height:60px;overflow:auto;padding:4px!important}
+#view-orders #order-rows tr.order-row-expanded .order-deferral-note{max-height:none;overflow:visible}
+@media(max-width:900px){
+ #view-orders .orders-fixed-layout tr:has(.order-deferral-preview):not(.order-row-expanded){height:400px;min-height:400px;max-height:400px}
+ #view-orders table.orders-fixed-layout.orders-with-margins tbody tr:not(.order-row-expanded)>td[data-fixed-column="reference"]:has(.order-deferral-preview){height:180px;max-height:180px}
+ #view-orders #order-rows .order-deferral-note{max-height:60px}
+}
+
+#view-orders #order-rows tr:not(.order-row-expanded) .order-deferral-preview{position:absolute;top:76px;bottom:44px;left:6px;right:6px;display:flex!important;flex-direction:column;min-height:0;box-sizing:border-box;margin:0}
+#view-orders #order-rows tr:not(.order-row-expanded) .order-deferral-note{flex:1;min-height:0;max-height:none}
+#view-orders #order-rows .order-deferral-preview :is(time,small){flex:none;overflow-wrap:anywhere}
+@media(max-width:900px){#view-orders #order-rows tr:not(.order-row-expanded) .order-deferral-preview{top:72px}}
