@@ -25,7 +25,7 @@ async function fixture(t,{status='api_error',blStatus='ready_to_ship',attempt=nu
  return {db,reference};
 }
 
-for(const status of [null,'api_error','ready','to_buy'])test(`published BL and ${status??'missing job'}: recover existing PDF before unavailable amounts or margin, no buy`,async t=>{
+for(const status of [null,'api_error','ready','to_buy','unverified'])test(`published BL and ${status??'missing job'}: recover existing PDF before unavailable amounts or margin, no buy`,async t=>{
  const {db,reference}=await fixture(t,{status});let recovered=0;
  const pdf=Buffer.from('%PDF-original-untouched');
  const local={async recover(ref){assert.equal(ref,reference);recovered++;await db.query(`INSERT INTO temu_label_jobs(reference,status) VALUES($1,'complete') ON CONFLICT(reference) DO UPDATE SET status='complete'`,[ref]);await db.query('INSERT INTO temu_label_documents VALUES($1,$2,$3)',[ref,'PK-123',pdf]);return {status:'complete',documents:true};},amounts(){assert.fail('Amounts unavailable must not prevent existing PDF recovery');},prepare(){assert.fail('Existing label');},buy(){assert.fail('No repurchase');}};
@@ -43,7 +43,7 @@ for(const status of ['uncertain','purchasing','pending','shipment_error','docume
  assert.equal((await db.query('SELECT * FROM temu_automatic_purchase_checks')).rows.length,0);
 });
 
-for(const change of [{status:'api_error',attempt:'old-attempt'},{status:'api_error',packages:['PK-123']},{status:'api_error',blStatus:'unpublished'},{status:'api_error',blStatus:'cancelled'},{status:null,blStatus:'unpublished'},{status:'api_error',archived:true}])test(`discovery excludes ${JSON.stringify(change)}`,async t=>{
+for(const change of [{status:'api_error',attempt:'old-attempt'},{status:'api_error',packages:['PK-123']},{status:'api_error',archived:true}])test(`discovery excludes ${JSON.stringify(change)}`,async t=>{
  const {db}=await fixture(t,change);
  await temuAutomaticPurchaseWorker(db,{recover(){assert.fail('Ineligible');}},{}).run();
  assert.equal((await db.query('SELECT * FROM temu_automatic_purchase_checks')).rows.length,0);

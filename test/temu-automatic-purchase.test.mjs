@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import {automaticPreparationHold,temuAutomaticPurchaseWorker} from '../src/temu-automatic-purchase.mjs';
 const now=Date.now();
 const order={id:'o',reference:'PO-069-123456789',channel:'temu',source_payload:{temuDirect:{state:'verified'}},erp_live:{phase:'bl_ready',pricing:{status:'verified'},bl:{id:'1'},stockDocument:{id:'1'},documentSource:{checkedAt:new Date(now).toISOString(),stockHolds:[]},verifiedAt:new Date(now).toISOString(),stockCheckedAt:new Date(now).toISOString()}};
-test('automatic admission preserves independent holds and requires validated preparation and a current read before buying',()=>{
- assert.equal(automaticPreparationHold(order,now),null);
- for(const change of [{archived:true},{simulation:true},{partial_mode:true},{issue:'Stock insuffisant'},{resolution_pending_resume:true},{transport_choice:'GLS'},{suspension:{active:true,note:'stop'}},{source_payload:{marketplacePendingCorrection:{}}},{source_payload:{temuDirect:{state:'error'}}},{source_payload:{externalLabel:{active:true}}},{erp_live:{...order.erp_live,phase:'bc_created'}},{erp_live:{...order.erp_live,stockCheckedAt:'invalid'}}])assert.ok(automaticPreparationHold({...order,...change},now),JSON.stringify(change));
- assert.equal(automaticPreparationHold({...order,erp_live:{...order.erp_live,verifiedAt:new Date(now-10*86400000).toISOString(),stockCheckedAt:new Date(now-10*86400000).toISOString()}},now),null);
- assert.ok(automaticPreparationHold(null,now));
+test('TEMU admission preserves independent protections but ignores ERP preparation and legacy simulation flags',()=>{
+ assert.equal(automaticPreparationHold(order),null);
+ for(const change of [{archived:true},{partial_mode:true},{transport_choice:'GLS'},{suspension:{active:true,note:'stop'}},{source_payload:{externalLabel:{active:true}}}])assert.ok(automaticPreparationHold({...order,...change}));
+ for(const change of [{simulation:true},{issue:'Stock insuffisant'},{resolution_pending_resume:true},{source_payload:{marketplacePendingCorrection:{},visibilityHold:true}},{source_payload:{temuDirect:{state:'error'}}},{erp_live:{phase:'bc_created'}},{erp_live:{stockCheckedAt:'invalid'}},{erp_live:{}}])assert.equal(automaticPreparationHold({...order,...change}),null);
+ assert.ok(automaticPreparationHold(null));
 });
 test('disabled worker performs no reads or purchases',async()=>{
  const worker=temuAutomaticPurchaseWorker({query(){throw Error('unexpected read');}},{},{},{enabled:()=>false});await worker.run();assert.equal(worker.running,false);
@@ -30,9 +30,11 @@ test('latest negative margin prevents buy claim',async()=>{
  await temuAutomaticPurchaseWorker(db,local,margins,{stockGate:async()=>{},refreshPreparation:async()=>({notFound:false,stockHolds:[]})}).run();assert.equal(calls,2);assert.equal(bought,0);assert.equal(saved[0].status,'held');assert.match(saved[0].message,/confirmer/);
 });
 
-test('failed document read or current stock hold never reaches pricing or purchase',async()=>{
- for(const refreshPreparation of [async()=>{throw Error('Erplain unavailable');},async()=>({notFound:false,stockHolds:[{message:'Stock incompatible'}]})]){
- const saved=[];const db={async query(sql,args){if(sql.startsWith('INSERT'))return {rows:[]};if(sql.startsWith('SELECT c.reference'))return {rows:[{reference:order.reference}]};if(sql.startsWith('SELECT *'))return {rows:[order]};if(sql.startsWith('SELECT o.id'))return {rows:[{id:'o'}]};if(sql.startsWith('SELECT coalesce'))return {rows:[{lines:[]}]};if(sql.startsWith('UPDATE')){saved.push(JSON.parse(args[1]));return {rows:[]};}throw Error(sql);}};
- await temuAutomaticPurchaseWorker(db,{amounts(){throw Error('Pricing must not start');},buy(){throw Error('Purchase forbidden');}},{},{stockGate:async()=>{},refreshPreparation}).run();assert.equal(saved[0].status,'held');assert.match(saved[0].message,/Erplain unavailable|Stock incompatible/);
- }
+test('ERP document/stock reads are never invoked by the positive-margin TEMU worker',async()=>{
+ const saved=[];let buys=0;
+ const db={async query(sql,args){if(sql.startsWith('INSERT'))return {rows:[]};if(sql.startsWith('SELECT c.reference'))return {rows:[{reference:order.reference}]};if(sql.startsWith('SELECT *'))return {rows:[order]};if(sql.startsWith('SELECT o.id'))return {rows:[{id:'o'}]};if(sql.startsWith('SELECT coalesce'))return {rows:[{lines:[]}]};if(sql.startsWith('UPDATE')){saved.push(JSON.parse(args[1]));return {rows:[]};}throw Error(sql);}};
+ const plan={id:'p',currency:'EUR',amount:6,selected:1,expiresAt:Date.now()+60000,offers:[{channelId:1,shippingCompanyName:'FedEx'}]};
+ const local={async recover(){return {status:'ready',plan};},async amounts(){return {};},async buy(r,id,a,{beforeClaim}){await beforeClaim(plan);buys++;return {status:'complete'};}};
+ const margins={async get(){return {calculatedAt:new Date().toISOString(),rows:[{reference:order.reference,status:'positive',profit:1,shipping:5,shippingSource:'Devis TEMU',issues:[]}]};}};
+ await temuAutomaticPurchaseWorker(db,local,margins,{stockGate(){assert.fail('ERP gate removed');},refreshPreparation(){assert.fail('ERP refresh removed');}}).run();assert.equal(buys,1);assert.equal(saved[0].status,'complete');
 });

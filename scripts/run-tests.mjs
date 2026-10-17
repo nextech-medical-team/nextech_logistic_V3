@@ -4,6 +4,7 @@ const postBlPreparationReviewGroup=['--test','test/post-bl-preparation-review.te
 const recoveredPreparationGroup=['--test','test/recovered-preparation-issue.test.mjs'];
 const manualCreatedBlWaitingGroup=['--test','test/manual-created-bl-waiting.test.mjs'];
 const excelRenewalGroup=['--test','test/temu-excel-renewal.test.mjs'];
+const positiveBeforeBlGroup=['--test','test/temu-positive-before-bl.test.mjs'];
 const automaticTemuRecoveryGroup=['--test','test/temu-automatic-recovery.test.mjs'];
 import {spawnSync} from 'node:child_process';
 const postBlHistoryGroup=['--test','test/post-bl-label-history.test.mjs'];
@@ -41,6 +42,7 @@ groups.push(['--test','test/missing-draft-recovery.test.mjs','test/native-bl-pol
 groups.push(manualCreatedBlWaitingGroup);
 groups.push(excelRenewalGroup);
 groups.push(automaticTemuRecoveryGroup);
+groups.push(positiveBeforeBlGroup);
 groups.push(['--test','test/equivalent-preview-recheck.test.mjs']);
 groups.push(['--test','test/manual-legacy-label-retry.test.mjs']);
 groups.push(['--test','test/temu-excel-purchase-admission.test.mjs','test/temu-excel-label-admission.test.mjs','test/source-product-name.test.mjs']);
