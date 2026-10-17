@@ -29,7 +29,8 @@ export async function cacheProviderWeight(db,v){
    FROM orders o WHERE l.order_id=o.id AND l.source_payload->>'erplainSourceVariantId'=$2
    AND coalesce(l.target_sku,(SELECT m.target_sku FROM mappings m WHERE m.channel=o.channel AND m.source_sku=l.source_sku),l.source_sku)=$1
    AND NOT o.archived AND NOT o.partial_mode AND o.erp_live->'bl'->>'id' IS NULL
-   AND o.channel<>'tender' AND NOT coalesce(o.source_payload->'externalLabel'->>'active','false')::boolean
+   AND o.channel<>'tender' AND coalesce(o.source_payload->>'erplainImported','false')<>'true'
+   AND NOT coalesce(o.source_payload->'externalLabel'->>'active','false')::boolean
    AND NOT EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status IN ('pending','processing'))
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
    AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id)
