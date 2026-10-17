@@ -1,3 +1,4 @@
+import {priceCorrection} from './price-correction.mjs';
 import {initializePlatformCancellationReports,platformCancellationReports} from './platform-cancellation-reports.mjs';
 import {publishStockWatchObservations} from './grouped-stock-watch.mjs';
 import {initializeImportReceptions,readImportReceptions} from './import-reception.mjs';
@@ -156,6 +157,7 @@ backgroundInterval(()=>statusSync.run(),1000,'tracking-sync');
 const v2Followup=v2Worker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>v2Followup.run(),10000,'v2-followup');
 const temuReading=readingService(db,directory);
 const verifyPrices=priceVerification(db,directory);
+const correctPrice=priceCorrection(db,directory,verifyPrices);
 const verifyMissingOrders=missingOrdersVerification(db,directory);
 const shopifyObservation=shopifyObservationWorker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>shopifyObservation.run(),10000,'shopify-observation');
 const events=liveEvents(db,{authenticate});if(config.http)await events.start();
@@ -362,6 +364,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
 
+    if(p==='/api/price-verification/correct'&&req.method==='POST'){permitted(user,['admin','manager']);json(res,200,await correctPrice(await body(req),user));return;}
     if(p==='/api/price-verification/options'&&req.method==='GET'){permitted(user,operational);json(res,200,await verifyPrices.options());return;}
     if(p==='/api/price-verification/next'&&req.method==='POST'){permitted(user,operational);json(res,200,await verifyPrices.next(await body(req)));return;}
     if(p==='/api/problem-deferral'&&req.method==='GET'){json(res,200,await deferralService.context(url.searchParams.get('id')));return;}
