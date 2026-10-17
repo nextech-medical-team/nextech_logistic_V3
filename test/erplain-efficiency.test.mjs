@@ -47,7 +47,7 @@ test('pre-BL stock guard rejects an empty BC, shipping-only BC and missing produ
  for(const lines of [[],[{type:'shipping_cost',quantity:1}],[{type:'normal',quantity:2}],[{quantity:1,variant:{id:1,track_inventory:false}},{type:'normal',quantity:2}]])assert.throws(()=>assertFullOrderStock(lines),/sans produit|identité produit/);
 });
 test('a real decimal shortage is never waived by an epsilon; repeated fractional lines do not create a false shortage',()=>{
- const line={quantity:1,available:'0.999999',on_hand:'0.999999',reserved_quantity:0,location:{id:1},variant:{id:1,sku:'A'}};
+ const line={quantity:1,available:'0.999999',on_hand:'0.999999',reserved_quantity:0,location:{id:1},variant:{id:1,sku:'A',track_inventory:true}};
  assert.throws(()=>assertFullOrderStock([line]),/manque 0.000001/);
  assert.throws(()=>assertFullOrderStock([{...line,quantity:'0.000001',available:0,on_hand:0}]),/stock insuffisant/);
  assert.doesNotThrow(()=>assertFullOrderStock([{...line,quantity:0.1,available:0.3,on_hand:0.3},{...line,quantity:0.2,available:0.3,on_hand:0.3}]));

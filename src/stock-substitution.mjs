@@ -1,4 +1,5 @@
 import {substitutionExecutionSnapshot} from './substitution-execution-snapshot.mjs';
+import {exactStockAvailability,exactQuantitySum,exactQuantityDifference} from './stock-decimal.mjs';
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
 import {importBcAmounts} from './import-bc-commercial.mjs';
 import {chooseDocumentStockVariant} from './document-stock-choice.mjs';
@@ -19,9 +20,10 @@ const bcFields='id label created_at status total tax_type currency{label} update
 export function validateSubstitution(b,apply=false){
  if(typeof b.sku!=='string'||!b.sku.trim()||typeof b.replacementSku!=='string'||!b.replacementSku.trim()||b.replacementSku.length>199)throw Error('SKU original et SKU équivalent requis');
  if(b.sku.trim()===b.replacementSku.trim())throw Error('Choisir un SKU différent du produit en rupture');
- for(const field of ['replaceQuantity','replacementQuantity'])if(!Number.isFinite(Number(b[field]))||Number(b[field])<=0)throw Error('Quantités de remplacement strictement positives requises');
+ for(const field of ['replaceQuantity','replacementQuantity'])if(!['number','string'].includes(typeof b[field])||String(b[field]).trim()===''||!Number.isFinite(Number(b[field]))||Number(b[field])<=0)throw Error('Quantités de remplacement strictement positives requises');
  if(!['order','permanent'].includes(b.scope))throw Error('Choisir la portée de l’équivalence');
- if(apply&&(!/^[a-f0-9]{64}$/.test(b.previewFingerprint||'')||b.confirmEquivalent!==true))throw Error('Vérifier et confirmer le produit équivalent avant enregistrement');
+ if(b.verifyAndApply!==undefined&&b.verifyAndApply!==true)throw Error('Option de remplacement direct invalide');
+ if(apply&&(b.confirmEquivalent!==true||b.verifyAndApply!==true&&!/^[a-f0-9]{64}$/.test(b.previewFingerprint||'')))throw Error('Vérifier et confirmer le produit équivalent avant enregistrement');
 }
 function inclusivePrice(bc,l){const price=Number(l.price)-Number(l.tax_amount)/Number(l.quantity);return bc.tax_type==='inclusive'&&l.price!=null&&l.tax_amount!=null&&Number.isFinite(price)?{price}:{};}
 export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,historicalStock=null,partialProof=null}={}){
@@ -43,13 +45,15 @@ export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,histor
  if(replace>Number(original.quantity))throw Error('La quantité remplacée dépasse la quantité du BC');
  if(!variant?.id||variant.sku!==b.replacementSku.trim()||variant.active===false||variant.product?.active===false)throw Error('Produit équivalent actif requis dans Erplain LIVE');
  let weight;try{weight=resolveWeight([variant],variant.sku).weightKg;}catch(e){throw Error('Produit équivalent ['+variant.sku+'] : '+e.message);}
+ if(typeof variant.track_inventory!=='boolean')throw Error('API Erplain · Politique de stock du produit équivalent non vérifiée');
  if(variant.track_inventory!==false){
-  if(!Array.isArray(variant.stock_levels?.data)||variant.stock_levels.paginatorInfo?.hasMorePages)throw Error('API Erplain · Stock du produit équivalent incomplet');
+  if(!Array.isArray(variant.stock_levels?.data)||variant.stock_levels.paginatorInfo?.hasMorePages!==false)throw Error('API Erplain · Stock du produit équivalent incomplet');
   const stocks=variant.stock_levels.data.filter(s=>String(s.location?.id)===String(original.location.id));
-  if(stocks.length!==1||[stocks[0].available,stocks[0].on_hand].some(v=>v==null||!Number.isFinite(Number(v))))throw Error('API Erplain · Stock de l’emplacement non reçu');
+  if(stocks.length!==1||[stocks[0].available,stocks[0].on_hand].some(v=>!['number','string'].includes(typeof v)||String(v).trim()===''||!Number.isFinite(Number(v))))throw Error('API Erplain · Stock de l’emplacement non reçu');
   // Historical BC quantities were already deducted; require only the added quantity.
-  const existing=historicalProof?0:Math.max(0,lines.filter(l=>String(l.variant.id)===String(variant.id)&&String(l.location.id)===String(original.location.id)).reduce((n,l)=>n+Number(l.quantity),0)-(partialProof?.allocated[String(variant.id)+':'+String(original.location.id)]||0));
-  if(Math.min(Number(stocks[0].available),Number(stocks[0].on_hand))<quantity+existing)throw Error('Produit de remplacement ['+variant.sku+'] : stock insuffisant. Quantité totale nécessaire : '+(quantity+existing)+' unités ; stock disponible : '+Math.min(Number(stocks[0].available),Number(stocks[0].on_hand))+' unités ; quantité manquante : '+Math.round((quantity+existing-Math.min(Number(stocks[0].available),Number(stocks[0].on_hand)))*1e6)/1e6+' unités. Remplacement non enregistré. Choisissez un autre produit ou réduisez la quantité à remplacer.');
+  const prior=historicalProof?'0':exactQuantityDifference(exactQuantitySum(lines.filter(l=>String(l.variant.id)===String(variant.id)&&String(l.location.id)===String(original.location.id)).map(l=>l.quantity)),partialProof?.allocated[String(variant.id)+':'+String(original.location.id)]||0),existing=Number(prior)<0?'0':prior;
+  const stockRows=[quantity,existing].map(quantity=>({quantity,reserved_quantity:0,available:stocks[0].available,on_hand:stocks[0].on_hand})),budget=exactStockAvailability(stockRows);
+  if(!budget.sufficient)throw Error('Produit de remplacement ['+variant.sku+'] : stock insuffisant. Quantité totale nécessaire : '+budget.need+' unités ; stock disponible : '+budget.usable+' unités ; quantité manquante : '+budget.missing+' unités. Remplacement non enregistré. Choisissez un autre produit ou réduisez la quantité à remplacer.');
  }
  const remaining=Number(original.quantity)-replace;
  for(const l of lines.filter(l=>l!==original||remaining>0)){try{resolveWeight([l.variant],l.variant.sku);}catch(e){throw Error('Produit restant ['+l.variant.sku+'] : '+e.message);}}
@@ -126,6 +130,9 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   }else if(fingerprint(substitutionMappingSnapshot(mappingLines))!==fingerprint(substitutionMappingSnapshot((plan.recordedMappingBefore||[]).map(r=>({source_sku:r.source_sku,mapped_sku:r.target_sku,mapping_source_qty:r.source_qty,mapping_target_qty:r.target_qty})))))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');
  }
  const permanent=b.scope==='permanent'?(plan.localCommitted?plan.recordedPermanent:permanentEquivalentMapping(o,plan.attemptRecovery?plan.commercialBefore:bc,b,mappingLines)):null;if(plan.attemptRecovery&&((permanent===null)!==(plan.recordedPermanent===null)||['channel','source_sku','target_sku','source_qty','target_qty'].some(k=>permanent?.[k]!==plan.recordedPermanent?.[k])))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');plan.labelNotice=labelNotice;plan.previewFingerprint=fingerprint({plan:plan.previewFingerprint,scope:b.scope,permanent,shopifyStatusProof:plan.shopifyStatusProof||null,temu:temu?{status:temu.status,packages:temu.packages,result:temu.result?.packageInfoResultList}:null,carrier:carrier?{creation:carrier.creation_id,reference:carrier.reference,tracking:carrier.tracking}:null});if(!apply)return plan;
+ // One explicit submission verifies the current ERP state and applies that same
+ // plan in the existing locked worker. No browser round trip or saved preview.
+ if(b.verifyAndApply===true)b={...b,previewFingerprint:plan.previewFingerprint};
  if(plan.previewFingerprint!==b.previewFingerprint){
   const saved=(await db.query("SELECT result,payload FROM resolution_jobs WHERE order_id=$1 AND action='equivalent-preview' AND status='complete' AND result->>'previewFingerprint'=$2 ORDER BY created_at DESC LIMIT 1",[o.id,b.previewFingerprint])).rows[0],prior=saved?.result;
   const operation=p=>({bc:p.commercialBefore,items:p.items,expected:p.expected,bcId:p.bcId,originalSku:p.originalSku,replacementSku:p.replacementSku,replaceQuantity:p.replaceQuantity,replacementQuantity:p.replacementQuantity,weightKg:p.weightKg});
