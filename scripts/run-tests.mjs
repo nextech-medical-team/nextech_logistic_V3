@@ -70,4 +70,5 @@ groups.push(['--test','test/margin-observer-stability.test.mjs','test/temu-refus
 groups.push(['--test','test/negative-stocks-upgrade.test.mjs','test/negative-stocks.test.mjs','test/negative-stocks-launch.test.mjs','test/workspace-navigation.test.mjs']);
 groups.push(['--test','test/erplain-existing-recovery.test.mjs']);
 groups.push(['--test','test/catalogue-demand-sql.test.mjs']);
+groups.push(['--test','test/single-action-substitution.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

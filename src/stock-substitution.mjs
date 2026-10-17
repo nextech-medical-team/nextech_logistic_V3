@@ -21,7 +21,8 @@ export function validateSubstitution(b,apply=false){
  if(b.sku.trim()===b.replacementSku.trim())throw Error('Choisir un SKU différent du produit en rupture');
  for(const field of ['replaceQuantity','replacementQuantity'])if(!Number.isFinite(Number(b[field]))||Number(b[field])<=0)throw Error('Quantités de remplacement strictement positives requises');
  if(!['order','permanent'].includes(b.scope))throw Error('Choisir la portée de l’équivalence');
- if(apply&&(!/^[a-f0-9]{64}$/.test(b.previewFingerprint||'')||b.confirmEquivalent!==true))throw Error('Vérifier et confirmer le produit équivalent avant enregistrement');
+ if(b.verifyAndApply!==undefined&&b.verifyAndApply!==true)throw Error('Option de remplacement direct invalide');
+ if(apply&&(b.confirmEquivalent!==true||b.verifyAndApply!==true&&!/^[a-f0-9]{64}$/.test(b.previewFingerprint||'')))throw Error('Vérifier et confirmer le produit équivalent avant enregistrement');
 }
 function inclusivePrice(bc,l){const price=Number(l.price)-Number(l.tax_amount)/Number(l.quantity);return bc.tax_type==='inclusive'&&l.price!=null&&l.tax_amount!=null&&Number.isFinite(price)?{price}:{};}
 export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,historicalStock=null,partialProof=null}={}){
@@ -126,6 +127,9 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   }else if(fingerprint(substitutionMappingSnapshot(mappingLines))!==fingerprint(substitutionMappingSnapshot((plan.recordedMappingBefore||[]).map(r=>({source_sku:r.source_sku,mapped_sku:r.target_sku,mapping_source_qty:r.source_qty,mapping_target_qty:r.target_qty})))))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');
  }
  const permanent=b.scope==='permanent'?(plan.localCommitted?plan.recordedPermanent:permanentEquivalentMapping(o,plan.attemptRecovery?plan.commercialBefore:bc,b,mappingLines)):null;if(plan.attemptRecovery&&((permanent===null)!==(plan.recordedPermanent===null)||['channel','source_sku','target_sku','source_qty','target_qty'].some(k=>permanent?.[k]!==plan.recordedPermanent?.[k])))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');plan.labelNotice=labelNotice;plan.previewFingerprint=fingerprint({plan:plan.previewFingerprint,scope:b.scope,permanent,shopifyStatusProof:plan.shopifyStatusProof||null,temu:temu?{status:temu.status,packages:temu.packages,result:temu.result?.packageInfoResultList}:null,carrier:carrier?{creation:carrier.creation_id,reference:carrier.reference,tracking:carrier.tracking}:null});if(!apply)return plan;
+ // One explicit submission verifies the current ERP state and applies that same
+ // plan in the existing locked worker. No browser round trip or saved preview.
+ if(b.verifyAndApply===true)b={...b,previewFingerprint:plan.previewFingerprint};
  if(plan.previewFingerprint!==b.previewFingerprint){
   const saved=(await db.query("SELECT result,payload FROM resolution_jobs WHERE order_id=$1 AND action='equivalent-preview' AND status='complete' AND result->>'previewFingerprint'=$2 ORDER BY created_at DESC LIMIT 1",[o.id,b.previewFingerprint])).rows[0],prior=saved?.result;
   const operation=p=>({bc:p.commercialBefore,items:p.items,expected:p.expected,bcId:p.bcId,originalSku:p.originalSku,replacementSku:p.replacementSku,replaceQuantity:p.replaceQuantity,replacementQuantity:p.replacementQuantity,weightKg:p.weightKg});
