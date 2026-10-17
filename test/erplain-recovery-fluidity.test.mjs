@@ -4,6 +4,50 @@ import {PGlite} from '@electric-sql/pglite';
 import {resumeTransientErplain} from '../src/erplain-transient-recovery.mjs';
 
 const error='Erplain HTTP 429 · attente du quota partagé différée, aucune requête envoyée';
+test('existing Amazon draft resumes without missing-document transport or ledger guards',async t=>{
+ const {engine,db,api}=await fixture(t,1);
+ await engine.exec("ALTER TABLE orders ADD COLUMN channel text DEFAULT 'amazon'");
+ await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'publishing_bl',bcReservationPolicy:'erplain_bc_bl',bc:{id:123,status:'active',update_stock:true},bl:{id:456,label:'SHO00745115',status:'unpublished',update_stock:true}})]);
+ await engine.query('UPDATE erp_live_jobs SET error=$1',['BL Erplain · Publication à vérifier']);
+ let reads=0;api.request=async q=>{reads++;if(q.includes('V3TransientBL'))return {Order:{id:123,status:'active',update_stock:true,shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}}};
+ assert.match(q,/^query V3TransientSavedDraft/);return {ShippingOrder:{id:456,label:'SHO00745115',status:'unpublished',update_stock:true,orders:{data:[{id:123}],paginatorInfo:{hasMorePages:false}}}};};
+ assert.equal(await resumeTransientErplain(db,api),1);assert.equal(reads,2);
+ assert.equal((await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live.phase,'bl_created');
+});
+for(const scenario of ['absent','movement','concurrent-suspension','concurrent-label'])test('Amazon missing draft recovery: '+scenario,async t=>{
+ const {engine,db,api}=await fixture(t,1);
+ await engine.exec(`ALTER TABLE orders ADD COLUMN channel text DEFAULT 'amazon';ALTER TABLE resolution_jobs ADD COLUMN id text;
+ CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE audit(user_email text,action text,detail jsonb);`);
+ const before={phase:'publishing_bl',bcReservationPolicy:'erplain_bc_bl',bc:{id:123,status:'active',update_stock:true},bl:{id:456,label:'SHO00745115',status:'unpublished',update_stock:true}};
+ await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify(before)]);
+ await engine.query('UPDATE erp_live_jobs SET error=$1',['BL Erplain · Publication à vérifier']);
+ let mutations=0;
+ api.request=async q=>{
+  if(!q.startsWith('query ')){mutations++;assert.fail('read-only reconciliation');}
+  if(q.includes('V3TransientBL'))return {Order:{id:123,status:'active',update_stock:true,shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}}};
+  if(q.includes('V3TransientSavedDraft'))return {ShippingOrder:null};
+  if(q.includes('V3MissingDraftRead'))return {Order:{id:123,created_at:'2026-10-15 08:00:00',status:'active',update_stock:true,line_items:[{type:'normal',variant:{id:1}}],shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}},ShippingOrder:null};
+  if(q.includes('V3MissingNativeDraftLedger'))return {InventoryLogs:{data:scenario==='movement'?[{id:9,document_id:456,order_type:'ShippingOrder'}]:[],paginatorInfo:{hasMorePages:false}}};
+  if(q.includes('V3MissingDraftStock'))return {StockRemovals:{data:[],paginatorInfo:{hasMorePages:false}}};
+  if(q.includes('V3MissingDraftLabel')){
+   if(scenario==='concurrent-suspension')await engine.query(`UPDATE orders SET suspension='{"active":true}'`);
+   if(scenario==='concurrent-label')await engine.query("INSERT INTO carrier_jobs VALUES('0')");
+   return {ShippingOrders:{data:[{id:789,label:'SHO00745115',status:'ready_to_ship',orders:{data:[{id:999}],paginatorInfo:{hasMorePages:false}}}],paginatorInfo:{hasMorePages:false}}};
+  }
+  assert.fail(q);
+ };
+ if(scenario==='concurrent-label')await assert.rejects(resumeTransientErplain(db,api),/document transport/);
+ else assert.equal(await resumeTransientErplain(db,api),scenario==='absent'?1:0);
+ const after=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;
+ assert.equal(mutations,0);
+ if(scenario==='absent'){
+  assert.equal(after.phase,'bc_created');assert.equal(after.bl,undefined);assert.deepEqual(after.bc,before.bc);
+  assert.deepEqual(after.missingDraftRecoveries[0].retiredDraft,before.bl);
+  assert.equal(after.missingDraftRecoveries[0].labelMatches[0].id,789);
+  assert.equal((await engine.query('SELECT action FROM audit')).rows[0].action,'erplain.missing_draft_retired');
+  assert.equal((await engine.query('SELECT status FROM erp_live_jobs')).rows[0].status,'pending');
+ }else{assert.deepEqual(after.bl,before.bl);assert.equal((await engine.query('SELECT * FROM audit')).rows.length,0);}
+});
 async function fixture(t,n=2){
  const engine=new PGlite();await engine.waitReady;t.after(()=>engine.close());
  await engine.exec(`CREATE TABLE orders(id text PRIMARY KEY,source_payload jsonb DEFAULT '{}',label_status text DEFAULT 'pending',tracking_status text DEFAULT 'not_shipped',issue text,erp_live jsonb NOT NULL,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
@@ -72,4 +116,14 @@ test('existing BC/BL read is reconciled without provider mutation',async t=>{
  api.request=async q=>{assert.match(q,/^query V3TransientBL/);return {Order:{id:123,status:'active',shipping_orders:{data:[{id:456,status:'pending'}],paginatorInfo:{hasMorePages:false}}}};};
  assert.equal(await resumeTransientErplain(db,api),1);
  assert.equal((await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live.bl.id,456);
+});
+
+test('tender transient recovery preserves installed publication phase',async t=>{
+ const {engine,db,api}=await fixture(t,1);
+ await engine.exec("ALTER TABLE orders ADD COLUMN channel text DEFAULT 'tender'");
+ await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'publishing_bl',bc:{id:123},bl:{id:456,status:'unpublished'},transientRecovery:{lastError:error,readRateLimited:true}})]);
+ api.request=async q=>{assert.match(q,/^query /);return {Order:{id:123,status:'active',shipping_orders:{data:[{id:456,status:'pending'}],paginatorInfo:{hasMorePages:false}}}};};
+ assert.equal(await resumeTransientErplain(db,api),1);
+ const s=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;
+ assert.equal(s.phase,'publishing_bl');assert.equal(s.publicationReconciledAt,undefined);
 });

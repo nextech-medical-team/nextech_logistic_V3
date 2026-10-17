@@ -2,6 +2,10 @@ import {cancellationBlock,retryDecision,transientErpError} from './erp-transient
 import {recoverOrder} from './erplain-document-metadata.mjs';
 import {quotaReadRetryAt,quotaWaitingMessage} from './erplain-quota-wait.mjs';
 import {reconcilePublicationState} from './publication-recovery.mjs';
+import {readTransientBlIdentity} from './transient-bl-identity.mjs';
+import {prepareMissingDraftRecovery,commitMissingDraftRecovery} from './missing-draft-recovery.mjs';
+import {usesNativeBlCycle} from './native-bl-policy.mjs';
+import {randomUUID} from 'node:crypto';
 
 export async function recordTransientFailure(db,o,message,error){
  const old=o.erp_live?.transientRecovery||{};
@@ -53,7 +57,8 @@ export async function resumeTransientErplain(db,api){
    if(cancellationBlock(o))continue;
    if(!retryDecision(o,raw,o.retry_updated))continue;
    const recovery={...o.erp_live.transientRecovery,attempts:Number(o.erp_live.transientRecovery?.attempts||0)+1,lastError:raw,checkedAt:new Date().toISOString()};
-   let state={...o.erp_live,transientRecovery:recovery},failure=null;
+   let state={...o.erp_live,transientRecovery:recovery},failure=null,retiredDraft=null;
+   const recoveryId=randomUUID();
    try{
     // No writes in this preflight. A lost BC response is reconciled by its immutable V3 identity.
     const reader={request:async(q,v)=>{if(!/^query\s/.test(q))throw Error('Rapprochement ERP : lecture seule obligatoire');const result=await api.request(q,v);if(result.Orders){if(!Array.isArray(result.Orders.data)||result.Orders.paginatorInfo?.hasMorePages!==false)throw Error('BC : recherche incomplète');for(const x of result.Orders.data){const identified=x.external_reference==='V3:'+o.id||String(x.internal_notes||'').includes('[V3:'+o.id+']')||x.customer?.customer_number==='V3:'+o.id;if(!identified||!x.id||!['active','unpublished'].includes(x.status))throw Error('BC de même référence ambigu ou non réutilisable : aucune nouvelle création');}}return result;}};
@@ -69,12 +74,20 @@ export async function resumeTransientErplain(db,api){
      const result=await reader.request('query V3TransientBL($id:ID!){Order(id:$id){id status update_stock shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}}}',{id:String(state.bc.id)});
      const bc=result.Order,list=bc?.shipping_orders;
      if(String(bc?.id)!==String(state.bc.id)||bc.status!=='active'||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
-     const bl=list.data[0];
-     if(bl&&(!bl.id||['cancelled','closed'].includes(bl.status)))throw Error('BL annulé ou non identifiable : contrôle nécessaire');
-     if(state.bl?.id&&!bl)throw Error(state.bl.status==='unpublished'?'Brouillon BL introuvable dans Erplain : reprendre depuis le BC après rapprochement':'BL introuvable dans Erplain : rapprochement nécessaire');
-     if(state.bl?.id&&String(bl?.id)!==String(state.bl.id))throw Error('BL différent : contrôle nécessaire');
-     if(bl)state.bl=bl;
-     state=reconcilePublicationState(state,bc);
+     let bl;
+     try{bl=await readTransientBlIdentity(reader,state,bc,{lookupDraft:o.channel!=='tender'});}
+     catch(e){
+      // Only a confirmed absent draft needs the existing no-movement proof.
+      // An existing draft must not acquire new transport or stock prerequisites.
+      if(e.code!=='V3_MISSING_DRAFT'||o.channel!=='amazon'||!usesNativeBlCycle(o))throw e;
+      retiredDraft=await prepareMissingDraftRecovery(db,reader,o,{resolutionId:recoveryId});
+      if(!retiredDraft)throw Error('Brouillon BL réapparu pendant le rapprochement : relire avant reprise');
+     }
+     if(retiredDraft)state={...retiredDraft,transientRecovery:recovery};
+     else{
+      if(bl)state.bl=bl;
+      if(o.channel!=='tender')state=reconcilePublicationState(state,bc);
+     }
     }
    }catch(e){
     state.transientRecovery.lastError=transientErpError(e.message)?e.message:null;
@@ -96,7 +109,8 @@ export async function resumeTransientErplain(db,api){
      AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
      FOR UPDATE OF o,e SKIP LOCKED`,[o.id,o.retry_version,JSON.stringify(o.erp_live)])).rows[0];
     if(!fresh||!retryDecision(fresh,raw,fresh.retry_updated))return false;
-    await tx.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(state)]);
+    if(retiredDraft&&!failure)await commitMissingDraftRecovery(tx,o,state,{resolutionId:recoveryId});
+    else await tx.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(state)]);
     if(failure)await tx.query('UPDATE erp_live_jobs SET error=$2,updated_at=now() WHERE order_id=$1',[o.id,failure]);
     else await tx.query("UPDATE erp_live_jobs SET status='pending',error=null,updated_at=now() WHERE order_id=$1",[o.id]);
     return true;

@@ -1,4 +1,5 @@
 import {priceCorrection} from './price-correction.mjs';
+import {partialTemuLabelService} from './partial-temu-label.mjs';
 import {initializePlatformCancellationReports,platformCancellationReports} from './platform-cancellation-reports.mjs';
 import {publishStockWatchObservations} from './grouped-stock-watch.mjs';
 import {initializeImportReceptions,readImportReceptions} from './import-reception.mjs';
@@ -198,7 +199,7 @@ const interruptedErplain=interruptedErplainRecovery(db,directory,{shouldStop:()=
 backgroundInterval(()=>interruptedErplain.run(),15000,'erplain-interrupted-recovery');
 const erplainRefresh=erplainRefreshService(db,directory);const erplainRefreshTimer=backgroundInterval(()=>erplainRefresh.run(),1200,'erplain-refresh');erplainRefreshTimer.unref();
 const temuLocal=temuLocalService(db,directory);
-const temuAutoPurchase=temuAutomaticPurchaseWorker(db,temuLocal,margins,{refreshPreparation:id=>refreshErplainDocuments(db,erplainAccount(directory,'source'),id),enabled:()=>!runtime.stopping&&runtime.enabled('temu-automatic-purchase')&&runtime.enabled('temu-logistics')&&runtime.enabled('automatic-preparation')});
+const temuAutoPurchase=temuAutomaticPurchaseWorker(db,temuLocal,margins,{refreshPreparation:id=>refreshErplainDocuments(db,erplainAccount(directory,'source'),id),enabled:()=>!runtime.stopping&&runtime.enabled('temu-automatic-purchase')&&runtime.enabled('temu-logistics')});
 backgroundInterval(()=>temuAutoPurchase.run(),30000,'temu-automatic-purchase');
 await db.withLocks(['schema'],()=>initializeTemuSync(db));
 const temuSync=temuSyncJobs(db,temuLocal,{shouldStop:()=>runtime.stopping});
@@ -221,7 +222,8 @@ let productionConfig=null;try{productionConfig=JSON.parse(await readFile(path.jo
 let partialConfig=null;try{partialConfig=JSON.parse(await readFile(path.join(directory,'carriers-test.json'),'utf8'));}catch{}
 let carrierWorkers=null;try{carrierWorkers=createCarrierWorkers(db,partialConfig,{productionConfig});}catch{}
 const extras=extraParcelWorker(db,{testConfig:partialConfig,productionConfig});const extraTimer=backgroundInterval(()=>extras.run(),1200,'extra-parcels');extraTimer.unref();
-const partialWorker=partialService(db,directory,{carrierConfig:productionConfig,testConfig:partialConfig});
+const partialTemu=partialTemuLabelService(db,temuLocal,erplainAccount(directory,'live'),{enabled:()=>!runtime.stopping&&runtime.enabled('temu-logistics')&&runtime.enabled('automatic-preparation')});
+const partialWorker=partialService(db,directory,{carrierConfig:productionConfig,testConfig:partialConfig,temu:partialTemu});
 const partialTimer=backgroundInterval(()=>partialWorker.run(),1500,'partials');partialTimer.unref();
 
 for(const carrier of ['gls','gofo'])backgroundInterval(async()=>{if(carrierWorkers)await carrierWorkers.run(carrier);},1000,'carrier-'+carrier);
@@ -462,7 +464,7 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/stocks/negative/history'&&req.method==='GET'){json(res,200,await negativeStockHistory.list(url.searchParams.get('page')||'1'));return;}
     if(p==='/api/stocks/negative/history/detail'&&req.method==='GET'){json(res,200,await negativeStockHistory.get(url.searchParams.get('id')));return;}
     if(p==='/api/stocks/negative'&&req.method==='GET'){json(res,200,await negativeStocks.page(url.searchParams.get('page')||'1'));return;}
-    if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku')));return;}
+    if(p==='/api/equivalences/stock-information'&&req.method==='GET'){json(res,200,await stockInformation.get(url.searchParams.get('sku'),{includeIncomingDates:url.searchParams.get('includeIncomingDates')==='1'}));return;}
     if(await equivalenceApi({p,url,req,res,db,user,body,json,permitted,api:erplainAccount(directory,'source'),directory}))return;
     if(await workspaceApi({p,url,req,res,db,user,body,json,permitted,audit,catalog,carrierConfigured:!!carrierWorkers&&!!productionConfig}))return;
 
@@ -501,12 +503,14 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/partial/refresh'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialWorker.refresh(b.id);await audit(user,'partial.erplain_refreshed',{orderId:b.id,stockHolds:result.stockHolds.length});json(res,200,{message:result.message,stockHolds:result.stockHolds});return;}
     if(p==='/api/partial/prepare'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialWorker.prepare(b.id,b.selection,b.requestId,b.labelChoice??(b.replaceLabel===true?'replace':null));await audit(user,'partial.prepared',{orderId:b.id,deliveryId:result.id,replayed:result.replayed||false});json(res,202,result);return;}
     if(p==='/api/partial/cancel'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await cancelPartialDelivery(db,erplainAccount(directory,'live'),b);await audit(user,'partial.cancel',{orderId:b.id,deliveryId:b.deliveryId,blId:b.blId,...result});json(res,200,result);return;}
+    if(p==='/api/partial/temu/refresh'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialTemu.advance(b.id);await audit(user,'partial.temu_refreshed',{deliveryId:b.id,status:result.status});json(res,200,result);return;}
+    if(p==='/api/partial/temu/buy'&&req.method==='POST'){permitted(user,operational);const b=await body(req);await audit(user,'partial.temu_purchase_requested',{deliveryId:b.id,planId:b.planId,amount:b.amount});json(res,200,await partialTemu.buy(b.id,b.planId,b.amount,b.confirmPurchase));return;}
     if(p==='/api/partial/retry'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialWorker.retry(b.id);await audit(user,'partial.retry',{deliveryId:b.id,...result});json(res,202,{ok:true,...result});return;}
     if(p==='/api/partial/visible'&&req.method==='POST'){
       const {ids}=await body(req);if(!Array.isArray(ids)||ids.length>200||ids.some(id=>typeof id!=='string'))throw new Error('Page de commandes invalide');
-      const rows=(await db.query("SELECT d.id,d.order_id,o.reference,o.channel,o.recipient,o.address,o.erp_live,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.label_choice,d.environment,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE d.order_id=ANY($1::text[]) ORDER BY d.created_at,d.id",[ids])).rows;json(res,200,{rows});return;
+      const rows=(await db.query("SELECT d.id,d.order_id,o.reference,o.channel,o.recipient,o.address,o.erp_live,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.label_choice,d.environment,d.temu_label,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE d.order_id=ANY($1::text[]) ORDER BY d.created_at,d.id",[ids])).rows;json(res,200,{rows});return;
     }
-    if(p==='/api/partial/list'&&req.method==='GET'){const rows=(await db.query("SELECT d.id,d.order_id,o.reference,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.environment,d.label_choice,d.stock_document,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE ($1='' OR d.order_id=$1) ORDER BY d.created_at DESC LIMIT 100",[url.searchParams.get('id')||''])).rows;json(res,200,{rows});return;}
+    if(p==='/api/partial/list'&&req.method==='GET'){const rows=(await db.query("SELECT d.id,d.order_id,o.reference,d.status,d.selection,d.bl,d.carrier,d.weight_kg,d.parcel_count,d.tracking,d.error,d.stage,d.environment,d.label_choice,d.stock_document,d.temu_label,d.created_at,(SELECT count(*)::int FROM partial_documents p WHERE p.delivery_id=d.id) AS documents FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE ($1='' OR d.order_id=$1) ORDER BY d.created_at DESC LIMIT 100",[url.searchParams.get('id')||''])).rows;json(res,200,{rows});return;}
     const partialDoc=p.match(/^\/api\/partial\/documents\/([^/]+)\/(\d+)$/);
     if(partialDoc&&req.method==='GET'){const row=(await db.query('SELECT pdf FROM partial_documents WHERE delivery_id=$1 AND document_index=$2',[partialDoc[1],Number(partialDoc[2])])).rows[0];if(!row)throw new Error('PDF partiel indisponible');res.setHeader('Content-Type','application/pdf');await labelAttachment(db,res,'partial',partialDoc[1],Number(partialDoc[2])+1);res.end(await currentPartialSkuPdf(db,row.pdf,partialDoc[1],Number(partialDoc[2])));return;}
 

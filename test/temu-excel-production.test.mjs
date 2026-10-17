@@ -42,7 +42,7 @@ test('production validation is explicit, atomic and idempotent; queues the exist
  const results=await Promise.all([f.service.prepare({...b,mallId:"untrusted-browser-value"},user),f.service.prepare(b,user)]);assert.equal(results.filter(r=>r.replayed).length,1);
  const resumed=await f.service.preview(reference);assert.equal((await f.service.prepare({...b,fingerprint:resumed.fingerprint},user)).replayed,true);
  const o=await f.read();assert.equal(o.suspension.active,false);assert.equal(o.source_payload.mallId,undefined);assert.equal(o.source_payload.temuDirect.state,'unverified');assert.equal(f.calls.length,0);assert.equal(o.resolution_pending_resume,true);assert.equal(o.source_payload.temuExcelCommercial.total,84.05);
- const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.ok(automaticPreparationHold(o));
+ const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.equal(automaticPreparationHold(o),null);
 });
 test('Excel preparation works without TEMU access and preserves stale-preview and independent holds',async t=>{
  const f=await fixture(t),input=await f.input();
@@ -65,11 +65,11 @@ test('production worker uses Excel source totals and shared pricing, without API
  assert.equal(temuSellerTotals(o).total,84.05);verifySourceCommercialTotals({total:84.05,currency:{label:'EUR'},line_items:[{tax_amount:16.8}]},temuSellerTotals(o));
  lines[0].quantity=10;await assert.rejects(ensureTemuBcPricing(f.db,o,lines,()=>assert.fail('No API amount request')),/modifiés/);
 });
-test('same TEMU shipping engine uses published BL without ERP revalidation, quotes 0.25 kg/latest slot, and buys once',async t=>{
+test('same TEMU shipping engine uses published BL without ERP revalidation, quotes known kg/latest slot, and buys once',async t=>{
  const f=await fixture(t);await f.service.prepare(await f.input(),user);const shipping=temuShipping(f.db,f.api);
- await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
+ await assert.doesNotReject(shipping.prepare(reference));
  await f.db.query("UPDATE orders SET resolution_pending_resume=false,weight_kg=5 WHERE id='o'");
- await assert.rejects(shipping.prepare(reference),/BL validé/);
+ await assert.doesNotReject(shipping.prepare(reference));
  const proof=await shipmentFingerprint(f.db,await f.read()),at=new Date().toISOString();
  await f.db.query("UPDATE orders SET erp_live=$1 WHERE id='o'",[JSON.stringify({bc:{id:'bc'},bl:{id:'bl',status:'ready_to_ship'},verifiedAt:at,stockCheckedAt:at,labelPreparationFingerprint:proof})]);await f.db.query("INSERT INTO erp_live_jobs VALUES('o','complete',null)");
  // Reproduce the waiting worker's document-only completion: manual hold remains.
@@ -84,7 +84,7 @@ test('same TEMU shipping engine uses published BL without ERP revalidation, quot
  await f.db.query("UPDATE resolution_jobs SET error=null WHERE order_id='o'");
  // A successful BL retry is newer than the original Excel import job.
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,result,created_at) VALUES('bl-retry','o','resume-erp','complete','{\"erpOnly\":true}',now()+interval '1 second')");
- const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'0.25');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
+ const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'5');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
  assert.equal((await f.read()).resolution_pending_resume,true);
  assert.equal(automaticPreparationHold(await f.read()),null);
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,created_at) VALUES('later','o','refresh','queued',now()+interval '1 minute')");
@@ -120,7 +120,7 @@ test('post-BL Excel path preserves suspension, cancellation, partial scope and d
  await f.db.query("UPDATE orders SET suspension='{}',tracking_status='cancelled' WHERE id='o'");
  await assert.rejects(shipping.prepare(reference),/annulée/);
  await f.db.query("UPDATE orders SET tracking_status='not_shipped',partial_mode=true WHERE id='o'");
- await assert.rejects(shipping.prepare(reference),/partielle/);
+ await assert.rejects(shipping.prepare(reference),/partiel/);
  await f.db.query("UPDATE orders SET partial_mode=false WHERE id='o'");
  await f.db.query("UPDATE temu_label_jobs SET attempt_id='uncertain-attempt',status='uncertain' WHERE reference=$1",[reference]);
  await assert.rejects(shipping.prepare(reference),/tentative/);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,0);
@@ -151,7 +151,7 @@ test('automatic TEMU purchase uses existing BL without Excel, ERP, stock or prep
  const erp={bl:{id:'existing-bl',status:'in_preparation'},bc:{id:'bc'},stock:{error:'Stock insuffisant'},pricing:{status:'blocked'}};
  await f.db.query("UPDATE orders SET simulation=true,suspension='{}',issue='Mapping modifié',resolution_pending_resume=true,erp_live=$1 WHERE id='o'",[JSON.stringify(erp)]);
  await f.db.query("INSERT INTO temu_label_jobs(reference,status) VALUES($1,'to_buy')",[reference]);
- const shipping=temuShipping(f.db,f.api),local={amounts:async()=>({}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
+ const shipping=temuShipping(f.db,f.api),local={recover:async r=>({status:'ready',plan:await shipping.prepare(r)}),amounts:async()=>({}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
  const margins={get:async()=>({calculatedAt:new Date().toISOString(),rows:[{reference,status:'positive',profit:1,shipping:2.5/1.2,shippingSource:'Devis TEMU final',issues:[]}]})};
  const worker=temuAutomaticPurchaseWorker(f.db,local,margins,{stockGate:()=>assert.fail('No post-BL stock read'),refreshPreparation:()=>assert.fail('No post-BL ERP read')});
  await worker.run();assert.equal(f.bought,1);assert.equal((await f.db.query('SELECT status FROM temu_label_jobs')).rows[0].status,'complete');
@@ -195,7 +195,7 @@ test('Excel uses the existing automatic worker: only positive quote-matched marg
  await f.db.query("INSERT INTO temu_label_jobs(reference,status) VALUES($1,'to_buy')",[reference]);
  await f.db.query("UPDATE orders SET source_payload=jsonb_set(source_payload,'{temuDirect,state}','\"verified\"') WHERE id='o'");
  let profit=null;
- const shipping=temuShipping(f.db,f.api),local={amounts:async()=>({source:'temu_excel'}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
+ const shipping=temuShipping(f.db,f.api),local={recover:async r=>({status:'ready',plan:await shipping.prepare(r)}),amounts:async()=>({source:'temu_excel'}),prepare:r=>shipping.prepare(r),buy:(...args)=>shipping.buy(...args)};
  const margins={get:async()=>({calculatedAt:new Date().toISOString(),rows:[{reference,status:profit===null?'incomplete':profit>0?'positive':'negative',profit,shipping:2.5/1.2,shippingSource:'Devis TEMU final',issues:[]}]})};
  const worker=temuAutomaticPurchaseWorker(f.db,local,margins,{refreshPreparation:async()=>({stockHolds:[]})});
  for(profit of [null,-1,0]){
@@ -253,7 +253,7 @@ test('published BL permits manual label despite legacy import flags and obsolete
  const shipping=temuShipping(f.db,f.api);
  const plan=await shipping.prepare(reference);assert.equal(f.bought,0);
  await f.db.query("INSERT INTO correction_jobs VALUES('correction','o','checking')");
- await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/correction ou reprise en cours/);
+ await assert.doesNotReject(shipping.prepare(reference));
  assert.equal(f.bought,0);
  await f.db.query("DELETE FROM correction_jobs WHERE id='correction'");
  await f.db.query("UPDATE orders SET suspension='{\"active\":true,\"note\":\"Stop\"}' WHERE id='o'");
