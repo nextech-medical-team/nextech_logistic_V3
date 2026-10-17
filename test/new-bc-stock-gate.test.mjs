@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {assertNewBcStock} from '../src/new-bc-stock-gate.mjs';
 import {publishIncrementalBc} from '../src/bc-numbering.mjs';
+import {newSalesBcInput} from '../src/erplain-live-workflow.mjs';
 const conn=data=>({data,paginatorInfo:{hasMorePages:false}});
 function fixture(stock=94){
  const variant={id:642510,sku:'TR03',track_inventory:true,stock_levels:conn([{location:{id:100934},on_hand:stock,available:stock,incoming:35200}])};
@@ -10,6 +11,12 @@ function fixture(stock=94){
  return {variant,line,api,calls,run:lines=>assertNewBcStock(api,lines||[line])};
 }
 test('SHO00745275: 94 real units cannot cover 200 despite 35200 incoming',async()=>{await assert.rejects(()=>fixture().run(),/200.*94.*106/);});
+for(const channel of ['amazon','shopify','relay','temu','samples','rakuten','tender'])test(channel+' BC input is refused by the shared stock gate at 94/200',async()=>{
+ const f=fixture(),source={channel,id:'coverage',reference:'CASE',source_date:'17/10/2026',source_payload:{},documentMetadata:{},address:{},currency:{id:1},erp_live:{customer:{id:1}},pricing:{tax_type:'exclusive',items:[f.line]}};
+ const input=newSalesBcInput(source,1);
+ assert.equal(input.update_stock,true);
+ await assert.rejects(()=>assertNewBcStock(f.api,input.line_items,{TR03:f.variant}),/stock insuffisant/);
+});
 for(const stock of [200,300])test('sufficient real stock '+stock,async()=>{assert.equal(await fixture(stock).run(),true);});
 test('duplicate lines sum demand against shared stock',async()=>{const f=fixture(200);await assert.rejects(()=>f.run([f.line,f.line]),/400/);assert.equal(f.calls.length,1);});
 test('unknown tracking policy refuses',async()=>{const f=fixture();delete f.variant.track_inventory;await assert.rejects(()=>f.run());});

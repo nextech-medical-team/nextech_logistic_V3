@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {usesNativeBlCycle,readNativeBlCycle} from '../src/native-bl-policy.mjs';
+import {usesNativeBlCycle,readNativeBlCycle,assertNativeBcSnapshot} from '../src/native-bl-policy.mjs';
 import {historicalPreparationProof} from '../src/historical-stock-proof.mjs';
 import {normalizeHistoricalDraft} from '../src/historical-bl-draft.mjs';
 import {assertResumeStock} from '../src/resume-stock-policy.mjs';
@@ -20,6 +20,23 @@ test('native BC with 24 items, zero reservation and no debit proof proceeds with
  const resumed=await assertResumeStock(f.api,f.order,f.bc,f.bc.line_items);assert.equal(resumed.stockOnBc,true);
 });
 test('actual 5/10 shortage continues to wait for reception',async()=>{const f=fixture();Object.assign(f.bc.line_items[0],{quantity:10,available:5,on_hand:5});await assert.rejects(()=>readNativeBlCycle(f.api,f.order,{beforeBlPublication:true}),/stock insuffisant/i);});
+
+for(const channel of ['amazon','shopify','relay','temu','samples','rakuten'])test(channel+' saved unpublished draft rechecks stock before publication and resume',async()=>{
+ const f=fixture();f.order.channel=channel;f.order.erp_live.bl={id:9,status:'unpublished'};
+ f.data.ShippingOrder={id:9,status:'unpublished',update_stock:true,orders:conn([{id:7}])};
+ Object.assign(f.bc.line_items[0],{quantity:200,available:94,on_hand:94});
+ assert.throws(()=>assertNativeBcSnapshot(f.order,f.bc,{beforeBlPublication:true}),/stock insuffisant/);
+ await assert.rejects(()=>readNativeBlCycle(f.api,f.order,{beforeBlPublication:true}),/stock insuffisant/);
+ await assert.rejects(()=>assertResumeStock(f.api,f.order,f.bc,f.bc.line_items),/stock insuffisant/);
+ assert.ok(f.calls.every(q=>q.startsWith('query ')));
+});
+
+test('fresh unpublished status rechecks stock even with stale saved pending status',async()=>{
+ const f=fixture();f.order.erp_live.bl={id:9,status:'pending'};
+ f.data.ShippingOrder={id:9,status:'unpublished',update_stock:true,orders:conn([{id:7}])};
+ Object.assign(f.bc.line_items[0],{quantity:200,available:94,on_hand:94});
+ await assert.rejects(()=>readNativeBlCycle(f.api,f.order,{beforeBlPublication:true}),/stock insuffisant/);
+});
 test('existing native draft does not compare BC quantities or stock journals',async()=>{
  const f=fixture();f.order.erp_live.bl={id:9,status:'unpublished'};f.data.ShippingOrder={id:9,label:'SHO00744947',status:'unpublished',update_stock:true,orders:conn([{id:7}])};f.bc.line_items=[];
  assert.equal((await normalizeHistoricalDraft(f.api,f.order)).id,9);assert.equal(f.calls.length,1);

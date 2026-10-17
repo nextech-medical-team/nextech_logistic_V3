@@ -8,7 +8,7 @@ export async function assertResumeStock(api,order,bc,lines,{prove=historicalPrep
  if(String(bc?.id)!==String(order.erp_live?.bc?.id)||bc?.status!=='active')throw Error('BC actif demandé non confirmé');
  if(typeof bc.update_stock!=='boolean')throw Error('Politique de stock du BC non reçue');
  if(usesNativeBlCycle(order)){
-  const result=await readNativeBlCycle(api,order,{beforeBlPublication:!order.erp_live?.bl?.id});
+  const result=await readNativeBlCycle(api,order,{beforeBlPublication:!order.erp_live?.bl?.id||order.erp_live.bl.status==='unpublished'});
   return {stockOnBc:true,proof:result.observation};
  }
  if(bc.update_stock){
