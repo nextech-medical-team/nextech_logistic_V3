@@ -1,5 +1,6 @@
 import {erplainTransportChannel,isImportedErplain} from './erplain-label-required.mjs';
 import {defaultShopifyServices,configuredShopifyMode} from './shopify-delivery.mjs';
+import {parcelWeightKg} from './weight-arithmetic.mjs';
 export const defaultInternational={product:'PARCEL',flexDelivery:true,incoterm:''};
 export const defaultRouting={maxParcelKg:30,shopifyServices:defaultShopifyServices,international:defaultInternational,rules:[
  {channel:'amazon',type:'threshold',threshold:3,below:'gofo',above:'gls'},
@@ -20,6 +21,7 @@ export function validateRouting(c){
 }
 export function configuredRoute(channel,weight,config=defaultRouting,country='FR'){
  if(channel==='temu')return {carrier:'temu',weight:0.25,parcels:1};
+ if(Number.isFinite(weight)&&weight>0)weight=parcelWeightKg(weight);
  if(channel==='relay'){
   const rule=config.rules.find(r=>r.channel==='relay');
   if(rule?.type!=='fixed'||rule.fixed!=='gls_shop')throw Error('Relais · Règle fixe GLS ShopDelivery requise');

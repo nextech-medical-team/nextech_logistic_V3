@@ -4,7 +4,7 @@ import {sourceProductName,minimalProductInput} from '../src/missing-product-crea
 test('TEMU nested Excel French title supplies the real catalogue name without SKU, price or quantity changes',()=>{
  const payload={origin:'temu_excel',excel:{'nom du produit':'10x10 – PHARMAPLAST – Boîte de 10 pièces','contribution SKU':'JN100100','quantité achetée':'2','prix de base des marchandises':'5,90€'}};
  const original=structuredClone(payload),name=sourceProductName({source_payload:payload});assert.equal(name,payload.excel['nom du produit']);
- assert.deepEqual(minimalProductInput('JN100100',name),{label:name,active:true,variants:{data:[{type:'normal',sku:'JN100100',track_inventory:true}]}});assert.deepEqual(payload,original);
+ assert.deepEqual(minimalProductInput('JN100100',name),{label:name,active:true,variants:{data:[{type:'normal',sku:'JN100100',track_inventory:true,weight_amount:5,weight_unit:'g'}]}});assert.deepEqual(payload,original);
 });
 test('existing direct source title keeps priority; normalized French headers and customer product title are supported',()=>{
  assert.equal(sourceProductName({source_payload:{productName:'Authoritative source',excel:{'nom du produit':'Other'}}}),'Authoritative source');
