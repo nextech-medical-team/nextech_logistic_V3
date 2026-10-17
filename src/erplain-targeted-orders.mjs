@@ -1,3 +1,4 @@
+import {resumeArchivedBl} from './erplain-archived-resume.mjs';
 import {preserveImportedPostalAddress} from './imported-postal-authority.mjs';
 import {existingRecoveryCandidate,attachExistingDocuments} from './erplain-existing-recovery.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
@@ -122,6 +123,16 @@ export function targetedOrderService(db,api){
   }));
  }
  return {
+  async reactivate(b,user){
+   if(b.confirmed!==true||typeof b.bcId!=='string'||typeof b.orderId!=='string'||typeof b.blId!=='string'||!b.blId||typeof b.reviewHash!=='string')throw Error('Confirmer la réactivation et sélectionner le BL');
+   const d=await read(b.bcId);if(manualReviewHash(d)!==b.reviewHash)throw Error('Le BC ou ses BL ont changé : relire avant de confirmer');
+   return withShipmentLock(()=>db.transaction(async tx=>{
+    const candidate=await existingRecoveryCandidate(tx,d);
+    if(!candidate||candidate.blocked||candidate.orderId!==b.orderId)throw Error(candidate?.blocked||'Correspondance V3 à vérifier');
+    const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[b.orderId])).rows[0];
+    return resumeArchivedBl(tx,o,d,b.blId,user);
+   }));
+  },
   async reconcile(b,user){
    if(b.confirmed!==true||typeof b.bcId!=='string'||!b.bcId.trim()||typeof b.orderId!=='string'||!b.orderId||typeof b.reviewHash!=='string')throw Error('Confirmer le rattachement à une commande V3 existante');
    const d=await read(b.bcId);

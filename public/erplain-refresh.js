@@ -33,6 +33,8 @@ function renderPreview(r){
  ${admission.length?`<h4>Admission bloquée</h4><ul>${admission.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:''}
  ${preparation.length?`<h4>Points à résoudre avant préparation</h4><ul>${preparation.map(i=>`<li>${esc(i)}</li>`).join('')}</ul><p>La validation de l’entrée dans V3 ne résout pas ces blocages logistiques.</p>`:''}
  ${r.reconcileCandidate?`<p>La commande ${esc(r.reconcileCandidate.reference)} existe déjà dans V3. Le rattachement récupère le BC et tous ses BL, y compris le deuxième BL, en conservant les étiquettes et l’historique. La préparation reste une action séparée.</p>`:''}
+ ${r.reconcileCandidate?.canReactivate&&(r.document.shipping_orders?.data||[]).some(b=>b.status==='pending')?`<fieldset><legend>Reprendre un BL existant sur la commande archivée</legend><label>BL en attente<select data-erplain-resume-bl><option value="">Choisir le BL</option>${r.document.shipping_orders.data.filter(b=>b.status==='pending').map(b=>`<option value="${esc(b.id)}">${esc(b.label)} · en attente</option>`).join('')}</select></label><p>La commande redeviendra visible. Le premier BL et les anciennes étiquettes seront conservés. Aucun BC, BL ni achat d’étiquette ne sera créé par cette action.</p><button class="primary" data-erplain-reactivate>Réactiver et reprendre le BL existant</button></fieldset>`:''}
+ ${r.deliveryId?`<button data-erplain-recovered-bl="${esc(r.orderId)}">Voir la livraison reprise / lancer son étiquette</button>`:''}
  <div class="actions">${r.reconcileCandidate?`<button class="primary" data-erplain-reconcile>Rattacher le BC et les BL à la commande existante</button><button data-erplain-open="${esc(r.reconcileCandidate.orderId)}">Voir la commande existante</button><button data-erplain-reread>Relire ce BC dans Erplain</button>`:r.alreadyRecovered?`<button data-erplain-open="${esc(r.orderId)}">Voir la commande</button>${r.archived?'<span>Commande archivée : aucune réactivation automatique.</span>':''}`:`<button class="primary" data-erplain-approve ${admission.length?'disabled':''}>Valider l’entrée dans V3</button><button data-erplain-reread>Relire ce BC dans Erplain</button>`}<button data-erplain-abandon>Abandonner</button></div><p>Abandonner ne modifie pas le BC dans Erplain.</p>`;
 }
 async function lookup(reference,bcId){
@@ -50,7 +52,7 @@ async function loadRecovered(){
  const logistic=o.archived?'Archivée':o.busy?'Traitement en cours':o.has_label?'Étiquette existante · '+o.tracking_status:problems.length?'Préparation à vérifier':'Préparation à lancer';
  const bls=(o.erp_live?.bc?.shipping_orders?.data||[]).filter(b=>o.erp_live?.bc?.pendingScope?(o.erp_live.pendingBlIds||[]).map(String).includes(String(b.id)):b.status!=='cancelled');
  const partial=o.partial_mode||bls.length>1||(!o.erp_live?.bc?.pendingScope&&(bls.some(b=>['shipped','delivered'].includes(b.status))||(o.erp_live?.bc?.line_items||[]).some(l=>Number(l.shipped_quantity)>0)));
- return `<tr><td>${esc(o.erp_live?.bc?.label)}<br>${esc(o.reference)}</td><td>${esc(o.recipient)}</td><td>${approved?'Validée dans V3':!o.source_payload?.erplainImported?'Documents rattachés à la commande existante':'Validation requise'}<br>${esc(logistic)}${problems.length?`<ul>${problems.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:''}</td><td>${esc(date(o.read_at))}</td><td><button data-erplain-open="${esc(o.id)}">Voir la commande</button><button data-erplain-document-refresh="${esc(o.id)}" data-erplain-document-kind="bc">Actualiser le BC Erplain</button><button data-erplain-document-refresh="${esc(o.id)}" data-erplain-document-kind="bl">Actualiser les BL Erplain</button>${approved&&!o.archived&&!o.busy&&(partial||!o.has_label)?`<button data-erplain-${partial?'partial':'prepare'}="${esc(o.id)}">${partial?'Préparer une livraison partielle':'Préparer la commande'}</button>`:''}${!o.archived?`<button data-erplain-correct="${esc(o.id)}">Résoudre un problème</button>`:''}</td></tr>`;
+ return `<tr><td>${esc(o.erp_live?.bc?.label)}<br>${esc(o.reference)}</td><td>${esc(o.recipient)}</td><td>${approved?'Validée dans V3':!o.source_payload?.erplainImported?'Documents rattachés à la commande existante':'Validation requise'}<br>${esc(logistic)}${problems.length?`<ul>${problems.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:''}</td><td>${esc(date(o.read_at))}</td><td><button data-erplain-open="${esc(o.id)}">Voir la commande</button><button data-erplain-document-refresh="${esc(o.id)}" data-erplain-document-kind="bc">Actualiser le BC Erplain</button><button data-erplain-document-refresh="${esc(o.id)}" data-erplain-document-kind="bl">Actualiser les BL Erplain</button>${approved&&!o.archived&&!o.busy&&(partial||!o.has_label)?`<button data-erplain-${partial?'partial':'prepare'}="${esc(o.id)}">${partial?'Préparer une livraison partielle':'Préparer la commande'}</button>`:''}${o.source_payload?.archivedBlRecovery?`<button data-erplain-recovered-bl="${esc(o.id)}">Voir le BL repris / étiquette</button>`:''}${!o.archived?`<button data-erplain-correct="${esc(o.id)}">Résoudre un problème</button>`:''}</td></tr>`;
  }).join('')}</tbody></table>`:'<p>Aucune commande récupérée ne correspond à cette recherche.</p>';
 }
 el('erplain-one-form').onsubmit=e=>{e.preventDefault();lookup(el('erplain-one-reference').value);};
@@ -64,12 +66,18 @@ panel.addEventListener('click',async event=>{
   if(b.dataset.erplainSelect)return await lookup(preview.reference,b.dataset.erplainSelect);
   if(b.dataset.erplainOpen)return await orderDetail(b.dataset.erplainOpen);
   if(b.dataset.erplainCorrect)return await openCorrection(b.dataset.erplainCorrect);
+  if(b.dataset.erplainRecoveredBl)return await openRecoveredBl(b.dataset.erplainRecoveredBl);
   if(b.dataset.erplainPartial)return await openPartial(b.dataset.erplainPartial);
   if(b.dataset.erplainPrepare){b.disabled=true;try{await refreshAndResumeOrder(b.dataset.erplainPrepare);}finally{await loadRecovered();}return;}
   if(b.hasAttribute('data-erplain-reread')){setBusy(true);renderPreview(await post('targeted-reread',{bcId:String(preview.document.id)}));note('BC relu. Vérifiez les données avant validation.');}
+  if(b.hasAttribute('data-erplain-reactivate')){
+   const blId=panel.querySelector('[data-erplain-resume-bl]')?.value;if(!blId){note('Sélectionnez le BL en attente à reprendre.',true);return;}
+   setBusy(true);const r=await post('targeted-reactivate',{bcId:String(preview.document.id),orderId:preview.reconcileCandidate.orderId,blId,reviewHash:preview.reviewHash,confirmed:true});
+   renderPreview({...preview,...r,alreadyRecovered:true,reconcileCandidate:null,existingMatches:(preview.existingMatches||[]).map(o=>o.orderId===r.orderId?{...o,archived:false}:o)});note(r.message||'Livraison déjà reprise.');await loadRecovered();await orders();return;
+  }
   if(b.hasAttribute('data-erplain-reconcile')){
    setBusy(true);const r=await post('targeted-reconcile',{bcId:String(preview.document.id),orderId:preview.reconcileCandidate.orderId,reviewHash:preview.reviewHash,confirmed:true});
-   renderPreview({...preview,...r,reconcileCandidate:null,admissionIssues:[]});note(r.message);page=1;await loadRecovered();await orders();return;
+   renderPreview({...preview,...r,reconcileCandidate:preview.reconcileCandidate?.canReactivate?preview.reconcileCandidate:null,admissionIssues:[]});note(r.message);page=1;await loadRecovered();await orders();return;
   }
   if(b.hasAttribute('data-erplain-approve')){
    setBusy(true);const r=await post('manual-review/approve',{bcId:String(preview.document.id),reviewHash:preview.reviewHash,confirmed:true});
