@@ -17,3 +17,20 @@ test('existing reference offers documentary attachment despite preparation warni
  await expect(page.locator('#erplain-one-note')).toContainText('BC et BL récupérés');await expect(box.locator('[data-erplain-open]').first()).toBeVisible();
  expect(writes).toEqual([{bcId:'bc',orderId:'existing',reviewHash:'a'.repeat(64),confirmed:true}]);expect(errors).toEqual([]);
 });
+test('archived import requires BL selection and exposes separate label step after reactivation',async({page})=>{
+ const calls=[],document={id:'bc',label:'BC',line_items:[],shipping_orders:{data:[{id:'first',label:'BL-FIRST',status:'delivered'},{id:'second',label:'BL-SECOND',status:'pending'}]}};
+ await page.route('**/api/erplain-refresh/**',async r=>{
+  const p=new URL(r.request().url()).pathname;
+  if(p.endsWith('recovered-orders'))return r.fulfill({json:{rows:[],total:0,page:1,pages:1}});
+  if(p.endsWith('targeted-lookup'))return r.fulfill({json:{document,reviewHash:'a'.repeat(64),admissionIssues:[],preparationIssues:[],reconcileCandidate:{orderId:'o',reference:'REF',archived:true,canReactivate:true}}});
+  if(p.endsWith('targeted-reactivate')){calls.push(r.request().postDataJSON());return r.fulfill({json:{orderId:'o',deliveryId:'d',archived:false,labelPurchased:false,message:'Commande réactivée'}});}
+  return r.fallback();
+ });
+ await page.goto('/');await page.locator('button[data-view="erplain-refresh"]').click();await page.locator('#erplain-one-reference').fill('BC');await page.locator('#erplain-one-fetch').click();
+ await page.locator('[data-erplain-reactivate]').click();expect(calls).toEqual([]);await expect(page.locator('#erplain-one-note')).toContainText('Sélectionnez le BL');
+ await expect(page.locator('[data-erplain-resume-bl] option')).toHaveCount(2);await page.locator('[data-erplain-resume-bl]').selectOption('second');await page.locator('[data-erplain-reactivate]').click();
+ await expect(page.locator('#erplain-one-note')).toHaveText('Commande réactivée');await expect(page.locator('[data-erplain-recovered-bl="o"]')).toBeVisible();
+ await page.route('**/api/partial/list?*',r=>r.fulfill({json:{rows:[{id:'d',order_id:'o',status:'review',stage:'recovered_bl',bl:{id:'second',label:'BL-SECOND',status:'pending'},selection:[{sku:'SKU',quantity:28}],tracking:[],documents:0,label_choice:'new',environment:'production'}]}}));
+ await page.locator('[data-erplain-recovered-bl="o"]').click();await expect(page.locator('[data-partial-retry="d"]')).toBeVisible();await expect(page.locator('#partial-submit')).toHaveCount(0);
+ expect(calls).toEqual([{bcId:'bc',orderId:'o',blId:'second',reviewHash:'a'.repeat(64),confirmed:true}]);
+});

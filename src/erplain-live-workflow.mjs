@@ -1,4 +1,5 @@
 import {assertNewBcStock,withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
+import {customerCreationStarted,customerCreationFailed,customerCreationMessage} from './customer-creation-recovery.mjs';
 import {withErplainOrigin} from './erplain-request-observation.mjs';
 import {usesNativeBlCycle,assertNativeBcSnapshot} from './native-bl-policy.mjs';
 import {resumeRetiredReservationReviews} from './retired-reservation-review.mjs';
@@ -77,6 +78,7 @@ export function newSalesBcInput(o,priceLevelId){
 export function assertNewBcStockPolicy(o,bc){if(o.erp_live.bcReservationPolicy==='erplain_bc_bl'&&bc.update_stock!==true)throw Error('BC · Politique de réservation différente de la création : rapprochement requis');}
 export function creationResumeBlock(o){
  const state=o.erp_live||{};
+ if(state.phase==='creating_customer'&&!state.customer?.id&&!state.bc?.id&&!state.bl?.id)return customerCreationMessage;
  if(uncertainBc(o))return 'BC Erplain · Création à vérifier : aucun BC confirmé, aucune nouvelle création automatique';
  if(state.phase==='creating_stock'&&!state.stockDocument?.id)return state.stockLastFailure?.message||'Stock Erplain · Mouvement à vérifier : sortie non confirmée, aucune nouvelle déduction automatique';
  if(state.phase==='publishing_bl')return 'BL Erplain · Publication à vérifier : contrôler le BL et son mouvement de stock avant reprise';
@@ -103,11 +105,11 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    await db.query("INSERT INTO settings(key,value) VALUES('erplain_live_capacity',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify({current,planned:orders.length,limit:assertLiveCapacity(current,orders.length).limit,checkedAt:new Date().toISOString()})]);
    assertLiveCapacity(current,orders.length);
   }
-  for(const o of orders){const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id&&['CreateCustomer','CreateOrder'].includes(operation)});if(block){o.failed=true;await fail(o,new Error(block));continue;}if(operation==='CreateOrder')o.erp_live.bcReservationPolicy='erplain_bc_bl';o.erp_live.phase=phase;await save(o);}
+  for(const o of orders){const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id&&['CreateCustomer','CreateOrder'].includes(operation)});if(block){o.failed=true;await fail(o,new Error(block));continue;}if(operation==='CreateOrder')o.erp_live.bcReservationPolicy='erplain_bc_bl';o.erp_live.phase=phase;if(operation==='CreateCustomer')o.erp_live.customerCreationAttempt=customerCreationStarted(o);await save(o);}
   orders=orders.filter(o=>!o.failed);if(!orders.length)return;
   const q='mutation V3Batch('+orders.map((o,i)=>'$p'+i+':'+type+'!').join(',')+'){'+orders.map((o,i)=>`p${i}:${operation}(input:$p${i}){${selection}}`).join(' ')+'}';
-  const result=await api.request(q,Object.fromEntries(orders.map((o,i)=>['p'+i,input(o)])),0,true);
-  for(let i=0;i<orders.length;i++){if(!result['p'+i]?.id){orders[i].failed=true;await fail(orders[i],new Error(result._v3Errors?.find(e=>e.path?.[0]==='p'+i)?.message||'Réponse incomplète '+phase));continue;}orders[i].erp_live[field]=result['p'+i];orders[i].erp_live.phase=field+'_created';await save(orders[i]);}
+  let result;try{result=await api.request(q,Object.fromEntries(orders.map((o,i)=>['p'+i,input(o)])),0,true);}catch(error){if(operation==='CreateCustomer')for(const o of orders){o.erp_live.customerCreationAttempt=customerCreationFailed(o.erp_live.customerCreationAttempt,error);await save(o);}throw error;}
+  for(let i=0;i<orders.length;i++){if(!result['p'+i]?.id){orders[i].failed=true;await fail(orders[i],new Error(result._v3Errors?.find(e=>e.path?.[0]==='p'+i)?.message||'Réponse incomplète '+phase));continue;}if(operation==='CreateCustomer')orders[i].erp_live.customerCreationAttempt={...orders[i].erp_live.customerCreationAttempt,outcome:'confirmed',customerId:result['p'+i].id};orders[i].erp_live[field]=result['p'+i];orders[i].erp_live.phase=field+'_created';await save(orders[i]);}
   if(operation==='CreateOrder')await db.query("UPDATE settings SET value=jsonb_set(value,'{current}',to_jsonb((value->>'current')::int+$1::int)) WHERE key='erplain_live_capacity'",[orders.filter(o=>!o.failed&&o.erp_live.bc?.id).length]);
  }
  async function run({bcOnlyOrderId}={}){if(running)return;running=true;activeBcOnlyOrderId=bcOnlyOrderId||null;let working=[];
