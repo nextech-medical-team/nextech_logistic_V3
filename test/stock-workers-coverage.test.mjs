@@ -5,7 +5,8 @@ import {partialService,initializePartialDeliveries} from '../src/partial-deliver
 import {reconcileFullStock} from '../src/stock-cycle.mjs';
 import {withShipmentLock} from '../src/shipment-lock.mjs';
 import {assertNewBcStock} from '../src/new-bc-stock-gate.mjs';
-const channels=['amazon','shopify','relay','temu','samples','rakuten','tender'];
+import {representativeLabels} from '../src/erplain-document-metadata.mjs';
+const channels=Object.keys(representativeLabels);
 const conn=data=>({data,paginatorInfo:{hasMorePages:false}});
 const line=(quantity=200,stock=94)=>({id:'20',type:'normal',quantity,price:1,tax_amount:0,reserved_quantity:0,shipped_quantity:0,on_hand:stock,available:stock,location:{id:'70'},variant:{id:'60',sku:'TR03',track_inventory:true}});
 

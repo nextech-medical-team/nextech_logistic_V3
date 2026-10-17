@@ -6,6 +6,7 @@ import {normalizeHistoricalDraft} from '../src/historical-bl-draft.mjs';
 import {assertResumeStock} from '../src/resume-stock-policy.mjs';
 import {confirmDeliveryReady} from '../src/bl-ready.mjs';
 import {prepareMissingDraftRecovery} from '../src/missing-draft-recovery.mjs';
+import {representativeLabels} from '../src/erplain-document-metadata.mjs';
 const conn=data=>({data,paginatorInfo:{hasMorePages:false}});
 function fixture(){
  const order={id:'native',channel:'amazon',erp_live:{bcReservationPolicy:'erplain_bc_bl',bc:{id:7},phase:'bc_created'}};
@@ -21,7 +22,7 @@ test('native BC with 24 items, zero reservation and no debit proof proceeds with
 });
 test('actual 5/10 shortage continues to wait for reception',async()=>{const f=fixture();Object.assign(f.bc.line_items[0],{quantity:10,available:5,on_hand:5});await assert.rejects(()=>readNativeBlCycle(f.api,f.order,{beforeBlPublication:true}),/stock insuffisant/i);});
 
-for(const channel of ['amazon','shopify','relay','temu','samples','rakuten'])test(channel+' saved unpublished draft rechecks stock before publication and resume',async()=>{
+for(const channel of Object.keys(representativeLabels).filter(channel=>channel!=='tender'))test(channel+' saved unpublished draft rechecks stock before publication and resume',async()=>{
  const f=fixture();f.order.channel=channel;f.order.erp_live.bl={id:9,status:'unpublished'};
  f.data.ShippingOrder={id:9,status:'unpublished',update_stock:true,orders:conn([{id:7}])};
  Object.assign(f.bc.line_items[0],{quantity:200,available:94,on_hand:94});
