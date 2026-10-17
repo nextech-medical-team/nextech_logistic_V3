@@ -1324,7 +1324,7 @@ function openStockEquivalent(ctx,problem){
 
 
  const form=d.body.querySelector('form'),apply=form.querySelector('[data-apply]'),preview=form.querySelector('[data-preview]');let busy=false,done=false;
- const initialValues=()=>JSON.stringify({sku:form.elements.replacementSku.value,quantity:form.elements.replacementQuantity.value,scope:form.elements.scope.value});let originalValues;
+ const initialValues=()=>JSON.stringify({sku:form.elements.replacementSku.value,quantity:form.elements.replacementQuantity.value,originalQuantity:form.elements.replaceQuantity.value,mode:form.elements.replacementMode.value,scope:form.elements.scope.value});let originalValues;
 
 
 
@@ -1363,7 +1363,7 @@ function openStockEquivalent(ctx,problem){
 
 
 
- const enabled=()=>{if(done||d.modal.dataset.equivalentSubmitted)delete d.modal.dataset.unsavedEquivalent;else if(!busy&&!d.modal.dataset.unsavedEquivalent?.includes('tentée')&&initialValues()!==originalValues)d.modal.dataset.unsavedEquivalent='Le remplacement n’est pas lancé. Fermer sans enregistrer ?';apply.disabled=busy||done;apply.textContent=busy?'Vérification et remplacement en cours…':partialRemainder?'Remplacer le reliquat et poursuivre':'Remplacer et poursuivre la commande';};
+ const enabled=()=>{const abandon=d.body.querySelector('[data-abandon-equivalent]');if(abandon){abandon.disabled=busy||done;abandon.hidden=done;}if(done||d.modal.dataset.equivalentSubmitted)delete d.modal.dataset.unsavedEquivalent;else if(!busy&&!d.modal.dataset.unsavedEquivalent?.includes('tentée')&&initialValues()!==originalValues)d.modal.dataset.unsavedEquivalent='Le remplacement n’est pas lancé. Fermer sans enregistrer ?';apply.disabled=busy||done;apply.textContent=busy?'Vérification et remplacement en cours…':partialRemainder?'Remplacer le reliquat et poursuivre':'Remplacer et poursuivre la commande';};
  const showError=e=>{preview.setAttribute('role','alert');preview.textContent=(e.correctionRecorded?'Remplacement enregistré. ':e.saveAttempted?'Résultat de l’enregistrement à vérifier avant de relancer : ':'Remplacement non enregistré : ')+e.message+(e.message.includes('Poids non renseigné')?' · Renseignez le poids du produit '+(/Produit restant \[([^\]]+)\]/.exec(e.message)?.[1]||values().replacementSku)+' dans Erplain, puis réessayez.':'');};
 
 
