@@ -28,13 +28,13 @@ function fixture(option={}){
 test('SKU and verified name prepare catalogue without amounts, prices, stock or order writes',async()=>{const f=fixture(),before=JSON.stringify(f.order);const r=await prepareIncompleteTemuCatalogue(f.db,f.api,f.options);assert.equal(r.report[0].status,'created');assert.equal(f.mutations.length,1);assert.deepEqual(f.mutations[0].input,{label:'Nom source',active:true,variants:{data:[{type:'normal',sku:'SKU',track_inventory:true}]}});assert.equal(JSON.stringify(f.order),before);assert.equal(f.bindings.length,1);await prepareIncompleteTemuCatalogue(f.db,f.api,f.options);assert.equal(f.mutations.length,1);});
 for(const reason of ['paused','old','stock','archived','suspended','uncertain','nameMissing','stale','previousAttempt','documents','converted','change','zeroLines','linked'])test('catalogue independent preserves '+reason,async()=>{const f=fixture({[reason]:true}),before=JSON.stringify(f.order);const r=await prepareIncompleteTemuCatalogue(f.db,f.api,f.options);assert.equal(f.mutations.length,0);if(reason!=='paused')assert.equal(r.report[0].status,'review');if(reason!=='change')assert.equal(JSON.stringify(f.order),before);});
 
-for(const status of [1,2,3,4,5,6,7])test('indicative platform status never vetoes catalogue preparation: '+status,async()=>{
+for(const status of [1,2,3,4,5,6,7])test('catalogue respects cancelled source while other platform statuses remain indicative: '+status,async()=>{
  const f=fixture();f.observation.payload.detail.parentOrderMap.parentOrderStatus=status;
  f.observation.sourceStage=status===3?'cancelled':status===1?'pending':'fulfillment';
  const line=f.observation.payload.detail.orderList[0];line.orderStatus=status;line.isCancelledDuringPending=true;line.canceledQuantityBeforeShipment=line.quantity;
  f.observation.payload.detail.parentOrderMap.parentOrderLabel=[{name:'pending_buyer_cancellation',value:1}];
  const before=JSON.stringify(f.order),r=await prepareIncompleteTemuCatalogue(f.db,f.api,f.options);
- assert.equal(r.report[0].status,'created');assert.equal(f.mutations.length,1);assert.equal(JSON.stringify(f.order),before);
+ assert.equal(r.report[0].status,status===3?'review':'created');assert.equal(f.mutations.length,status===3?0:1);assert.equal(JSON.stringify(f.order),before);
 });
 test('existing converted SKU is reread and never recreated',async()=>{const f=fixture({converted:true,existing:true});const r=await prepareIncompleteTemuCatalogue(f.db,f.api,f.options);assert.equal(r.report[0].status,'existing');assert.equal(f.mutations.length,0);assert.equal(f.bindings.length,1);});
 

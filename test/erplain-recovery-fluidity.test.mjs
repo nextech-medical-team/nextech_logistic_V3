@@ -6,7 +6,7 @@ import {resumeTransientErplain} from '../src/erplain-transient-recovery.mjs';
 const error='Erplain HTTP 429 · attente du quota partagé différée, aucune requête envoyée';
 test('existing Amazon draft resumes without missing-document transport or ledger guards',async t=>{
  const {engine,db,api}=await fixture(t,1);
- await engine.exec("ALTER TABLE orders ADD COLUMN channel text DEFAULT 'amazon'");
+ await engine.query("UPDATE orders SET channel='amazon'");
  await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'publishing_bl',bcReservationPolicy:'erplain_bc_bl',bc:{id:123,status:'active',update_stock:true},bl:{id:456,label:'SHO00745115',status:'unpublished',update_stock:true}})]);
  await engine.query('UPDATE erp_live_jobs SET error=$1',['BL Erplain · Publication à vérifier']);
  let reads=0;api.request=async q=>{reads++;if(q.includes('V3TransientBL'))return {Order:{id:123,status:'active',update_stock:true,shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}}};
@@ -16,7 +16,7 @@ test('existing Amazon draft resumes without missing-document transport or ledger
 });
 for(const scenario of ['absent','movement','concurrent-suspension','concurrent-label'])test('Amazon missing draft recovery: '+scenario,async t=>{
  const {engine,db,api}=await fixture(t,1);
- await engine.exec(`ALTER TABLE orders ADD COLUMN channel text DEFAULT 'amazon';ALTER TABLE resolution_jobs ADD COLUMN id text;
+ await engine.exec(`UPDATE orders SET channel='amazon';ALTER TABLE resolution_jobs ADD COLUMN id text;
  CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE audit(user_email text,action text,detail jsonb);`);
  const before={phase:'publishing_bl',bcReservationPolicy:'erplain_bc_bl',bc:{id:123,status:'active',update_stock:true},bl:{id:456,label:'SHO00745115',status:'unpublished',update_stock:true}};
  await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify(before)]);
@@ -50,7 +50,7 @@ for(const scenario of ['absent','movement','concurrent-suspension','concurrent-l
 });
 async function fixture(t,n=2){
  const engine=new PGlite();await engine.waitReady;t.after(()=>engine.close());
- await engine.exec(`CREATE TABLE orders(id text PRIMARY KEY,source_payload jsonb DEFAULT '{}',label_status text DEFAULT 'pending',tracking_status text DEFAULT 'not_shipped',issue text,erp_live jsonb NOT NULL,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
+ await engine.exec(`CREATE TABLE orders(id text PRIMARY KEY,channel text DEFAULT 'amazon',source_payload jsonb DEFAULT '{}',label_status text DEFAULT 'pending',tracking_status text DEFAULT 'not_shipped',issue text,erp_live jsonb NOT NULL,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}');
  CREATE TABLE erp_live_jobs(order_id text PRIMARY KEY,status text DEFAULT 'review',error text,updated_at timestamptz DEFAULT now()-interval '1 hour');
  CREATE TABLE resolution_jobs(order_id text,status text);CREATE TABLE correction_jobs(order_id text,status text);`);
  for(let i=0;i<n;i++){
@@ -120,10 +120,28 @@ test('existing BC/BL read is reconciled without provider mutation',async t=>{
 
 test('tender transient recovery preserves installed publication phase',async t=>{
  const {engine,db,api}=await fixture(t,1);
- await engine.exec("ALTER TABLE orders ADD COLUMN channel text DEFAULT 'tender'");
+ await engine.query("UPDATE orders SET channel='tender'");
  await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'publishing_bl',bc:{id:123},bl:{id:456,status:'unpublished'},transientRecovery:{lastError:error,readRateLimited:true}})]);
  api.request=async q=>{assert.match(q,/^query /);return {Order:{id:123,status:'active',shipping_orders:{data:[{id:456,status:'pending'}],paginatorInfo:{hasMorePages:false}}}};};
  assert.equal(await resumeTransientErplain(db,api),1);
  const s=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;
  assert.equal(s.phase,'publishing_bl');assert.equal(s.publicationReconciledAt,undefined);
+});
+
+for(const mode of ['found','absent','ambiguous','incomplete','cancelled','race'])test('persisted creating_customer 429 selects read-only reconciliation: '+mode,async t=>{
+ const {engine,db,api}=await fixture(t,1);const state={phase:'creating_customer',customerNumber:'V3:0',transientRecovery:{lastError:'Erplain HTTP 429',attempts:0,providerRateLimited:true}};
+ await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify(state)]);await engine.query("UPDATE erp_live_jobs SET error='Erplain HTTP 429'");if(mode==='cancelled')await engine.exec("UPDATE orders SET tracking_status='cancelled'");
+ let calls=0;api.request=async(q,v)=>{calls++;assert.match(q,/^query V3RecoverQuotaCustomer/);assert.equal(v.where.value,'V3:0');if(mode==='race')await engine.exec(`UPDATE orders SET suspension='{"active":true}'`);return {Customers:{data:mode==='absent'?[]:mode==='ambiguous'?[{id:7,customer_number:'V3:0'},{id:8,customer_number:'V3:0'}]:[{id:7,customer_number:'V3:0'}],paginatorInfo:{hasMorePages:mode==='incomplete'}}};};
+ const n=await resumeTransientErplain(db,api);assert.equal(n,mode==='found'?1:0);assert.equal(calls,mode==='cancelled'?0:1);
+ const saved=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;assert.equal(saved.customer?.id,mode==='found'?7:undefined);assert.equal(saved.phase,mode==='found'?'customer_created':'creating_customer');
+ await resumeTransientErplain(db,api);assert.equal(calls,mode==='cancelled'?0:1,'no immediate retry or duplicate creation');
+});
+test('persisted missing draft error without transient lastError enters reconciliation',async t=>{
+ const {engine,db,api}=await fixture(t,1);await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'publishing_bl',bc:{id:123},bl:{id:456,status:'unpublished'},transientRecovery:{lastError:null,attempts:1}})]);await engine.query("UPDATE erp_live_jobs SET error='Brouillon BL introuvable dans Erplain'");let calls=0;
+ api.request=async q=>{calls++;assert.match(q,/^query /);return {Order:{id:123,status:'active',update_stock:true,shipping_orders:{data:[{id:456,status:'pending',update_stock:true}],paginatorInfo:{hasMorePages:false}}}};};assert.equal(await resumeTransientErplain(db,api),1);assert.equal(calls,1);
+});
+test('missing saved BC searches immutable identity, never guesses from its number or recreates',async t=>{
+ const {engine,db,api}=await fixture(t,1);await engine.exec("ALTER TABLE orders ADD COLUMN reference text DEFAULT 'PO-fixture'");await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'bc_created',bc:{id:123,label:'C0016034',status:'unpublished'},transientRecovery:{lastError:null,attempts:1}})]);await engine.query("UPDATE erp_live_jobs SET error='BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire'");let calls=0;
+ api.request=async(q,v)=>{calls++;assert.match(q,/^query /);if(q.includes('V3TransientBL'))return {Order:null};assert.match(q,/V3RecoverReference/);assert.equal(JSON.stringify(v).includes('C0016034'),false);return {Orders:{data:[{id:789,status:'active',external_reference:'V3:0'}],paginatorInfo:{hasMorePages:false}}};};assert.equal(await resumeTransientErplain(db,api),0);assert.equal(calls,2);
+ const saved=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;assert.equal(saved.bc.id,123);assert.equal(saved.documentReconciliation.candidateBcId,'789');assert.match((await engine.query('SELECT error FROM erp_live_jobs')).rows[0].error,/autre identité/);await resumeTransientErplain(db,api);assert.equal(calls,2);
 });
