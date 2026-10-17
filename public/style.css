@@ -413,7 +413,7 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
  #view-negative-stocks>p[role=status]{padding:12px 14px;background:#f0f6f5;border-radius:8px;margin:0 0 18px;line-height:1.5}
  #view-negative-stocks table{width:100%;min-width:1000px;border-collapse:collapse}
  #view-negative-stocks th,#view-negative-stocks td{padding:14px 16px}
- #view-negative-stocks th:nth-child(6),#view-negative-stocks th:nth-child(7),#view-negative-stocks th:nth-child(8),#view-negative-stocks td:nth-child(6),#view-negative-stocks td:nth-child(7),#view-negative-stocks td:nth-child(8){text-align:right;font-variant-numeric:tabular-nums}
+ #view-negative-stocks th:nth-child(7),#view-negative-stocks th:nth-child(8),#view-negative-stocks th:nth-child(9),#view-negative-stocks td:nth-child(7),#view-negative-stocks td:nth-child(8),#view-negative-stocks td:nth-child(9){text-align:right;font-variant-numeric:tabular-nums}
  #view-negative-stocks td[colspan]{text-align:center;padding:32px 16px;color:#627b81;background:#fafcfc}
  #view-negative-stocks .negative-stock-search{display:flex;flex-direction:column;gap:6px;margin:0;min-width:0;order:1}
  #view-negative-stocks .negative-stock-search label{font-weight:600;font-size:13px;line-height:18px;margin:0}
@@ -421,3 +421,6 @@ main:has(#view-import-shopify:not([hidden])) #movement-watch-panel,
  #view-negative-stocks .negative-stock-search small{color:#627b81}
  @media(max-width:1150px){#view-negative-stocks .negative-stock-toolbar{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}#view-negative-stocks .negative-stock-action{grid-column:1/-1}}
  @media(max-width:700px){#view-negative-stocks .negative-stock-toolbar{grid-template-columns:minmax(0,1fr);gap:16px}#view-negative-stocks .negative-stock-toolbar button{width:100%;align-self:stretch}}
+
+#view-negative-stocks #negative-stock-sort-date{display:inline-flex;align-items:center;background:transparent;border:0;padding:0;color:inherit;font:inherit;font-weight:600;white-space:nowrap;cursor:pointer}
+#view-negative-stocks #negative-stock-sort-date:focus-visible{outline:2px solid #127565;outline-offset:4px}
