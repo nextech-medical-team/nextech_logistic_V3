@@ -1,3 +1,4 @@
+import {archivedResumeBlock} from './erplain-archived-resume.mjs';
 import {assertDocumentIdle} from './erplain-document-read.mjs';
 
 // A reference suggests a match; only explicit confirmation attaches documents.
@@ -10,7 +11,7 @@ export async function existingRecoveryCandidate(db,d){
  const o=rows[0];
  if(o.source_payload?.erplainImported&&o.source_payload.account!=='live')return {matches,blocked:'Commande issue d’un autre compte Erplain : rattachement LIVE interdit'};
  if(o.erp_live?.bc?.id&&String(o.erp_live.bc.id)!==String(d.id))return {matches,blocked:'Cette référence est rattachée à un autre BC Erplain : aucun document remplacé'};
- return {...matches[0],matches};
+ return {...matches[0],matches,canReactivate:archivedResumeBlock(o)===null};
 }
 export async function attachExistingDocuments(tx,d,orderId,user){
  const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[orderId])).rows[0];

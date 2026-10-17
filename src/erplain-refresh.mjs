@@ -171,6 +171,7 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
   const manualReview=manualReviewService(db,apiFactory('live'));
   const targeted=targetedOrderService(db,apiFactory('live'));
   if(p==='/api/erplain-refresh/targeted-lookup'&&req.method==='POST'){json(res,200,await targeted.lookup(await body(req)));return true;}
+  if(p==='/api/erplain-refresh/targeted-reactivate'&&req.method==='POST'){json(res,200,await targeted.reactivate(await body(req),user));return true;}
   if(p==='/api/erplain-refresh/targeted-reconcile'&&req.method==='POST'){json(res,200,await targeted.reconcile(await body(req),user));return true;}
   if(p==='/api/erplain-refresh/targeted-reread'&&req.method==='POST'){json(res,200,await targeted.reread(await body(req)));return true;}
   if(p==='/api/erplain-refresh/recovered-orders'&&req.method==='GET'){json(res,200,await targeted.list({search:url.searchParams.get('search')||'',page:url.searchParams.get('page')}));return true;}
