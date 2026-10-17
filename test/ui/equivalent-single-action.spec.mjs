@@ -13,6 +13,6 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await expect.poll(()=>writes.length,{timeout:20000}).toBe(1);
  await expect(page.getByText('Remplacement enregistré et préparation poursuivie',{exact:false}).first()).toBeVisible({timeout:20000});
  expect(writes[0]).toMatchObject({action:'replace-equivalent',verifyAndApply:true,confirmEquivalent:true,scope:'order',sku:'A',replacementSku:'B',replaceQuantity:1,replacementQuantity:1});
- expect(writes[0].previewFingerprint).toBeUndefined();await expect(page.getByRole('button',{name:'Abandonner l��quivalent',exact:true})).toBeHidden();
+ expect(writes[0].previewFingerprint).toBeUndefined();await expect(page.getByRole('button',{name:'Abandonner l’équivalent',exact:true})).toBeHidden();
  await page.screenshot({path:'proofs/equivalent-single-action-'+name+'.png'});
 });

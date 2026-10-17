@@ -5,7 +5,7 @@ function fixture({catalog=null,missing=true,linked,mutationFailure,change,protec
  const initial={id:'o',channel:'temu',archived:false,resolution_pending_resume:false,source_payload:{},erp_live:{},issue:null,creation_job_error:'BC · SKU Erplain LIVE introuvable : R',labels:{pdf:'unchanged',tracking:'same'}};
  const line={id:'l',source_sku:'MEEME06_R',target_sku:'R',mapped_sku:'R',source_qty:1,target_qty:ratio,quantity:1,source_payload:{goodsName:'Produit source'}};
  const job={status:'review',error:initial.creation_job_error,updated_at:'2020-01-01T00:00:00Z'};
- const v={id:'7',sku:'R',active:true,variant_prices:[],product:{id:'9',active:true}};
+ const v={id:'7',sku:'R',active:true,weight_amount:5,weight_unit:'g',variant_prices:[],product:{id:'9',active:true}};
  const calls=[],journal=new Map(),reviews=[],bound=[],schedule=new Map();let clock=Date.now(),created=!missing,freshCount=0,mutations=0,guardLineReads=0;
  const db={exec:async sql=>calls.push({sql}),transaction:async fn=>fn(db),query:async(sql,args=[])=>{
   calls.push({sql,args});

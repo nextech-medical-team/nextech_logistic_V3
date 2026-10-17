@@ -1,3 +1,5 @@
+import {assertNewBcStock,withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
+import {customerCreationStarted,customerCreationFailed,customerCreationMessage} from './customer-creation-recovery.mjs';
 import {withErplainOrigin} from './erplain-request-observation.mjs';
 import {usesNativeBlCycle,assertNativeBcSnapshot} from './native-bl-policy.mjs';
 import {resumeRetiredReservationReviews} from './retired-reservation-review.mjs';
@@ -76,6 +78,7 @@ export function newSalesBcInput(o,priceLevelId){
 export function assertNewBcStockPolicy(o,bc){if(o.erp_live.bcReservationPolicy==='erplain_bc_bl'&&bc.update_stock!==true)throw Error('BC · Politique de réservation différente de la création : rapprochement requis');}
 export function creationResumeBlock(o){
  const state=o.erp_live||{};
+ if(state.phase==='creating_customer'&&!state.customer?.id&&!state.bc?.id&&!state.bl?.id)return customerCreationMessage;
  if(uncertainBc(o))return 'BC Erplain · Création à vérifier : aucun BC confirmé, aucune nouvelle création automatique';
  if(state.phase==='creating_stock'&&!state.stockDocument?.id)return state.stockLastFailure?.message||'Stock Erplain · Mouvement à vérifier : sortie non confirmée, aucune nouvelle déduction automatique';
  if(state.phase==='publishing_bl')return 'BL Erplain · Publication à vérifier : contrôler le BL et son mouvement de stock avant reprise';
@@ -85,19 +88,28 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
  let running=false,activeBcOnlyOrderId=null,nextRunAt=0,catalogueRecoveryAfterId='',excelRecoveryAfterId='';
  const save=async o=>db.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(o.erp_live)]);
  const fail=async(o,e)=>{let message=stockFailureMessage(o,e.message);message=await stockCheckFailure(db,o,e,message);if(o.erp_live?.phase==='creating_stock'&&!/sortie non confirmée, aucune nouvelle déduction automatique/.test(message)){o.erp_live.stockLastFailure={at:new Date().toISOString(),message};await save(o);}const waiting=await recordTransientFailure(db,o,message,e);if(e?.httpStatus===429)nextRunAt=Date.now()+Math.max(2000,Number(e.retryAfter||60)*1000);if(await queueQuotaRead(db,o,e))return;e=new Error(waiting);await db.query("UPDATE erp_live_jobs SET status='review',error=$2,updated_at=now() WHERE order_id=$1",[o.id,e.message]);await db.query("UPDATE orders SET erp_status='live_review' WHERE id=$1",[o.id]);};
- async function batchMutation(orders,phase,field,type,operation,input,selection){
+ async function batchMutation(orders,phase,field,type,operation,input,selection,{stockLocked=false}={}){
   if(!orders.length)return;
+  if(operation==='CreateOrder'&&!stockLocked){
+   // Serialize each fresh read and BC creation across workers and shipments.
+   // The next order must see the previous BC's reservation/debit.
+   for(const o of orders)await withShipmentLock(async()=>{
+    try{await assertNewBcStock(api,input(o).line_items,o.selectedProducts);await batchMutation([o],phase,field,type,operation,input,selection,{stockLocked:true});}
+    catch(e){o.failed=true;await fail(o,e);}
+   });
+   return;
+  }
   if(operation==='CreateOrder'){
    const snapshot=await api.request('query V3LiveCapacity { Orders(first:1){paginatorInfo{total}} }');
    const current=Number(snapshot.Orders?.paginatorInfo?.total);
    await db.query("INSERT INTO settings(key,value) VALUES('erplain_live_capacity',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[JSON.stringify({current,planned:orders.length,limit:assertLiveCapacity(current,orders.length).limit,checkedAt:new Date().toISOString()})]);
    assertLiveCapacity(current,orders.length);
   }
-  for(const o of orders){const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id&&['CreateCustomer','CreateOrder'].includes(operation)});if(block){o.failed=true;await fail(o,new Error(block));continue;}if(operation==='CreateOrder')o.erp_live.bcReservationPolicy='erplain_bc_bl';o.erp_live.phase=phase;await save(o);}
+  for(const o of orders){const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id&&['CreateCustomer','CreateOrder'].includes(operation)});if(block){o.failed=true;await fail(o,new Error(block));continue;}if(operation==='CreateOrder')o.erp_live.bcReservationPolicy='erplain_bc_bl';o.erp_live.phase=phase;if(operation==='CreateCustomer')o.erp_live.customerCreationAttempt=customerCreationStarted(o);await save(o);}
   orders=orders.filter(o=>!o.failed);if(!orders.length)return;
   const q='mutation V3Batch('+orders.map((o,i)=>'$p'+i+':'+type+'!').join(',')+'){'+orders.map((o,i)=>`p${i}:${operation}(input:$p${i}){${selection}}`).join(' ')+'}';
-  const result=await api.request(q,Object.fromEntries(orders.map((o,i)=>['p'+i,input(o)])),0,true);
-  for(let i=0;i<orders.length;i++){if(!result['p'+i]?.id){orders[i].failed=true;await fail(orders[i],new Error(result._v3Errors?.find(e=>e.path?.[0]==='p'+i)?.message||'Réponse incomplète '+phase));continue;}orders[i].erp_live[field]=result['p'+i];orders[i].erp_live.phase=field+'_created';await save(orders[i]);}
+  let result;try{result=await api.request(q,Object.fromEntries(orders.map((o,i)=>['p'+i,input(o)])),0,true);}catch(error){if(operation==='CreateCustomer')for(const o of orders){o.erp_live.customerCreationAttempt=customerCreationFailed(o.erp_live.customerCreationAttempt,error);await save(o);}throw error;}
+  for(let i=0;i<orders.length;i++){if(!result['p'+i]?.id){orders[i].failed=true;await fail(orders[i],new Error(result._v3Errors?.find(e=>e.path?.[0]==='p'+i)?.message||'Réponse incomplète '+phase));continue;}if(operation==='CreateCustomer')orders[i].erp_live.customerCreationAttempt={...orders[i].erp_live.customerCreationAttempt,outcome:'confirmed',customerId:result['p'+i].id};orders[i].erp_live[field]=result['p'+i];orders[i].erp_live.phase=field+'_created';await save(orders[i]);}
   if(operation==='CreateOrder')await db.query("UPDATE settings SET value=jsonb_set(value,'{current}',to_jsonb((value->>'current')::int+$1::int)) WHERE key='erplain_live_capacity'",[orders.filter(o=>!o.failed&&o.erp_live.bc?.id).length]);
  }
  async function run({bcOnlyOrderId}={}){if(running)return;running=true;activeBcOnlyOrderId=bcOnlyOrderId||null;let working=[];
@@ -241,7 +253,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of working.filter(o=>o.pricing)){
     try{
      const historical=await readPreservedHistoricalBc(api,o,usesRecordedBc(o)?null:o.channel==='temu'?temuSellerTotals(o):null);
-     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),lock:fn=>withShipmentLock(fn,['erplain-bc-numbering'])});
+     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),beforePublish:bc=>bc.update_stock===true?assertNewBcStock(api,bc.line_items):undefined,lock:withSalesBcPublicationLock});
      const confirmed=historical?.confirmed||await verifyRecordedOrSourceTotals(api,o,actual,()=>o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
      o.erp_live.pricing={...o.erp_live.pricing,status:'verified',error:null,confirmed,verifiedAt:new Date().toISOString()};await save(o);
     }catch(e){o.failed=true;o.erp_live.pricing={...o.erp_live.pricing,status:'blocked',error:e.message};await save(o);await fail(o,e);}

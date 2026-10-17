@@ -1329,7 +1329,7 @@ function openStockEquivalent(ctx,problem){
 
 
  const pending=ctx.order.pending_equivalent;
- if(pending?.previewJobId){const abandon=document.createElement('button');abandon.type='button';abandon.textContent='Abandonner l’équivalent';abandon.onclick=async()=>{abandon.disabled=true;try{const result=await d.job(ctx,'abandon-equivalent','stock',{previewJobId:pending.previewJobId});if(result?.abandoned){d.modal.close();await orders();await openCorrection(ctx.order.id);}}catch{}finally{abandon.disabled=false;}};d.body.prepend(abandon);}
+ if(pending?.previewJobId){const abandon=document.createElement('button');abandon.type='button';abandon.dataset.abandonEquivalent='true';abandon.textContent='Abandonner l’équivalent';abandon.onclick=async()=>{abandon.disabled=true;try{const result=await d.job(ctx,'abandon-equivalent','stock',{previewJobId:pending.previewJobId});if(result?.abandoned){d.modal.close();await orders();await openCorrection(ctx.order.id);}}catch{}finally{abandon.disabled=false;}};d.body.prepend(abandon);}
  if(pending?.sku===sku){form.elements.scope.value=pending.scope;form.elements.replacementSku.value=pending.replacementSku;form.elements.replaceQuantity.value=pending.replaceQuantity;form.elements.replacementQuantity.value=pending.replacementQuantity;}
 
 

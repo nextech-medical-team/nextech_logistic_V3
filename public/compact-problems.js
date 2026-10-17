@@ -55,6 +55,7 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/ParcelShopID.*manquant/i.test(text))return result('relay-search','GLS · Recherche du relais','');
  if(/City information is incorrect/i.test(text))return result('city','GOFO · Ville refusée','');
  if(/Informations transport manquantes/i.test(text)){const field=text.split(':').slice(1).join(':').trim();return result('address',field?field+' manquant'+(field.includes(',')?'s':''):'Adresse manquante','');}
+ if(/^Client Erplain/.test(text)&&/cr[e\u00e9]ation/i.test(text))return result('customer','Client Erplain \u00b7 Cr\u00e9ation \u00e0 v\u00e9rifier','');
  if(/^BC Erplain · Création à vérifier/.test(text))return result('bc','BC · Création à vérifier','');
  if(/^BL Erplain · Publication à vérifier/.test(text))return result('preparation','BL · Publication à vérifier','');
  if(/^Stock Erplain · Mouvement à vérifier/.test(text))return result('preparation','Stock · Mouvement à vérifier','');

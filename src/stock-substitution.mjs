@@ -1,4 +1,5 @@
 import {substitutionExecutionSnapshot} from './substitution-execution-snapshot.mjs';
+import {exactStockAvailability,exactQuantitySum,exactQuantityDifference} from './stock-decimal.mjs';
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
 import {importBcAmounts} from './import-bc-commercial.mjs';
 import {chooseDocumentStockVariant} from './document-stock-choice.mjs';
@@ -19,7 +20,7 @@ const bcFields='id label created_at status total tax_type currency{label} update
 export function validateSubstitution(b,apply=false){
  if(typeof b.sku!=='string'||!b.sku.trim()||typeof b.replacementSku!=='string'||!b.replacementSku.trim()||b.replacementSku.length>199)throw Error('SKU original et SKU équivalent requis');
  if(b.sku.trim()===b.replacementSku.trim())throw Error('Choisir un SKU différent du produit en rupture');
- for(const field of ['replaceQuantity','replacementQuantity'])if(!Number.isFinite(Number(b[field]))||Number(b[field])<=0)throw Error('Quantités de remplacement strictement positives requises');
+ for(const field of ['replaceQuantity','replacementQuantity'])if(!['number','string'].includes(typeof b[field])||String(b[field]).trim()===''||!Number.isFinite(Number(b[field]))||Number(b[field])<=0)throw Error('Quantités de remplacement strictement positives requises');
  if(!['order','permanent'].includes(b.scope))throw Error('Choisir la portée de l’équivalence');
  if(b.verifyAndApply!==undefined&&b.verifyAndApply!==true)throw Error('Option de remplacement direct invalide');
  if(apply&&(b.confirmEquivalent!==true||b.verifyAndApply!==true&&!/^[a-f0-9]{64}$/.test(b.previewFingerprint||'')))throw Error('Vérifier et confirmer le produit équivalent avant enregistrement');
@@ -44,13 +45,15 @@ export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,histor
  if(replace>Number(original.quantity))throw Error('La quantité remplacée dépasse la quantité du BC');
  if(!variant?.id||variant.sku!==b.replacementSku.trim()||variant.active===false||variant.product?.active===false)throw Error('Produit équivalent actif requis dans Erplain LIVE');
  let weight;try{weight=resolveWeight([variant],variant.sku).weightKg;}catch(e){throw Error('Produit équivalent ['+variant.sku+'] : '+e.message);}
+ if(typeof variant.track_inventory!=='boolean')throw Error('API Erplain · Politique de stock du produit équivalent non vérifiée');
  if(variant.track_inventory!==false){
-  if(!Array.isArray(variant.stock_levels?.data)||variant.stock_levels.paginatorInfo?.hasMorePages)throw Error('API Erplain · Stock du produit équivalent incomplet');
+  if(!Array.isArray(variant.stock_levels?.data)||variant.stock_levels.paginatorInfo?.hasMorePages!==false)throw Error('API Erplain · Stock du produit équivalent incomplet');
   const stocks=variant.stock_levels.data.filter(s=>String(s.location?.id)===String(original.location.id));
-  if(stocks.length!==1||[stocks[0].available,stocks[0].on_hand].some(v=>v==null||!Number.isFinite(Number(v))))throw Error('API Erplain · Stock de l’emplacement non reçu');
+  if(stocks.length!==1||[stocks[0].available,stocks[0].on_hand].some(v=>!['number','string'].includes(typeof v)||String(v).trim()===''||!Number.isFinite(Number(v))))throw Error('API Erplain · Stock de l’emplacement non reçu');
   // Historical BC quantities were already deducted; require only the added quantity.
-  const existing=historicalProof?0:Math.max(0,lines.filter(l=>String(l.variant.id)===String(variant.id)&&String(l.location.id)===String(original.location.id)).reduce((n,l)=>n+Number(l.quantity),0)-(partialProof?.allocated[String(variant.id)+':'+String(original.location.id)]||0));
-  if(Math.min(Number(stocks[0].available),Number(stocks[0].on_hand))<quantity+existing)throw Error('Produit de remplacement ['+variant.sku+'] : stock insuffisant. Quantité totale nécessaire : '+(quantity+existing)+' unités ; stock disponible : '+Math.min(Number(stocks[0].available),Number(stocks[0].on_hand))+' unités ; quantité manquante : '+Math.round((quantity+existing-Math.min(Number(stocks[0].available),Number(stocks[0].on_hand)))*1e6)/1e6+' unités. Remplacement non enregistré. Choisissez un autre produit ou réduisez la quantité à remplacer.');
+  const prior=historicalProof?'0':exactQuantityDifference(exactQuantitySum(lines.filter(l=>String(l.variant.id)===String(variant.id)&&String(l.location.id)===String(original.location.id)).map(l=>l.quantity)),partialProof?.allocated[String(variant.id)+':'+String(original.location.id)]||0),existing=Number(prior)<0?'0':prior;
+  const stockRows=[quantity,existing].map(quantity=>({quantity,reserved_quantity:0,available:stocks[0].available,on_hand:stocks[0].on_hand})),budget=exactStockAvailability(stockRows);
+  if(!budget.sufficient)throw Error('Produit de remplacement ['+variant.sku+'] : stock insuffisant. Quantité totale nécessaire : '+budget.need+' unités ; stock disponible : '+budget.usable+' unités ; quantité manquante : '+budget.missing+' unités. Remplacement non enregistré. Choisissez un autre produit ou réduisez la quantité à remplacer.');
  }
  const remaining=Number(original.quantity)-replace;
  for(const l of lines.filter(l=>l!==original||remaining>0)){try{resolveWeight([l.variant],l.variant.sku);}catch(e){throw Error('Produit restant ['+l.variant.sku+'] : '+e.message);}}

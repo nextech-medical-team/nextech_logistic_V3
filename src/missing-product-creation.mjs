@@ -1,6 +1,9 @@
 import {createHash} from 'node:crypto';
 import {cancellationBlock} from './erp-transient-policy.mjs';
-// No catalogue price, cost, stock, weight or tax is invented by this operation.
+// No catalogue price, cost, stock or tax is invented. Missing unit weight follows
+// the human 5 g rule, independently of sales channel and shipment weight.
+import {DEFAULT_UNIT_WEIGHT_GRAMS,businessWeight,missingWeight} from './weight-business-policy.mjs';
+import {erplainWeightInput} from './erplain-weight-input.mjs';
 export const sameSku=(a,b)=>typeof a==='string'&&typeof b==='string'&&a.trim().toLowerCase()===b.trim().toLowerCase();
 const selection='id sku active weight_amount weight_unit track_inventory variant_prices{id amount} tax_codes{id} product{id label active} stock_levels(first:100){data{location{id} available on_hand} paginatorInfo{hasMorePages}}';
 export const creationTable=`CREATE TABLE IF NOT EXISTS erplain_product_creation_attempts(sku TEXT PRIMARY KEY,status TEXT NOT NULL,product_id TEXT,variant_id TEXT,error TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
@@ -18,7 +21,7 @@ export function sourceProductName(line){
 export function minimalProductInput(sku,label){
  if(typeof sku!=='string'||!sku.trim()||sku.trim().length>199)throw Error('Création produit · SKU requis');
  if(typeof label!=='string'||!label.trim()||label.trim().length>250)throw Error('Création produit · Nom du produit manquant ou invalide : '+sku);
- return {label:label.trim(),active:true,variants:{data:[{type:'normal',sku:sku.trim(),track_inventory:true}]}};
+ return {label:label.trim(),active:true,variants:{data:[{type:'normal',sku:sku.trim(),track_inventory:true,weight_amount:DEFAULT_UNIT_WEIGHT_GRAMS,weight_unit:'g'}]}};
 }
 export async function readCreationSku(api,sku){
  const result=await api.request(`query V3MissingProductLookup($where:QueryVariantsWhereWhereConditions!){Variants(first:100,where:$where){data{${selection}} paginatorInfo{hasMorePages}}}`,{where:{column:'SKU',operator:'EQ',value:sku}});
@@ -56,7 +59,7 @@ export async function ensureMissingProduct(db,api,{sku,label,weightKg,guard=asyn
  let rows=initialRows??await read(sku);
  if(rows.length){const variant=uniqueActive(rows,sku);await reconcileCreationAttempt(db,variant);return {variant,created:false};}
  const input=minimalProductInput(sku,label);
- if(weightKg!==undefined){if(!Number.isFinite(Number(weightKg))||Number(weightKg)<=0||Number(weightKg)>3000)throw Error('Poids invalide');Object.assign(input.variants.data[0],{weight_amount:Number(weightKg),weight_unit:'kg'});}
+ if(!missingWeight(weightKg))Object.assign(input.variants.data[0],erplainWeightInput(weightKg));
  await guard();
  await db.exec(creationTable);
  const claimed=(await db.query("INSERT INTO erplain_product_creation_attempts(sku,status) VALUES($1,'attempted') ON CONFLICT DO NOTHING RETURNING sku",[sku])).rows.length;
@@ -71,7 +74,10 @@ export async function ensureMissingProduct(db,api,{sku,label,weightKg,guard=asyn
   productId=made?.CreateProduct?.id;if(!productId)throw Error('Création non confirmée');
   await db.query("UPDATE erplain_product_creation_attempts SET product_id=$2,updated_at=now() WHERE sku=$1",[sku,String(productId)]);
   await stage('Relecture du produit créé dans Erplain LIVE');
-  const variant=assertAbsentProductPrices(uniqueActive(await read(sku),sku,productId));await verified(variant);
+  const variant=assertAbsentProductPrices(uniqueActive(await read(sku),sku,productId));
+  const expected=input.variants.data[0];
+  if(missingWeight(variant.weight_amount)||!Object.hasOwn(variant,'weight_unit')||Math.abs(businessWeight(variant.weight_amount,variant.weight_unit).weightKg-businessWeight(expected.weight_amount,expected.weight_unit).weightKg)>1e-9)throw Error('Poids du produit créé non confirmé');
+  await verified(variant);
   return {variant,created:true};
  }catch(e){
   await db.query("UPDATE erplain_product_creation_attempts SET status='review',error=$2,updated_at=now() WHERE sku=$1",[sku,String(e.message).slice(0,1000)]);
