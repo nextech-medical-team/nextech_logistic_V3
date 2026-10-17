@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import * as standard from '../src/partial-deliveries.mjs';
 import * as tender from '../src/partial-deliveries-tender-preserved.mjs';
 import {assertFullOrderStock} from '../src/stock-gate.mjs';
+import {assertInstalledStock} from '../src/stock-gate-preserved.mjs';
 const raw=(change={})=>({id:'1',type:'normal',quantity:200,price:1,shipped_quantity:0,reserved_quantity:0,on_hand:94,available:94,incoming:35200,variant:{id:642510,sku:'TR03',track_inventory:true},location:{id:100934},...change});
+test('legacy compatibility entry point cannot bypass the exact shared stock gate',()=>{
+ assert.equal(assertInstalledStock,assertFullOrderStock);
+ assert.throws(()=>assertInstalledStock([raw({quantity:1,on_hand:.9999999,available:.9999999})]),/insuffisant/);
+});
 for(const [name,service] of Object.entries({standard,tender})){
  for(const [scenario,change,quantity] of [
   ['94/200 real case',{},200],['negative', {on_hand:-106,available:-106},1],['zero',{on_hand:0,available:0},1],
