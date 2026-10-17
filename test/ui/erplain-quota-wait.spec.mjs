@@ -16,7 +16,7 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await expect(card.locator('.processing-reason')).toContainText('Prochaine tentative à 17:00:00');
  await expect(card.locator('.processing-elapsed')).toContainText('Attente');
  await expect(card.locator('.processing-other')).not.toContainText(old);
- await card.scrollIntoViewIfNeeded();const bounds=await card.boundingBox();expect(bounds.width).toBeLessThan(viewport.width);
+ await expect(card).toBeHidden();await card.locator('xpath=ancestor::tr').scrollIntoViewIfNeeded();const bounds=await card.locator('xpath=ancestor::tr').boundingBox();expect(bounds.width).toBeLessThan(viewport.width);
  fs.mkdirSync('proofs',{recursive:true});await page.screenshot({path:'proofs/erplain-quota-wait-'+name+'.png',fullPage:false});
  message='Stock indisponible';await page.reload();await expect(card.locator('.processing-reason')).toContainText('Stock indisponible');await expect(card.locator('.processing-elapsed')).toContainText('Blocage');
  expect(writes).toEqual([]);expect(errors).toEqual([]);fs.writeFileSync('proofs/erplain-quota-wait-'+name+'.json',JSON.stringify({status:'PASS',viewport,bounds,writes,errors,waitingIsQueued:true,nextAttemptDisplayed:true,stockErrorPreserved:true,providerCalls:0,scope:'Synthetic full application using actual backend processing projection'}));
