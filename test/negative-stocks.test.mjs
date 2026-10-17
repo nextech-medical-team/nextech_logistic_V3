@@ -111,8 +111,9 @@ test('missing BL status on later pages is recorded in report history',async()=>{
 test('BL, quantity and negative availability are numeric/text values in Excel',async()=>{
  const {exportNegativeStocks}=await import('../src/negative-stocks-export.mjs');
  const {default:ExcelJS}=await import('exceljs');
- const rows=(await reader([document(10,[line(1)])]).page()).rows;
+ const datedOrder={...document(10,[line(1)]),dated_at:'2026-10-15'};
+ const rows=(await reader([datedOrder]).page()).rows;
  const book=new ExcelJS.Workbook();await book.xlsx.load(await exportNegativeStocks(rows));
  const sheet=book.worksheets[0];
- assert.equal(sheet.getCell('A2').value,'CO10');assert.equal(sheet.getCell('B2').value,'SHO10');assert.equal(sheet.getCell('F2').value,1);assert.equal(sheet.getCell('G2').value,-1);assert.equal(sheet.getCell('I2').value,'Default location');
+ assert.equal(sheet.getCell('A2').value,'CO10');assert.equal(sheet.getCell('B2').value.toISOString().slice(0,10),'2026-10-15');assert.equal(sheet.getCell('C2').value,'SHO10');assert.equal(sheet.getCell('G2').value,1);assert.equal(sheet.getCell('H2').value,-1);assert.equal(sheet.getCell('J2').value,'Default location');
 });

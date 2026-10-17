@@ -67,7 +67,7 @@ groups.push(['--test','test/erplain-quota-delay.test.mjs']);
 groups.push(['--test','test/manager-tender-filter.test.mjs']);
 groups.push(['--test','test/recorded-bc-mapping-stock.test.mjs']);
 groups.push(['--test','test/margin-observer-stability.test.mjs','test/temu-refusal-details-ui.test.mjs','test/platform-cancellation-reports.test.mjs']);
-groups.push(['--test','test/negative-stocks-upgrade.test.mjs','test/negative-stocks.test.mjs','test/negative-stocks-launch.test.mjs','test/workspace-navigation.test.mjs']);
+groups.push(['--test','test/negative-stocks-upgrade.test.mjs','test/negative-stocks.test.mjs','test/negative-stocks-launch.test.mjs','test/negative-stocks-date.test.mjs','test/workspace-navigation.test.mjs']);
 groups.push(['--test','test/erplain-existing-recovery.test.mjs']);
 groups.push(['--test','test/catalogue-demand-sql.test.mjs']);
 groups.push(['--test','test/stock-coverage-matrix.test.mjs','test/stock-workers-coverage.test.mjs']);

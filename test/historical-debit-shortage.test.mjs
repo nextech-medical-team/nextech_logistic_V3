@@ -23,4 +23,3 @@ for(const channel of [...Object.keys(representativeLabels),'erplain'])for(const 
  assert.ok(f.calls.every(q=>q.startsWith('query ')));
 });
 test('ordinary historical reading is preserved',async()=>{assert.equal((await fixture().run(false)).stockOnBc,true);});
-
