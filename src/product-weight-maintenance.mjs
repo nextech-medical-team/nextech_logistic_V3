@@ -35,7 +35,7 @@ export function productWeightMaintenance(db,directory,{api=erplainAccount(direct
       const claimed=await db.query(`INSERT INTO erplain_weight_repairs(variant_id,sku,product_id,state,before_value,attempted_at) VALUES($1,$2,$3,'submitting',$4,now())
        ON CONFLICT(variant_id) DO UPDATE SET state='submitting',before_value=excluded.before_value,after_value=null,error=null,attempted_at=now(),updated_at=now(),
         history=erplain_weight_repairs.history||jsonb_build_array(jsonb_build_object('state',erplain_weight_repairs.state,'before',erplain_weight_repairs.before_value,'after',erplain_weight_repairs.after_value,'attemptedAt',erplain_weight_repairs.attempted_at))
-       WHERE erplain_weight_repairs.state IN ('verified','reconciled') AND erplain_weight_repairs.sku=excluded.sku AND erplain_weight_repairs.product_id=excluded.product_id RETURNING variant_id`,[String(v.id),v.sku,String(v.product.id),JSON.stringify(record.before)]);
+       WHERE erplain_weight_repairs.state IN ('verified','reconciled','not_sent') AND erplain_weight_repairs.sku=excluded.sku AND erplain_weight_repairs.product_id=excluded.product_id RETURNING variant_id`,[String(v.id),v.sku,String(v.product.id),JSON.stringify(record.before)]);
       if(claimed.rows.length!==1)throw Error('Tentative poids déjà enregistrée : aucun rejeu');
      }else if(record.state!=='preserved')await db.query('UPDATE erplain_weight_repairs SET state=$2,after_value=$3,updated_at=now() WHERE variant_id=$1',[String(v.id),record.state,record.after?JSON.stringify(record.after):null]);
     }});
@@ -67,7 +67,7 @@ export function productWeightMaintenance(db,directory,{api=erplainAccount(direct
    await api.verify();if(!enabled())return;
    // Demand takes priority; catalogue traversal covers products without orders too.
    await db.query(`INSERT INTO erplain_weight_checks(sku) SELECT DISTINCT coalesce(l.target_sku,m.target_sku,l.source_sku) FROM lines l JOIN orders o ON o.id=l.order_id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku WHERE NOT o.archived AND coalesce(l.target_sku,m.target_sku,l.source_sku)<>'' ON CONFLICT DO NOTHING`);
-   const candidates=(await db.query(`SELECT w.sku FROM erplain_weight_checks w LEFT JOIN catalog_results c ON c.sku=w.sku WHERE w.checked_at IS NULL OR w.checked_at<now()-interval '24 hours' OR (c.checked_at>w.checked_at AND coalesce(c.message,'') ~* 'poids|weight') ORDER BY (coalesce(c.message,'') ~* 'poids|weight') DESC,w.checked_at NULLS FIRST,w.sku LIMIT $1`,[batchSize])).rows;
+   const candidates=(await db.query(`SELECT w.sku FROM erplain_weight_checks w LEFT JOIN catalog_results c ON c.sku=w.sku WHERE w.checked_at IS NULL OR (w.error IS NULL AND w.checked_at<now()-interval '24 hours') OR (w.error IS NOT NULL AND w.checked_at<now()-interval '5 minutes') OR (c.checked_at>w.checked_at AND coalesce(c.message,'') ~* 'poids|weight') ORDER BY (coalesce(c.message,'') ~* 'poids|weight') DESC,w.checked_at NULLS FIRST,w.sku LIMIT $1`,[batchSize])).rows;
    for(const {sku} of candidates){
     if(!enabled())break;
     let error=null;

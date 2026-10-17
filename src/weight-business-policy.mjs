@@ -27,10 +27,12 @@ export async function fillMissingVariantWeight(api,expected,{checkpoint}={}){
  const before=await read();
  if(!missingWeight(before.weight_amount)){await checkpoint({state:'preserved',before,after:before});return {changed:false,variant:before};}
  await checkpoint({state:'submitting',before});
+ let mutationReturned=false;
  try{
   await api.request('mutation V3BusinessMissingWeight($id:ID!,$input:VariantInput!){UpdateVariant(id:$id,input:$input){id}}',{id:String(expected.id),input:{weight_amount:DEFAULT_UNIT_WEIGHT_GRAMS,weight_unit:'g'}});
+  mutationReturned=true;
   const after=await read();
   if(after.weight_amount==null||Number(after.weight_amount)!==DEFAULT_UNIT_WEIGHT_GRAMS||after.weight_unit!=='g')throw Error('Enregistrement des 5 g non confirmé');
   await checkpoint({state:'verified',before,after});return {changed:true,variant:after};
- }catch(error){await checkpoint({state:'uncertain',before});throw error;}
+ }catch(error){await checkpoint({state:!mutationReturned&&error.code==='source_budget_deferred'?'not_sent':'uncertain',before});throw error;}
 }
