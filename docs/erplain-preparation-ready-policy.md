@@ -30,3 +30,9 @@ Dans Réceptions ERPLAIN, une commande archivée par `importCancellation` avec l
 Le serveur relit les documents et compare l’empreinte de l’aperçu avant de modifier V3. Une seule livraison partielle est enregistrée pour le BL sélectionné, avec ses propres SKU et quantités Erplain. L’action conserve les lignes source, l’ancien BL principal, les PDF, les suivis et l’annulation d’import ; l’état antérieur est enregistré dans l’audit et `archivedBlRecovery`. La commande redevient visible et utilise le circuit partiel. Aucun appel de mutation Erplain ni achat transporteur ne se produit lors de la réactivation.
 
 La livraison reste à confirmer (`review` / `recovered_bl`). « Voir la livraison reprise / lancer son étiquette » ouvre directement l’historique des livraisons, sans proposer la création d’un nouveau BL. « Reprendre l’étiquette sans recréer le BL » lance ensuite le parcours transport existant. Les relectures de stock ne doivent pas démarrer cet achat automatiquement.
+
+### Affichage et étiquette d’un BL repris après archivage
+
+Lorsqu’un BL existant est repris et qu’aucune autre livraison locale n’est encore à traiter, la liste présente une seule ligne opérationnelle : référence et date de la commande, BC, BL repris, articles et quantités de ce BL. Les BL précédents restent dans l’historique. Les autres livraisons encore actives conservent leurs lignes distinctes.
+
+Le bouton habituel « Créer les étiquettes transporteurs PROD » dirige cette sélection vers la reprise d’étiquette du BL existant. Le traitement utilise les règles transport du canal (notamment Amazon), les quantités du BL et les protections existantes contre une seconde création. Il ne relance pas la création du BC, du BL ou d’une sortie de stock. Le téléchargement de la sélection vise également les documents de ce BL. Si les données du BL repris ne sont pas chargées, la création demande d’actualiser la liste au lieu de traiter l’ancienne expédition globale.

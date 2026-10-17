@@ -27,3 +27,26 @@ test('business cancellations and unrelated archival cannot be undone through loc
  assert.equal(archivedResumeBlock(order()),null);
  for(const edit of [o=>o.source_payload.importCancellation.scope='marketplace',o=>o.source_payload.importCancellation=null,o=>o.suspension={active:true},o=>o.suspension={erplainCancellation:{}},o=>o.source_payload.manualPlatformCancellation={cancelled:true},o=>o.channel='temu',o=>o.archived=false]){const o=order();edit(o);assert.ok(archivedResumeBlock(o));}
 });
+test('resumed Amazon label uses 42 BL units and Amazon routing without recreating BC, BL or stock',async()=>{
+ const {partialService}=await import('../src/partial-deliveries.mjs');
+ const {configuredRoute,defaultRouting}=await import('../src/routing.mjs');
+ const o={...order(),archived:false,partial_mode:true,tracking_status:'not_shipped',reference:'AMAZON-TEST',address:{country:'FR'},weight_kg:56};
+ const d={id:'resumed',order_id:o.id,status:'bl_ready',stage:'recovered_bl',environment:'production',label_choice:'new',bl:{id:'second',label:'SHO00745172',status:'pending'},selection:[{sku:'165674',quantity:42}],tracking:[]};
+ let docs=0;const shipments=[];
+ const db={query:async(q,a=[])=>{
+  if(q.startsWith('SELECT * FROM partial_deliveries WHERE NOT EXISTS'))return {rows:d.status==='bl_ready'?[structuredClone(d)]:[]};
+  if(q.startsWith('SELECT * FROM orders WHERE id='))return {rows:[structuredClone(o)]};
+  if(q.startsWith('SELECT 1 FROM partial_documents'))return {rows:docs?[{}]:[]};
+  if(q.startsWith('SELECT sku,weight_kg FROM products'))return {rows:[{sku:'165674',weight_kg:.5}]};
+  if(q.startsWith('SELECT value FROM settings'))return {rows:[{value:defaultRouting}]};
+  if(q.startsWith('UPDATE partial_deliveries SET status=$2')){Object.assign(d,{status:a[1],selection:JSON.parse(a[2]),bl:JSON.parse(a[3]),carrier:a[4],weight_kg:a[5],parcel_count:a[6],tracking:JSON.parse(a[7]),carrier_result:a[8]?JSON.parse(a[8]):null,error:a[9]});return {rows:[]};}
+  if(q.startsWith('INSERT INTO partial_documents')){docs++;return {rows:[]};}
+  throw Error('Unexpected database operation: '+q);
+ },transaction:async f=>f(db)};
+ const create=async shipment=>{shipments.push(shipment);return {reference:'SHIP',tracking:['TEST-TRACK'],documents:[Buffer.from('%PDF-1.4 fake').toString('base64')]};};
+ const service=partialService(db,'/unused',{api:{verify:()=>assert.fail('No Erplain call'),request:()=>assert.fail('No Erplain call')},clients:{gls:create,gofoCreate:create,gofoLabel:async()=>Buffer.from('%PDF-1.4 fake').toString('base64')}});
+ await service.run();assert.equal(d.error,null);assert.equal(d.status,'ready');assert.equal(docs,1);assert.equal(shipments.length,1);
+ const shipment=shipments[0],route=configuredRoute('amazon',21,defaultRouting,'FR');
+ assert.equal(shipment.label_bl_id,'second');assert.equal(shipment.label_bl,'SHO00745172');assert.equal(shipment.weight_kg,21);assert.equal(shipment.carrier,route.carrier);assert.equal(shipment.parcel_count,route.parcels);assert.deepEqual(shipment.lines,[{target_sku:'165674',target_quantity:42}]);
+ await service.run();assert.equal(shipments.length,1);
+});
