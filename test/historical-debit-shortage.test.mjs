@@ -16,5 +16,10 @@ test('negative available balance also blocks',async()=>{await assert.rejects(()=
 for(const stock of [null,'',false,NaN])test('unknown stock balance refuses '+String(stock),async()=>{await assert.rejects(()=>fixture({stock}).run(),/Stock non vérifiable/);});
 test('existing published BL remains readable despite later negative stock',async()=>{const f=fixture({blStatus:'ready_to_ship'});assert.equal((await f.run()).stockOnBc,true);assert.equal((await f.run(false)).stockOnBc,true);});
 test('tender negative debit blocks before a new BL',async()=>{await assert.rejects(()=>fixture({channel:'tender'}).run(),/stock insuffisant/);});
+for(const channel of ['amazon','shopify','relay','temu','samples','rakuten','tender','erplain'])for(const blStatus of [null,'unpublished'])for(const imported of [false,true])test(`${channel} historical negative balance: draft=${blStatus} imported=${imported}`,async()=>{
+ const f=fixture({channel,blStatus});if(imported)f.o.source_payload={erplainImported:true,account:'live'};
+ await assert.rejects(()=>f.run(),/stock insuffisant/);
+ assert.ok(f.calls.every(q=>q.startsWith('query ')));
+});
 test('ordinary historical reading is preserved',async()=>{assert.equal((await fixture().run(false)).stockOnBc,true);});
 

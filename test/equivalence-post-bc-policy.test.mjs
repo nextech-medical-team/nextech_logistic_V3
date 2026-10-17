@@ -11,6 +11,19 @@ function fixture(){
  const b={scope:'order',sku:'A',replacementSku:'B',replaceQuantity:10,replacementQuantity:20};
  return {bc,b,v:v('B')};
 }
+
+for(const [name,patch] of [['missing policy',{track_inventory:undefined}],['boolean stock',{stock_levels:{data:[{location:{id:'L'},on_hand:true,available:true}],paginatorInfo:{hasMorePages:false}}}],['blank stock',{stock_levels:{data:[{location:{id:'L'},on_hand:'',available:''}],paginatorInfo:{hasMorePages:false}}}],['unknown pagination',{stock_levels:{data:[{location:{id:'L'},on_hand:50,available:50}],paginatorInfo:{}}}]])test('replacement refuses '+name,()=>{
+ const f=fixture();f.b.replacementQuantity=1;Object.assign(f.v,patch);assert.throws(()=>buildSubstitution(f.bc,f.v,f.b));
+});
+test('replacement compares cumulative fractional quantities exactly',()=>{
+ const f=fixture();f.b.replacementQuantity=.1;
+ f.bc.line_items.push({...f.bc.line_items[0],id:'b',quantity:.2,variant:f.v});
+ f.v.stock_levels.data[0].on_hand=.3;f.v.stock_levels.data[0].available=.3;
+ assert.equal(buildSubstitution(f.bc,f.v,f.b).replacementQuantity,.1);
+ f.v.stock_levels.data[0].on_hand=.2999999;
+ assert.throws(()=>buildSubstitution(f.bc,f.v,f.b),/stock insuffisant/);
+});
+test('replacement quantities cannot be boolean',()=>{const f=fixture();f.b.replacementQuantity=true;assert.throws(()=>buildSubstitution(f.bc,f.v,f.b),/positives/);});
 test('amounts, taxes, discounts and currency cannot invalidate an equivalence preview',()=>{
  const {bc,b,v}=fixture(),plan=buildSubstitution(bc,v,b);
  for(const patch of [{total:999,currency:{label:'USD'}},{total:null,tax_type:null}]){

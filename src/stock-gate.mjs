@@ -1,13 +1,13 @@
-import {assertInstalledStock} from './stock-gate-preserved.mjs';
 import {exactStockAvailability} from './stock-decimal.mjs';
 const stockNumeric=value=>(typeof value==='number'||typeof value==='string'&&value.trim()!=='')&&Number.isFinite(Number(value));
 export function assertFullOrderStock(lines,{preserveInstalled=false}={}){
- if(preserveInstalled)return assertInstalledStock(lines);
+ // All channels use the same exact stock comparison, including legacy callers.
  if(!Array.isArray(lines))throw new Error('Stock non vérifiable : lignes produit absentes');
  const groups=new Map();let products=0;
  for(const l of lines){if(l?.type==='shipping_cost'&&!l.variant)continue;
  if(!l?.variant?.id)throw new Error('Stock non vérifiable : identité produit absente');
  products++;
+ if(typeof l.variant.track_inventory!=='boolean')throw new Error('Stock non vérifiable : politique produit absente');
  if(!stockNumeric(l.quantity)||Number(l.quantity)<=0)throw new Error('Quantité produit invalide : '+l.variant.sku);
  if(l.variant.track_inventory===false)continue;
  const key=l.variant.id+':'+l.location?.id;if(!l.location?.id)throw new Error('Lieu de stockage absent : '+l.variant.sku);
