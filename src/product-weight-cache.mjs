@@ -20,7 +20,9 @@ export async function cacheProviderWeight(db,v){
   const binding=(await tx.query('SELECT live_variant_id FROM erplain_product_bindings WHERE sku=$1 FOR UPDATE',[v.sku])).rows[0];
   const override=(await tx.query('SELECT live_variant_id FROM product_weight_overrides WHERE sku=$1 FOR UPDATE',[v.sku])).rows[0];
   if([binding,override].some(b=>b&&String(b.live_variant_id)!==String(v.id)))throw Error('Variante liée différente : poids conservés');
-  if(binding)await tx.query('UPDATE erplain_product_bindings SET product=$2,verified_at=now() WHERE sku=$1 AND live_variant_id=$3',[v.sku,JSON.stringify(v),String(v.id)]);
+  // A weight lookup omits prices, taxes and descriptive fields. Refresh only
+  // returned fields, keeping the rest of the existing variant/product snapshot.
+  if(binding)await tx.query("UPDATE erplain_product_bindings SET product=product||$2::jsonb||jsonb_build_object('product',coalesce(product->'product','{}'::jsonb)||($2::jsonb->'product')),verified_at=now() WHERE sku=$1 AND live_variant_id=$3",[v.sku,JSON.stringify(v),String(v.id)]);
   if(override)await tx.query('UPDATE product_weight_overrides SET weight_kg=$2,verified_at=now() WHERE sku=$1 AND live_variant_id=$3',[v.sku,weight,String(v.id)]);
   await tx.query(`INSERT INTO products(sku,weight_kg,origin,updated_at) VALUES($1,$2,'erplain_readonly',now()) ON CONFLICT(sku) DO UPDATE SET weight_kg=excluded.weight_kg,updated_at=now()`,[v.sku,weight]);
   await tx.query(`INSERT INTO catalog_results(sku,message,checked_at) VALUES($1,null,now()) ON CONFLICT(sku) DO UPDATE SET message=null,checked_at=now()`,[v.sku]);

@@ -9,6 +9,15 @@ import {additionalLabelWeight} from '../src/manual-label-policy.mjs';
 import {reconcileVerifiedWeights} from '../src/verified-weight-diagnostics.mjs';
 const variant=(sku='A',amount=null,id='42')=>({id,sku,active:true,weight_amount:amount,weight_unit:amount==null?null:'g',product:{id:'7',active:true}});
 const shared=new PGlite();after(()=>shared.close());
+test('weight-only provider refresh preserves unrelated cached product metadata',async()=>{
+ const f=await fixture();try{
+  const old={...variant('A',5),track_inventory:true,tax_codes:[{id:'tax'}],variant_prices:[{id:'price',amount:12}],product:{id:'7',active:true,label:'Existing product name'}};
+  await f.db.query('INSERT INTO erplain_product_bindings(sku,live_variant_id,product) VALUES($1,$2,$3)',['A','42',JSON.stringify(old)]);
+  await cacheProviderWeight(f.db,variant('A',100));
+  const saved=(await f.db.query('SELECT product FROM erplain_product_bindings')).rows[0].product;
+  assert.equal(saved.weight_amount,100);assert.equal(saved.track_inventory,true);assert.deepEqual(saved.tax_codes,old.tax_codes);assert.deepEqual(saved.variant_prices,old.variant_prices);assert.equal(saved.product.label,old.product.label);
+ }finally{await f.close();}
+});
 async function fixture({variants=[variant()],timeout=false,applyBeforeTimeout=false,enabled=()=>true,inventory=[]}={}){
  const engine=shared;await engine.waitReady;await engine.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
  const wrap=e=>({query:(...a)=>e.query(...a),exec:s=>e.exec(s)});
