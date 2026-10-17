@@ -115,6 +115,7 @@ import {temuExcelImportRoutes} from './temu-excel-import.mjs';
 import {createDemo,runJobs,refreshTracking} from './workflow.mjs';
 
 import {createCatalogSync} from './erplain-readonly.mjs';
+import {initializeProductWeightMaintenance,productWeightMaintenance} from './product-weight-maintenance.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 
@@ -136,6 +137,7 @@ await db.withLocks(['schema'],()=>initializePlatformCancellationReports(db));
 await db.withLocks(['schema'],()=>initializeStockResumeWatch(db,{resumeReadLeases:config.background}));
 await db.withLocks(['schema'],()=>initializeV2Followup(db));
 await db.withLocks(['schema'],()=>initializeShopifyObservation(db));
+await db.withLocks(['schema'],()=>initializeProductWeightMaintenance(db));
 await db.withLocks(['schema'],()=>initializeManualReview(db));
 const importApprovals=importAuthorization(db);
 await db.withLocks(['schema'],()=>initializeImportCorrections(db));
@@ -232,6 +234,8 @@ const negativeStocks=negativeStocksService(erplainAccount(directory,'source'),di
 const negativeStockHistory=negativeStocksHistory(db,negativeStocks);
 const stockInformation=stockInformationService(db,erplainAccount(directory,'source'),directory);
 const catalog=createCatalogSync(db,directory); const allWeights=fullWeightSync(db,directory),equivalents=equivalentService(db,directory);
+const weightMaintenance=productWeightMaintenance(db,directory,{enabled:()=>!runtime.stopping&&runtime.enabled('read-catalog')&&runtime.enabled('product-weights')&&process.env.ERPLAIN_LIVE_WRITES==='1'&&process.env.MIGRATION_PREPARATION!=='1'});
+backgroundInterval(()=>weightMaintenance.run(),30000,'product-weights');
 
 await db.query(`UPDATE jobs SET status='pending',available_at=now() WHERE kind='label' AND status='blocked'`);
 

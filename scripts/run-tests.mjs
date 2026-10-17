@@ -72,5 +72,6 @@ groups.push(['--test','test/erplain-existing-recovery.test.mjs']);
 groups.push(['--test','test/catalogue-demand-sql.test.mjs']);
 groups.push(['--test','test/price-correction.test.mjs','test/price-verification.test.mjs']);
 groups.push(['--test','test/erplain-archived-resume.test.mjs']);
+groups.push(['--test','test/product-weight-maintenance.test.mjs']);
 groups.push(['--test','test/customer-creation-recovery.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}
