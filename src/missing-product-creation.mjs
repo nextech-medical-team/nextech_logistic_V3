@@ -76,7 +76,7 @@ export async function ensureMissingProduct(db,api,{sku,label,weightKg,guard=asyn
   await stage('Relecture du produit créé dans Erplain LIVE');
   const variant=assertAbsentProductPrices(uniqueActive(await read(sku),sku,productId));
   const expected=input.variants.data[0];
-  if(missingWeight(variant.weight_amount)||Math.abs(businessWeight(variant.weight_amount,variant.weight_unit).weightKg-businessWeight(expected.weight_amount,expected.weight_unit).weightKg)>1e-9)throw Error('Poids du produit créé non confirmé');
+  if(missingWeight(variant.weight_amount)||!Object.hasOwn(variant,'weight_unit')||Math.abs(businessWeight(variant.weight_amount,variant.weight_unit).weightKg-businessWeight(expected.weight_amount,expected.weight_unit).weightKg)>1e-9)throw Error('Poids du produit créé non confirmé');
   await verified(variant);
   return {variant,created:true};
  }catch(e){

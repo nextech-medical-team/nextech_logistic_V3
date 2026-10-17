@@ -51,3 +51,4 @@ test('uncertain mutation or unconfirmed relecture is journalled and never retrie
  }
  const api=apiMock(variant(null,null));await assert.rejects(fillMissingVariantWeight(api,{id:42,sku:'SKU'},{checkpoint:async()=>{throw Error('journal unavailable');}}));assert.equal(api.calls.length,1);
 });
+for(const field of ['weight_amount','weight_unit'])test('omitted provider field is not proof of a missing weight: '+field,async()=>{const v=variant(null,null);delete v[field];const api=apiMock(v);await assert.rejects(fillMissingVariantWeight(api,{id:42,sku:'SKU'},{checkpoint:async()=>{}}),/incomplète/);assert.equal(api.calls.some(c=>c.q.startsWith('mutation')),false);});

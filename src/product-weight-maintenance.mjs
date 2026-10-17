@@ -21,6 +21,7 @@ export function productWeightMaintenance(db,directory,{api=erplainAccount(direct
    if(previous&&['submitting','uncertain'].includes(previous.state)){
     const read=await api.request(readVariant,{id:String(v.id)});v=read.Variant;
     if(!v||String(v.id)!==previous.variant_id||v.sku!==previous.sku||String(v.product?.id)!==previous.product_id||v.active!==true||v.product.active!==true)throw Error('Identité du rapprochement poids non vérifiée');
+    if(!Object.hasOwn(v,'weight_amount')||!Object.hasOwn(v,'weight_unit'))throw Error('Lecture du poids Erplain incomplète : rapprochement différé');
     if(missingWeight(v.weight_amount))throw Error('Écriture poids incertaine : lecture seule, aucun rejeu');
     businessWeight(v.weight_amount,v.weight_unit);
     await db.query("UPDATE erplain_weight_repairs SET state='reconciled',after_value=$2,error=null,updated_at=now() WHERE variant_id=$1",[String(v.id),JSON.stringify(v)]);

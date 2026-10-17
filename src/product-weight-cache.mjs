@@ -13,6 +13,7 @@ export async function weightVariantForCache(db,variants,sku,locationId){
 // Existing identity choices and weights attached to completed documents stay intact.
 export async function cacheProviderWeight(db,v){
  if(!v?.id||!v.sku||v.active!==true||v.product?.active!==true)throw Error('Identité produit active non vérifiée');
+ if(!Object.hasOwn(v,'weight_amount')||!Object.hasOwn(v,'weight_unit'))throw Error('Lecture du poids Erplain incomplète');
  if(missingWeight(v.weight_amount))throw Error('Poids absent dans Erplain : enregistrement des 5 g à confirmer');
  const weight=businessWeight(v.weight_amount,v.weight_unit).weightKg;
  return db.transaction(async tx=>{

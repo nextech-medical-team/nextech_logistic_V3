@@ -21,6 +21,7 @@ export async function fillMissingVariantWeight(api,expected,{checkpoint}={}){
  const read=async()=>{
   const {Variant:v}=await api.request(query,{id:String(expected.id)});
   if(!v||String(v.id)!==String(expected.id)||v.sku!==expected.sku||v.active!==true||v.product?.active!==true||expected.productId&&String(v.product.id)!==String(expected.productId))throw Error('Identité produit active différente');
+  if(!Object.hasOwn(v,'weight_amount')||!Object.hasOwn(v,'weight_unit'))throw Error('Lecture du poids Erplain incomplète : aucune écriture');
   return v;
  };
  const before=await read();
