@@ -57,7 +57,9 @@ export function negativeStocksService(api,directory,{location=()=>stockChoiceLoc
   for(const order of documents.data){
    if(['cancelled','unpublished'].includes(order.status))continue;
    if(!order.id||!order.label||!order.status||!Array.isArray(order.line_items)){unverified++;continue;}
-   const deliveries=await readOrderDeliveryLabels(api,order);
+   const deliveryRead=await readOrderDeliveryLabels(api,order);
+   unverified+=deliveryRead.unverified;
+   const deliveries=deliveryRead.labels;
    if(!deliveries.length)continue;
    for(const line of order.line_items){
     // Shipping/handling lines have no inventory variant.
@@ -81,15 +83,16 @@ export function negativeStocksService(api,directory,{location=()=>stockChoiceLoc
 }
 
 async function readOrderDeliveryLabels(api,order){
- const labels=[],seen=new Set();let connection=order.shipping_orders;
+ const labels=[],seen=new Set();let connection=order.shipping_orders,unverified=0;
  for(let page=1;page<=100;page++){
   if(!Array.isArray(connection?.data)||typeof connection.paginatorInfo?.hasMorePages!=='boolean')throw Error('Liste des BL du BC incomplète');
   for(const bl of connection.data){
    if(!bl.id||seen.has(String(bl.id)))throw Error('Pagination des BL incohérente');
    seen.add(String(bl.id));
+   if(typeof bl.status!=='string'||!bl.status.trim()){unverified++;continue;}
    if(!['cancelled','unpublished'].includes(bl.status)&&bl.label)labels.push(bl.label);
   }
-  if(!connection.paginatorInfo.hasMorePages)return labels;
+  if(!connection.paginatorInfo.hasMorePages)return {labels,unverified};
   if(!connection.data.length||page===100)throw Error('Liste des BL du BC incomplète');
   const result=await api.request('query V3NegativeStockOrderDeliveryPage($id:ID!,$page:Int!){Order(id:$id){id shipping_orders(first:100,page:$page){data{id label status} paginatorInfo{hasMorePages}}}}',{id:String(order.id),page:page+1});
   if(String(result.Order?.id)!==String(order.id))throw Error('Identité du BC non confirmée');
