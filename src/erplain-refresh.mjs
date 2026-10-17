@@ -1,3 +1,4 @@
+import {preserveImportedPostalAddress} from './imported-postal-authority.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {targetedOrderService} from './erplain-targeted-orders.mjs';
 import {initializeManualReview,queueManualReview,manualReviewService} from './erplain-manual-validation.mjs';
@@ -111,7 +112,7 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
     const hasLabel=(await db.query("SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND (status='ready' OR result IS NOT NULL OR tracking<>'[]'::jsonb)",[o.id])).rows.length;
     // Save the external document snapshot, never set ERP jobs to pending or complete.
     await db.query('UPDATE orders SET erp_live=jsonb_set(erp_live,ARRAY[$2],$3::jsonb),erplain_refresh=erplain_refresh||$4::jsonb WHERE id=$1',[o.id,key,JSON.stringify({...o.erp_live[key],...document}),JSON.stringify({at:new Date().toISOString(),account:job.account,jobId:job.id})]);
-    if(section==='orders'&&!hasLabel&&!o.partial_mode){const a=orderAddress(document.shipping_address,o.recipient);if(a.street&&a.country)await db.query('UPDATE orders SET address=$2,resolution_pending_resume=true WHERE id=$1',[o.id,JSON.stringify({...o.address,...a})]);}
+    if(section==='orders'&&!hasLabel&&!o.partial_mode){const a=orderAddress(document.shipping_address,o.recipient);if(a.street&&a.country)await db.query('UPDATE orders SET address=$2,resolution_pending_resume=true WHERE id=$1',[o.id,JSON.stringify(preserveImportedPostalAddress(o,{...o.address,...a}))]);}
     const issues=[];
     if(section==='orders'){
      const local=(await db.query('SELECT target_sku sku,target_quantity quantity FROM lines WHERE order_id=$1',[o.id])).rows;
@@ -170,6 +171,7 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
   const manualReview=manualReviewService(db,apiFactory('live'));
   const targeted=targetedOrderService(db,apiFactory('live'));
   if(p==='/api/erplain-refresh/targeted-lookup'&&req.method==='POST'){json(res,200,await targeted.lookup(await body(req)));return true;}
+  if(p==='/api/erplain-refresh/targeted-reconcile'&&req.method==='POST'){json(res,200,await targeted.reconcile(await body(req),user));return true;}
   if(p==='/api/erplain-refresh/targeted-reread'&&req.method==='POST'){json(res,200,await targeted.reread(await body(req)));return true;}
   if(p==='/api/erplain-refresh/recovered-orders'&&req.method==='GET'){json(res,200,await targeted.list({search:url.searchParams.get('search')||'',page:url.searchParams.get('page')}));return true;}
   if(p==='/api/erplain-refresh/manual-review'&&req.method==='GET'){json(res,200,await manualReview.list());return true;}

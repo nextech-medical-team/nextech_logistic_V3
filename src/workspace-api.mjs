@@ -1,3 +1,4 @@
+import {assertImportedPostalAddress} from './imported-postal-authority.mjs';
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
 import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
 import {deliveredOrderSql} from './delivered-order.mjs';
@@ -18,7 +19,8 @@ export async function workspaceApi({p,url,req,res,db,user,body,json,permitted,au
   permitted(user,operations);const b=await body(req),a={};for(const k of ['name','street','postal','city','country','phone','email'])a[k]=String(b.address?.[k]||'').trim().slice(0,250);
   a.country=a.country.toUpperCase();if(!a.name||!a.street||!a.postal||!a.city||! /^[A-Z]{2}$/.test(a.country))throw new Error('Nom, adresse, ville, code postal et pays à deux lettres requis');
   await db.transaction(async tx=>{
-   const o=(await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows[0];if(!o)throw new Error('Commande introuvable');
+   const o=(await tx.query('SELECT id,channel,source_payload FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows[0];if(!o)throw new Error('Commande introuvable');
+   assertImportedPostalAddress(o,a);
    if((await tx.query('SELECT order_id FROM carrier_jobs WHERE order_id=$1',[b.id])).rows.length)throw new Error('Une demande transporteur existe déjà : adresse figée pour éviter une divergence avec l’étiquette');
    await tx.query("UPDATE orders SET address=$2,recipient=$3,label_status='pending',issue=null WHERE id=$1",[b.id,JSON.stringify(a),a.name]);
    await tx.query("UPDATE jobs SET status='pending',available_at=now() WHERE order_id=$1 AND kind='label'",[b.id]);

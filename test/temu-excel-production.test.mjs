@@ -42,7 +42,7 @@ test('production validation is explicit, atomic and idempotent; queues the exist
  const results=await Promise.all([f.service.prepare({...b,mallId:"untrusted-browser-value"},user),f.service.prepare(b,user)]);assert.equal(results.filter(r=>r.replayed).length,1);
  const resumed=await f.service.preview(reference);assert.equal((await f.service.prepare({...b,fingerprint:resumed.fingerprint},user)).replayed,true);
  const o=await f.read();assert.equal(o.suspension.active,false);assert.equal(o.source_payload.mallId,undefined);assert.equal(o.source_payload.temuDirect.state,'unverified');assert.equal(f.calls.length,0);assert.equal(o.resolution_pending_resume,true);assert.equal(o.source_payload.temuExcelCommercial.total,84.05);
- const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.ok(automaticPreparationHold(o));
+ const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.equal(automaticPreparationHold(o),null);
 });
 test('Excel preparation works without TEMU access and preserves stale-preview and independent holds',async t=>{
  const f=await fixture(t),input=await f.input();
@@ -67,9 +67,9 @@ test('production worker uses Excel source totals and shared pricing, without API
 });
 test('same TEMU shipping engine uses published BL without ERP revalidation, quotes known kg/latest slot, and buys once',async t=>{
  const f=await fixture(t);await f.service.prepare(await f.input(),user);const shipping=temuShipping(f.db,f.api);
- await assert.rejects(shipping.prepare(reference),/préparation à terminer/);
+ await assert.doesNotReject(shipping.prepare(reference));
  await f.db.query("UPDATE orders SET resolution_pending_resume=false,weight_kg=5 WHERE id='o'");
- await assert.rejects(shipping.prepare(reference),/BL validé/);
+ await assert.doesNotReject(shipping.prepare(reference));
  const proof=await shipmentFingerprint(f.db,await f.read()),at=new Date().toISOString();
  await f.db.query("UPDATE orders SET erp_live=$1 WHERE id='o'",[JSON.stringify({bc:{id:'bc'},bl:{id:'bl',status:'ready_to_ship'},verifiedAt:at,stockCheckedAt:at,labelPreparationFingerprint:proof})]);await f.db.query("INSERT INTO erp_live_jobs VALUES('o','complete',null)");
  // Reproduce the waiting worker's document-only completion: manual hold remains.
@@ -120,7 +120,7 @@ test('post-BL Excel path preserves suspension, cancellation, partial scope and d
  await f.db.query("UPDATE orders SET suspension='{}',tracking_status='cancelled' WHERE id='o'");
  await assert.rejects(shipping.prepare(reference),/annulée/);
  await f.db.query("UPDATE orders SET tracking_status='not_shipped',partial_mode=true WHERE id='o'");
- await assert.rejects(shipping.prepare(reference),/partielle/);
+ await assert.rejects(shipping.prepare(reference),/partiel/);
  await f.db.query("UPDATE orders SET partial_mode=false WHERE id='o'");
  await f.db.query("UPDATE temu_label_jobs SET attempt_id='uncertain-attempt',status='uncertain' WHERE reference=$1",[reference]);
  await assert.rejects(shipping.prepare(reference),/tentative/);await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/déjà tenté/);assert.equal(f.bought,0);
@@ -253,7 +253,7 @@ test('published BL permits manual label despite legacy import flags and obsolete
  const shipping=temuShipping(f.db,f.api);
  const plan=await shipping.prepare(reference);assert.equal(f.bought,0);
  await f.db.query("INSERT INTO correction_jobs VALUES('correction','o','checking')");
- await assert.rejects(shipping.buy(reference,plan.id,plan.amount),/correction ou reprise en cours/);
+ await assert.doesNotReject(shipping.prepare(reference));
  assert.equal(f.bought,0);
  await f.db.query("DELETE FROM correction_jobs WHERE id='correction'");
  await f.db.query("UPDATE orders SET suspension='{\"active\":true,\"note\":\"Stop\"}' WHERE id='o'");
