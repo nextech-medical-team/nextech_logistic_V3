@@ -124,9 +124,10 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
  };
  searchInput.addEventListener('input',()=>{if(displayedRows!==null)renderRows(displayedRows);});
 
- button.textContent='Actualiser les stocks négatifs';
+ const verifyButtonLabel='Lancer la vérification';
+ button.textContent=verifyButtonLabel;
  function emptyRow(target,text,columns){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=columns;cell.textContent=text;row.append(cell);target.replaceChildren(row);}
- table.hidden=false;emptyRow(body,'Chargement des stocks négatifs à l’ouverture du module…',9);
+ table.hidden=false;emptyRow(body,'Cliquez sur « Lancer la vérification » pour rechercher les commandes ERP avec BL et disponible négatif.',9);
  function renderRows(rows){
   displayedRows=rows;
   const query=normalizeSearch(searchInput.value.trim());
@@ -151,16 +152,16 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
  reportSelect.onchange=async()=>{
   const id=reportSelect.value;if(!id||button.disabled)return;
   reportSelect.disabled=true;button.disabled=true;
-  try{const saved=await api('/api/stocks/negative/history/detail?'+new URLSearchParams({id}));renderRows(saved.snapshot.rows);status.textContent='Rapport du '+new Date(saved.completed_at).toLocaleString('fr-FR')+' · emplacement '+saved.snapshot.locationId+(saved.snapshot.unverified?' · '+saved.snapshot.unverified+' stock(s) non vérifié(s).':'.');}
+  try{const saved=await api('/api/stocks/negative/history/detail?'+new URLSearchParams({id}));renderRows(saved.snapshot.rows);status.textContent='Rapport du '+new Date(saved.completed_at).toLocaleString('fr-FR')+' · emplacement '+saved.snapshot.locationId+(saved.snapshot.unverified?' · '+saved.snapshot.unverified+' élément(s) non vérifié(s).':'.');}
   catch(error){status.textContent='Rapport indisponible : '+error.message;}
   finally{reportSelect.disabled=false;button.disabled=false;}
  };
- let opened=false;
- new MutationObserver(()=>{if(!panel.hidden){if(!opened){opened=true;button.onclick();}else loadHistory();}}).observe(panel,{attributes:true,attributeFilter:['hidden']});
+ // Verify only on explicit request; opening the module reads saved reports only.
+ new MutationObserver(()=>{if(!panel.hidden)loadHistory();}).observe(panel,{attributes:true,attributeFilter:['hidden']});
  button.onclick=async()=>{
   if(button.disabled)return;
   displayedRows=null;exportRows=[];exportButton.disabled=true;searchCount.textContent='';
-  button.disabled=true;panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des stocks ERPLAIN en cours…',9);loadHistory();
+  button.disabled=true;button.textContent='Vérification en cours…';panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des commandes ERP avec BL en cours…',9);loadHistory();
   try{
    let page=1,lastPage=1,locationId=null,unverified=0,runId=null;const rows=[];
    do{
@@ -172,9 +173,9 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
     locationId=data.locationId;lastPage=data.lastPage;unverified+=data.unverified;rows.push(...data.rows);page++;
    }while(page<=lastPage);
    renderRows(rows);
-   status.textContent=`${new Set(rows.map(row=>row.bcId)).size} BC ERP · ${rows.length} ligne(s) à stock disponible négatif · emplacement ${locationId} · lecture terminée à ${new Date().toLocaleTimeString('fr-FR')}.`+(unverified?` ${unverified} produit(s) avec stock non vérifié : résultat potentiellement incomplet.`:'');
+   status.textContent=`${new Set(rows.map(row=>row.bcId)).size} BC ERP · ${rows.length} ligne(s) à stock disponible négatif · emplacement ${locationId} · lecture terminée à ${new Date().toLocaleTimeString('fr-FR')}.`+(unverified?` ${unverified} élément(s) non vérifié(s) : résultat potentiellement incomplet.`:'');
    await loadHistory();
   }catch(error){status.textContent=error.message.includes('Route inexistante')?'Le service de stocks négatifs n’est pas encore actif. Redémarrez le serveur pour charger les stocks et les rapports.':'Lecture interrompue : '+error.message;emptyRow(body,'Aucun résultat à afficher pour le moment.',9);}
-  finally{button.disabled=false;panel.setAttribute('aria-busy','false');}
+  finally{button.disabled=false;button.textContent=verifyButtonLabel;panel.setAttribute('aria-busy','false');}
  };
 })();

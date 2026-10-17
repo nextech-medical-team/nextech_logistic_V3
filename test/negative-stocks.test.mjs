@@ -79,6 +79,35 @@ test('all associated BL pages are read before a command is reported',async()=>{
  assert.equal(result.rows[0].blLabel,'SHO1 ; SHO-extra');
 });
 
+test('missing, blank and malformed BL status never qualifies a command and is flagged',async()=>{
+ for(const status of [undefined,null,'','   ',0,false,{}]){
+  const order=document(1,[line(1)]);order.shipping_orders.data[0].status=status;
+  const result=await reader([order]).page();
+  assert.equal(result.rows.length,0);assert.equal(result.unverified,1);
+ }
+});
+
+test('a valid BL still qualifies the command while an unknown BL is excluded and flagged',async()=>{
+ const order=document(1,[line(1)]);
+ order.shipping_orders.data.push({id:'unknown',label:'SHO-unknown'});
+ const result=await reader([order]).page();
+ assert.equal(result.rows.length,1);assert.equal(result.rows[0].blLabel,'SHO1');assert.equal(result.unverified,1);
+});
+
+test('missing BL status on later pages is recorded in report history',async()=>{
+ const order=document(1,[line(1)]);order.shipping_orders.data[0].status='cancelled';order.shipping_orders.paginatorInfo.hasMorePages=true;
+ const api={verify:async()=>{},request:async query=>query.includes('V3NegativeStockOrders(')?{Orders:{data:[order],paginatorInfo:{lastPage:1}}}:{Order:{id:1,shipping_orders:{data:[{id:'unknown',label:'SHO-unknown'}],paginatorInfo:{hasMorePages:false}}}}};
+ const db=new PGlite();
+ try{
+  await initializeNegativeStocks(db);
+  const history=negativeStocksHistory(db,negativeStocksService(api,'',{location:async()=>'7'}));
+  const result=await history.scan({}, {email:'fixture@example.invalid'});
+  assert.equal(result.saved,true);assert.equal(result.unverified,1);assert.equal(result.rows.length,0);
+  const saved=await history.get(result.runId);assert.equal(saved.snapshot.unverified,1);
+  assert.equal((await history.list()).rows[0].unverified,1);
+ }finally{await db.close();}
+});
+
 test('BL, quantity and negative availability are numeric/text values in Excel',async()=>{
  const {exportNegativeStocks}=await import('../src/negative-stocks-export.mjs');
  const {default:ExcelJS}=await import('exceljs');
