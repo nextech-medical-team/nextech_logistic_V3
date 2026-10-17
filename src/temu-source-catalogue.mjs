@@ -48,7 +48,7 @@ export async function prepareIncompleteTemuCatalogue(db,api,{bind,now=()=>Date.n
    await guard();await api.verify();
    const label=typeof line.originalGoodsName==='string'&&line.originalGoodsName.trim()?line.originalGoodsName.trim():typeof line.goodsName==='string'?line.goodsName.trim():'';
    const linked=(await db.query('SELECT live_variant_id FROM erplain_product_bindings WHERE sku=$1',[sku])).rows[0];
-   const read=async key=>{const rows=await readCreationSku(api,key);if(linked&&(rows.length!==1||String(rows[0].id)!==String(linked.live_variant_id)))throw Error('Catalogue: identite liee a rapprocher');return rows;};
+   const read=async key=>{await guard();const rows=await readCreationSku(api,key);if(linked&&(rows.length!==1||String(rows[0].id)!==String(linked.live_variant_id)))throw Error('Catalogue: identite liee a rapprocher');return rows;};
    const result=await ensureMissingProduct(db,api,{sku,label,read,guard:async()=>{await guard();
     // A pack-to-unit ratio does not change the identity or source product name.
     // A different target SKU still needs its own authoritative catalogue name.

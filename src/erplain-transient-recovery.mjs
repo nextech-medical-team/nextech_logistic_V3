@@ -63,7 +63,23 @@ export async function resumeTransientErplain(db,api){
    const recoveryId=randomUUID();
    try{
     // No writes in this preflight. A lost BC response is reconciled by its immutable V3 identity.
-    const reader={request:async(q,v)=>{if(!/^query\s/.test(q))throw Error('Rapprochement ERP : lecture seule obligatoire');const freshRead=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];if(!freshRead||freshRead.archived||freshRead.resolution_pending_resume||freshRead.partial_mode||cancellationBlock(freshRead)||['shipped','delivered','in_transit'].includes(freshRead.tracking_status)||JSON.stringify(freshRead.erp_live)!==JSON.stringify(o.erp_live))throw Error('Commande modifiée ou protégée : rapprochement suspendu');const result=await api.request(q,v);if(result.Orders){if(!Array.isArray(result.Orders.data)||result.Orders.paginatorInfo?.hasMorePages!==false)throw Error('BC : recherche incomplète');for(const x of result.Orders.data){const identified=x.external_reference==='V3:'+o.id||String(x.internal_notes||'').includes('[V3:'+o.id+']')||x.customer?.customer_number==='V3:'+o.id;if(!identified||!x.id||!['active','unpublished'].includes(x.status))throw Error('BC de même référence ambigu ou non réutilisable : aucune nouvelle création');}}return result;}};
+    const reader={request:async(q,v)=>{
+     if(!/^query\s/.test(q))throw Error('Rapprochement ERP : lecture seule obligatoire');
+     const freshRead=(await db.query(`SELECT o.* FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
+      WHERE o.id=$1 AND e.status='review' AND e.updated_at::text=$2
+      AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
+      AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))`,[o.id,o.retry_version])).rows[0];
+     if(!freshRead||freshRead.archived||freshRead.resolution_pending_resume||freshRead.partial_mode||cancellationBlock(freshRead)||['shipped','delivered','in_transit'].includes(freshRead.tracking_status)||JSON.stringify(freshRead.erp_live)!==JSON.stringify(o.erp_live))throw Error('Commande modifiée ou protégée : rapprochement suspendu');
+     const result=await api.request(q,v);
+     if(result.Orders){
+      if(!Array.isArray(result.Orders.data)||result.Orders.paginatorInfo?.hasMorePages!==false)throw Error('BC : recherche incomplète');
+      for(const x of result.Orders.data){
+       const identified=x.external_reference==='V3:'+o.id||String(x.internal_notes||'').includes('[V3:'+o.id+']');
+       if(!identified||!x.id||!['active','unpublished'].includes(x.status))throw Error('BC de même référence ambigu ou non réutilisable : aucune nouvelle création');
+      }
+     }
+     return result;
+    }};
     if(!state.phase){
      // One identity read per bounded pass, rather than one per untouched order.
      const result=await (identityRead??=reader.request('query V3RateLimitIdentity { Company { id } }'));
