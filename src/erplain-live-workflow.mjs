@@ -1,3 +1,4 @@
+import {assertNewBcStock} from './new-bc-stock-gate.mjs';
 import {usesNativeBlCycle,assertNativeBcSnapshot} from './native-bl-policy.mjs';
 import {resumeRetiredReservationReviews} from './retired-reservation-review.mjs';
 import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
@@ -84,8 +85,17 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
  let running=false,activeBcOnlyOrderId=null,nextRunAt=0,catalogueRecoveryAfterId='',excelRecoveryAfterId='';
  const save=async o=>db.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(o.erp_live)]);
  const fail=async(o,e)=>{let message=stockFailureMessage(o,e.message);message=await stockCheckFailure(db,o,e,message);if(o.erp_live?.phase==='creating_stock'&&!/sortie non confirmée, aucune nouvelle déduction automatique/.test(message)){o.erp_live.stockLastFailure={at:new Date().toISOString(),message};await save(o);}const waiting=await recordTransientFailure(db,o,message,e);if(e?.httpStatus===429)nextRunAt=Date.now()+Math.max(2000,Number(e.retryAfter||60)*1000);if(await queueQuotaRead(db,o,e))return;e=new Error(waiting);await db.query("UPDATE erp_live_jobs SET status='review',error=$2,updated_at=now() WHERE order_id=$1",[o.id,e.message]);await db.query("UPDATE orders SET erp_status='live_review' WHERE id=$1",[o.id]);};
- async function batchMutation(orders,phase,field,type,operation,input,selection){
+ async function batchMutation(orders,phase,field,type,operation,input,selection,{stockLocked=false}={}){
   if(!orders.length)return;
+  if(operation==='CreateOrder'&&!stockLocked){
+   // Serialize each fresh read and BC creation across workers and shipments.
+   // The next order must see the previous BC's reservation/debit.
+   for(const o of orders)await withShipmentLock(async()=>{
+    try{await assertNewBcStock(api,input(o).line_items,o.selectedProducts);await batchMutation([o],phase,field,type,operation,input,selection,{stockLocked:true});}
+    catch(e){o.failed=true;await fail(o,e);}
+   });
+   return;
+  }
   if(operation==='CreateOrder'){
    const snapshot=await api.request('query V3LiveCapacity { Orders(first:1){paginatorInfo{total}} }');
    const current=Number(snapshot.Orders?.paginatorInfo?.total);
@@ -240,7 +250,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of working.filter(o=>o.pricing)){
     try{
      const historical=await readPreservedHistoricalBc(api,o,usesRecordedBc(o)?null:o.channel==='temu'?temuSellerTotals(o):null);
-     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),lock:fn=>withShipmentLock(fn,['erplain-bc-numbering'])});
+     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),beforePublish:bc=>bc.update_stock===true?assertNewBcStock(api,bc.line_items):undefined,lock:fn=>withShipmentLock(fn,['erplain-bc-numbering','stock-mutations'])});
      const confirmed=historical?.confirmed||await verifyRecordedOrSourceTotals(api,o,actual,()=>o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
      o.erp_live.pricing={...o.erp_live.pricing,status:'verified',error:null,confirmed,verifiedAt:new Date().toISOString()};await save(o);
     }catch(e){o.failed=true;o.erp_live.pricing={...o.erp_live.pricing,status:'blocked',error:e.message};await save(o);await fail(o,e);}

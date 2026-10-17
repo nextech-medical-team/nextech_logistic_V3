@@ -207,7 +207,7 @@ export async function historicalPreparationProof(api,o,{beforeBlPublication=fals
  // A matching debit proves that Erplain wrote the movement, not that the
  // movement was covered by stock. Check its remaining balances before a new
  // BL is published. Never turn this into a gate for an existing BL's label.
- if(beforeBlPublication&&(!bl||bl.status==='unpublished')&&o.channel!=='tender'&&!proof.stockModel){
+ if(beforeBlPublication&&(!bl||bl.status==='unpublished')&&!proof.stockModel){
   for(const l of bc.line_items.filter(l=>l.type==='normal')){
    if(typeof l.variant?.track_inventory!=='boolean')throw Error('Stock non vérifiable : politique produit absente');
    if(!l.variant.track_inventory)continue;
