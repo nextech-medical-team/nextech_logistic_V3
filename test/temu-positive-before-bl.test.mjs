@@ -83,6 +83,11 @@ test('positive margin without a BL waits without any provider or margin call, th
  await db.query("UPDATE orders SET erp_live=erp_live||'{\"bl\":{\"id\":\"bl\",\"status\":\"pending\"}}'");
  await f.worker.process(reference);assert.equal(f.buys,1);
 });
+test('a cached quote created before BL is refreshed and purchased on the first automatic pass after BL creation',async()=>{
+ const f=await fixture({bl:false});const before=await f.local.prepare(reference);assert.equal(before.blAuthority,undefined);
+ await db.query("UPDATE orders SET erp_live=erp_live||'{\"bl\":{\"id\":\"bl\",\"status\":\"pending\"}}'");
+ const result=await f.worker.process(reference);assert.equal(result.status,'complete');assert.equal(f.buys,1);
+});
 for(const change of ["erp_live=erp_live-'bl'","erp_live=jsonb_set(erp_live,'{bl,status}','\"cancelled\"')","erp_live=jsonb_set(erp_live,'{bl,id}','\"other\"')"])
 test('BL removal, cancellation or replacement before atomic claim prevents the purchase: '+change,async()=>{
  const f=await fixture({beforeClaim:async n=>{if(n===2)await db.query('UPDATE orders SET '+change);}});

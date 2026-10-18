@@ -9,6 +9,8 @@ The worker filters by created BL and rechecks admission and financial proof
 before claim. The native purchase locks the order and checks BL existence and
 identity; the financial SQL claim independently requires a valid created BL.
 The existing order trigger wakes purchases immediately on BL creation.
+An unexpired quote prepared before that BL is refreshed to bind its new BL
+authority, avoiding a stale-preview failure on the first automatic pass.
 Pending, make_the_shipment, in_preparation and ready_to_ship BLs qualify.
 Missing, draft, cancelled or shipped BLs do not qualify. Other channels retain
 their existing rules. Existing partial shipment authorities stay in force.
