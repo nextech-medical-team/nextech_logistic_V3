@@ -51,6 +51,7 @@ test('uncertain purchase remains recoverable after restart and is never repurcha
 
 test('Excel and the existing API shipping engine produce identical quotes, purchases and PDFs',async t=>{
  const apiOrder=await fixture(t),excelOrder=await fixture(t);
+ await apiOrder.db.exec("ALTER TABLE orders ADD COLUMN erp_live jsonb DEFAULT '{}'::jsonb");
  await apiOrder.db.query("UPDATE orders SET suspension='{}'::jsonb,source_payload='{}'::jsonb,erp_live='{\"bl\":{\"id\":\"bl\",\"status\":\"pending\"}}'::jsonb");
  const existing=temuShipping(apiOrder.db,apiOrder.api);
  const oldPlan=await existing.prepare(reference),excelPlan=await excelOrder.service.prepare({reference,mall:'shop'});
