@@ -1,4 +1,5 @@
-import {temuLabelOrderHold} from './temu-label-order-policy.mjs';
+import {temuLabelPurchaseHold} from './temu-label-order-policy.mjs';
+import {createdBlSql} from './created-bl-label.mjs';
 import {automaticTemuMarginDecision} from './temu-purchase-policy.mjs';
 
 export async function initializeTemuAutomaticPurchase(db){
@@ -29,8 +30,8 @@ export async function initializeTemuAutomaticPurchase(db){
  DROP TRIGGER IF EXISTS v3_temu_purchase_result ON temu_automatic_purchase_checks;
  CREATE TRIGGER v3_temu_purchase_result AFTER UPDATE OF result ON temu_automatic_purchase_checks FOR EACH ROW EXECUTE FUNCTION v3_temu_purchase_result_diagnostic();`);
 }
-export const automaticPreparationHold=temuLabelOrderHold;
-// Every untouched TEMU order can be quoted, including historical import flags.
+export const automaticPreparationHold=temuLabelPurchaseHold;
+// Untouched TEMU orders enter automatic purchase only after BL creation.
 const discoverableJobSql=`(j.status IN ('ready','to_buy','api_error','unverified') OR j.reference IS NULL)
  AND j.attempt_id IS NULL AND coalesce(jsonb_array_length(j.packages),0)=0`;
 export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true}={}){
@@ -38,7 +39,7 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true}=
  async function admission(reference,plan){
   if(!enabled())throw Error('Achat automatique suspendu');
   const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];
-  const held=temuLabelOrderHold(o);if(held)throw Error(held);
+  const held=temuLabelPurchaseHold(o);if(held)throw Error(held);
   const idle=(await db.query(`SELECT o.id FROM orders o WHERE o.id=$1
    AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id)
    AND NOT EXISTS(SELECT 1 FROM carrier_documents d WHERE d.order_id=o.id)
@@ -71,11 +72,11 @@ export function temuAutomaticPurchaseWorker(db,local,margins,{enabled=()=>true}=
   try{
    await db.query(`INSERT INTO temu_automatic_purchase_checks(reference)
     SELECT o.reference FROM orders o LEFT JOIN temu_label_jobs j ON j.reference=o.reference
-    WHERE o.channel='temu' AND NOT o.archived AND ${discoverableJobSql}
+    WHERE o.channel='temu' AND NOT o.archived AND ${createdBlSql} AND ${discoverableJobSql}
     ON CONFLICT DO NOTHING`);
    const candidate=(await db.query(`SELECT c.reference FROM temu_automatic_purchase_checks c
     JOIN orders o ON o.reference=c.reference LEFT JOIN temu_label_jobs j ON j.reference=c.reference
-    WHERE o.channel='temu' AND NOT o.archived AND c.next_at<=now() AND ${discoverableJobSql}
+    WHERE o.channel='temu' AND NOT o.archived AND ${createdBlSql} AND c.next_at<=now() AND ${discoverableJobSql}
     ORDER BY c.next_at,c.reference LIMIT 1`)).rows[0];
    if(!candidate)return;
    const reference=candidate.reference;let result;

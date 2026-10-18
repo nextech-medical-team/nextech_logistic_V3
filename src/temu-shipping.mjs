@@ -1,4 +1,4 @@
-import {assertTemuLabelOrder,positiveTemuClaimGuard} from './temu-label-order-policy.mjs';
+import {assertTemuLabelOrder,assertTemuLabelPurchaseOrder,positiveTemuClaimGuard} from './temu-label-order-policy.mjs';
 import {recoverMissingTemuPdfs} from './temu-pdf-archive.mjs';
 import {readConfirmedTemuShipments,temuLabelFailure} from './temu-shipment-remediation.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
@@ -156,10 +156,11 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
    const claim=await (current.financialAuthority||current.blAuthority||current.excelProof?db.transaction(async tx=>{
     const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[current.financialAuthority?.orderId||current.blAuthority?.orderId||current.excelProof.order.id])).rows[0];
     if(current.financialAuthority){
-     assertTemuLabelOrder(o);
+     assertTemuLabelPurchaseOrder(o);
+     if(String(o.erp_live.bl.id)!==current.blAuthority?.blId)throw Error('BL associé modifié avant achat');
      if(hasExternalLabel(o)||(await tx.query('SELECT 1 FROM temu_label_documents WHERE reference=$1 LIMIT 1',[reference])).rows.length)throw Error('Étiquette existante à conserver : aucun nouvel achat');
      const claimed=await tx.query(claimSql,args);
-     if(proof&&claimed.rows.length)await tx.query('INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) VALUES($1,$2,$3,$4)',[claimed.rows[0].attempt_id,reference,current.id,JSON.stringify({...admission.audit,policy:'positive-margin-without-bl-v2'})]);
+     if(proof&&claimed.rows.length)await tx.query('INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) VALUES($1,$2,$3,$4)',[claimed.rows[0].attempt_id,reference,current.id,JSON.stringify({...admission.audit,policy:'positive-margin-after-bl-v3'})]);
      return claimed;
     }
     if(current.blAuthority){

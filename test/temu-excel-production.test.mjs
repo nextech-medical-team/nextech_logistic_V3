@@ -42,7 +42,7 @@ test('production validation is explicit, atomic and idempotent; queues the exist
  const results=await Promise.all([f.service.prepare({...b,mallId:"untrusted-browser-value"},user),f.service.prepare(b,user)]);assert.equal(results.filter(r=>r.replayed).length,1);
  const resumed=await f.service.preview(reference);assert.equal((await f.service.prepare({...b,fingerprint:resumed.fingerprint},user)).replayed,true);
  const o=await f.read();assert.equal(o.suspension.active,false);assert.equal(o.source_payload.mallId,undefined);assert.equal(o.source_payload.temuDirect.state,'unverified');assert.equal(f.calls.length,0);assert.equal(o.resolution_pending_resume,true);assert.equal(o.source_payload.temuExcelCommercial.total,84.05);
- const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.equal(automaticPreparationHold(o),null);
+ const jobs=(await f.db.query('SELECT * FROM resolution_jobs')).rows;assert.equal(jobs.length,1);assert.equal(jobs[0].action,'resume');assert.equal(jobs[0].payload.type,'resolved');assert.equal((await f.db.query('SELECT * FROM erp_live_jobs')).rows.length,0);assert.equal(f.bought,0);assert.match(automaticPreparationHold(o),/création du BL/);
 });
 test('Excel preparation works without TEMU access and preserves stale-preview and independent holds',async t=>{
  const f=await fixture(t),input=await f.input();

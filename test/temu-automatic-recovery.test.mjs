@@ -5,6 +5,18 @@ import {initializeTemuAutomaticPurchase,temuAutomaticPurchaseWorker} from '../sr
 
 let sharedDb;
 after(async()=>{if(sharedDb)await sharedDb.close();});
+for(const blStatus of [null,'draft','cancelled','shipped'])test(`no purchasable BL (${blStatus}): SQL discovery does not call provider or buy`,async t=>{
+ const {db}=await fixture(t,{blStatus});
+ await temuAutomaticPurchaseWorker(db,{recover(){assert.fail('Wait for BL');}},{}).run();
+ assert.equal((await db.query('SELECT * FROM temu_automatic_purchase_checks')).rows.length,0);
+});
+test('BL creation wakes a previously held order immediately, without waiting the retry interval',async t=>{
+ const {db,reference}=await fixture(t,{blStatus:null});
+ await db.query("INSERT INTO temu_automatic_purchase_checks(reference,next_at) VALUES($1,now()+interval '1 day')",[reference]);
+ await db.query("UPDATE orders SET erp_live='{\"bl\":{\"id\":\"new-bl\",\"status\":\"pending\"}}'");
+ let recovered=0;await temuAutomaticPurchaseWorker(db,{async recover(){recovered++;return {status:'complete',documents:true};}},{}).run();
+ assert.equal(recovered,1);
+});
 async function fixture(t,{status='api_error',blStatus='ready_to_ship',attempt=null,packages=[],suspension={},archived=false}={}){
  const db=sharedDb??new PGlite();
  if(!sharedDb){

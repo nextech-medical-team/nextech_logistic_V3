@@ -1,5 +1,8 @@
 # TEMU: purchase a missing label as soon as the quoted margin is positive
 
+Historical instruction, superseded on 18 October 2026: new purchases now wait
+for BL creation. See [the current policy](temu-label-after-bl.md).
+
 Human decision of 16 October 2026: TEMU label purchase must not wait for a BC,
 BL, available stock, ERP validation or completion of an imported order's
 preparation. This is TEMU-only. The legacy `simulation` flag on an Excel import

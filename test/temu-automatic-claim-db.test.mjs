@@ -21,6 +21,7 @@ test('real PostgreSQL claim validates the unchanged order and rejects changed fi
  if(method==='bg.logistics.shippingservices.get')return {onlineChannelDtoList:[{channelId:1,shipCompanyId:1,shippingCompanyName:'GOFO',estimatedAmount:'6',estimatedCurrencyCode:'EUR'}]};
  throw Error(method);
  }};
+ await db.query("UPDATE orders SET erp_live='{\"bl\":{\"id\":\"bl\",\"status\":\"pending\"}}'");
  const service=temuShipping(db,api),plan=await service.prepare(reference);
  const proof={id:'o',erpLive:{},sourcePayload:{},address:{},suspension:{},weight:null,lines:(await db.query("SELECT jsonb_agg(to_jsonb(l) ORDER BY source_line,id) lines FROM lines l WHERE order_id='o'")).rows[0].lines};
  await assert.rejects(service.buy(reference,plan.id,plan.amount,{beforeClaim:async()=>{
