@@ -105,7 +105,11 @@ export async function resumeTransientErplain(db,api){
       state.documentReconciliation={checkedAt:recovery.checkedAt,savedBcId:String(state.bc.id),candidateBcId:found?.id?String(found.id):null,externalWrites:0};
       throw Error(found?'BC enregistré introuvable ; autre identité V3 retrouvée : rapprochement requis, aucun rattachement automatique':'BC enregistré introuvable et aucune identité V3 retrouvée : contrôle Erplain requis, aucune nouvelle création automatique');
      }
-     if(String(bc?.id)!==String(state.bc.id)||bc.status!=='active'||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
+     const draft=bc.status==='unpublished'&&state.phase==='bc_created'&&!state.bl?.id;
+     if(String(bc?.id)!==String(state.bc.id)||(!draft&&bc.status!=='active')||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1||(draft&&(list.data.length||typeof bc.update_stock!=='boolean'||typeof state.bc.update_stock==='boolean'&&state.bc.update_stock!==bc.update_stock)))throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
+     // A verified legacy BC draft returns to the normal publication path.
+     // This read-only reconciliation neither publishes nor creates a BL.
+     if(draft)state.bc={...state.bc,status:bc.status,update_stock:bc.update_stock};
      let bl;
      try{bl=await readTransientBlIdentity(reader,state,bc,{lookupDraft:o.channel!=='tender'});}
      catch(e){

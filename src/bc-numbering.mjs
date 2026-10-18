@@ -17,6 +17,13 @@ export async function nextBcNumber(api,datedAt){
  const {DocumentNumberingContext:c}=await api.request('query V3BcNumber($date:String){DocumentNumberingContext(document_type:"order",dated_at:$date){preview manual_override_allowed_effective}}',{date:datedAt});
  if(!c?.manual_override_allowed_effective||!/^C[0-9]+$/.test(c.preview||''))throw Error('BC · Séquence officielle Erplain non disponible');return c.preview;
 }
+// New BCs are numbered and activated by the same CreateOrder transaction.
+// The caller holds the existing stock-then-numbering lock; no draft is left
+// between creation and activation if a subsequent read hits the API quota.
+export async function numberedNewBcInput(api,input){
+ if(input.status!=='unpublished'||input.update_stock!==true)throw Error('BC · Nouvelle création : état ou politique de stock inattendus');
+ return {...input,label:await nextBcNumber(api,input.dated_at),status:'active'};
+}
 export async function publishIncrementalBc(api,id,{datedAt,verify,lock,expectedStockPolicy,preserveInstalled=false,beforePublish}){return lock(async()=>{
  for(let attempt=0;attempt<5;attempt++){
  const {Order:bc}=await api.request(`query V3BcNumberRead($id:ID!){Order(id:$id){${fields}}}`,{id:String(id)});
