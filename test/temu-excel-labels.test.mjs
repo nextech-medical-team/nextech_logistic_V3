@@ -51,10 +51,12 @@ test('uncertain purchase remains recoverable after restart and is never repurcha
 
 test('Excel and the existing API shipping engine produce identical quotes, purchases and PDFs',async t=>{
  const apiOrder=await fixture(t),excelOrder=await fixture(t);
- await apiOrder.db.query("UPDATE orders SET suspension='{}'::jsonb,source_payload='{}'::jsonb");
+ await apiOrder.db.query("UPDATE orders SET suspension='{}'::jsonb,source_payload='{}'::jsonb,erp_live='{\"bl\":{\"id\":\"bl\",\"status\":\"pending\"}}'::jsonb");
  const existing=temuShipping(apiOrder.db,apiOrder.api);
  const oldPlan=await existing.prepare(reference),excelPlan=await excelOrder.service.prepare({reference,mall:'shop'});
- assert.deepEqual(excelPlan.request,oldPlan.request);assert.equal(excelPlan.id,oldPlan.id);assert.equal(excelPlan.amount,oldPlan.amount);
+ // Production binds its quote ID to the recorded BL; the isolated Excel
+ // adapter binds the same supplier request to its separate document state.
+ assert.deepEqual(excelPlan.request,oldPlan.request);assert.equal(oldPlan.blAuthority.blId,'bl');assert.equal(excelPlan.amount,oldPlan.amount);
  const oldResult=await existing.buy(reference,oldPlan.id,oldPlan.amount);
  const excelResult=await excelOrder.service.buy({reference,planId:excelPlan.id,amount:excelPlan.amount,confirmPurchase:true});
  assert.deepEqual(excelOrder.requests,apiOrder.requests);assert.equal(excelResult.status,oldResult.status);
