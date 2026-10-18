@@ -453,6 +453,6 @@ function deliveredOrderHtml(o){
 function orderDeferralPreviewHtml(o){
  const state=o.suspension?.problemDeferral;if(state?.active!==true)return '';
  const date=new Date(state.updatedAt),valid=state.updatedAt&&Number.isFinite(date.getTime());
- const stamp=valid?date.toLocaleString('fr-FR',{timeZone:'Europe/Paris',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+ const stamp=valid?date.toLocaleDateString('fr-FR',{timeZone:'Europe/Paris',day:'2-digit',month:'2-digit',year:'numeric'}):'';
  return '<div class="order-deferral-preview"><div class="order-deferral-note" tabindex="0" aria-label="Commentaire de report">'+esc(state.note||'Commentaire non renseigné')+'</div>'+(valid?'<time datetime="'+esc(date.toISOString())+'" title="Rédigé le '+esc(stamp)+'">'+esc(stamp)+'</time>':'<small>Date de rédaction non disponible</small>')+'</div>';
 }
