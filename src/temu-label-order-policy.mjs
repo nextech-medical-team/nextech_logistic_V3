@@ -1,8 +1,9 @@
 import {suspensionBlock} from './order-suspension.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
+import {hasCreatedBl} from './created-bl-label.mjs';
 
-// Labels are purchased on their own financial decision, independently of ERP
-// preparation. The legacy simulation/import flag is not a supplier sandbox.
+// Common guards also apply to quotes. Purchase adds the recorded BL boundary;
+// the legacy simulation/import flag is not a supplier sandbox.
 export function temuLabelOrderHold(o){
  if(!o||o.channel!=='temu'||o.archived)return 'Commande hors périmètre TEMU';
  const suspension=suspensionBlock(o);if(suspension)return suspension;
@@ -13,14 +14,20 @@ export function temuLabelOrderHold(o){
  return null;
 }
 export function assertTemuLabelOrder(o){const held=temuLabelOrderHold(o);if(held)throw Error(held);}
+// Human decision 18 October: new purchases wait for the recorded BL. Quotes
+// and recovery of paid labels remain independent; no stock check after the BL.
+export function temuLabelPurchaseHold(o){return temuLabelOrderHold(o)||(!hasCreatedBl(o)?'TEMU · Achat en attente de la création du BL':null);}
+export function assertTemuLabelPurchaseOrder(o){const held=temuLabelPurchaseHold(o);if(held)throw Error(held);}
 
 // Financial/source data used in the fresh margin remain unchanged at claim.
-// Deliberately no BC, BL, stock, preparation, issue or simulation prerequisite.
+// Recorded BL required; no BC, stock, preparation, issue or simulation gate.
 export const positiveTemuClaimGuard=` AND EXISTS(SELECT 1 FROM orders o
  WHERE o.id=$4 AND o.reference=temu_label_jobs.reference AND o.channel='temu'
  AND NOT o.archived AND NOT o.partial_mode AND o.transport_choice IS NULL
  AND coalesce(o.tracking_status,'not_shipped') NOT IN ('cancelled','shipped','in_transit','delivered')
  AND coalesce(o.label_status,'')<>'cancelled'
+ AND nullif(o.erp_live->'bl'->>'id','') IS NOT NULL
+ AND o.erp_live->'bl'->>'status' IN ('pending','make_the_shipment','in_preparation','ready_to_ship')
  AND o.source_payload=$5::jsonb AND o.address=$6::jsonb AND o.suspension=$7::jsonb
  AND o.weight_kg IS NOT DISTINCT FROM $8::numeric
  AND coalesce((SELECT jsonb_agg(to_jsonb(l) ORDER BY source_line,id) FROM lines l WHERE l.order_id=o.id),'[]'::jsonb)=$9::jsonb

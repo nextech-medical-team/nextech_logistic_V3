@@ -4,9 +4,10 @@ import {PGlite} from '@electric-sql/pglite';
 import {initializeTemuShipping,temuShipping} from '../src/temu-shipping.mjs';
 import {temuLocalService} from '../src/temu-local.mjs';
 import {temuAutomaticPurchaseWorker,automaticPreparationHold} from '../src/temu-automatic-purchase.mjs';
+import {positiveTemuClaimGuard} from '../src/temu-label-order-policy.mjs';
 let db;after(async()=>{if(db)await db.close();});
 const reference='PO-108-08320568412790292';
-async function fixture({profit=10.81,initial='api_error',suspension={},beforeClaim=async()=>{},failBuy=false,providerPackage=false}={}){
+async function fixture({bl=true,profit=10.81,initial='api_error',suspension={},beforeClaim=async()=>{},failBuy=false,providerPackage=false}={}){
  if(!db){db=new PGlite();await db.exec(`CREATE TABLE orders(id text PRIMARY KEY,reference text UNIQUE,channel text,archived boolean DEFAULT false,simulation boolean DEFAULT true,partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT true,issue text,transport_choice text,erp_live jsonb DEFAULT '{}',source_payload jsonb DEFAULT '{}',address jsonb DEFAULT '{}',suspension jsonb DEFAULT '{}',weight_kg numeric,tracking_status text,label_status text);
  CREATE TABLE lines(id text,order_id text,source_line text,source_sku text,target_sku text,target_quantity numeric,quantity numeric,source_payload jsonb);
  CREATE TABLE erp_live_jobs(order_id text,status text,error text);CREATE TABLE resolution_jobs(id text,order_id text,status text);CREATE TABLE correction_jobs(id text,order_id text,status text);
@@ -14,7 +15,7 @@ async function fixture({profit=10.81,initial='api_error',suspension={},beforeCla
  CREATE TABLE mappings(channel text,source_sku text,target_sku text,source_qty numeric,target_qty numeric);CREATE TABLE catalog_results(sku text,message text);CREATE TABLE audit(user_email text,action text,detail jsonb);
  CREATE TABLE temu_automatic_purchase_audit(attempt_id text PRIMARY KEY,reference text,plan_id text,decision jsonb);`);await initializeTemuShipping(db);}
  else await db.exec('TRUNCATE orders,lines,erp_live_jobs,resolution_jobs,correction_jobs,carrier_jobs,carrier_documents,extra_parcels,temu_label_documents,temu_label_jobs,temu_automatic_purchase_audit,audit');
- const erp={bc:{id:1949149,label:'C0015986',status:'active'},phase:'bc_created',stockIncidentRecheck:{currentError:'Stock insuffisant IP26211 : 0 utilisable'}};
+ const erp={...(bl?{bl:{id:'bl',status:'pending'}}:{}),bc:{id:1949149,label:'C0015986',status:'active'},phase:'bc_created',stockIncidentRecheck:{currentError:'Stock insuffisant IP26211 : 0 utilisable'}};
  const source={origin:'temu_excel',mallId:'shop',visibilityHold:true,temuExcelCommercial:{total:1},temuDirect:{state:'verified'}};
  await db.query(`INSERT INTO orders(id,reference,channel,issue,erp_live,source_payload,suspension,address,weight_kg,tracking_status,label_status) VALUES('o',$1,'temu','Ancien refus préparation',$2,$3,$4,'{"country":"LV"}',0.2,'not_shipped','simulated')`,[reference,JSON.stringify(erp),JSON.stringify(source),JSON.stringify(suspension)]);
  await db.exec("INSERT INTO erp_live_jobs VALUES('o','review','Stock insuffisant');INSERT INTO resolution_jobs VALUES('old','o','review')");
@@ -38,15 +39,15 @@ async function fixture({profit=10.81,initial='api_error',suspension={},beforeCla
  const worker=temuAutomaticPurchaseWorker(db,local,margins,{stockGate(){assert.fail('No stock gate');},refreshPreparation(){assert.fail('No ERP refresh');}});
  return {worker,local,api,erp,source,detail,get buys(){return buys;},get marginsRead(){return marginsRead;},reads,read:async()=>(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0]};
 }
-test('LV historical Excel order: native local API buys with positive margin before BL, despite stock review/simulation/stale commercial validation; no ERP mutation',async()=>{
+test('LV historical Excel order: native local API buys with positive margin after BL, despite stock review/simulation/stale commercial validation; no ERP mutation',async()=>{
  const f=await fixture();const before=await f.read();assert.equal(automaticPreparationHold(before),null);
  const r=await f.worker.process(reference);assert.equal(r.status,'complete');assert.equal(f.buys,1);assert.equal(f.marginsRead,2);
  const after=await f.read();assert.deepEqual(after.erp_live,before.erp_live);assert.equal(after.simulation,true);assert.equal(after.issue,before.issue);assert.equal(after.resolution_pending_resume,true);
  assert.deepEqual(Buffer.from((await db.query('SELECT pdf FROM temu_label_documents')).rows[0].pdf),Buffer.from('%PDF-provider-unchanged'));
- const audit=(await db.query('SELECT decision FROM temu_automatic_purchase_audit')).rows;assert.equal(audit.length,1);assert.equal(audit[0].decision.policy,'positive-margin-without-bl-v2');
+ const audit=(await db.query('SELECT decision FROM temu_automatic_purchase_audit')).rows;assert.equal(audit.length,1);assert.equal(audit[0].decision.policy,'positive-margin-after-bl-v3');
  await assert.rejects(f.worker.process(reference),/existante|rapprocher/);assert.equal(f.buys,1);
 });
-for(const profit of [0,-1,null])test(`margin ${profit} never buys without BL`,async()=>{
+for(const profit of [0,-1,null])test(`margin ${profit} never buys after BL`,async()=>{
  const f=await fixture({profit});await assert.rejects(f.worker.process(reference),/confirmer/);assert.equal(f.buys,0);assert.equal((await db.query('SELECT attempt_id FROM temu_label_jobs')).rows[0].attempt_id,null);
 });
 test('source or costs changed during final margin check cannot claim the earlier financial proof',async()=>{
@@ -54,7 +55,7 @@ test('source or costs changed during final margin check cannot claim the earlier
  await assert.rejects(f.worker.process(reference),/modifiés/);assert.equal(f.buys,0);
 });
 test('concurrent ERP preparation changes do not become a label prerequisite',async()=>{
- const f=await fixture({beforeClaim:async n=>{if(n===2)await db.query("UPDATE orders SET erp_live=erp_live||'{\"bl\":{\"id\":\"new\",\"status\":\"pending\"}}' WHERE id='o'");}});
+ const f=await fixture({beforeClaim:async n=>{if(n===2)await db.query("UPDATE orders SET erp_live=erp_live||'{\"bl\":{\"id\":\"bl\",\"status\":\"ready_to_ship\"}}' WHERE id='o'");}});
  await f.worker.process(reference);assert.equal(f.buys,1);
 });
 test('failed purchase becomes uncertain and cannot be retried or cleared by historical recovery',async()=>{
@@ -74,4 +75,35 @@ for(const status of ['cancelled','shipped','delivered'])test('recorded terminal 
  await assert.rejects(f.worker.process(reference),/annulé|expédié/);assert.equal(f.buys,0);assert.equal(f.reads.length,0);
  f=await fixture({beforeClaim:async n=>{if(n===2)await db.query("UPDATE orders SET erp_live=erp_live||jsonb_build_object('bl',jsonb_build_object('id','BL','status',$1::text)) WHERE id='o'",[status]);}});
  await assert.rejects(f.worker.process(reference),/annulé|expédié/);assert.equal(f.buys,0);assert.equal((await db.query('SELECT attempt_id FROM temu_label_jobs')).rows[0].attempt_id,null);
+});
+
+test('positive margin without a BL waits without any provider or margin call, then resumes on BL creation',async()=>{
+ const f=await fixture({bl:false});
+ await assert.rejects(f.worker.process(reference),/création du BL/);assert.equal(f.buys,0);assert.equal(f.reads.length,0);assert.equal(f.marginsRead,0);
+ await db.query("UPDATE orders SET erp_live=erp_live||'{\"bl\":{\"id\":\"bl\",\"status\":\"pending\"}}'");
+ await f.worker.process(reference);assert.equal(f.buys,1);
+});
+for(const change of ["erp_live=erp_live-'bl'","erp_live=jsonb_set(erp_live,'{bl,status}','\"cancelled\"')","erp_live=jsonb_set(erp_live,'{bl,id}','\"other\"')"])
+test('BL removal, cancellation or replacement before atomic claim prevents the purchase: '+change,async()=>{
+ const f=await fixture({beforeClaim:async n=>{if(n===2)await db.query('UPDATE orders SET '+change);}});
+ await assert.rejects(f.worker.process(reference),/BL|annulé|modifié/);assert.equal(f.buys,0);assert.equal((await db.query('SELECT attempt_id FROM temu_label_jobs')).rows[0].attempt_id,null);
+});
+test('a quote without BL cannot be bought manually, and paid PDF recovery remains allowed without BL',async()=>{
+ const f=await fixture({bl:false});const plan=await f.local.prepare(reference);
+ await assert.rejects(f.local.buy(reference,plan.id,plan.amount),/création du BL/);assert.equal(f.buys,0);
+ const existing=await fixture({bl:false,providerPackage:true});const result=await existing.local.recover(reference);assert.equal(result.status,'complete');assert.equal(existing.buys,0);
+});
+
+test('financial SQL claim independently rejects missing/draft BL and admits a created BL without stock validation',async()=>{
+ const f=await fixture({bl:false}),o=await f.read();
+ const lines=(await db.query("SELECT jsonb_agg(to_jsonb(l) ORDER BY source_line,id) lines FROM lines l WHERE order_id='o'")).rows[0].lines;
+ const args=[reference,'claim-id','{}','o',JSON.stringify(o.source_payload),JSON.stringify(o.address),JSON.stringify(o.suspension),o.weight_kg,JSON.stringify(lines)];
+ const sql=`UPDATE temu_label_jobs SET result=$3::jsonb WHERE reference=$1 AND $2::text IS NOT NULL ${positiveTemuClaimGuard} RETURNING reference`;
+ // This test fixture deliberately has no result column until this isolated SQL test.
+ await db.exec('ALTER TABLE temu_label_jobs ADD COLUMN IF NOT EXISTS result jsonb');
+ assert.equal((await db.query(sql,args)).rows.length,0);
+ await db.query("UPDATE orders SET erp_live=erp_live||'{\"bl\":{\"id\":\"bl\",\"status\":\"draft\"}}'");
+ assert.equal((await db.query(sql,args)).rows.length,0);
+ await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bl,status}','\"pending\"')");
+ assert.equal((await db.query(sql,args)).rows.length,1);
 });

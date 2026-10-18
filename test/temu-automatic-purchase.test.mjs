@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {automaticPreparationHold,temuAutomaticPurchaseWorker} from '../src/temu-automatic-purchase.mjs';
 const now=Date.now();
-const order={id:'o',reference:'PO-069-123456789',channel:'temu',source_payload:{temuDirect:{state:'verified'}},erp_live:{phase:'bl_ready',pricing:{status:'verified'},bl:{id:'1'},stockDocument:{id:'1'},documentSource:{checkedAt:new Date(now).toISOString(),stockHolds:[]},verifiedAt:new Date(now).toISOString(),stockCheckedAt:new Date(now).toISOString()}};
-test('TEMU admission preserves independent protections but ignores ERP preparation and legacy simulation flags',()=>{
+const order={id:'o',reference:'PO-069-123456789',channel:'temu',source_payload:{temuDirect:{state:'verified'}},erp_live:{phase:'bl_ready',pricing:{status:'verified'},bl:{id:'1',status:'pending'},stockDocument:{id:'1'},documentSource:{checkedAt:new Date(now).toISOString(),stockHolds:[]},verifiedAt:new Date(now).toISOString(),stockCheckedAt:new Date(now).toISOString()}};
+test('TEMU admission preserves independent protections but ignores ERP preparation and legacy simulation flags after BL creation',()=>{
  assert.equal(automaticPreparationHold(order),null);
  for(const change of [{archived:true},{partial_mode:true},{transport_choice:'GLS'},{suspension:{active:true,note:'stop'}},{source_payload:{externalLabel:{active:true}}}])assert.ok(automaticPreparationHold({...order,...change}));
- for(const change of [{simulation:true},{issue:'Stock insuffisant'},{resolution_pending_resume:true},{source_payload:{marketplacePendingCorrection:{},visibilityHold:true}},{source_payload:{temuDirect:{state:'error'}}},{erp_live:{phase:'bc_created'}},{erp_live:{stockCheckedAt:'invalid'}},{erp_live:{}}])assert.equal(automaticPreparationHold({...order,...change}),null);
+ for(const change of [{simulation:true},{issue:'Stock insuffisant'},{resolution_pending_resume:true},{source_payload:{marketplacePendingCorrection:{},visibilityHold:true}},{source_payload:{temuDirect:{state:'error'}}}])assert.equal(automaticPreparationHold({...order,...change}),null);
+ for(const erp_live of [{phase:'bc_created'},{stockCheckedAt:'invalid'},{}])assert.match(automaticPreparationHold({...order,erp_live}),/création du BL/);
  assert.ok(automaticPreparationHold(null));
 });
 test('disabled worker performs no reads or purchases',async()=>{
