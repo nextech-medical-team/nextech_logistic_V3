@@ -14,8 +14,11 @@ export function stockIncidentOnly(message){
  if(text==='Stock insuffisant')return true;
  return /^BL bloqué [—-] stock insuffisant : [^:;]+ : [\d.]+ nécessaires, [\d.]+ utilisables, manque [\d.]+(?: ; [^:;]+ : [\d.]+ nécessaires, [\d.]+ utilisables, manque [\d.]+)*$/.test(text);
 }
-export function closedStockReview(job){return job?.error==null&&job?.result?.stockIncidentRecheck?.status==='resolved'&&stockIncidentOnly(job.result.stockIncidentRecheck.previousError);}
-export function reopenedStockReview(job){return !!job?.error&&job?.result?.stockIncidentRecheck?.status==='resolved'&&stockIncidentOnly(job.result.stockIncidentRecheck.previousError);}
+export function refreshableStockDiagnostic(message){
+ return stockIncidentOnly(message)||message==='Stock non vérifiable avant BC : emplacement incomplet'||message==='En attente de stock : BC disponible, préparation du BL suspendue';
+}
+export function closedStockReview(job){return job?.error==null&&job?.result?.stockIncidentRecheck?.status==='resolved'&&refreshableStockDiagnostic(job.result.stockIncidentRecheck.previousError);}
+export function reopenedStockReview(job){return !!job?.error&&job?.result?.stockIncidentRecheck?.status==='resolved'&&refreshableStockDiagnostic(job.result.stockIncidentRecheck.previousError);}
 const sum=rows=>{if(!Array.isArray(rows))throw Error('Lignes non reçues');const totals=new Map();for(const l of rows){if(!l.variant){if(l.type==='normal')throw Error('Variante non vérifiable');continue;}const q=l.quantity;if(!l.variant.id||!l.location?.id||q==null||typeof q==='boolean'||String(q).trim()===''||!Number.isFinite(Number(q))||Number(q)<=0)throw Error('Quantités ou emplacements non vérifiables');const key=String(l.variant.id)+':'+String(l.location.id);totals.set(key,(totals.get(key)||0)+Number(q));}if(!totals.size)throw Error('Aucun produit vérifiable');return totals;};
 const equal=(a,b)=>a.size===b.size&&[...a].every(([k,q])=>Math.abs(q-(b.get(k)??NaN))<1e-6);
 export function evaluateStockIncident(order,bc,{historicalProof=null}={}){
@@ -44,8 +47,8 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
 
  const erp=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[id])).rows[0];
  const previousCheck=initial.erp_live?.stockIncidentRecheck;
- const trackedStockIssue=stockIncidentOnly(previousCheck?.previousError)&&initial.issue===previousCheck.currentError;
- if(!stockIncidentOnly(initial.issue)&&!stockIncidentOnly(erp?.error)&&!jobs.some(j=>stockIncidentOnly(j.error))&&!trackedStockIssue)return {notApplicable:true};
+ const trackedStockIssue=refreshableStockDiagnostic(previousCheck?.previousError)&&initial.issue===previousCheck.currentError;
+ if(!refreshableStockDiagnostic(initial.issue)&&!refreshableStockDiagnostic(erp?.error)&&!jobs.some(j=>refreshableStockDiagnostic(j.error))&&!trackedStockIssue)return {notApplicable:true};
  const frozen=usesRecordedBc(initial),fingerprint=await shipmentFingerprint(db,initial);
  let mapping=null,proof;
  try{
@@ -66,22 +69,22 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
   if(current.some(j=>!jobs.some(old=>old.id===j.id&&old.error===j.error&&String(old.updated_at)===String(j.updated_at))))return {deferred:true};
   const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[id])).rows[0];
   if(e?.status!==erp?.status||e?.error!==erp?.error)return {deferred:true};
-  proof.erpError=e?.error||null;proof.observedErrors=current.filter(j=>stockIncidentOnly(j.error)).map(j=>j.error);
+  proof.erpError=e?.error||null;proof.observedErrors=current.filter(j=>refreshableStockDiagnostic(j.error)).map(j=>j.error);
   if(proof.status==='resolved'){
-   const retired=current.filter(j=>stockIncidentOnly(j.error)&&(proof.preparationRequired?['refresh','sync','resume','resume-erp'].includes(j.action):completed&&Number.isFinite(Date.parse(j.created_at))&&Date.parse(j.created_at)<Date.parse(completed.created_at)));
+   const retired=current.filter(j=>refreshableStockDiagnostic(j.error)&&(proof.preparationRequired?['refresh','sync','resume','resume-erp'].includes(j.action):completed&&Number.isFinite(Date.parse(j.created_at))&&Date.parse(j.created_at)<Date.parse(completed.created_at)));
    proof.retiredErrors=retired.map(j=>j.error);
    const retained=current.filter(j=>j.error&&!retired.some(r=>r.id===j.id));
    if(!proof.preparationRequired&&!completed)return {deferred:true,reason:'Reprise complète réussie non identifiée'};
    for(const j of retired)await tx.query("UPDATE resolution_jobs SET error=null,result=(CASE WHEN jsonb_typeof(result)='object' THEN result ELSE jsonb_build_object('previousResult',result) END)||$2::jsonb,updated_at=now() WHERE id=$1 AND error=$3",[j.id,JSON.stringify({stockIncidentRecheck:{...proof,previousError:j.error}}),j.error]);
-   if(!proof.preparationRequired&&stockIncidentOnly(e?.error))await tx.query('UPDATE erp_live_jobs SET error=null,updated_at=now() WHERE order_id=$1 AND error=$2',[id,e.error]);
+   if(!proof.preparationRequired&&refreshableStockDiagnostic(e?.error))await tx.query('UPDATE erp_live_jobs SET error=null,updated_at=now() WHERE order_id=$1 AND error=$2',[id,e.error]);
    const previousError=o.erp_live?.stockIncidentRecheck?.previousError||o.issue;
-   const trackedIssue=stockIncidentOnly(o.erp_live?.stockIncidentRecheck?.previousError)&&o.issue===o.erp_live.stockIncidentRecheck.currentError;
-   const issue=(stockIncidentOnly(o.issue)||trackedIssue)&&!retained.some(j=>stockIncidentOnly(j.error))?(proof.preparationRequired?'Préparation à reprendre : stock disponible':null):o.issue;
+   const trackedIssue=refreshableStockDiagnostic(o.erp_live?.stockIncidentRecheck?.previousError)&&o.issue===o.erp_live.stockIncidentRecheck.currentError;
+   const issue=(refreshableStockDiagnostic(o.issue)||trackedIssue)&&!retained.some(j=>refreshableStockDiagnostic(j.error))?(proof.preparationRequired?'Préparation à reprendre : stock disponible':null):o.issue;
    // Incident closure never grants preparation readiness; the existing full
    // reconciliation must still validate addresses, pricing, labels and holds.
    await tx.query("UPDATE orders SET issue=$2,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$3::jsonb,true) WHERE id=$1",[id,issue,JSON.stringify({...proof,previousError,currentIssue:issue})]);
    await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:stock-incident-recheck','diagnostic.stock_incident_resolved',$1)",[JSON.stringify({orderId:id,proof,previousError,retiredJobs:retired.map(j=>({id:j.id,error:j.error})),labelsPreserved:true,businessCompleted:false})]);
-  }else {const old=o.erp_live?.stockIncidentRecheck,tracked=stockIncidentOnly(o.issue)||(stockIncidentOnly(old?.previousError)&&o.issue===old.currentError);proof.previousError=old?.previousError||o.issue;await tx.query("UPDATE orders SET issue=CASE WHEN $3 THEN $4 ELSE issue END,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(proof),tracked,proof.currentError]);}
+  }else {const old=o.erp_live?.stockIncidentRecheck,tracked=refreshableStockDiagnostic(o.issue)||(refreshableStockDiagnostic(old?.previousError)&&o.issue===old.currentError);proof.previousError=old?.previousError||o.issue;await tx.query("UPDATE orders SET issue=CASE WHEN $3 THEN $4 ELSE issue END,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(proof),tracked,proof.currentError]);}
   return proof;
  });
 }

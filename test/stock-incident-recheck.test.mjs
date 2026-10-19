@@ -92,3 +92,27 @@ test('fresh document reads supply BL dates for historical ledger verification on
  for(const bl of actual.shipping_orders.data){const proof=await readInheritedBlLedger(api,bl);assert.equal(proof[0].complete,true);assert.deepEqual(proof[0].rows,[]);}
  assert.equal(calls.filter(q=>q.includes('InventoryLogs')).length,2);
 });
+
+for(const legacy of ['Stock non vérifiable avant BC : emplacement incomplet','En attente de stock : BC disponible, préparation du BL suspendue'])test('fresh verified stock retires exact historical diagnostic: '+legacy,async()=>{
+ const db=await fixture();try{
+  const b=bc();b.shipping_orders.data=[];b.line_items[0].available=20;b.line_items[0].on_hand=20;
+  const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];delete o.erp_live.bl;delete o.erp_live.stockDocument;o.erp_live.phase='bc_created';
+  await db.query("UPDATE orders SET issue=$1,erp_live=$2 WHERE id='o'",[legacy,JSON.stringify(o.erp_live)]);
+  await db.query("UPDATE erp_live_jobs SET status='review',error=$1 WHERE order_id='o'",[legacy]);
+  const proof=await reconcile(db,{bc:b});assert.equal(proof.status,'resolved');assert.equal(proof.preparationRequired,true);
+  const updated=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];assert.equal(updated.issue,'Préparation à reprendre : stock disponible');assert.equal(updated.label_status,'blocked');
+  const erpJob=(await db.query("SELECT * FROM erp_live_jobs WHERE order_id='o'")).rows[0];
+  assert.equal(erpJob.error,legacy,'raw error stays available to the guarded resume worker');
+  assert.equal(projectCurrentDiagnostics({...updated,erp_live_job:erpJob}).erp_live_job.error,null,'fresh proof retires the historical badge');
+ }finally{await db.close();}
+});
+test('real shortage and mixed historical error remain blocked',async()=>{
+ const db=await fixture();try{
+  const b=bc();b.shipping_orders.data=[];const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];delete o.erp_live.bl;delete o.erp_live.stockDocument;o.erp_live.phase='bc_created';
+  await db.query("UPDATE orders SET issue=$1,erp_live=$2 WHERE id='o'",['En attente de stock : BC disponible, préparation du BL suspendue',JSON.stringify(o.erp_live)]);
+  assert.equal((await reconcile(db,{bc:b})).status,'active');
+  assert.match((await db.query("SELECT issue FROM orders WHERE id='o'")).rows[0].issue,/stock insuffisant/);
+  await db.query("UPDATE orders SET issue='Stock non vérifiable avant BC : emplacement incomplet ; Adresse invalide' WHERE id='o'");
+  assert.equal((await reconcile(db,{bc:b})).notApplicable,true);
+ }finally{await db.close();}
+});
