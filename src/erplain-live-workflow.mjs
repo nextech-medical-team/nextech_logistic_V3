@@ -1,4 +1,4 @@
-import {assertNewBcStock,withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
+import {withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
 import {customerCreationStarted,customerCreationFailed,customerCreationMessage} from './customer-creation-recovery.mjs';
 import {withErplainOrigin} from './erplain-request-observation.mjs';
 import {usesNativeBlCycle,assertNativeBcSnapshot} from './native-bl-policy.mjs';
@@ -91,10 +91,11 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
  async function batchMutation(orders,phase,field,type,operation,input,selection,{stockLocked=false}={}){
   if(!orders.length)return;
   if(operation==='CreateOrder'&&!stockLocked){
-   // Serialize each fresh read and BC creation across workers and shipments.
-   // The next order must see the previous BC's reservation/debit.
+   // Keep BC creation serialized across workers; stock only gates its BL.
    for(const o of orders)await withShipmentLock(async()=>{
-    try{await assertNewBcStock(api,input(o).line_items,o.selectedProducts);await batchMutation([o],phase,field,type,operation,input,selection,{stockLocked:true});}
+    // A sales order records demand even without stock. Physical availability
+    // gates the shipping order, never creation of the sales order.
+    try{await batchMutation([o],phase,field,type,operation,input,selection,{stockLocked:true});}
     catch(e){o.failed=true;await fail(o,e);}
    });
    return;
@@ -253,7 +254,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of working.filter(o=>o.pricing)){
     try{
      const historical=await readPreservedHistoricalBc(api,o,usesRecordedBc(o)?null:o.channel==='temu'?temuSellerTotals(o):null);
-     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),beforePublish:bc=>bc.update_stock===true?assertNewBcStock(api,bc.line_items):undefined,lock:withSalesBcPublicationLock});
+     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),lock:withSalesBcPublicationLock});
      const confirmed=historical?.confirmed||await verifyRecordedOrSourceTotals(api,o,actual,()=>o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
      o.erp_live.pricing={...o.erp_live.pricing,status:'verified',error:null,confirmed,verifiedAt:new Date().toISOString()};await save(o);
     }catch(e){o.failed=true;o.erp_live.pricing={...o.erp_live.pricing,status:'blocked',error:e.message};await save(o);await fail(o,e);}
