@@ -1,3 +1,4 @@
+import {recoverMissingBc} from './missing-bc-recovery.mjs';
 import {refreshErplainDocuments} from './erplain-documents-sync.mjs';
 import {checkedResumeBc} from './resume-bc-read.mjs';
 import {refreshCustomerIdentity} from './customer-refresh.mjs';
@@ -93,10 +94,11 @@ export function validateResolution(b){
  if(b?.type==='customer'&&b.provider!==undefined&&b.provider!=='Erplain')throw Error('Le rapprochement client nécessite Erplain');
  if(!actionTypes[b.action]?.includes(b.type))throw Error('Action incompatible avec le problème sélectionné');
  if(typeof b.id!=='string'||!b.id||!/^[a-f0-9-]{36}$/i.test(String(b.requestId)))throw Error('Commande et identifiant de demande requis');
- const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'abandon-equivalent':['previewJobId'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent','verifyAndApply'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider','confirmCustomerAbsent','customerNumber']}[b.action]||[])];
+ const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'abandon-equivalent':['previewJobId'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent','verifyAndApply'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider','confirmCustomerAbsent','customerNumber','confirmMissingBc','missingBcId','orderReference']}[b.action]||[])];
  if(Object.keys(b).some(k=>!allowed.includes(k)))throw Error('La fenêtre ne peut modifier que les informations de ce problème');
  if(['check-sku','weight','select-product','activate-product','create-product'].includes(b.action)&&(!String(b.sku||'').trim()||b.sku.length>199))throw Error('SKU Erplain requis');
  if((b.confirmCustomerAbsent!==undefined||b.customerNumber!==undefined)&&(b.action!=='refresh'||b.type!=='customer'||b.confirmCustomerAbsent!==true||typeof b.customerNumber!=='string'||!b.customerNumber.trim()||b.customerNumber.length>250))throw Error('Confirmation explicite du client absent requise');
+ if((b.confirmMissingBc!==undefined||b.missingBcId!==undefined||b.orderReference!==undefined)&&(b.action!=='refresh'||!['bc','unknown','api-incomplete'].includes(b.type)||b.provider!=='Erplain'||b.confirmMissingBc!==true||typeof b.missingBcId!=='string'||!/^\d+$/.test(b.missingBcId)||typeof b.orderReference!=='string'||!b.orderReference.trim()||b.orderReference.length>250))throw Error('Confirmation explicite de la commande et du BC absent requise');
  if(b.resumeAfter!==undefined&&typeof b.resumeAfter!=='boolean')throw Error('Option de reprise invalide');
  if(['equivalent-preview','replace-equivalent'].includes(b.action))validateSubstitution(b,b.action==='replace-equivalent');
  if(b.action==='abandon-equivalent'&&(typeof b.previewJobId!=='string'||!b.previewJobId))throw Error('Identifiant de l’aperçu requis');
@@ -414,6 +416,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    return refreshWeightUnitDiagnostics(db,o,b.sku.trim(),found.variant);
   }
   if(j.action==='refresh'){
+   if(b.confirmMissingBc===true){await stage('Vérification du BC absent avant reprise');return {...await recoverMissingBc(db,api,o,{bcId:b.missingBcId,reference:b.orderReference,confirmed:true,resolutionId:j.id,stage}),checks:await recheckOrders(db,[o.id])};}
    if(b.type==='customer'){await stage('Recherche du client existant dans Erplain');return {...await refreshCustomerIdentity(db,api,o,{confirmAbsent:b.confirmCustomerAbsent===true,customerNumber:b.customerNumber,requestId:j.id}),checks:await recheckOrders(db,[o.id])};}
    if(b.provider==='Shopify'){
     await stage('Lecture de la commande source dans Shopify');
