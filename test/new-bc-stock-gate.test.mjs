@@ -30,7 +30,7 @@ function rereadFixture(stock){
  const f=fixture(),initial=f.api.request;f.variant.stock_levels=conn([]);
  f.api.request=async(q,v)=>{
   if(!q.includes('V3NewBcStockDetail'))return initial(q,v);
-  f.calls.push({q,v});assert.match(q,/^query /);assert.deepEqual(v,{id:'642510'});
+  f.calls.push({q,v});assert.match(q,/^query /);assert.deepEqual(v,{id:'642510',locations:[100934]});
   return {Variant:{...f.variant,stock_levels:conn(stock)}};
  };
  return f;
@@ -79,6 +79,30 @@ test('detail read network refusal does not become zero or permit BC creation',as
  const f=rereadFixture([]),request=f.api.request;
  f.api.request=async(q,v)=>{if(q.includes('V3NewBcStockDetail'))throw Error('Erplain HTTP 429');return request(q,v);};
  await assert.rejects(()=>f.run(),/Erplain HTTP 429/);
+});
+
+for(const [physical,available,passes] of [[0,0,false],[300,300,true],[300,0,false],[0,300,false]])test('empty stock-level rows use explicit warehouse balances '+physical+'/'+available,async()=>{
+ const f=rereadFixture([]),request=f.api.request;
+ f.api.request=async(q,v)=>{const r=await request(q,v);if(r.Variant){assert.match(q,/on_hand\(location_ids:\$locations\)/);assert.match(q,/available\(location_ids:\$locations\)/);Object.assign(r.Variant,{physicalAtLocation:physical,availableAtLocation:available});}return r;};
+ if(passes)assert.equal(await f.run(),true);else await assert.rejects(()=>f.run(),/stock insuffisant/);
+});
+test('missing or invalid scoped scalar quantities remain unknown',async()=>{
+ for(const patch of [{physicalAtLocation:0},{physicalAtLocation:null,availableAtLocation:0},{physicalAtLocation:0,availableAtLocation:''},{physicalAtLocation:false,availableAtLocation:0}]){
+  const f=rereadFixture([]),request=f.api.request;
+  f.api.request=async(q,v)=>{const r=await request(q,v);if(r.Variant)Object.assign(r.Variant,patch);return r;};
+  await assert.rejects(()=>f.run(),/Stock non vérifiable/);
+ }
+});
+test('scoped balances are never reused for another warehouse',async()=>{
+ const f=fixture();f.variant.stock_levels=conn([]);
+ f.api.request=async(q,v)=>{
+  f.calls.push({q,v});
+  if(!q.includes('V3NewBcStockDetail'))return {Variants:conn([f.variant])};
+  const stock=v.locations[0]===100934?300:0;
+  return {Variant:{...f.variant,physicalAtLocation:stock,availableAtLocation:stock}};
+ };
+ await assert.rejects(()=>f.run([f.line,{...f.line,location:{id:100935}}]),/stock insuffisant/);
+ assert.deepEqual(f.calls.filter(c=>c.q.includes('Detail')).map(c=>c.v.locations),[[100934],[100935]]);
 });
 test('fresh shortage prevents activation mutation',async()=>{
  const f=fixture(),mutations=[];const api={request:async(q,v)=>{

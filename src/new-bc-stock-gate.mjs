@@ -34,13 +34,19 @@ export async function assertNewBcStock(api,lines,products){
   if(!stock){
    // Re-read the exact variant, never infer zero from an absent location or use
    // a different warehouse's quantities. Share this fresh read within this check.
-   if(!rereads.has(id)){
-    const response=await api.request('query V3NewBcStockDetail($id:ID!){Variant(id:$id){id sku track_inventory stock_levels(first:100){data{location{id} on_hand available} paginatorInfo{hasMorePages}}}}',{id});
+   const key=id+':'+location;
+   if(!Number.isSafeInteger(Number(location))||Number(location)>2147483647)throw Error('Emplacement Erplain invalide');
+   if(!rereads.has(key)){
+    const response=await api.request('query V3NewBcStockDetail($id:ID!,$locations:[Int]){Variant(id:$id){id sku track_inventory physicalAtLocation:on_hand(location_ids:$locations) availableAtLocation:available(location_ids:$locations) stock_levels(first:100){data{location{id} on_hand available} paginatorInfo{hasMorePages}}}}',{id,locations:[Number(location)]});
     const detail=response?.Variant;
     if(String(detail?.id)!==id||detail.sku!==variant.sku||detail.track_inventory!==true)throw Error('Stock non vérifiable avant BC : identité produit non confirmée après relecture : '+variant.sku);
-    rereads.set(id,detail);
+    rereads.set(key,detail);
    }
-   stock=locationStock(rereads.get(id),location);
+   const detail=rereads.get(key);
+   stock=locationStock(detail,location);
+   // Erplain can return no stock-level rows for a zero balance. The filtered
+   // scalar quantities still explicitly confirm physical and available stock.
+   if(!stock&&[detail.physicalAtLocation,detail.availableAtLocation].every(stockNumber))stock={on_hand:detail.physicalAtLocation,available:detail.availableAtLocation};
    if(!stock)throw Error('Stock non vérifiable avant BC : '+variant.sku+' · emplacement '+location+' : quantités absentes ou incomplètes après relecture Erplain');
   }
   checked.push({...line,variant,on_hand:stock.on_hand,available:stock.available,reserved_quantity:0});
