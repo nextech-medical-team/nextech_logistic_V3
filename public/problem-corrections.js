@@ -1211,6 +1211,16 @@ function renderResolution(ctx,problem){
 
 
 
+ if(['bc','unknown','api-incomplete'].includes(problem.type)&&/BC[^\n]*(?:introuvable|absent)|Lignes BC non reçues/i.test((problem.detail||'')+' '+problem.label)&&['temu','amazon'].includes(ctx.order.channel)&&ctx.order.erp_live?.bc?.id&&!ctx.order.erp_live?.bl?.id&&!ctx.order.partial_mode){
+  const p=document.createElement('p');p.textContent='Si le BC enregistré est réellement absent, V3 peut vérifier les documents et le stock avant d’autoriser sa recréation. L’étiquette existante sera conservée.';fields.append(p);
+  const label=document.createElement('label'),confirm=document.createElement('input');confirm.type='checkbox';
+  label.append(confirm,document.createTextNode(' J’autorise la recréation du BC pour '+ctx.order.reference+' uniquement si les contrôles confirment son absence.'));fields.append(label);
+  const recovery=button('Vérifier le BC absent et reprendre',async()=>{
+   if(!confirm.checked)throw Error('Confirmez la reprise de cette commande.');
+   await saved(await task('refresh',{provider:'Erplain',confirmMissingBc:true,missingBcId:String(ctx.order.erp_live.bc.id),orderReference:ctx.order.reference,resumeAfter:true}));
+  });recovery.disabled=true;confirm.onchange=()=>{recovery.disabled=!confirm.checked;};
+ }
+
  if(ctx.active){const p=document.createElement('p');p.textContent='Intervention enregistrée à l’ouverture : '+(ctx.active.stage||'Étape non transmise.');d.body.prepend(p);}
 
 
