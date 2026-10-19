@@ -11,14 +11,16 @@ export function mutationBlock(o,{allowHeldBc=false}={}){return !o||o.archived?'C
 export function retryDecision(o,error,updatedAt,now=Date.now()){
  const attempts=Number(o.erp_live?.transientRecovery?.attempts||0);
  const readLimited=o.erp_live?.transientRecovery?.readRateLimited===true&&/Erplain HTTP 429\b/.test(error||'');
- if(!transientErpError(error)||!Number.isInteger(attempts)||(attempts>=3&&!readLimited)||attempts<0)return false;
+ const draftReview=error==='BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire'&&o.erp_live?.phase==='bc_created'&&o.erp_live?.bc?.status==='unpublished'&&!o.erp_live?.bl?.id&&!o.erp_live?.stockDocument?.id;
+ if((!transientErpError(error)&&!draftReview)||!Number.isInteger(attempts)||(attempts>=3&&!readLimited)||attempts<0)return false;
  if(o.archived||o.partial_mode||o.resolution_pending_resume||cancellationBlock(o)||(!usesRecordedBc(o)&&Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection'))||['shipped','delivered','in_transit'].includes(o.tracking_status))return false;
  if(['cancelled','closed'].includes(o.erp_live?.bc?.status)||['cancelled','closed'].includes(o.erp_live?.bl?.status))return false;
  const phase=o.erp_live?.phase;
- const initialRead=readLimited&&!phase&&!o.erp_live?.customer?.id&&!o.erp_live?.bc?.id&&!o.erp_live?.bl?.id;
- if(!initialRead&&!['creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl'].includes(phase))return false;
+ const initialRead=!phase&&!o.erp_live?.customer?.id&&!o.erp_live?.bc?.id&&!o.erp_live?.bl?.id;
+ const customerCheckpoint=['creating_customer','customer_created'].includes(phase)&&!o.erp_live?.bc?.id&&!o.erp_live?.bl?.id;
+ if(!initialRead&&!customerCheckpoint&&!['creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl'].includes(phase))return false;
  if(phase==='creating_bc'&&!o.erp_live?.customer?.id)return false;
- if(!initialRead&&phase!=='creating_bc'&&!o.erp_live?.bc?.id)return false;
+ if(!initialRead&&!customerCheckpoint&&phase!=='creating_bc'&&!o.erp_live?.bc?.id)return false;
  const retryAt=o.erp_live?.transientRecovery?.nextReadCheckAt;
  if(retryAt&&(!Number.isFinite(Date.parse(retryAt))||Date.parse(retryAt)>now))return false;
  return Number.isFinite(Date.parse(updatedAt))&&now-Date.parse(updatedAt)>=[30000,120000,300000][Math.min(attempts,2)];

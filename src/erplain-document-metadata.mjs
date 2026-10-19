@@ -12,4 +12,14 @@ export async function copyRepresentatives(source,live,directory){
  const mapping={sourceCompany:100174,targetCompany:100174,verifiedAt:new Date().toISOString(),rows:result.AccountRepresentatives.data.map(r=>({sourceId:r.id,liveId:r.id,label:r.label,active:r.active}))};
  await writeFile(path.join(directory,'account-representatives.json'),JSON.stringify(mapping),{mode:0o600});return mapping;
 }
-export async function recoverOrder(api,o){const data=await api.request('query V3RecoverReference($where:QueryOrdersWhereWhereConditions){Orders(first:100,where:$where){data{id label status external_reference internal_notes customer{customer_number}} paginatorInfo{hasMorePages}}}',{where:{OR:[{column:'EXTERNAL_REFERENCE',operator:'EQ',value:'V3:'+o.id},{column:'EXTERNAL_REFERENCE',operator:'EQ',value:externalReference(o)}]}});if(data.Orders.paginatorInfo.hasMorePages)throw Error('Trop de BC candidats : contrôle requis');const hits=data.Orders.data.filter(x=>x.status!=='cancelled').filter(x=>x.external_reference==='V3:'+o.id||String(x.internal_notes||'').includes(technicalMarker(o))||x.customer?.customer_number==='V3:'+o.id);if(hits.length>1)throw Error('BC multiples pour la même commande V3');return hits[0]||null;}
+export async function recoverOrder(api,o){const data=await api.request('query V3RecoverReference($where:QueryOrdersWhereWhereConditions){Orders(first:100,where:$where){data{id label status external_reference internal_notes customer{customer_number}} paginatorInfo{hasMorePages}}}',{where:{OR:[{column:'EXTERNAL_REFERENCE',operator:'EQ',value:'V3:'+o.id},{column:'EXTERNAL_REFERENCE',operator:'EQ',value:externalReference(o)}]}});const list=data?.Orders;
+ if(!Array.isArray(list?.data)||typeof list.paginatorInfo?.hasMorePages!=='boolean')throw Error('API Erplain · Réponse BC incomplète : aucune nouvelle création');
+ if(list.paginatorInfo.hasMorePages)throw Error('Trop de BC candidats : contrôle requis');
+ const hits=[];
+ for(const x of list.data){
+  if(!x?.id||!x.status)throw Error('API Erplain · Réponse BC incomplète : identité absente');
+  const identified=x.external_reference==='V3:'+o.id||String(x.internal_notes||'').includes(technicalMarker(o))||x.customer?.customer_number==='V3:'+o.id;
+  if(!identified||!['active','unpublished'].includes(x.status))throw Error('BC de même référence ambigu ou non réutilisable : aucune nouvelle création');
+  hits.push(x);
+ }
+ if(hits.length>1)throw Error('BC multiples pour la même commande V3');return hits[0]||null;}

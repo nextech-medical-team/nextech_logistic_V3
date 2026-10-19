@@ -1,10 +1,12 @@
 import {cancellationBlock,retryDecision,transientErpError} from './erp-transient-policy.mjs';
 import {recoverOrder} from './erplain-document-metadata.mjs';
+import {customerCheckpointResult} from './temu-customer-checkpoint.mjs';
 
 export async function recordTransientFailure(db,o,message,error){
  const old=o.erp_live?.transientRecovery||{};
  const readRateLimited=error?.httpStatus===429&&error?.erplainReadOnly===true;
  const state={...old,lastError:transientErpError(message)?message:null,lastFailureAt:new Date().toISOString(),readRateLimited,
+  customerCreationRejected:o.erp_live?.phase==='creating_customer'&&error?.httpStatus===429&&error?.confirmedRateLimitRejection===true,
   nextReadCheckAt:readRateLimited?new Date(Date.now()+Math.max(60000,Number(error.retryAfter||0)*1000)).toISOString():null};
  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{transientRecovery}',$2::jsonb) WHERE id=$1",[o.id,JSON.stringify(state)]);
  o.erp_live.transientRecovery=state;
@@ -25,7 +27,8 @@ export async function resumeTransientErplain(db,api){
   for(const o of cancelled){const block=cancellationBlock(o);if(!block)continue;await tx.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{transientRecovery}',$2::jsonb) WHERE id=$1",[o.id,JSON.stringify({...o.erp_live.transientRecovery,lastError:o.erp_live.transientRecovery?.lastError||o.error})]);await tx.query('UPDATE erp_live_jobs SET error=$2 WHERE order_id=$1',[o.id,block]);}
   // Locks and the worker-wide shipment lock prevent two schedulers claiming the same retry.
   const rows=(await tx.query(`SELECT o.*,e.error,e.updated_at retry_updated FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
-   WHERE e.status='review' AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL)
+   WHERE e.status='review' AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL
+    OR (e.error='BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire' AND o.erp_live->>'phase'='bc_created' AND o.erp_live->'bc'->>'status'='unpublished' AND o.erp_live->'bl'->>'id' IS NULL AND o.erp_live->'stockDocument'->>'id' IS NULL))
    AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
    AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
@@ -35,8 +38,8 @@ export async function resumeTransientErplain(db,api){
    AND coalesce(o.erp_live->'bc'->>'status','') NOT IN ('cancelled','closed') AND coalesce(o.erp_live->'bl'->>'status','') NOT IN ('cancelled','closed')
    AND (coalesce(o.erp_live->'transientRecovery'->>'attempts','0') IN ('0','1','2') OR o.erp_live->'transientRecovery'->>'readRateLimited'='true')
    AND (o.erp_live->'transientRecovery'->>'nextReadCheckAt' IS NULL OR o.erp_live->'transientRecovery'->>'nextReadCheckAt'<=to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
-   AND (o.erp_live->>'phase' IN ('creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl') OR (o.erp_live->>'phase' IS NULL AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
-   AND ((o.erp_live->>'phase'='creating_bc' AND o.erp_live->'customer'->>'id' IS NOT NULL) OR (o.erp_live->>'phase'<>'creating_bc' AND o.erp_live->'bc'->>'id' IS NOT NULL) OR o.erp_live->>'phase' IS NULL)
+   AND (o.erp_live->>'phase' IN ('creating_customer','customer_created','creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl') OR (o.erp_live->>'phase' IS NULL AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
+   AND ((o.erp_live->>'phase'='creating_bc' AND o.erp_live->'customer'->>'id' IS NOT NULL) OR (o.erp_live->>'phase'<>'creating_bc' AND o.erp_live->'bc'->>'id' IS NOT NULL) OR (o.erp_live->>'phase' IN ('creating_customer','customer_created') AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL) OR o.erp_live->>'phase' IS NULL)
    AND e.updated_at<=now()-CASE coalesce(o.erp_live->'transientRecovery'->>'attempts','0') WHEN '0' THEN interval '30 seconds' WHEN '1' THEN interval '2 minutes' ELSE interval '5 minutes' END
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
    AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
@@ -54,6 +57,19 @@ export async function resumeTransientErplain(db,api){
     if(!state.phase){
      const result=await reader.request('query V3RateLimitIdentity { Company { id } }');
      if(result.Company?.id!==100174)throw Error('Identité Erplain incorrecte : aucune reprise');
+    }else if(['creating_customer','customer_created'].includes(state.phase)){
+     const number=state.customerNumber||'V3:'+o.id;
+     const result=await reader.request('query V3TransientCustomer($where:QueryCustomersWhereWhereConditions){Customers(first:100,where:$where){data{id customer_number} paginatorInfo{hasMorePages}}}',{where:{column:'CUSTOMER_NUMBER',operator:'EQ',value:number}});
+     const customer=customerCheckpointResult(result,o.id,number);
+     if(!customer&&state.phase==='creating_customer'&&!state.customer?.id&&state.transientRecovery.customerCreationRejected===true){
+      // Only an explicit rejection with no accepted data permits a fresh creation.
+      // The complete customer search above still runs before releasing the checkpoint.
+      delete state.phase;
+     }else{
+      if(!customer||state.customer?.id&&String(customer.id)!==String(state.customer.id))throw Error('Client Erplain · Création à vérifier : client non retrouvé ou différent, aucune nouvelle création automatique');
+      state.customer={...state.customer,...customer};state.phase='customer_created';
+     }
+     state.transientRecovery.customerCreationRejected=false;
     }else if(state.phase==='creating_bc'){
      const found=await recoverOrder(reader,o);
      if(found){state.bc={id:found.id,label:found.label,status:found.status};state.phase='bc_created';}
@@ -61,11 +77,13 @@ export async function resumeTransientErplain(db,api){
     }else{
      const result=await reader.request('query V3TransientBL($id:ID!){Order(id:$id){id status shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}}}',{id:String(state.bc.id)});
      const bc=result.Order,list=bc?.shipping_orders;
-     if(String(bc?.id)!==String(state.bc.id)||bc.status!=='active'||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
+     const draft=bc?.status==='unpublished'&&state.phase==='bc_created'&&!state.bl?.id&&!state.stockDocument?.id;
+     if(String(bc?.id)!==String(state.bc.id)||!(bc.status==='active'||draft)||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1||draft&&list.data.length)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
      const bl=list.data[0];
      if(bl&&(!bl.id||['cancelled','closed'].includes(bl.status)))throw Error('BL annulé ou non identifiable : contrôle nécessaire');
      if(state.bl?.id&&String(bl?.id)!==String(state.bl.id))throw Error('BL différent : contrôle nécessaire');
      if(bl)state.bl=bl;
+     state.bc={...state.bc,status:bc.status};
     }
     await tx.query('UPDATE orders SET erp_live=$2 WHERE id=$1',[o.id,JSON.stringify(state)]);
     await tx.query("UPDATE erp_live_jobs SET status='pending',error=null,updated_at=now() WHERE order_id=$1",[o.id]);resumed++;

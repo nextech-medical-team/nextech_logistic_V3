@@ -7,6 +7,14 @@ function sharedParcelResolutionNotice(problem,order){
  return {description:'Plusieurs commandes sont associées au même colis TEMU. Ce regroupement n’est pas une erreur. Cette commande attend une reprise de ses contrôles Erplain : produits, quantités, stock et documents existants. L’étiquette et le numéro de suivi sont conservés ; aucun nouvel achat n’est demandé et les autres commandes du colis ne sont pas relancées.',button:'Reprendre les contrôles BC/BL — étiquette conservée'};
 }
 
+function temuLabelResolutionNotice(problem,order){
+ if(order?.channel!=='temu')return null;
+ const text=String(problem.detail||problem.label||'');
+ if(/shipping address contains non-English characters|Adresse\s*:\s*caractères refusés|adresse avec caractères non pris en charge/i.test(text))return 'TEMU refuse les caractères de l’adresse pour ce service de livraison. Vérifiez et corrigez les coordonnées dans TEMU Seller Center, puis relisez le résultat de l’expédition existante. Modifier uniquement l’adresse dans V3 ne corrige pas ce refus chez TEMU. Si vous disposez déjà d’une étiquette achetée à l’extérieur, vous pouvez l’enregistrer ici.';
+ if(problem.type==='temu-label-refused')return 'TEMU a refusé cette étiquette. Consultez le motif ci-dessous et corrigez le problème dans TEMU Seller Center, puis relisez l’expédition existante. Si vous disposez déjà d’une étiquette achetée à l’extérieur, vous pouvez l’enregistrer ici.';
+ return null;
+}
+
 function mappingQuantityDefaults(line={}){
 
 
@@ -1165,8 +1173,8 @@ function renderResolution(ctx,problem){
 
 
 
-  const sharedParcelNotice=sharedParcelResolutionNotice(problem,ctx.order);
-  scope.textContent=sharedParcelNotice?sharedParcelNotice.description:spec.view==='api'?'Incident de connexion '+provider+' · les données métier ne doivent pas être modifiées pour masquer une erreur API.':'Motif enregistré par V3 ou renvoyé par le service. Le détail complet est affiché ci-dessous ; une actualisation ne garantit pas sa résolution.';
+  const sharedParcelNotice=sharedParcelResolutionNotice(problem,ctx.order),temuLabelNotice=temuLabelResolutionNotice(problem,ctx.order);
+  scope.textContent=temuLabelNotice|| (sharedParcelNotice?sharedParcelNotice.description:spec.view==='api'?'Incident de connexion '+provider+' · les données métier ne doivent pas être modifiées pour masquer une erreur API.':'Motif enregistré par V3 ou renvoyé par le service. Le détail complet est affiché ci-dessous ; une actualisation ne garantit pas sa résolution.');
 
 
 
@@ -1174,7 +1182,7 @@ function renderResolution(ctx,problem){
 
 
 
-  button(sharedParcelNotice?sharedParcelNotice.button:['TEMU','GLS','GOFO'].includes(provider)?'Actualiser les informations '+provider:'Actualiser et reprendre la commande',async()=>saved(await task('refresh',{...(target?{sku:target}:{}),provider,...(['TEMU','GLS','GOFO'].includes(provider)?{resumeAfter:false}:{})})));button('Ouvrir les connexions',()=>{d.modal.close();show('connections');});
+  button(sharedParcelNotice?sharedParcelNotice.button:['TEMU','GLS','GOFO'].includes(provider)?'Actualiser les informations '+provider:'Actualiser et reprendre la commande',async()=>saved(await task('refresh',{...(target?{sku:target}:{}),provider,...(['TEMU','GLS','GOFO'].includes(provider)?{resumeAfter:false}:{})})));if(temuLabelNotice)button('Enregistrer une étiquette externe déjà achetée',()=>{d.modal.close();openExternalLabel(ctx.order.id);});else button('Ouvrir les connexions',()=>{d.modal.close();show('connections');});
 
 
 
