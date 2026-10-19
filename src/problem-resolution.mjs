@@ -1,3 +1,5 @@
+import {refreshErplainDocuments} from './erplain-documents-sync.mjs';
+import {checkedResumeBc} from './resume-bc-read.mjs';
 import {refreshCustomerIdentity} from './customer-refresh.mjs';
 import {queueResolutionRequest} from './resolution-request.mjs';
 import {assertImportedPostalAddress} from './imported-postal-authority.mjs';
@@ -426,6 +428,11 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     await stage('Lecture de la commande et des expéditions dans TEMU');
     return {...await refreshTemuDiagnostic(o.reference),readOnly:true};
    }
+   if(o.erp_live?.bc?.id&&!o.partial_mode&&['stock','api-stock','api-incomplete','bc','unknown','preparation'].includes(b.type)){
+    await stage('Relecture du BC et des BL existants dans Erplain');
+    const documents=await refreshErplainDocuments(db,api,o.id,{resolutionId:j.id});
+    if(documents.identityIssue)throw Error(documents.message);
+   }
    if(o.source_payload?.erplainImported){await stage('Lecture du BC, des produits et des BL Erplain');await refreshManualOrder(db,api,o);}
    if(b.sku){await stage('Relecture du SKU dans Erplain LIVE');await api.verify();const found=await readOrderSku(b.sku);if(found.usable)await bindProduct(db,found.variant);else return {...found,message:'Diagnostic Erplain actualisé : '+found.status};}
    else if(b.type.startsWith('api-')){await stage('Vérification de la connexion Erplain LIVE');await api.verify();}
@@ -442,8 +449,8 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    if(!existing){await stage('Recalcul de la préparation');const checks=await recheckOrders(db,[o.id]);if(!checks[0]?.prepared)throw Error(checks[0]?.problem||'Préparation protégée : vérifier la commande');}
    if(carrier?.status==='review'||carrier?.status==='failed'&&(carrier.result||carrier.tracking?.length))throw Error('Création transport à vérifier : récupérer la création existante avant reprise');
    if(o.erp_live?.bc?.id){
-    await api.verify();const {Order:bc}=await api.request(`query V3ResolutionResumeBC($id:ID!){Order(id:$id){${o.source_payload?.erplainImported?manualOrderFields:'id status line_items{type quantity variant{sku}}'}}}`,{id:String(o.erp_live.bc.id)});
-    if(!bc?.line_items)throw Error('API Erplain · Lignes BC non reçues');
+    await api.verify();const bcResult=await api.request(`query V3ResolutionResumeBC($id:ID!){Order(id:$id){${o.source_payload?.erplainImported?manualOrderFields:'id status line_items{type quantity variant{sku}}'}}}`,{id:String(o.erp_live.bc.id)});
+    const bc=checkedResumeBc(bcResult,o.erp_live.bc);
     const desired=usesRecordedBc(o)?[]:await readComparisonLines(db,o);
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku;sums.set(sku,(sums.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};
     if(!usesRecordedBc(o)&&total(desired)!==total(resolutionBcLines(o,bc)))throw Error('Commande V3 et BC différents : comparer les produits et quantités avant de générer l’étiquette');
