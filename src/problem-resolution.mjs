@@ -1,3 +1,4 @@
+import {refreshCustomerIdentity} from './customer-refresh.mjs';
 import {queueResolutionRequest} from './resolution-request.mjs';
 import {assertImportedPostalAddress} from './imported-postal-authority.mjs';
 import {abandonEquivalentPreview} from './abandon-equivalent.mjs';
@@ -72,7 +73,7 @@ const actionTypes={
  'create-product':['mapping','missing'],'activate-product':['inactive'],
  'weight':['weight','weight-unit'],'address':['address','city'],
  'relay':['relay','relay-search'],'compare-bc':['bc','stock','api-stock','historical-preparation','erplain-recovery'],'resume-erp':['stock','api-stock','historical-preparation','erplain-recovery'],'force-stock-label':['stock'],
- 'refresh':['preparation','unknown','routing','stock','bc',...productTypes,'api-access','api-limit','api-server','api-timeout','api-network','api-stock','api-incomplete','api-http','uncertain','pdf'],
+ 'refresh':['customer','preparation','unknown','routing','stock','bc',...productTypes,'api-access','api-limit','api-server','api-timeout','api-network','api-stock','api-incomplete','api-http','uncertain','pdf'],
  'recover-pdf':['pdf','uncertain'],'resume':['resolved']
 };
 export async function initializeResolutions(db){await initializePriority(db);
@@ -87,6 +88,7 @@ function assertRefreshProvider(provider){
 }
 export function validateResolution(b){
  if(b?.action==='refresh')assertRefreshProvider(b.provider);
+ if(b?.type==='customer'&&b.provider!==undefined&&b.provider!=='Erplain')throw Error('Le rapprochement client nécessite Erplain');
  if(!actionTypes[b.action]?.includes(b.type))throw Error('Action incompatible avec le problème sélectionné');
  if(typeof b.id!=='string'||!b.id||!/^[a-f0-9-]{36}$/i.test(String(b.requestId)))throw Error('Commande et identifiant de demande requis');
  const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'abandon-equivalent':['previewJobId'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent','verifyAndApply'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider']}[b.action]||[])];
@@ -409,6 +411,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    return refreshWeightUnitDiagnostics(db,o,b.sku.trim(),found.variant);
   }
   if(j.action==='refresh'){
+   if(b.type==='customer'){await stage('Recherche du client existant dans Erplain');return {...await refreshCustomerIdentity(db,api,o),checks:await recheckOrders(db,[o.id])};}
    if(b.provider==='Shopify'){
     await stage('Lecture de la commande source dans Shopify');
     return {...await diagnoseShopify(o.id),readOnly:true};
