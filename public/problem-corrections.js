@@ -1188,6 +1188,7 @@ function renderResolution(ctx,problem){
 
 
   fields.innerHTML='<p class="resolution-diagnostic">'+esc(problem.detail||'Le motif détaillé n’a pas été enregistré.')+'</p>'+temuRefusalDetailsHtml(problem,ctx);
+  if(problem.type==='customer'){const number=ctx.order.channel==='temu'&&ctx.order.erp_live?.customerNumber||'V3:'+ctx.order.id;fields.innerHTML+='<p>Numéro client recherché dans Erplain : <strong>'+esc(number)+'</strong></p><p>Si aucun client n’est trouvé et que la création précédente reste incertaine, vérifiez ce numéro dans Erplain. Un client retrouvé avec ce numéro pourra être réutilisé à la prochaine actualisation. Ne recréez pas le client sans avoir vérifié la tentative précédente.</p>';}
 
 
 

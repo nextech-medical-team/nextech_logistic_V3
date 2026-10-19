@@ -17,10 +17,10 @@ export function assertRefreshedBcDocument(order,bc){
  for(const line of bc.line_items.filter(l=>l.variant)){const q=line.quantity;if(!((typeof q==='number'||typeof q==='string'&&q.trim()!=='')&&Number.isFinite(Number(q))&&Number(q)>=0))throw Error('Erplain · Quantité BC non confirmée : aucune projection remplacée');}
 }
 // Only reconcile the exact physical diagnostic. Never resume or complete a job.
-export async function reconcileRefreshedBcDiagnostics(tx,id,bc){
+export async function reconcileRefreshedBcDiagnostics(tx,id,bc,{resolutionId}={}){
  const order=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];
  if(!order)throw Error('Commande V3 introuvable pendant comparaison');
- await assertDocumentIdle(tx,id);
+ await assertDocumentIdle(tx,id,{resolutionId});
  const lines=(await tx.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1 FOR SHARE OF l',[id,order.channel])).rows;
  const invalid=!usesRecordedBc(order)&&lines.some(l=>{const values=l.target_quantity!=null?[l.target_quantity]:(l.source_qty!=null||l.target_qty!=null)?[l.quantity,l.source_qty,l.target_qty]:[l.quantity];return values.some(v=>!((typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v))&&Number(v)>0));});
  const diagnostic=bcComparisonDiagnostic(order,bc,lines);

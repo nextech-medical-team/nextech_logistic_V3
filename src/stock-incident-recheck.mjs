@@ -35,7 +35,7 @@ export function evaluateStockIncident(order,bc,{historicalProof=null}={}){
  try{assertFullOrderStock(bc.line_items,{preserveInstalled:order.channel==='tender'});}catch(e){if(stockIncidentOnly(e.message))return {status:'active',basis:'current_available_stock',currentError:e.message,bcId:String(bc.id)};throw e;}
  return {status:'resolved',basis:'current_available_stock',bcId:String(bc.id),preparationRequired:true};
 }
-export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,now=()=>Date.now()}={}){
+export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,resolutionId,now=()=>Date.now()}={}){
  const initial=(await db.query('SELECT * FROM orders WHERE id=$1',[id])).rows[0];if(!initial)return {notApplicable:true};
  if(initial.archived||initial.partial_mode||suspensionBlock(initial)||initial.erp_live?.mappingAlignmentAttempt?.status==='uncertain')return {deferred:true,reason:'Périmètre archivé, partiel, suspendu ou résultat de mapping incertain'};
  const jobs=(await db.query("SELECT id,action,status,error,result,created_at,updated_at FROM resolution_jobs WHERE order_id=$1 AND status='review'",[id])).rows;
@@ -60,7 +60,7 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
  proof={...proof,checkedAt:new Date(now()).toISOString(),mappingFingerprint:mapping,...(frozen?{authority:'recorded_bc'}:{}),shipmentFingerprint:fingerprint,readOnly:true,preparationNotStarted:true};
  const version=createHash('sha256').update(JSON.stringify([initial.issue,initial.erp_live,initial.partial_mode,initial.suspension,initial.source_payload])).digest('hex');
  return db.transaction(async tx=>{
-  const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];await assertDocumentIdle(tx,id);
+  const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[id])).rows[0];await assertDocumentIdle(tx,id,{resolutionId});
   if(!o||createHash('sha256').update(JSON.stringify([o.issue,o.erp_live,o.partial_mode,o.suspension,o.source_payload])).digest('hex')!==version||(!frozen&&await currentMappingFingerprint(tx,o)!==mapping)||await shipmentFingerprint(tx,o)!==fingerprint)return {deferred:true};
   const current=(await tx.query("SELECT id,action,status,error,result,created_at,updated_at FROM resolution_jobs WHERE order_id=$1 AND status='review' FOR UPDATE",[id])).rows;
   if(current.some(j=>!jobs.some(old=>old.id===j.id&&old.error===j.error&&String(old.updated_at)===String(j.updated_at))))return {deferred:true};

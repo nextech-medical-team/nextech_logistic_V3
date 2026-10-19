@@ -224,6 +224,12 @@ export async function historicalPreparationProof(api,o,{beforeBlPublication=fals
 // Never infer that solely from flags: require a complete BL ledger with no
 // independent movement, before AND after publication through preparationProof.
 export async function readInheritedBlLedger(api,bl){
+ if(bl?.id&&!/^\d{4}-\d{2}-\d{2}[ T]/.test(String(bl.created_at||''))){
+  const fresh=(await api.request('query V3InheritedBlDate($id:ID!){ShippingOrder(id:$id){id created_at status update_stock line_items{type quantity variant{id} location{id}}}}',{id:String(bl.id)})).ShippingOrder;
+  const quantities=rows=>Array.isArray(rows)?JSON.stringify(rows.map(l=>[l.type,String(l.variant?.id||''),String(l.location?.id||''),String(l.quantity)]).sort()):null;
+  if(!fresh||String(fresh.id)!==String(bl.id)||fresh.status!==bl.status||fresh.update_stock!==bl.update_stock||!Array.isArray(fresh.line_items)||quantities(fresh.line_items)!==quantities(bl.line_items))throw Error('BL historique modifié ou introuvable : actualiser les documents avant vérification du stock');
+  bl={...bl,created_at:fresh.created_at};
+ }
  const created=String(bl?.created_at||'');
  if(!bl?.id||!/^\d{4}-\d{2}-\d{2}[ T]/.test(created)||!Number.isFinite(Date.parse(created.replace(' ','T'))))throw Error('Journal BL historique : date absente');
  const evidence=[];
