@@ -50,9 +50,14 @@ test('database recovery reconciles drafts and customers using reads only',async(
   await check(draft,{Order:{...response.Order,id:'99'}},{resumed:false,error:/rapprochement/});
   await check(draft,{Order:{...response.Order,shipping_orders:{data:[{id:'bl'}],paginatorInfo:{hasMorePages:false}}}},{resumed:false,error:/rapprochement/});
   await check({...draft,phase:'creating_bl'},response,{resumed:false,error:/rapprochement/});
-  await check(draft,{Order:{...response.Order,shipping_orders:{data:[],paginatorInfo:{hasMorePages:true}}}},{resumed:false,error:/rapprochement/});
+  const partial=await check(draft,{Order:{...response.Order,shipping_orders:{data:[],paginatorInfo:{hasMorePages:true}}}},{resumed:false,error:/Réponse Erplain incomplète/});
+  assert.equal(partial.state.transientRecovery.outcome,'waiting');
+  assert.ok(Date.parse(partial.state.transientRecovery.nextReadCheckAt)>Date.now());
+  await check({...draft,transientRecovery:{attempts:1}},response,{jobError:'Réponse Erplain incomplète : liste BL non reçue en totalité'});
+  await check(draft,{}, {resumed:false,error:/BC non reçu/});
   const customer={phase:'creating_customer',customerNumber:'C1'};
   const found={Customers:{data:[{id:'9',customer_number:'C1'}],paginatorInfo:{hasMorePages:false}}};
+  await check(customer,found,{jobError:'Réponse incomplète creating_customer'});
   const recovered=await check(customer,found);
   assert.equal(recovered.state.phase,'customer_created');assert.equal(recovered.state.customer.id,'9');
   assert.equal(recovered.calls[0].v.where.value,'C1');
@@ -78,4 +83,9 @@ test('database recovery reconciles drafts and customers using reads only',async(
   await recordTransientFailure({query:async()=>({rows:[]})},o,'Erplain HTTP 429',error);
   assert.equal(canRetryCustomerCreation(o,'V3:o'),confirmed===true);
  }
+});
+
+test('incomplete stock or unidentified BL mutation is not silently replayed',()=>{
+ assert.equal(retryDecision(order({phase:'creating_stock',bc:{id:1}}),'Réponse incomplète creating_stock',old),false);
+ assert.equal(retryDecision(order({phase:'creating_bl',bc:{id:1}}),'Réponse incomplète creating_bl',old),false);
 });

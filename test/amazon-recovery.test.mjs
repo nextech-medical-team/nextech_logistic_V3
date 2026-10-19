@@ -61,3 +61,7 @@ test('definitive refusal history requires explicit Amazon scope',async()=>{
  assert.equal(await hasUncertainCarrierHistory(history,'o',{manualRequest:true}),true);
  assert.equal(await hasUncertainCarrierHistory(history,'o',{manualRequest:true,channel:'amazon'}),false);
 });
+
+test('missing draft response field is incomplete, never proof that the BL is absent',async()=>{
+ await assert.rejects(readTransientBlIdentity({request:async()=>({})},state,bc),e=>/Réponse Erplain incomplète/.test(e.message)&&e.code!=='V3_MISSING_DRAFT');
+});
