@@ -28,13 +28,13 @@
    try{context=await api('/api/problem-deferral?id='+encodeURIComponent(id));if(context.order.id!==id)throw Error('Réponse incohérente');}
    catch(e){result+=' · Résultat enregistré à vérifier : '+e.message;failed=true;}
    busy=false;modal.removeAttribute('aria-busy');render(result,failed,failed?note:'');
-   try{await orders();}catch(e){modal.querySelector('[data-deferral-message]').textContent=result+' · Liste non actualisée : '+e.message;}
+   try{await orders();}catch(e){modal.querySelector('[data-deferral-message]').textContent=result+' · Liste non actualisée : '+displayErrorMessage(e);}
   };
  }
  document.addEventListener('click',async e=>{
   const b=e.target.closest('[data-problem-deferral-id]');if(!b)return;e.preventDefault();if(busy)return;const token=++request,id=b.dataset.problemDeferralId;
   try{const data=await api('/api/problem-deferral?id='+encodeURIComponent(id));if(token!==request)return;if(data.order?.id!==id)throw Error('Réponse incohérente');context=data;render();if(!modal.open)modal.showModal();}
-  catch(e){if(token===request)alert('Impossible d’ouvrir le report : '+e.message);}
+  catch(e){if(token===request)alert('Impossible d’ouvrir le report : '+displayErrorMessage(e));}
  });
  document.addEventListener('keydown',e=>{const b=e.target.closest('[data-problem-deferral-id]');if(b&&e.key===' '){e.preventDefault();b.click();}});
  modal.addEventListener('cancel',e=>{if(busy)e.preventDefault();else request++;});
