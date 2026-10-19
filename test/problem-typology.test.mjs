@@ -6,6 +6,15 @@ import {selectProblemOrders,paginateProblemOrders,WITHOUT_DIAGNOSTIC} from '../s
 import {currentProblemClassifier} from '../src/problem-typology-reader.mjs';
 import {orderQuery} from '../src/order-query.mjs';
 
+test('missing stock has a verification label while explicit shortage stays distinct',()=>{
+ const classify=currentProblemClassifier();
+ const missing=classify({id:'missing',issue:'Stock non vérifiable avant BC : 900604 · emplacement 100934 : quantités absentes ou incomplètes après relecture Erplain'});
+ assert.ok(missing.some(item=>item.label==='Stock Erplain à vérifier'));
+ assert.ok(!missing.some(item=>item.label==='Bloqué : stock insuffisant'));
+ const shortage=classify({id:'zero',issue:'BL bloqué — stock insuffisant : 900604 : 1 nécessaires, 0 utilisables, manque 1'});
+ assert.ok(shortage.some(item=>item.label==='Bloqué : stock insuffisant'));
+});
+
 test('exact labels, distinct order counts, OR and filtering before pagination',()=>{
  const orders=Array.from({length:125},(_,i)=>({id:String(i),diagnostics:i%3===0?['A','B','A']:['B']}));
  const classify=o=>o.diagnostics.map(label=>({label}));
