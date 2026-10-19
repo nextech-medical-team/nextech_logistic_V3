@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 
 const source=readFileSync(new URL('../public/tracking-sync.js',import.meta.url),'utf8');
+const formatter=readFileSync(new URL('../public/compact-problems.js',import.meta.url),'utf8');
 function setup({ids=['order-1'],deliveries=[],active=false,race=false,clearDuringRead=false}={}){
  const elements=new Map(),requests=[],created=[];
  const element=()=>({textContent:'',hidden:false,disabled:false,elements:{search:{value:''}},setAttribute(){},addEventListener(){},after(){}});
@@ -19,7 +20,9 @@ function setup({ids=['order-1'],deliveries=[],active=false,race=false,clearDurin
    if(clearDuringRead)selected.clear();
    return {runs:active?[{id:'other-run',status:'running'}]:[],canApply:false,workerAvailable:true};
   }};
- vm.runInNewContext(source,context);
+ vm.createContext(context);
+ vm.runInContext(formatter,context);
+ vm.runInContext(source,context);
  return {requests,find,launch:find('[data-again]').onclick};
 }
 
