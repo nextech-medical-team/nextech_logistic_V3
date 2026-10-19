@@ -6,6 +6,22 @@ import {selectProblemOrders,paginateProblemOrders,WITHOUT_DIAGNOSTIC} from '../s
 import {currentProblemClassifier} from '../src/problem-typology-reader.mjs';
 import {orderQuery} from '../src/order-query.mjs';
 
+test('BC-only stock wait message is hidden while real shortage and other errors remain',()=>{
+ const wait='En attente de stock : BC disponible, préparation du BL suspendue';
+ const shortage='BL bloqué — stock insuffisant : 900604 : 1 nécessaires, 0 utilisables, manque 1';
+ const o={id:'stock',channel:'amazon',erp_live:{bc:{id:1,status:'active'}},sku_lines:[{sku:'900604'}],resolution_error:shortage,erp_live_job:{status:'review',error:wait}};
+ const problems=currentProblemClassifier()(o);
+ assert.equal(problems.length,1);assert.equal(problems[0].label,'Bloqué : stock insuffisant');
+ assert.ok(!JSON.stringify(problems).includes(wait));
+ for(const patch of [{resolution_error:wait},{issue:wait},{erp_live_job:{error:wait}},{carrier_job:{error:wait}},{temu_job:{error:wait}}]){
+  const items=currentProblemClassifier()({id:'other',channel:'amazon',...patch});
+  assert.ok(!JSON.stringify(items).includes(wait));
+ }
+ const independent=currentProblemClassifier()({...o,issue:'GOFO · Adresse invalide'});
+ assert.ok(independent.some(p=>p.detail==='GOFO · Adresse invalide'));
+ assert.equal(o.erp_live_job.error,wait,'persisted wait remains available to background recovery');
+});
+
 test('missing stock has a verification label while explicit shortage stays distinct',()=>{
  const classify=currentProblemClassifier();
  const missing=classify({id:'missing',issue:'Stock non vérifiable avant BC : 900604 · emplacement 100934 : quantités absentes ou incomplètes après relecture Erplain'});
