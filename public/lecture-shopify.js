@@ -47,11 +47,11 @@
   if(!result){$('ls-errors').textContent='Lecture en cours de mise à jour, actualisation automatique…';timer=setTimeout(load,3000);return;}
   cache=result;render(cache);
   if(['shopify','erplain'].includes(result.phase)&&currentView==='lecture-shopify')timer=setTimeout(load,3000);
- }catch(e){if(token===seq)$('ls-errors').textContent=e.message;}finally{if(token===seq)$('ls-reload').disabled=false;}}
+ }catch(e){if(token===seq)$('ls-errors').textContent=displayErrorMessage(e);}finally{if(token===seq)$('ls-reload').disabled=false;}}
 
  const previous=show;show=async function(view){clearTimeout(timer);if(view!=='lecture-shopify')return previous(view);currentView=view;document.querySelectorAll('.view').forEach(e=>e.hidden=e.id!=='view-'+view);document.querySelectorAll('[data-view]').forEach(e=>e.classList.toggle('active',e.dataset.view===view));$('title').textContent='Lecture Shopify';await load();};
  button.onclick=()=>show('lecture-shopify');$('ls-reload').onclick=load;
- $('ls-read').onclick=async()=>{try{$('ls-read').disabled=true;await api('/api/lecture-shopify',{});page=1;await load();}catch(e){$('ls-errors').textContent=e.message;$('ls-read').disabled=false;}};
+ $('ls-read').onclick=async()=>{try{$('ls-read').disabled=true;await api('/api/lecture-shopify',{});page=1;await load();}catch(e){$('ls-errors').textContent=displayErrorMessage(e);$('ls-read').disabled=false;}};
  function closeMenu(){ $('ls-filter-dialog').close();menuTrigger?.focus(); }
  function paintOptions(){
   const needle=fold($('ls-filter-search').value);const shown=menuValues.filter(v=>fold(v).includes(needle));

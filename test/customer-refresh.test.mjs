@@ -46,3 +46,45 @@ test('explicit customer refresh reuses identity, preserves failed cases and neve
   }
  }finally{await f.e.close();}
 });
+
+test('customer absence confirmation is scoped to customer refresh with an exact number',()=>{
+ const confirmed={...input,confirmCustomerAbsent:true,customerNumber:'RECORDED'};
+ assert.deepEqual(validateResolution(confirmed),confirmed);
+ for(const extra of [{type:'bc'},{action:'resume'},{confirmCustomerAbsent:false},{customerNumber:''},{customerNumber:12}])assert.throws(()=>validateResolution({...confirmed,...extra}));
+});
+test('operator-confirmed absence authorizes one normal retry only after complete re-read',async()=>{
+ const f=await fixture();try{
+  const original=await f.read();
+  for(const mode of ['absent','found','wrong-number','incomplete','ambiguous','recent','busy','changed','deleted-customer','renumbered-customer','incomplete-old-customer','unsupported']){
+   const state=structuredClone(original.erp_live);state.customerCreationAttempt={outcome:'uncertain',at:'2026-01-01T00:00:00Z'};
+   if(mode==='recent')state.customerCreationAttempt.at=new Date().toISOString();
+   if(['deleted-customer','renumbered-customer','incomplete-old-customer'].includes(mode)){state.customer={id:'old'};state.phase='customer_created';}
+   await f.e.query("UPDATE orders SET channel=$1,erp_live=$2,issue=$3 WHERE id='o'",[mode==='unsupported'?'shopify':'temu',JSON.stringify(state),original.issue]);
+   await f.e.exec("UPDATE erp_live_jobs SET status='review';DELETE FROM audit");
+   const before=await f.read(),options={confirmAbsent:true,customerNumber:mode==='wrong-number'?'OTHER':'RECORDED',requestId:'confirmed-job'};
+   let reads=0;const api={verify:async()=>{},request:async q=>{
+    reads++;assert.match(q,/^query /);
+    if(q.includes('V3PreviousCustomerIdentity'))return mode==='incomplete-old-customer'?{}:{Customer:mode==='renumbered-customer'?{id:'old',customer_number:'CHANGED'}:null};
+    if(mode==='busy')await f.e.exec("UPDATE erp_live_jobs SET status='processing'");
+    if(mode==='changed')await f.e.exec("UPDATE orders SET issue='Changed'");
+    const customer={id:'new',customer_number:'RECORDED'};
+    return {Customers:{data:mode==='found'?[customer]:mode==='ambiguous'?[customer,customer]:[],paginatorInfo:{hasMorePages:mode==='incomplete'}}};
+   }};
+   if(['absent','found','deleted-customer'].includes(mode)){
+    await refreshCustomerIdentity(f.db,api,before,options);const after=await f.read();
+    assert.equal(reads,mode==='deleted-customer'?2:1);assert.equal(after.erp_live.phase,mode==='found'?'customer_created':undefined);
+    assert.equal(after.erp_live.customer?.id,mode==='found'?'new':undefined);
+    if(mode!=='found'){
+     assert.equal(after.erp_live.customerReconciliation.retryAuthorizedBy,'operator_confirmed_absence');
+     assert.equal(after.erp_live.customerReconciliation.authorization.requestId,'confirmed-job');
+     assert.deepEqual(after.erp_live.customerCreationAttempt,state.customerCreationAttempt);
+     await assert.rejects(()=>refreshCustomerIdentity(f.db,api,after,options),/Étape/);
+    }
+    assert.equal((await f.e.query('SELECT count(*)::int n FROM audit')).rows[0].n,1);
+   }else{
+    await assert.rejects(()=>refreshCustomerIdentity(f.db,api,before,options));assert.deepEqual((await f.read()).erp_live,before.erp_live);
+    assert.equal((await f.e.query('SELECT count(*)::int n FROM audit')).rows[0].n,0);
+   }
+  }
+ }finally{await f.e.close();}
+});

@@ -16,7 +16,7 @@
    const response=await fetch('/api/signup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('email').value,password:password.value})});
    const result=await response.json();if(!response.ok)throw Error(result.error||'Inscription impossible.');
    toggle.disabled=false;toggle.click();password.value='';success.textContent='Compte créé. Vous pouvez maintenant vous connecter.';success.hidden=false;
-  }catch(err){error.textContent=err.message;}
+  }catch(err){error.textContent=displayErrorMessage(err);}
   finally{busy=false;submit.disabled=false;toggle.disabled=false;}
  },true);
 })();

@@ -14,7 +14,7 @@
    (s.note?'<p><strong>Dernière note :</strong> '+esc(s.note)+'<br><small>'+esc(date(s.updatedAt))+' · '+esc(s.updatedBy)+'</small></p>':'')+
    '<section class="suspension-erplain"><h3>Documents ERPLAIN</h3><p>BC : <strong>'+esc(o.erp_live?.bc?.label||'Aucun BC associé')+'</strong></p><p>'+
    esc(cancel?.status==='complete'?'Annulation ERPLAIN confirmée.':pending?'Résultat à vérifier dans ERPLAIN. Ne pas relancer l’annulation.':'Aucune annulation ERPLAIN confirmée.')+'</p>'+
-   (cancel?.error?'<p>'+esc(cancel.error)+'</p>':'')+
+   (cancel?.error?'<p>'+errorDetailsHtml(cancel.error)+'</p>':'')+
    (active&&!shipped&&o.erp_live?.bc?.id&&cancel?.status!=='complete'?'<button type="button" '+(pending?'data-verify-erplain>Vérifier le résultat dans ERPLAIN':'data-cancel-erplain>Annuler dans ERPLAIN')+'</button>':'')+
    (shipped?'<p>Commande expédiée ou livrée : la suspension la retire des problèmes actifs. Ses statuts, documents et étiquettes restent conservés. L’annulation ERPLAIN est indisponible.</p>':'')+
    '<p>La commande client conserve son statut sur la plateforme. Les étiquettes existantes sont conservées.</p><section data-cancel-confirmation hidden aria-labelledby="cancel-confirm-title" tabindex="-1"></section></section>'+
@@ -85,7 +85,7 @@
   try{await orders();}catch(e){feedback(message+' · Liste non actualisée : '+e.message,true);}
  }
  document.addEventListener('click',async e=>{const button=e.target.closest('[data-order-suspension]');if(!button||busy||opening)return;opening=true;uncertain=false;localReadPending=false;pendingLocalActive=null;readGeneration++;
-  try{await load(button.dataset.orderSuspension);render();if(!dialog.open)dialog.showModal();}catch(error){alert('Impossible d’ouvrir la suspension : '+error.message);}finally{opening=false;}
+  try{await load(button.dataset.orderSuspension);render();if(!dialog.open)dialog.showModal();}catch(error){alert('Impossible d’ouvrir la suspension : '+displayErrorMessage(error));}finally{opening=false;}
  });
  dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault();});
  // Keep historical PDFs readable; prevent selecting or starting suspended rows.

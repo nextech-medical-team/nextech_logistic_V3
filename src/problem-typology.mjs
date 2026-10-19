@@ -1,7 +1,7 @@
 import {hasCompleteOrderDocuments} from './complete-order-documents.mjs';
 import {isDeliveredOrder} from './delivered-order.mjs';
 // Shared contract: labels come from the same compactProblems implementation as the UI.
-export const WITHOUT_DIAGNOSTIC='Filtre problÃ¨mes sans diagnostic dÃ©taillÃ©';
+export const WITHOUT_DIAGNOSTIC='Filtre problèmes sans diagnostic détaillé';
 export function orderProblemLabels(order, compactProblems, inProblemFilter=false){
  if(isDeliveredOrder(order))return [];
  if(order.suspension?.problemDeferral?.active===true||hasCompleteOrderDocuments(order))return [];

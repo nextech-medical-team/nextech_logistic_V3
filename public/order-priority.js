@@ -43,7 +43,8 @@
    const stamp=value=>value?new Date(value).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'À vérifier';
    setText(box.querySelector('.monitoring-last'),monitor?.lastCheck?'Dernière vérification : '+stamp(monitor.lastCheck):'');
    setText(box.querySelector('.monitoring-next'),monitor?.nextCheck?'Prochain contrôle : '+stamp(monitor.nextCheck):'');
-   setText(box.querySelector('.monitoring-result'),monitor?.result?'Résultat : '+monitor.result:'');
+   setText(box.querySelector('.monitoring-result'),monitor?.result?'Résultat : '+displayErrorDetail(monitor.result,r.service||'Erplain'):'');
+   box.querySelector('.monitoring-result').title=monitor?.result||'';
    setText(box.querySelector('.monitoring-step'),monitor?.nextStep?'Étape suivante : '+monitor.nextStep:'');
    const alert=box.querySelector('.monitoring-alert');setText(alert,monitor?.alert?(monitor.externalOverdue?'Vérification externe en retard : deux cycles sans contrôle complet'+(monitor.externalResult&&monitor.externalStatus!=='complete'?' · '+monitor.externalResult:''):'Sans progression depuis plus d’une heure'):'');alert.setAttribute('role','status');alert.style.fontWeight='bold';alert.style.color='#8a4b00';
    setText(box.querySelector('.processing-stage'),r.stage|| (r.monitoring?.blocked?'Contrôle des blocages':r.monitoring?.followUp?'Contrôle de la commande':r.previewPending?'Remplacement à confirmer':'Priorité enregistrée · en attente de préparation'));
@@ -55,11 +56,12 @@
    const clock=box.querySelector('.processing-elapsed');clock.dataset.since=r.since||'';clock.dataset.state=r.state||'unknown';
    setText(clock,r.stage?durationText(r.state,r.since):'');
    clock.title='Durée de l’état enregistré dans V3. Un traitement actif ne prouve pas un appel continu chez le fournisseur.';
-   setText(box.querySelector('.processing-reason'),carrierMessage(r.reason)?'Motif : '+carrierMessage(r.reason):'');
+   setText(box.querySelector('.processing-reason'),carrierMessage(r.reason)?'Motif : '+displayErrorMessage(carrierMessage(r.reason),r.service||'Erplain'):'');
+   box.querySelector('.processing-reason').title=carrierMessage(r.reason)||'';
    setText(box.querySelector('.processing-preview'),r.previewPending?'Équivalent '+r.previewPending.sku+' vérifié · remplacement NON enregistré. Ouvrez « Remplacer un produit » pour confirmer.':'');
    const observedAt=latestObservedAt.get(ref.dataset.detail),observed=observedAt?new Date(observedAt).toLocaleTimeString('fr-FR'):'';
    setText(box.querySelector('.processing-signals'),r.stage?'État V3 actualisé à '+observed+(r.lastSignal?' · dernier signal V3 : '+new Date(r.lastSignal).toLocaleString('fr-FR'):'')+(r.state==='active'?' · appel fournisseur en continu non confirmé':''): '');
-   setText(box.querySelector('.processing-other'),(r.activities||[]).filter(a=>a.service!==r.service||a.step!==r.step).map(a=>a.service+' · '+a.step+' · '+durationText(a.state,a.since)+(a.reason?' · '+a.reason:'')).join('\n'));
+   setText(box.querySelector('.processing-other'),(r.activities||[]).filter(a=>a.service!==r.service||a.step!==r.step).map(a=>a.service+' · '+a.step+' · '+durationText(a.state,a.since)+(a.reason?' · '+displayErrorMessage(a.reason,a.service||'Erplain'):'')).join('\n'));
    if(!button){button=document.createElement('button');button.type='button';button.className='processing-priority';ref.parentElement.append(button);}
    button.dataset.priorityOrder=r.id;button.dataset.enabled=String(r.priority);
    button.disabled=false;button.hidden=!['admin','manager','operator'].includes(user?.role)||(!r.canPrioritize&&!r.priority);
@@ -90,7 +92,7 @@
 
   const button=event.target.closest('[data-priority-order]');if(!button)return;event.preventDefault();event.stopPropagation();button.disabled=true;
   try{const enabled=button.dataset.enabled!=='true';await api('/api/orders/priority',{id:button.dataset.priorityOrder,enabled});flash(enabled?'Priorité enregistrée pour la reprise. Les blocages restent à corriger et les traitements en cours continuent.':'Priorité retirée.');await refresh();}
-  catch(e){flash(e.message,true);}finally{button.disabled=false;}
+  catch(e){flash(e,true);}finally{button.disabled=false;}
  });
  // Only new rows trigger a fetch. Updating the progress text never rebuilds the table.
  new MutationObserver(records=>{if(records.some(r=>r.target===body)&&!orderRenderData?.processing){clearTimeout(refreshTimer);refreshTimer=setTimeout(refresh,200);}}).observe(body,{childList:true});

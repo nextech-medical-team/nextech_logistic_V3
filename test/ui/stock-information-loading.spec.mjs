@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {readFile} from 'node:fs/promises';
-const script=await readFile(process.env.STOCK_UI_SOURCE||new URL('../../public/stock-information.js',import.meta.url),'utf8');
+const script=await readFile(new URL('../../public/compact-problems.js',import.meta.url),'utf8')+'\n'+await readFile(process.env.STOCK_UI_SOURCE||new URL('../../public/stock-information.js',import.meta.url),'utf8');
 const css=await readFile(new URL('../../public/style.css',import.meta.url),'utf8');
 // Local DOM and fictitious provider; no connection to production.
 for(const width of [1440,390])test(`stock visible rows, bounded wait, retry and cached re-render ${width}`,async({page})=>{

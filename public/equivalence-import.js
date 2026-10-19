@@ -24,7 +24,7 @@
     const bytes=Uint8Array.from(atob(result.file),c=>c.charCodeAt(0));
     const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),link=document.createElement('a');link.href=url;link.download=result.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
     feedback.textContent=path==='shortages'?(result.scopeTotal!==undefined?result.scopeTotal+' commande(s) du filtre exportée(s) dans Commandes du filtre, dont '+result.scopeBlocked+' « À compléter ». ':'')+result.rows+' ligne(s) vérifiée(s) dans Onglet type. '+result.unverified+' commande(s) non vérifiable(s) : consultez les contrôles et parcours dédiés dans le fichier.':'Modèle téléchargé : remplissez Onglet type puis analysez le fichier.';
-   }catch(e){feedback.textContent=e.message;}finally{buttons.forEach(b=>b.disabled=false);}
+   }catch(e){feedback.textContent=displayErrorMessage(e);}finally{buttons.forEach(b=>b.disabled=false);}
   };
  }
  const history=document.createElement('select');history.setAttribute('aria-label','Reprendre un import récent');history.append(new Option('Imports récents…',''));section.querySelector('form').after(history);
@@ -44,8 +44,8 @@
   feedback.textContent=batch.status==='checking'?'Analyse et lecture du stock Erplain : '+batch.rows.filter(r=>r.status!=='checking').length+' / '+batch.rows.length+' lignes examinées…':batch.status==='ready'?'Analyse terminée : '+(counts.valid||0)+' applicable(s), '+(counts.blocked||0)+' bloquée(s), '+(counts.already||0)+' déjà appliquée(s).':batch.status==='applying'?'Remplacements et reprise des commandes en cours…':'Traitement terminé : '+(counts.applied||0)+' remplacement(s) vérifié(s), '+(counts.blocked||0)+' ligne(s) à vérifier. Consultez les résultats et Commandes et livraisons.';
   selection();
  }
- async function refresh(){if(!batchId)return;try{batch=await api('/api/equivalence-import?id='+encodeURIComponent(batchId));render();if(['checking','applying'].includes(batch.status)&&!section.hidden)timer=setTimeout(refresh,2500);}catch(e){feedback.textContent=e.message;}}
- nav.onclick=async()=>{await show('equivalence-import');$('title').textContent='Importer des équivalences';clearTimeout(timer);try{await loadHistory();await refresh();}catch(e){feedback.textContent=e.message;}};
+ async function refresh(){if(!batchId)return;try{batch=await api('/api/equivalence-import?id='+encodeURIComponent(batchId));render();if(['checking','applying'].includes(batch.status)&&!section.hidden)timer=setTimeout(refresh,2500);}catch(e){feedback.textContent=displayErrorMessage(e);}}
+ nav.onclick=async()=>{await show('equivalence-import');$('title').textContent='Importer des équivalences';clearTimeout(timer);try{await loadHistory();await refresh();}catch(e){feedback.textContent=displayErrorMessage(e);}};
  section.querySelector('[data-all]').onclick=()=>{if(batch?.status==='ready')for(const r of batch.rows)if(r.status==='valid')selected.add(r.line);render();};
  section.querySelector('[data-none]').onclick=()=>{selected.clear();render();};
  section.querySelector('[data-refresh]').onclick=()=>{clearTimeout(timer);refresh();};
@@ -53,10 +53,10 @@
   event.preventDefault();const file=section.querySelector('input[type=file]').files[0];if(!file)return;
   if(file.size>10*1024*1024){feedback.textContent='Le fichier doit faire moins de 10 Mo.';return;}
   const button=event.currentTarget.querySelector('button');button.disabled=true;feedback.textContent='Lecture du fichier…';
-  try{const bytes=new Uint8Array(await file.arrayBuffer());let raw='';for(let i=0;i<bytes.length;i+=8192)raw+=String.fromCharCode(...bytes.subarray(i,i+8192));const result=await api('/api/equivalence-import/analyze',{file:btoa(raw)});clearTimeout(timer);batchId=result.id;selected.clear();known.clear();await loadHistory();await refresh();}catch(e){feedback.textContent=e.message;}finally{button.disabled=false;}
+  try{const bytes=new Uint8Array(await file.arrayBuffer());let raw='';for(let i=0;i<bytes.length;i+=8192)raw+=String.fromCharCode(...bytes.subarray(i,i+8192));const result=await api('/api/equivalence-import/analyze',{file:btoa(raw)});clearTimeout(timer);batchId=result.id;selected.clear();known.clear();await loadHistory();await refresh();}catch(e){feedback.textContent=displayErrorMessage(e);}finally{button.disabled=false;}
  };
  apply.onclick=async()=>{
   if(busy||batch?.status!=='ready'||!selected.size)return;busy=true;render();feedback.textContent='Enregistrement de la sélection…';
-  try{batch=await api('/api/equivalence-import/apply',{id:batchId,lines:[...selected].sort((a,b)=>a-b)});render();clearTimeout(timer);timer=setTimeout(refresh,1000);}catch(e){feedback.textContent=e.message;}finally{busy=false;selection();}
+  try{batch=await api('/api/equivalence-import/apply',{id:batchId,lines:[...selected].sort((a,b)=>a-b)});render();clearTimeout(timer);timer=setTimeout(refresh,1000);}catch(e){feedback.textContent=displayErrorMessage(e);}finally{busy=false;selection();}
  };
 })();

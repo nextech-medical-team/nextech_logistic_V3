@@ -18,6 +18,10 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/^(?:TEMU · )?Quota partagé : lecture différée$/.test(text))return {...result('temu-read-deferred','Lecture TEMU à reprendre',''),provider:'TEMU'};
  if(text==='TEMU · Lecture en attente')return {...result('temu-read-deferred','Lecture TEMU en attente',''),provider:'TEMU'};
  if(/achat d[’']étiquette TEMU à confirmer/i.test(text))return result('temu-purchase-confirmation','Achat d’étiquette TEMU à confirmer','');
+ if(/^rapprochement requis, aucune nouvelle cr[ée]ation automatique\.?$/i.test(text))return result('erp-review','Erplain · Rapprochement requis avant nouvelle création','');
+ if(/^GLS · (?:Aucun numéro de suivi PROD utilisable\.|Numéro de suivi absent pour le colis principal\.)/.test(text))return {...result('uncertain','GLS · Numéro de suivi à vérifier',''),provider:'GLS'};
+ if(/^Client Erplain · Création à vérifier/.test(text))return result('customer','Client Erplain · Création à vérifier','');
+ if(/^deadlock detected$/i.test(text))return result('erp-review','V3 · Conflit temporaire de traitement','');
  if(/^Préparation Erplain en attente ou en cours$/.test(text))return result('preparation-pending',text,'');
  if(["Échec d’étiquette antérieur, suivi d’une revalidation BC/BL. Aucune relance effectuée.","Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.","Appels d’offres · GLS Pharma obligatoire : actualiser la préparation selon les règles transporteurs"].includes(text))return result('preparation',text,'');
  if(/TEMU/i.test(text)&&/3000032|prix et TVA|Prix et frais de livraison|Données financières|Prix API à récupérer/i.test(text))return result('temu-pricing','TEMU · Prix à renseigner','');
@@ -26,7 +30,7 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/^Produit (?:équivalent|restant) \[[^\]]+\] : Poids vérifié, remplacement à confirmer$/.test(text))return result('equivalent-pending','Appliquer le remplacement');
  if(/Commande (modifiée|annulée|déjà expédiée)/i.test(text))return result('platform',/annulée/i.test(text)?'Commande annulée sur la plateforme':/déjà expédiée/i.test(text)?'Commande déjà expédiée sur la plateforme':'Commande modifiée sur la plateforme','');
  if(code==='401'||code==='403')return result('api-access','API '+apiName+' · Accès refusé ('+code+')','');
- if(code==='429')return result('api-limit','API '+apiName+' · Limite atteinte (429)','');
+ if(code==='429'||/^\s*429\b|\b(?:status(?:\s+code)?|code|error|erreur)\s*[:=]?\s*429\b|\btoo many requests\b/i.test(text))return result('api-limit','API '+apiName+' · Limite atteinte (429)','');
  if(code&&Number(code)>=500)return result('api-server','API '+apiName+' · Erreur serveur ('+code+')','');
  if(/timeout|timed out|délai.*dépass|AbortError/i.test(text))return result('api-timeout','API '+apiName+' · Délai dépassé','');
  if(/injoignable|Connexion.*impossible|fetch failed|réseau|certificat/i.test(text))return result('api-network','API '+apiName+' · Connexion impossible','');
@@ -46,8 +50,8 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/synchronisation Erplain/i.test(text))return result('catalog-sync','Catalogue Erplain à synchroniser');
  if(/Poids.*(?:non renseigné|manquant|absent)/i.test(text))return result('weight','Poids manquant');
  // Legacy gate messages include hypothetical override guidance, not a shortage.
- if(/^Étiquette bloquée : contrôle du stock et BL validé requis\./i.test(text))return result('preparation','Validation stock / BL à effectuer','');
- if(/stock insuffisant/i.test(text)){const stockSku=text.match(/^(?:Préparation V3 à vérifier · )?(?:BL bloqué [—-] stock insuffisant|Stock insuffisant) : ([^:;]+) : [\d.,]+ nécessaires/i)?.[1]?.trim();return result('stock','Bloqué : stock insuffisant',stockSku||sku);}
+ if(/^Étiquette bloquée : contrôle du stock et BL validé requis\./i.test(text)||/^Validation stock \/ BL à (?:effectuer|actualiser)$/.test(text))return result('preparation','Validation stock / BL à actualiser','');
+ if(/stock(?:\s+cumulé)?\s+insuffisant/i.test(text)){const stockSku=text.match(/^(?:Préparation V3 à vérifier · )?(?:BL bloqué [—-] stock insuffisant|Stock insuffisant) : ([^:;]+) : [\d.,]+ nécessaires/i)?.[1]?.trim()||text.match(/^Stock cumulé insuffisant\s*:\s*([^:;]+)$/i)?.[1]?.trim();return result('stock','Bloqué : stock insuffisant',stockSku||sku);}
  if(/BC existant contient d’autres|Commande V3 et BC différents|Écart BC\/BL|BC modifié/i.test(text))return result('bc','Commande V3 et BC différents');
  if(/^BC · Produits ou quantités des lignes Erplain différents de la source$/.test(text))return result('bc','Commande V3 et BC différents','');
  if(/Mode Shopify|Règle transport.*manquante|Gestionnaire transport à configurer/i.test(text))return result('routing',(/Shopify/i.test(text)?'Shopify · ':'')+'Règle transport manquante','');
@@ -74,6 +78,27 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/Référence Erplain absente ou ambiguë/i.test(text))return result('unknown','Référence Erplain non identifiée',sku||text.split(':').slice(1).join(':').trim());
  const readable=text.replace(/\s+/g,' ').trim();
  const fallback=result('unknown',readable?(readable.length>120?readable.slice(0,117)+'…':readable):'Blocage sans motif enregistré');if(!readable)fallback.detail='Le traitement indique un blocage, mais aucun motif détaillé n’a été enregistré. Consultez les documents et l’historique avant toute reprise ; l’absence de motif ne prouve pas que le problème est résolu.';return fallback;
+}
+// Presentation only: never rewrite Error.message, which recovery policies inspect.
+function displayErrorMessage(error,provider='Erplain'){
+ const raw=String(error?.message??error??'');
+ const apiName=error?.provider||provider;
+ if(error?.code==='API_NETWORK_ERROR')return 'API '+apiName+' · Connexion impossible';
+ if(error?.code==='API_READ_TIMEOUT')return 'API '+apiName+' · Délai dépassé';
+ const status=Number(error?.httpStatus??error?.status);
+ const input=status>=400&&status<=599?'HTTP '+status+' · '+raw:raw;
+ const problem=compactProblem(input,'',apiName);
+ return problem.type==='unknown'?raw:problem.label;
+}
+// Detailed panels keep actionable provider information visible, not only in a tooltip.
+function displayErrorDetail(error,provider='Erplain'){
+ const raw=String(error?.message??error??''),label=displayErrorMessage(error,provider);
+ return raw&&raw!==label?label+' · '+raw:label;
+}
+function errorDetailsHtml(error,provider='Erplain'){
+ const raw=String(error?.message??error??''),label=displayErrorMessage(error,provider);
+ const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ return escape(label)+(raw&&raw!==label?'<span class="error-detail" title="'+escape(raw)+'" aria-label="Détail de l’erreur : '+escape(raw)+'"> ⓘ</span>':'');
 }
 function problemMentionsSku(text,sku){
  const escaped=String(sku).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
@@ -103,7 +128,7 @@ function compactProblems(order){
  if(order.archived||order.suspension?.active===true||order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'||order.suspension?.erplainCancellation?.status==='complete')return [];
  const lines=order.sku_lines||[],out=[],family=order.carrier?.startsWith('gls')?'GLS':order.carrier==='gofo'?'GOFO':order.carrier==='temu'?'TEMU':'Erplain';
  const hiddenBcStockWait='En attente de stock : BC disponible, préparation du BL suspendue';
- const add=p=>{if(p.detail===hiddenBcStockWait)return;if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
+ const add=p=>{if(p.detail===hiddenBcStockWait)return;if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock','customer'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
  const pending=order.pending_equivalent;const pendingLine=pending&&lines.find(l=>[l.sku,l.mapped_sku,l.source_sku].includes(pending.sku));
  if(pendingLine&&pending.error){const p=compactProblem(pending.error,pending.replacementSku);p.detail='Remplacement prévu : '+pending.sku+' → '+pending.replacementSku+' · '+p.detail;add(p);}
  for(const l of lines){const sku=l.sku||l.mapped_sku||l.source_sku;if(l.catalog_issue)add(compactProblem(l.catalog_issue,sku));if(!['tender','samples','temu'].includes(order.channel)&&l.mapping_exists===false&&!l.sku)add(compactProblem('Mapping manquant',l.source_sku));}
