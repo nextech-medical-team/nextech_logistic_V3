@@ -14,6 +14,11 @@ export function stockIncidentOnly(message){
  if(text==='Stock insuffisant')return true;
  return /^BL bloqué [—-] stock insuffisant : [^:;]+ : [\d.]+ nécessaires, [\d.]+ utilisables, manque [\d.]+(?: ; [^:;]+ : [\d.]+ nécessaires, [\d.]+ utilisables, manque [\d.]+)*$/.test(text);
 }
+// These historical messages may be replaced only by a fresh, verified stock proof.
+// Do not classify arbitrary API failures or mixed diagnostics as shortages.
+export function refreshableStockDiagnostic(message){
+ return stockIncidentOnly(message)||message==='Stock non vérifiable avant BC : emplacement incomplet'||message==='En attente de stock : BC disponible, préparation du BL suspendue';
+}
 export function closedStockReview(job){return job?.error==null&&job?.result?.stockIncidentRecheck?.status==='resolved'&&stockIncidentOnly(job.result.stockIncidentRecheck.previousError);}
 export function reopenedStockReview(job){return !!job?.error&&job?.result?.stockIncidentRecheck?.status==='resolved'&&stockIncidentOnly(job.result.stockIncidentRecheck.previousError);}
 const sum=rows=>{if(!Array.isArray(rows))throw Error('Lignes non reçues');const totals=new Map();for(const l of rows){if(!l.variant){if(l.type==='normal')throw Error('Variante non vérifiable');continue;}const q=l.quantity;if(!l.variant.id||!l.location?.id||q==null||typeof q==='boolean'||String(q).trim()===''||!Number.isFinite(Number(q))||Number(q)<=0)throw Error('Quantités ou emplacements non vérifiables');const key=String(l.variant.id)+':'+String(l.location.id);totals.set(key,(totals.get(key)||0)+Number(q));}if(!totals.size)throw Error('Aucun produit vérifiable');return totals;};
@@ -43,7 +48,7 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
  const completed=completedRows.find(j=>['resume','resume-erp','replace-equivalent'].includes(j.action)&&!j.error&&!j.result?.partialRemainder);
 
  const erp=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[id])).rows[0];
- if(!stockIncidentOnly(initial.issue)&&!stockIncidentOnly(erp?.error)&&!jobs.some(j=>stockIncidentOnly(j.error)))return {notApplicable:true};
+ if(!refreshableStockDiagnostic(initial.issue)&&!refreshableStockDiagnostic(erp?.error)&&!jobs.some(j=>refreshableStockDiagnostic(j.error)))return {notApplicable:true};
  const frozen=usesRecordedBc(initial),fingerprint=await shipmentFingerprint(db,initial);
  let mapping=null,proof;
  try{
@@ -51,9 +56,14 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
   mapping=frozen?recordedBcFingerprint(bc):await currentMappingFingerprint(db,initial);
   if(comparison?.concordant!==true||comparison.mappingFingerprint!==mapping||(frozen&&comparison.authority!=='recorded_bc'))throw Error(frozen?'Lecture du BC enregistré et de ses BL non confirmée':'Produits/quantités V3 et BC non confirmés');
   if(initial.erp_live?.documentSource?.stockHolds?.length)throw Error('Mouvement de stock à rapprocher');
+  // Proving a current shortage never authorizes preparation or certifies a
+  // reservation/debit. It does not require the historical success ledger.
+  if(!initial.erp_live?.bl?.id&&!initial.erp_live?.stockDocument?.id&&!initial.erp_live?.stockCreationAttemptedAt&&!initial.erp_live?.stockPendingVariants?.length&&String(bc?.id)===String(initial.erp_live?.bc?.id)&&bc.status==='active'&&typeof bc.update_stock==='boolean'&&Array.isArray(bc.shipping_orders?.data)&&bc.shipping_orders.data.length===0&&bc.shipping_orders.paginatorInfo?.hasMorePages===false){
+   try{assertFullOrderStock(bc.line_items);}catch(e){if(stockIncidentOnly(e.message))proof={status:'active',basis:'current_available_stock',currentError:e.message,bcId:String(bc.id)};else throw e;}
+  }
   let historicalProof=null;
-  if(bc?.update_stock===true){const actual=(await api.request('query V3StockIncidentCreated($id:ID!){Order(id:$id){id created_at}}',{id:String(bc.id)})).Order;if(String(actual?.id)!==String(bc.id))throw Error('Identité BC non confirmée');historicalProof=(await readHistoricalStock(api,{...bc,created_at:actual.created_at},{bl:initial.erp_live.bl,reservationOnly:!initial.erp_live.bl?.id})).proof;}
-  proof=evaluateStockIncident(initial,bc,{historicalProof});
+  if(!proof&&bc?.update_stock===true){const actual=(await api.request('query V3StockIncidentCreated($id:ID!){Order(id:$id){id created_at}}',{id:String(bc.id)})).Order;if(String(actual?.id)!==String(bc.id))throw Error('Identité BC non confirmée');historicalProof=(await readHistoricalStock(api,{...bc,created_at:actual.created_at},{bl:initial.erp_live.bl,reservationOnly:!initial.erp_live.bl?.id})).proof;}
+  if(!proof)proof=evaluateStockIncident(initial,bc,{historicalProof});
  }catch(e){proof={status:'unverified',currentError:'Stock : vérification impossible — '+e.message};}
  proof={...proof,checkedAt:new Date(now()).toISOString(),mappingFingerprint:mapping,...(frozen?{authority:'recorded_bc'}:{}),shipmentFingerprint:fingerprint,readOnly:true,preparationNotStarted:true};
  const version=createHash('sha256').update(JSON.stringify([initial.issue,initial.erp_live,initial.partial_mode,initial.suspension,initial.source_payload])).digest('hex');
@@ -79,7 +89,21 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
    // reconciliation must still validate addresses, pricing, labels and holds.
    await tx.query("UPDATE orders SET issue=$2,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$3::jsonb,true) WHERE id=$1",[id,issue,JSON.stringify({...proof,previousError,currentIssue:issue})]);
    await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:stock-incident-recheck','diagnostic.stock_incident_resolved',$1)",[JSON.stringify({orderId:id,proof,previousError,retiredJobs:retired.map(j=>({id:j.id,error:j.error})),labelsPreserved:true,businessCompleted:false})]);
-  }else {const old=o.erp_live?.stockIncidentRecheck,tracked=stockIncidentOnly(o.issue)||(stockIncidentOnly(old?.previousError)&&o.issue===old.currentError);proof.previousError=old?.previousError||o.issue;await tx.query("UPDATE orders SET issue=CASE WHEN $3 THEN $4 ELSE issue END,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(proof),tracked,proof.currentError]);}
+  }else {
+   if(proof.status==='active'){
+    const changed=[];
+    for(const j of current.filter(j=>refreshableStockDiagnostic(j.error)&&j.error!==proof.currentError)){
+     await tx.query("UPDATE resolution_jobs SET error=$2,result=(CASE WHEN jsonb_typeof(result)='object' THEN result ELSE jsonb_build_object('previousResult',result) END)||$3::jsonb,updated_at=now() WHERE id=$1 AND error=$4",[j.id,proof.currentError,JSON.stringify({stockDiagnosticRefresh:{checkedAt:proof.checkedAt,bcId:proof.bcId,previousError:j.error,providerMutations:0}}),j.error]);
+     changed.push({jobId:j.id,previousError:j.error});
+    }
+    if(e?.status==='review'&&refreshableStockDiagnostic(e.error)&&e.error!==proof.currentError){
+     await tx.query("UPDATE erp_live_jobs SET error=$2,updated_at=now() WHERE order_id=$1 AND status='review' AND error=$3",[id,proof.currentError,e.error]);
+     changed.push({erpJob:true,previousError:e.error});
+    }
+    if(changed.length)await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system:stock-incident-recheck','diagnostic.stock_shortage_refreshed',$1)",[JSON.stringify({orderId:id,bcId:proof.bcId,currentError:proof.currentError,previousDiagnostics:changed,providerMutations:0,preparationStarted:false})]);
+   }
+   const old=o.erp_live?.stockIncidentRecheck,tracked=(proof.status==='active'?refreshableStockDiagnostic(o.issue):stockIncidentOnly(o.issue))||(stockIncidentOnly(old?.previousError)&&o.issue===old.currentError);proof.previousError=old?.previousError||o.issue;await tx.query("UPDATE orders SET issue=CASE WHEN $3 THEN $4 ELSE issue END,erp_live=jsonb_set(erp_live,'{stockIncidentRecheck}',$2::jsonb,true) WHERE id=$1",[id,JSON.stringify(proof),tracked,proof.currentError]);
+  }
   return proof;
  });
 }

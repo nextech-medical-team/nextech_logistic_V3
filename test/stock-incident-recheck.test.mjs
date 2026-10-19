@@ -31,6 +31,52 @@ async function fixture(){
  const fresh=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],fp=await shipmentFingerprint(db,fresh);await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{labelPreparationFingerprint}',$1::jsonb) WHERE id='o'",[JSON.stringify(fp)]);return db;
 }
 async function reconcile(db,extra={}){const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],document=extra.bc||bc(),frozen=usesRecordedBc(o),mapping=frozen?recordedBcFingerprint(document):await currentMappingFingerprint(db,o);return reconcileStockIncident(db,{request:()=>assert.fail('no provider mutation or new stock read for complete removal')},'o',{bc:document,comparison:{concordant:true,mappingFingerprint:mapping,authority:frozen?'recorded_bc':'source'},...extra});}
+
+async function legacyStockFixture(){
+ const db=await fixture(),o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
+ delete o.erp_live.bl;delete o.erp_live.stockDocument;
+ const document=bc();document.shipping_orders.data=[];document.update_stock=true;
+ document.line_items[0].on_hand=-2;document.line_items[0].available=-2;
+ o.erp_live.bc=document;
+ await db.query("UPDATE orders SET issue=null,erp_live=$1 WHERE id='o'",[JSON.stringify(o.erp_live)]);
+ await db.query("UPDATE erp_live_jobs SET status='review',error=$1 WHERE order_id='o'",['En attente de stock : BC disponible, préparation du BL suspendue']);
+ await db.query("INSERT INTO resolution_jobs(id,order_id,action,status,error,result) VALUES('old-stock','o','resume','review',$1,'{\"preserved\":true}'),('other','o','address','review','Adresse invalide','{}')",['Stock non vérifiable avant BC : emplacement incomplet']);
+ return {db,document};
+}
+test('fresh shortage replaces legacy API and BC-wait errors without starting preparation',async()=>{
+ const {db,document}=await legacyStockFixture();try{
+  const before=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
+  assert.equal((await reconcile(db,{bc:document})).status,'active');
+  const e=(await db.query("SELECT * FROM erp_live_jobs WHERE order_id='o'")).rows[0];
+  assert.equal(e.status,'review');assert.equal(e.error,error);
+  const a=(await db.query("SELECT * FROM resolution_jobs WHERE id='old-stock'")).rows[0];
+  assert.equal(a.status,'review');assert.equal(a.error,error);assert.equal(a.result.preserved,true);
+  assert.equal(a.result.stockDiagnosticRefresh.previousError,'Stock non vérifiable avant BC : emplacement incomplet');
+  assert.equal((await db.query("SELECT error FROM resolution_jobs WHERE id='other'")).rows[0].error,'Adresse invalide');
+  const after=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
+  for(const key of ['label_status','resolution_pending_resume','simulation'])assert.equal(after[key],before[key]);
+  assert.deepEqual(after.erp_live.bc,before.erp_live.bc);assert.ok(!after.erp_live.bl);
+  assert.equal((await db.query("SELECT count(*)::int n FROM resolution_jobs WHERE status='queued'")).rows[0].n,0);
+  assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='diagnostic.stock_shortage_refreshed'")).rows[0].n,1);
+  await reconcile(db,{bc:document});
+  assert.equal((await db.query("SELECT count(*)::int n FROM audit WHERE action='diagnostic.stock_shortage_refreshed'")).rows[0].n,1);
+ }finally{await db.close();}
+});
+test('failed or incomplete fresh reads cannot replace legacy diagnostics by shortage',async()=>{
+ for(const kind of ['read-error','missing-quantity','mixed-error','uncertain-stock']){
+  const {db,document}=await legacyStockFixture();try{
+   const extra={bc:document};
+   if(kind==='read-error')extra.readError='Timeout fournisseur';
+   if(kind==='missing-quantity')document.line_items[0].on_hand=null;
+   if(kind==='uncertain-stock')await db.query("UPDATE orders SET erp_live=erp_live||'{\"stockCreationAttemptedAt\":\"2026-10-19T00:00:00Z\"}'::jsonb WHERE id='o'");
+   if(kind==='mixed-error')await db.query("UPDATE resolution_jobs SET error=$1 WHERE id='old-stock'",['Stock non vérifiable avant BC : emplacement incomplet ; Adresse invalide']);
+   await reconcile(db,extra);
+   const a=(await db.query("SELECT error FROM resolution_jobs WHERE id='old-stock'")).rows[0];
+   assert.match(a.error,/Stock non vérifiable/);
+   if(kind!=='mixed-error')assert.equal((await db.query("SELECT error FROM erp_live_jobs WHERE order_id='o'")).rows[0].error,'En attente de stock : BC disponible, préparation du BL suspendue');
+  }finally{await db.close();}
+ }
+});
 for(const channel of ['temu','amazon','shopify'])test(channel+' stock reconciliation follows actual BC proof despite changed global source mapping',async()=>{const db=await fixture();try{
  await db.query('UPDATE orders SET channel=$1 WHERE id=$2',[channel,'o']);await db.query("INSERT INTO mappings VALUES($1,'SKU-A','UNRELATED',20,999)",[channel]);
  const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];assert.notEqual(await currentMappingFingerprint(db,o),recordedBcFingerprint(bc()));
