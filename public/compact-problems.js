@@ -57,7 +57,8 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/Informations transport manquantes/i.test(text)){const field=text.split(':').slice(1).join(':').trim();return result('address',field?field+' manquant'+(field.includes(',')?'s':''):'Adresse manquante','');}
  if(/^Client Erplain/.test(text)&&/cr[e\u00e9]ation/i.test(text))return result('customer','Client Erplain \u00b7 Cr\u00e9ation \u00e0 v\u00e9rifier','');
  if(/^BC Erplain · Création à vérifier/.test(text))return result('bc','BC · Création à vérifier','');
- if(/^BL Erplain · Publication à vérifier/.test(text))return result('preparation','BL · Publication à vérifier','');
+ if(/^BL Erplain · Publication à vérifier/.test(text))return result('erplain-recovery','BL · Publication à vérifier','');
+ if(/^Incident temporaire Erplain persistant après 3 reprises/.test(text))return result('erplain-recovery','Erplain · Reprise à vérifier après 3 tentatives','');
  if(/^Stock Erplain · Mouvement à vérifier/.test(text))return result('preparation','Stock · Mouvement à vérifier','');
  if(/incertaine|interrompu.*transporteur|Création.*vérifier/i.test(text))return result('uncertain',apiName+' · Création à vérifier','');
  if(/PDF.*attend|PDF.*attente/i.test(text))return result('pdf',apiName+' · PDF en attente','');
