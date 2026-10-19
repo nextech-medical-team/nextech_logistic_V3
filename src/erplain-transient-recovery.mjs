@@ -1,4 +1,4 @@
-import {customerGuard,customerRecoveryError,legacyBcCreationMessage,canRetryCustomerCreation} from './customer-creation-recovery.mjs';
+import {customerGuard,customerRecoveryError,customerCreationMessage,legacyBcCreationMessage,canRetryCustomerCreation} from './customer-creation-recovery.mjs';
 import {erplainCustomerInput} from './erplain-customer-input.mjs';
 import {customerCheckpointResult} from './temu-customer-checkpoint.mjs';
 import {cancellationBlock,retryDecision,transientErpError,reconciliationError} from './erp-transient-policy.mjs';
@@ -38,7 +38,7 @@ export async function resumeTransientErplain(db,api){
   // worker run guard serializes passes; the short commit below also rejects any
   // concurrent edit, cancellation, or job replacement made during the read.
   const rows=(await db.query(`SELECT o.*,e.error,e.updated_at retry_updated,e.updated_at::text retry_version FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
-   WHERE e.status='review' AND ((o.erp_live->>'phase'='creating_customer' AND e.error=$1 AND o.erp_live->'transientRecovery'->>'originalError' ~* 'Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError') OR e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu') OR (o.channel<>'tender' AND o.erp_live->'bc'->>'id' IS NOT NULL AND e.error ~ '^(BC/BL : rapprochement incomplet ou ambigu|Brouillon BL introuvable|BL Erplain · Brouillon.*introuvable)'))
+   WHERE e.status='review' AND ((o.erp_live->>'phase'='creating_customer' AND e.error IN ($1,$2)) OR (o.erp_live->>'phase'='creating_customer' AND e.error=$1 AND o.erp_live->'transientRecovery'->>'originalError' ~* 'Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError') OR e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu') OR (o.channel<>'tender' AND o.erp_live->'bc'->>'id' IS NOT NULL AND e.error ~ '^(BC/BL : rapprochement incomplet ou ambigu|Brouillon BL introuvable|BL Erplain · Brouillon.*introuvable)'))
    AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
    AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
@@ -53,10 +53,10 @@ export async function resumeTransientErplain(db,api){
    AND e.updated_at<=now()-CASE WHEN o.erp_live->'transientRecovery'->>'readRateLimited'='true' THEN interval '0 seconds' ELSE CASE coalesce(o.erp_live->'transientRecovery'->>'attempts','0') WHEN '0' THEN interval '30 seconds' WHEN '1' THEN interval '2 minutes' ELSE interval '5 minutes' END END
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
    AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
-   ORDER BY o.resolution_pending_resume ASC,o.archived ASC,o.partial_mode ASC,e.updated_at,o.id LIMIT 10`,[legacyBcCreationMessage])).rows;
+   ORDER BY o.resolution_pending_resume ASC,o.archived ASC,o.partial_mode ASC,e.updated_at,o.id LIMIT 10`,[legacyBcCreationMessage,customerCreationMessage])).rows;
   let resumed=0,identityRead;
   for(const o of rows){
-   const raw=customerRecoveryError(o,o.erp_live?.transientRecovery?.lastError||o.error);
+   const raw=customerGuard(o,o.error)?o.error:customerRecoveryError(o,o.erp_live?.transientRecovery?.lastError||o.error);
    if(cancellationBlock(o))continue;
    if(!retryDecision(o,raw,o.retry_updated))continue;
    const recovery={...o.erp_live.transientRecovery,attempts:Number(o.erp_live.transientRecovery?.attempts||0)+1,lastError:raw,checkedAt:new Date().toISOString()};

@@ -1,4 +1,4 @@
-import {canRetryCustomerCreation} from './customer-creation-recovery.mjs';
+import {canRetryCustomerCreation,customerGuard} from './customer-creation-recovery.mjs';
 import {erplainCustomerInput} from './erplain-customer-input.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
@@ -18,7 +18,7 @@ export function retryDecision(o,error,updatedAt,now=Date.now()){
  const safeCustomer=canRetryCustomerCreation(o,erplainCustomerInput(o).customer_number);
  const readLimited=o.erp_live?.transientRecovery?.readRateLimited===true&&/Erplain HTTP 429\b/.test(error||'');
  const interruptedPublication=o.channel!=='tender'&&o.erp_live?.phase==='publishing_bl'&&/Publication à vérifier|Traitement interrompu/.test(error||'');
- if((!transientErpError(error)&&!interruptedPublication&&!reconciliationError(o,error))||!Number.isInteger(attempts)||(attempts>=3&&!readLimited&&!safeCustomer)||attempts<0)return false;
+ if((!transientErpError(error)&&!customerGuard(o,error)&&!interruptedPublication&&!reconciliationError(o,error))||!Number.isInteger(attempts)||(attempts>=3&&!readLimited&&!safeCustomer)||attempts<0)return false;
  if(o.archived||o.partial_mode||o.resolution_pending_resume||cancellationBlock(o)||(!usesRecordedBc(o)&&Object.hasOwn(o.source_payload||{},'marketplacePendingCorrection'))||['shipped','delivered','in_transit'].includes(o.tracking_status))return false;
  if(['cancelled','closed'].includes(o.erp_live?.bc?.status)||['cancelled','closed'].includes(o.erp_live?.bl?.status))return false;
  const phase=o.erp_live?.phase;

@@ -53,10 +53,11 @@ test('database recovery reconciles drafts and customers using reads only',async(
   await check(draft,{Order:{...response.Order,shipping_orders:{data:[],paginatorInfo:{hasMorePages:true}}}},{resumed:false,error:/rapprochement/});
   const customer={phase:'creating_customer',customerNumber:'C1'};
   const found={Customers:{data:[{id:'9',customer_number:'C1'}],paginatorInfo:{hasMorePages:false}}};
+  await check({...customer,transientRecovery:{originalError:'Réponse incomplète creating_customer'}},found,{jobError:'Client Erplain · Création à vérifier : rapprocher le client de cette commande avant reprise'});
   const recovered=await check(customer,found);
   assert.equal(recovered.state.phase,'customer_created');assert.equal(recovered.state.customer.id,'9');
   assert.equal(recovered.calls[0].v.where.value,'C1');
-  await check(customer,{Customers:{data:[],paginatorInfo:{hasMorePages:false}}},{resumed:false,error:/aucune nouvelle cr[ée]ation/});
+  await check(customer,{Customers:{data:[],paginatorInfo:{hasMorePages:false}}},{jobError:'Client Erplain · Création à vérifier : rapprocher le client de cette commande avant reprise',resumed:false,error:/aucune nouvelle cr[ée]ation/});
   const rejected=await check({...customer,customerCreationAttempt:customerCreationFailed(customerCreationStarted(order(customer)),{httpStatus:429,confirmedRateLimitRejection:true})},{Customers:{data:[],paginatorInfo:{hasMorePages:false}}});
   assert.equal(rejected.state.phase,undefined);assert.equal(rejected.state.customerNumber,'C1');assert.equal(rejected.state.customerReconciliation.retryAuthorizedBy,'confirmed_no_write');
   await check(customer,{Customers:{...found.Customers,data:[...found.Customers.data,...found.Customers.data]}},{resumed:false,error:/ambigu/});
