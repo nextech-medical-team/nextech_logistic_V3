@@ -4,8 +4,8 @@
  let current=null,timer=null,busy=false,user=null,selected=new Set(),previewRequest=null,exportTimer=null,directExport=null,pendingDownload=null,exportRevision=0;
  const date=v=>v?new Date(v).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'';
  function node(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;}
- function error(e){$('receipt-error').textContent=e.message;$('receipt-error').hidden=false;}
- async function api(path,body){const r=await fetch(path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});if(r.status===401)throw Error('Session expirée : connectez-vous depuis la page V3 puis revenez aux réceptions.');const j=await r.json();if(!r.ok)throw Error(j.error||'Demande indisponible');return j;}
+ function error(e){$('receipt-error').textContent=displayErrorMessage(e);$('receipt-error').hidden=false;}
+ async function api(path,body){const r=await fetch(path,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});if(r.status===401)throw Error('Session expirée : connectez-vous depuis la page V3 puis revenez aux réceptions.');const j=await r.json();if(!r.ok)throw Object.assign(Error(j.error||'Demande indisponible'),{status:r.status});return j;}
  const exportable=r=>r.work!=='history'&&r.labels?.length&&(r.currentBl?.id||r.bls?.length||r.labels.some(l=>l.url.startsWith('/api/partial/documents/')));
  const directIds=()=>current?.plan?.rows.filter(r=>r.documentsComplete&&exportable(r)).map(r=>r.id).sort()||[];
  const selectable=r=>r.status==='eligible'||r.status==='documents'&&r.canLabel&&!r.labels?.length;
@@ -66,7 +66,7 @@
  async function exportStatus(id,runId=current?.id,revision=exportRevision){
   try{
    const e=await api('/api/receipts/recovery/warehouse/status?id='+encodeURIComponent(id));if(current?.id!==runId||revision!==exportRevision)return;
-   $('receipt-export-status').textContent=e.error||[e.stage||'Préparation des PDF en attente',...(e.observations||[])].join(' · ');
+   $('receipt-export-status').textContent=e.error?displayErrorMessage(e.error):[e.stage||'Préparation des PDF en attente',...(e.observations||[])].join(' · ');
    const links=[];for(const [kind,ready,text] of [['bl',e.bl_ready,'Télécharger les BL combinés'],['labels',e.labels_ready,'Télécharger les étiquettes combinées']]){
     $('receipt-download-'+kind).hidden=directExport?.id===id&&!!ready;
     if(ready){const a=node('a',text);a.href='/api/receipts/recovery/warehouse/pdf?id='+encodeURIComponent(id)+'&kind='+kind;links.push(a);}

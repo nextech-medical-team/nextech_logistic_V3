@@ -7,13 +7,13 @@
   try{const result=await api('/api/temu/excel/orders');get('tbody').innerHTML=result.rows.map(o=>{
    const status=o.erp_error||o.resolution?.error||(o.issue==='Import Excel TEMU : vérifier la commande et sa boutique avant toute préparation.'?'Import Excel TEMU : préparation BC/BL à confirmer.':o.issue)||(o.erp_live?.bl?.id?'BL créé · '+(o.erp_live.bl.status||'à vérifier'):o.resolution?.stage||o.erp_status||'À valider');
    return `<tr><td>${esc(o.reference)}</td><td>${esc(o.country)}</td><td>${esc(status)}</td><td>${!o.preparation?`<button data-verify="${esc(o.reference)}">Vérifier et préparer</button>`:`${o.revalidationAvailable?`<button data-renew="${esc(o.reference)}">Revalider la préparation Excel</button>`:''}<button data-order="${esc(o.id)}">Voir la commande / corriger</button><button data-label="${esc(o.reference)}">Étiquette et marge TEMU</button>`}</td></tr>`;
-  }).join('')||'<tr><td colspan="4">Aucune commande Excel TEMU importée.</td></tr>';}catch(e){get('[data-message]').textContent=e.message;}
+  }).join('')||'<tr><td colspan="4">Aucune commande Excel TEMU importée.</td></tr>';}catch(e){get('[data-message]').textContent=displayErrorMessage(e);}
  }
  get('[data-refresh]').onclick=()=>{if(!busy)load();};
  panel.addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b||busy)return;
   if(b.dataset.order){orderDetail(b.dataset.order);return;}
-  if(b.dataset.label){temuOpenOrder(b.dataset.label).catch(e=>get('[data-message]').textContent=e.message);return;}
+  if(b.dataset.label){temuOpenOrder(b.dataset.label).catch(e=>get('[data-message]').textContent=displayErrorMessage(e));return;}
   if(!b.dataset.verify&&!b.dataset.renew)return;
   busy=true;b.disabled=true;get('[data-message]').textContent='Vérification des montants Excel avant préparation…';get('[data-preview]').innerHTML='';
   try{
@@ -25,10 +25,10 @@
    box.querySelector('[data-start]').onclick=async()=>{
     if(busy)return;busy=true;ready();get('[data-message]').textContent='Contrôle API TEMU puis lancement de la préparation…';
     try{const result=await api('/api/temu/excel/prepare',{reference:p.reference,fingerprint:p.fingerprint,confirmPreparation:true,...(p.renewal?{confirmRenewal:true}:{})});get('[data-message]').textContent=result.message;box.innerHTML='';await load();}
-    catch(e){get('[data-message]').textContent=e.message;}finally{busy=false;if(box.querySelector('[data-start]'))ready();}
+    catch(e){get('[data-message]').textContent=displayErrorMessage(e);}finally{busy=false;if(box.querySelector('[data-start]'))ready();}
    };
    get('[data-message]').textContent='Vérifiez les informations puis confirmez la préparation.';
-  }catch(e){get('[data-message]').textContent=e.message;}finally{busy=false;b.disabled=false;}
+  }catch(e){get('[data-message]').textContent=displayErrorMessage(e);}finally{busy=false;b.disabled=false;}
  });
  const previous=show;show=async function(name){const result=await previous(name);if(name==='imports')await load();return result;};
  window.addEventListener('temu-excel-imported',()=>load());

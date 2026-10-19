@@ -67,10 +67,10 @@
    while(!result.done){
     result=await api('/api/missing-orders/verify',{runId:result.runId});
     report=result;refreshStatuses();renderReport();
-    $('missing-errors').textContent=result.errors.join(' · ');
+    $('missing-errors').textContent=result.errors.map(e=>displayErrorMessage(e)).join(' · ');
     $('missing-state').textContent=`${result.done?(result.complete?'Vérification terminée':'Vérification incomplète'):'Lecture en cours'} · ${result.checked} commandes lues · ${result.rows.length} absentes de V3 · du ${new Date(result.start).toLocaleString('fr-FR')} au ${new Date(result.end).toLocaleString('fr-FR')} (heure locale).`;
    }
-  }catch(e){$('missing-errors').textContent='Vérification interrompue : '+e.message;$('missing-state').textContent='Résultats incomplets. Relancez la vérification.';if(!$('missing-rows').querySelector('tr:not(:has(.missing-empty))'))emptyRows('Lecture interrompue. Relancez la vérification.');}
+  }catch(e){$('missing-errors').textContent='Vérification interrompue : '+displayErrorMessage(e);$('missing-state').textContent='Résultats incomplets. Relancez la vérification.';if(!$('missing-rows').querySelector('tr:not(:has(.missing-empty))'))emptyRows('Lecture interrompue. Relancez la vérification.');}
   finally{control.disabled=false;control.textContent='Lancer la vérification';$('missing-platform').disabled=false;$('missing-before').disabled=false;$('missing-start').disabled=false;}
  };
 })();

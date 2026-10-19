@@ -77,4 +77,5 @@ groups.push(['--test','test/erplain-archived-resume.test.mjs']);
 groups.push(['--test','test/product-weight-maintenance.test.mjs']);
 groups.push(['--test','test/customer-creation-recovery.test.mjs','test/customer-refresh.test.mjs','test/erplain-refresh-diagnostics.test.mjs']);
 groups.push(['--test','test/recovered-delivery-display.test.mjs']);
+groups.push(['--test','test/error-message-normalization.test.mjs']);
 for(const args of groups){const result=spawnSync(process.execPath,args,{stdio:'inherit'});if(result.status!==0)process.exit(result.status??1);}

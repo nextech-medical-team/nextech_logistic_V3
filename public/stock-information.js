@@ -67,10 +67,7 @@
  }
  function failure(error){
   if(error?.status===401)return 'session V3 expirée · reconnectez-vous';
-  if(error?.status===403)return 'accès à la lecture refusé';
-  if(error?.status===429)return 'lecture différée par la limite de requêtes';
-  if(error?.code==='API_NETWORK_ERROR')return 'connexion à V3 interrompue';
-  if(error?.code==='API_READ_TIMEOUT')return 'délai de réponse dépassé';
+  if(error?.status>=400||['API_NETWORK_ERROR','API_READ_TIMEOUT'].includes(error?.code))return displayErrorMessage(error);
   return 'lecture indisponible';
  }
  function pump(){while(running<2&&queue.length){
