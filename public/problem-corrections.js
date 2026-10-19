@@ -1188,7 +1188,18 @@ function renderResolution(ctx,problem){
 
 
   fields.innerHTML='<p class="resolution-diagnostic">'+esc(problem.detail||'Le motif détaillé n’a pas été enregistré.')+'</p>'+temuRefusalDetailsHtml(problem,ctx);
-  if(problem.type==='customer'){const number=ctx.order.channel==='temu'&&ctx.order.erp_live?.customerNumber||'V3:'+ctx.order.id;fields.innerHTML+='<p>Numéro client recherché dans Erplain : <strong>'+esc(number)+'</strong></p><p>Si aucun client n’est trouvé et que la création précédente reste incertaine, vérifiez ce numéro dans Erplain. Un client retrouvé avec ce numéro pourra être réutilisé à la prochaine actualisation. Ne recréez pas le client sans avoir vérifié la tentative précédente.</p>';}
+  if(problem.type==='customer'){
+   const number=ctx.order.channel==='temu'&&ctx.order.erp_live?.customerNumber||'V3:'+ctx.order.id;
+   fields.innerHTML+='<p>Numéro client à rechercher dans Erplain : <strong>'+esc(number)+'</strong></p><p>Actualiser recherche le client existant. Si vous avez vérifié son absence dans Erplain, vous pouvez autoriser une nouvelle tentative. Une création précédente peut avoir abouti sans réponse : vérifiez avant de confirmer.</p>';
+   if(['temu','amazon'].includes(ctx.order.channel)){
+    const label=document.createElement('label'),confirmation=document.createElement('input');confirmation.type='checkbox';
+    label.append(confirmation,document.createTextNode(' J’ai vérifié dans Erplain que ce client est absent et j’autorise une nouvelle création.'));fields.append(label);
+    const retry=button('Autoriser la création du client et reprendre',async()=>{
+     if(!confirmation.checked)throw Error('Vérifiez le client dans Erplain et cochez la confirmation.');
+     await saved(await task('refresh',{provider:'Erplain',confirmCustomerAbsent:true,customerNumber:number,resumeAfter:true}));
+    });retry.disabled=true;confirmation.onchange=()=>{retry.disabled=!confirmation.checked;};
+   }
+  }
 
 
 
