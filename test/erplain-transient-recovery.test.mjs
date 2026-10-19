@@ -51,6 +51,8 @@ test('database recovery reconciles drafts and customers using reads only',async(
   await check(draft,{Order:{...response.Order,shipping_orders:{data:[{id:'bl'}],paginatorInfo:{hasMorePages:false}}}},{resumed:false,error:/rapprochement/});
   await check({...draft,phase:'creating_bl'},response,{resumed:false,error:/rapprochement/});
   await check(draft,{Order:{...response.Order,shipping_orders:{data:[],paginatorInfo:{hasMorePages:true}}}},{resumed:false,error:/rapprochement/});
+  const published=await check({phase:'publishing_bl',bc:{id:'12',status:'active'},bl:{id:'22',status:'unpublished',update_stock:true}}, {Order:{id:'12',status:'active',update_stock:true,shipping_orders:{data:[{id:'22',status:'ready_to_ship',update_stock:true}],paginatorInfo:{hasMorePages:false}}}});
+  assert.equal(published.state.bl.id,'22');assert.equal(published.state.bl.status,'ready_to_ship');assert.equal(published.state.phase,'bl_created');
   const customer={phase:'creating_customer',customerNumber:'C1'};
   const found={Customers:{data:[{id:'9',customer_number:'C1'}],paginatorInfo:{hasMorePages:false}}};
   const recovered=await check(customer,found);

@@ -61,3 +61,9 @@ test('definitive refusal history requires explicit Amazon scope',async()=>{
  assert.equal(await hasUncertainCarrierHistory(history,'o',{manualRequest:true}),true);
  assert.equal(await hasUncertainCarrierHistory(history,'o',{manualRequest:true,channel:'amazon'}),false);
 });
+
+for(const status of ['pending','in_preparation','make_the_shipment','ready_to_ship'])test('saved draft already published is recovered by immutable ID and BC relation: '+status,async()=>{
+ const published={...draft,status};let reads=0;
+ const actual=await readTransientBlIdentity({request:async q=>{reads++;assert.match(q,/^query /);return {ShippingOrder:published};}},state,bc);
+ assert.deepEqual(actual,published);assert.equal(reads,1);
+});

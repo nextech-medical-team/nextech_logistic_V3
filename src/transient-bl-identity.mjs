@@ -6,7 +6,7 @@ export async function readTransientBlIdentity(reader,state,bc,{lookupDraft=true}
  if(lookupDraft&&state.bl?.id&&!bl&&state.bl.status==='unpublished'){
   const {ShippingOrder:draft}=await reader.request('query V3TransientSavedDraft($id:ID!){ShippingOrder(id:$id){id label status update_stock orders(first:100){data{id} paginatorInfo{hasMorePages}}}}',{id:String(state.bl.id)});
   if(draft){
-   if(String(draft.id)!==String(state.bl.id)||draft.status!=='unpublished'||typeof draft.update_stock!=='boolean'
+   if(String(draft.id)!==String(state.bl.id)||!['unpublished','pending','in_preparation','make_the_shipment','ready_to_ship'].includes(draft.status)||typeof draft.update_stock!=='boolean'
    ||draft.orders?.paginatorInfo?.hasMorePages!==false||draft.orders?.data?.length!==1||String(draft.orders.data[0].id)!==String(bc.id))throw Error('Brouillon BL : identité ou rattachement non confirmé');
    bl=draft;
   }
