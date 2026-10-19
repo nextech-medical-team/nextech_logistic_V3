@@ -7,6 +7,19 @@ import vm from 'node:vm';
 const presentation=vm.createContext({});
 vm.runInContext(readFileSync(new URL('../public/compact-problems.js',import.meta.url),'utf8'),presentation);
 
+test('detailed views retain shortage quantities, provider reasons and HTTP response details',()=>{
+ const shortage='Produit de remplacement [B] : stock insuffisant. Quantité totale nécessaire : 96 unités ; stock disponible : 13 unités ; quantité manquante : 83 unités.';
+ const detail=presentation.displayErrorDetail(shortage);
+ assert.ok(detail.startsWith('Bloqué : stock insuffisant'));
+ assert.ok(detail.includes('stock disponible : 13'));assert.ok(detail.includes('quantité manquante : 83'));
+ const refusal='TEMU · Étiquette refusée : The shipping address contains non-English characters.';
+ assert.ok(presentation.displayErrorDetail(refusal).includes('non-English characters'));
+ const error=Object.assign(Error('Erreur de lecture synthétique'),{status:400});
+ assert.ok(presentation.displayErrorDetail(error).includes('Erreur de lecture synthétique'));
+ assert.equal(error.message,'Erreur de lecture synthétique');assert.equal(error.status,400);
+ assert.equal(presentation.displayErrorDetail('Bloqué : stock insuffisant'),'Bloqué : stock insuffisant');
+});
+
 test('reported duplicate labels collapse without merging independent causes',()=>{
  const classify=currentProblemClassifier();
  const groups=[

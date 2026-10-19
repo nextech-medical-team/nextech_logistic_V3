@@ -88,6 +88,11 @@ function displayErrorMessage(error,provider='Erplain'){
  const problem=compactProblem(input,'',apiName);
  return problem.type==='unknown'?raw:problem.label;
 }
+// Detailed panels keep actionable provider information visible, not only in a tooltip.
+function displayErrorDetail(error,provider='Erplain'){
+ const raw=String(error?.message??error??''),label=displayErrorMessage(error,provider);
+ return raw&&raw!==label?label+' · '+raw:label;
+}
 function errorDetailsHtml(error,provider='Erplain'){
  const raw=String(error?.message??error??''),label=displayErrorMessage(error,provider);
  const escape=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));

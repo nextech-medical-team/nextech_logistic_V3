@@ -1371,7 +1371,7 @@ function openStockEquivalent(ctx,problem){
 
 
 
- const showError=e=>{preview.setAttribute('role','alert');preview.textContent=(e.correctionRecorded?'Remplacement enregistré. ':e.saveAttempted?'Résultat de l’enregistrement à vérifier avant de relancer : ':'Remplacement non enregistré : ')+displayErrorMessage(e)+(e.message.includes('Poids non renseigné')?' · Renseignez le poids du produit '+(/Produit restant \[([^\]]+)\]/.exec(e.message)?.[1]||values().replacementSku)+' dans Erplain, puis réessayez.':'');};
+ const showError=e=>{preview.setAttribute('role','alert');preview.textContent=(e.correctionRecorded?'Remplacement enregistré. ':e.saveAttempted?'Résultat de l’enregistrement à vérifier avant de relancer : ':'Remplacement non enregistré : ')+displayErrorDetail(e)+(e.message.includes('Poids non renseigné')?' · Renseignez le poids du produit '+(/Produit restant \[([^\]]+)\]/.exec(e.message)?.[1]||values().replacementSku)+' dans Erplain, puis réessayez.':'');};
 
 
 

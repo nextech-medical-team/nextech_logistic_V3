@@ -43,7 +43,7 @@
    const stamp=value=>value?new Date(value).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'À vérifier';
    setText(box.querySelector('.monitoring-last'),monitor?.lastCheck?'Dernière vérification : '+stamp(monitor.lastCheck):'');
    setText(box.querySelector('.monitoring-next'),monitor?.nextCheck?'Prochain contrôle : '+stamp(monitor.nextCheck):'');
-   setText(box.querySelector('.monitoring-result'),monitor?.result?'Résultat : '+displayErrorMessage(monitor.result,r.service||'Erplain'):'');
+   setText(box.querySelector('.monitoring-result'),monitor?.result?'Résultat : '+displayErrorDetail(monitor.result,r.service||'Erplain'):'');
    box.querySelector('.monitoring-result').title=monitor?.result||'';
    setText(box.querySelector('.monitoring-step'),monitor?.nextStep?'Étape suivante : '+monitor.nextStep:'');
    const alert=box.querySelector('.monitoring-alert');setText(alert,monitor?.alert?(monitor.externalOverdue?'Vérification externe en retard : deux cycles sans contrôle complet'+(monitor.externalResult&&monitor.externalStatus!=='complete'?' · '+monitor.externalResult:''):'Sans progression depuis plus d’une heure'):'');alert.setAttribute('role','status');alert.style.fontWeight='bold';alert.style.color='#8a4b00';
