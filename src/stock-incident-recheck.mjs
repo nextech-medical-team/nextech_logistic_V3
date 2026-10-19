@@ -43,7 +43,9 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
  const completed=completedRows.find(j=>['resume','resume-erp','replace-equivalent'].includes(j.action)&&!j.error&&!j.result?.partialRemainder);
 
  const erp=(await db.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1',[id])).rows[0];
- if(!stockIncidentOnly(initial.issue)&&!stockIncidentOnly(erp?.error)&&!jobs.some(j=>stockIncidentOnly(j.error)))return {notApplicable:true};
+ const previousCheck=initial.erp_live?.stockIncidentRecheck;
+ const trackedStockIssue=stockIncidentOnly(previousCheck?.previousError)&&initial.issue===previousCheck.currentError;
+ if(!stockIncidentOnly(initial.issue)&&!stockIncidentOnly(erp?.error)&&!jobs.some(j=>stockIncidentOnly(j.error))&&!trackedStockIssue)return {notApplicable:true};
  const frozen=usesRecordedBc(initial),fingerprint=await shipmentFingerprint(db,initial);
  let mapping=null,proof;
  try{

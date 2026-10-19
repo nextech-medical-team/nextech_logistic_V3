@@ -1,4 +1,5 @@
 import {withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
+import {reconcileShippingOrderReads} from './erplain-shipping-reconciliation.mjs';
 import {customerCreationStarted,customerCreationFailed,customerCreationMessage} from './customer-creation-recovery.mjs';
 import {withErplainOrigin} from './erplain-request-observation.mjs';
 import {usesNativeBlCycle,assertNativeBcSnapshot} from './native-bl-policy.mjs';
@@ -53,7 +54,7 @@ import {readFile} from 'node:fs/promises';
 
 import path from 'node:path';
 
-import {erplainAccount} from './erplain-accounts.mjs';
+import {erplainAccount,erplainBatchError} from './erplain-accounts.mjs';
 import {queueQuotaRead} from './erplain-quota-wait.mjs';
 
 import {convertedQuantity,addressIssue} from './domain.mjs';
@@ -110,7 +111,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
   orders=orders.filter(o=>!o.failed);if(!orders.length)return;
   const q='mutation V3Batch('+orders.map((o,i)=>'$p'+i+':'+type+'!').join(',')+'){'+orders.map((o,i)=>`p${i}:${operation}(input:$p${i}){${selection}}`).join(' ')+'}';
   let result;try{result=await api.request(q,Object.fromEntries(orders.map((o,i)=>['p'+i,input(o)])),0,true);}catch(error){if(operation==='CreateCustomer')for(const o of orders){o.erp_live.customerCreationAttempt=customerCreationFailed(o.erp_live.customerCreationAttempt,error);await save(o);}throw error;}
-  for(let i=0;i<orders.length;i++){if(!result['p'+i]?.id){orders[i].failed=true;await fail(orders[i],new Error(result._v3Errors?.find(e=>e.path?.[0]==='p'+i)?.message||'Réponse incomplète '+phase));continue;}if(operation==='CreateCustomer')orders[i].erp_live.customerCreationAttempt={...orders[i].erp_live.customerCreationAttempt,outcome:'confirmed',customerId:result['p'+i].id};orders[i].erp_live[field]=result['p'+i];orders[i].erp_live.phase=field+'_created';await save(orders[i]);}
+  for(let i=0;i<orders.length;i++){if(!result['p'+i]?.id){orders[i].failed=true;await fail(orders[i],erplainBatchError(result,'p'+i,phase));continue;}if(operation==='CreateCustomer')orders[i].erp_live.customerCreationAttempt={...orders[i].erp_live.customerCreationAttempt,outcome:'confirmed',customerId:result['p'+i].id};orders[i].erp_live[field]=result['p'+i];orders[i].erp_live.phase=field+'_created';await save(orders[i]);}
   if(operation==='CreateOrder')await db.query("UPDATE settings SET value=jsonb_set(value,'{current}',to_jsonb((value->>'current')::int+$1::int)) WHERE key='erplain_live_capacity'",[orders.filter(o=>!o.failed&&o.erp_live.bc?.id).length]);
  }
  async function run({bcOnlyOrderId}={}){if(running)return;running=true;activeBcOnlyOrderId=bcOnlyOrderId||null;let working=[];
@@ -290,7 +291,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    }
    const ready=[];for(const o of working){const block=preparationBlock(o);if(block){o.erp_live.preparationBlocked=block;await save(o);await fail(o,new Error(block));}else ready.push(o);}working=ready;if(!working.length)return;
    const needBl=working.filter(o=>!o.erp_live.bl);
-   if(needBl.length){const current=await api.request('query V3FindShipping{'+needBl.map((o,i)=>`p${i}:Order(id:${Number(o.erp_live.bc.id)}){shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}}`).join(' ')+'}');for(let i=0;i<needBl.length;i++){const hits=current?.['p'+i]?.shipping_orders?.data;if(!Array.isArray(hits)||current?.['p'+i]?.shipping_orders?.paginatorInfo?.hasMorePages!==false)throw new Error('API Erplain · Réponse BL incomplète : aucune nouvelle création');if(hits.length>1)throw new Error('BL multiples à contrôler');if(hits.some(bl=>!bl?.id))throw new Error('API Erplain · Réponse BL incomplète : identifiant absent');if(hits.length){needBl[i].erp_live.bl=hits[0];await save(needBl[i]);}}}
+   if(needBl.length){const current=await api.request('query V3FindShipping{'+needBl.map((o,i)=>`p${i}:Order(id:${Number(o.erp_live.bc.id)}){shipping_orders(first:100){data{id label status update_stock} paginatorInfo{hasMorePages}}}`).join(' ')+'}',{},0,true);await reconcileShippingOrderReads(needBl,current,{save,fail});}
    // Check and create/publish each BL sequentially so stock consumed by one order
    // is visible when validating the following order. Labels wait for verified BL quantities.
    for(const o of working){

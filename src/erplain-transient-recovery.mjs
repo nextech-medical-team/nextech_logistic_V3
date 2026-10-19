@@ -48,8 +48,8 @@ export async function resumeTransientErplain(db,api){
    AND coalesce(o.erp_live->'bc'->>'status','') NOT IN ('cancelled','closed') AND coalesce(o.erp_live->'bl'->>'status','') NOT IN ('cancelled','closed')
    AND (coalesce(o.erp_live->'transientRecovery'->>'attempts','0') IN ('0','1','2') OR o.erp_live->'transientRecovery'->>'readRateLimited'='true' OR (o.erp_live->>'phase'='creating_customer' AND o.erp_live->'customerCreationAttempt'->>'outcome'='rejected_without_write'))
    AND (o.erp_live->'transientRecovery'->>'nextReadCheckAt' IS NULL OR o.erp_live->'transientRecovery'->>'nextReadCheckAt'<=to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
-   AND (o.erp_live->>'phase' IN ('creating_customer','creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl') OR (o.erp_live->>'phase' IS NULL AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
-   AND ((o.erp_live->>'phase'='creating_bc' AND o.erp_live->'customer'->>'id' IS NOT NULL) OR (o.erp_live->>'phase'<>'creating_bc' AND o.erp_live->'bc'->>'id' IS NOT NULL) OR o.erp_live->>'phase' IS NULL OR (o.erp_live->>'phase'='creating_customer' AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
+   AND (o.erp_live->>'phase' IN ('creating_customer','customer_created','creating_bc','bc_created','creating_bl','publishing_bl','bl_created','bl_ready','finalizing_bl') OR (o.erp_live->>'phase' IS NULL AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
+   AND ((o.erp_live->>'phase'='creating_bc' AND o.erp_live->'customer'->>'id' IS NOT NULL) OR (o.erp_live->>'phase'<>'creating_bc' AND o.erp_live->'bc'->>'id' IS NOT NULL) OR o.erp_live->>'phase' IS NULL OR (o.erp_live->>'phase'='customer_created' AND o.erp_live->'customer'->>'id' IS NOT NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL) OR (o.erp_live->>'phase'='creating_customer' AND o.erp_live->'customer'->>'id' IS NULL AND o.erp_live->'bc'->>'id' IS NULL AND o.erp_live->'bl'->>'id' IS NULL))
    AND e.updated_at<=now()-CASE WHEN o.erp_live->'transientRecovery'->>'readRateLimited'='true' THEN interval '0 seconds' ELSE CASE coalesce(o.erp_live->'transientRecovery'->>'attempts','0') WHEN '0' THEN interval '30 seconds' WHEN '1' THEN interval '2 minutes' ELSE interval '5 minutes' END END
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))
    AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
@@ -85,12 +85,13 @@ export async function resumeTransientErplain(db,api){
      // One identity read per bounded pass, rather than one per untouched order.
      const result=await (identityRead??=reader.request('query V3RateLimitIdentity { Company { id } }'));
      if(result.Company?.id!==100174)throw Error('Identité Erplain incorrecte : aucune reprise');
-    }else if(state.phase==='creating_customer'){
+    }else if(['creating_customer','customer_created'].includes(state.phase)){
      const number=erplainCustomerInput(o).customer_number;
      const result=await reader.request('query V3RecoverQuotaCustomer($where:QueryCustomersWhereWhereConditions){Customers(first:100,where:$where){data{id customer_number} paginatorInfo{hasMorePages}}}',{where:{column:'CUSTOMER_NUMBER',operator:'EQ',value:number}});
      const customer=customerCheckpointResult(result,o.id,number);
      state.customerReconciliation={checkedAt:recovery.checkedAt,completeSearch:true,customerId:customer?.id||null,externalWrites:0};
-     if(customer){state.customer=customer;state.phase='customer_created';}
+     if(state.customer?.id&&String(customer?.id)!==String(state.customer.id))throw Error('Client Erplain · Client différent : rapprochement nécessaire');
+     if(customer){state.customer={...state.customer,...customer};state.phase='customer_created';}
      else if(canRetryCustomerCreation(o,number)){delete state.phase;state.customerReconciliation.retryAuthorizedBy='confirmed_no_write';}
      else throw Error('Client Erplain : creation precedente non retrouvee ; rapprochement requis, aucune nouvelle creation automatique');
     }else if(state.phase==='creating_bc'){
@@ -105,7 +106,8 @@ export async function resumeTransientErplain(db,api){
       state.documentReconciliation={checkedAt:recovery.checkedAt,savedBcId:String(state.bc.id),candidateBcId:found?.id?String(found.id):null,externalWrites:0};
       throw Error(found?'BC enregistré introuvable ; autre identité V3 retrouvée : rapprochement requis, aucun rattachement automatique':'BC enregistré introuvable et aucune identité V3 retrouvée : contrôle Erplain requis, aucune nouvelle création automatique');
      }
-     if(String(bc?.id)!==String(state.bc.id)||bc.status!=='active'||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
+     const draft=bc.status==='unpublished'&&state.phase==='bc_created'&&!state.bl?.id&&!state.stockDocument?.id;
+     if(String(bc?.id)!==String(state.bc.id)||!(bc.status==='active'||draft)||!Array.isArray(list?.data)||list.paginatorInfo?.hasMorePages!==false||list.data.length>1||draft&&list.data.length)throw Error('BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire');
      let bl;
      try{bl=await readTransientBlIdentity(reader,state,bc,{lookupDraft:o.channel!=='tender'});}
      catch(e){
@@ -118,6 +120,7 @@ export async function resumeTransientErplain(db,api){
      if(retiredDraft)state={...retiredDraft,transientRecovery:recovery};
      else{
       if(bl)state.bl=bl;
+      state.bc={...state.bc,status:bc.status};
       if(o.channel!=='tender')state=reconcilePublicationState(state,bc);
      }
     }
