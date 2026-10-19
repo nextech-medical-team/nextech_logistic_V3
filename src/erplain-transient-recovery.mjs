@@ -113,7 +113,7 @@ export async function resumeTransientErplain(db,api){
      catch(e){
       // Only a confirmed absent draft needs the existing no-movement proof.
       // An existing draft must not acquire new transport or stock prerequisites.
-      if(e.code!=='V3_MISSING_DRAFT'||o.channel!=='amazon'||!usesNativeBlCycle(o))throw e;
+      if(e.code!=='V3_MISSING_DRAFT'||!usesNativeBlCycle(o))throw e;
       retiredDraft=await prepareMissingDraftRecovery(db,reader,o,{resolutionId:recoveryId});
       if(!retiredDraft)throw Error('Brouillon BL réapparu pendant le rapprochement : relire avant reprise');
      }

@@ -50,3 +50,12 @@ test('atomic persistence: race or new carrier evidence aborts; successful recove
   await engine.exec('DELETE FROM carrier_documents');await run();const saved=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;assert.equal(saved.phase,'bc_created');assert.equal(saved.bl,undefined);assert.equal(saved.missingDraftRecoveries[0].retiredDraft.id,9);assert.equal((await engine.query('SELECT count(*) n FROM audit')).rows[0].n,1);
  }finally{await engine.close();}
 });
+
+for(const channel of ['amazon','temu','shopify','collection'])test('native '+channel+' missing draft requires complete no-movement proof',async()=>{
+ const f=fixture();f.order.channel=channel;f.order.erp_live.bcReservationPolicy='erplain_bc_bl';f.order.erp_live.bl.update_stock=true;f.order.erp_live.phase='bl_created';
+ f.data.Order.update_stock=true;f.data.Order.created_at='2026-10-14 12:00:00';f.data.Order.line_items=[{type:'normal',variant:{id:'v'}}];
+ const original=f.api.request;f.api.request=async(q,v)=>q.includes('V3MissingNativeDraftLedger')?{InventoryLogs:{data:[],paginatorInfo:{hasMorePages:false}}}:original(q,v);
+ assert.equal((await f.run()).phase,'bc_created');
+ f.api.request=async(q,v)=>q.includes('V3MissingNativeDraftLedger')?{InventoryLogs:{data:[{id:'log',document_id:9,order_type:'ShippingOrder'}],paginatorInfo:{hasMorePages:false}}}:original(q,v);
+ await assert.rejects(f.run(),/mouvement existant/);assert.equal(f.order.erp_live.bl.id,9);
+});

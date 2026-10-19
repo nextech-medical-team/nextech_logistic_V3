@@ -14,9 +14,10 @@ test('existing Amazon draft resumes without missing-document transport or ledger
  assert.equal(await resumeTransientErplain(db,api),1);assert.equal(reads,2);
  assert.equal((await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live.phase,'bl_created');
 });
-for(const scenario of ['absent','movement','concurrent-suspension','concurrent-label'])test('Amazon missing draft recovery: '+scenario,async t=>{
+for(const channel of ['amazon','temu','shopify'])for(const scenario of ['absent','movement','concurrent-suspension','concurrent-label'])test(channel+' missing draft recovery: '+scenario,async t=>{
  const {engine,db,api}=await fixture(t,1);
- await engine.exec(`UPDATE orders SET channel='amazon';ALTER TABLE resolution_jobs ADD COLUMN id text;
+ await engine.query('UPDATE orders SET channel=$1',[channel]);
+ await engine.exec(`ALTER TABLE resolution_jobs ADD COLUMN id text;
  CREATE TABLE carrier_jobs(order_id text);CREATE TABLE carrier_documents(order_id text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE audit(user_email text,action text,detail jsonb);`);
  const before={phase:'publishing_bl',bcReservationPolicy:'erplain_bc_bl',bc:{id:123,status:'active',update_stock:true},bl:{id:456,label:'SHO00745115',status:'unpublished',update_stock:true}};
  await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify(before)]);
