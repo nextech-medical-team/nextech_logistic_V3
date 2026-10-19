@@ -203,7 +203,20 @@ export async function historicalPreparationProof(api,o,{beforeBlPublication=fals
  }
  if(pendingBlScope){if(!bl||!o.erp_live.pendingBlIds.map(String).includes(String(bl.id))||expected(o.items)!==expected(historicalPendingLines(bc,bl)))throw Error('BL en attente modifié : produits ou quantités à rapprocher');}
  await assertNoHistoricalStockRemoval(api,o);
- return (await readHistoricalStock(api,bc,{bl,pendingBlScope,beforeBlPublication,additionalVariants:(o.erp_live.historicalStockProof?.quantities||[]).map(l=>l.key.split(':')[0])})).proof;
+ const proof=(await readHistoricalStock(api,bc,{bl,pendingBlScope,beforeBlPublication,additionalVariants:(o.erp_live.historicalStockProof?.quantities||[]).map(l=>l.key.split(':')[0])})).proof;
+ // A matching debit proves that Erplain wrote the movement, not that the
+ // movement was covered by stock. Check its remaining balances before a new
+ // BL is published. Never turn this into a gate for an existing BL's label.
+ if(beforeBlPublication&&(!bl||bl.status==='unpublished')&&!proof.stockModel){
+  for(const l of bc.line_items.filter(l=>l.type==='normal')){
+   if(typeof l.variant?.track_inventory!=='boolean')throw Error('Stock non vérifiable : politique produit absente');
+   if(!l.variant.track_inventory)continue;
+   const numeric=v=>(typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v));
+   if(![l.on_hand,l.available].every(numeric))throw Error('Stock non vérifiable après débit BC : '+l.variant.sku);
+   if(Number(l.on_hand)<0||Number(l.available)<0)throw Error('BL bloqué — stock insuffisant après débit BC : '+l.variant.sku);
+  }
+ }
+ return proof;
 }
 
 // A BC that already deducted both quantities may pass its immutable flag to

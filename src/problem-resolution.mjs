@@ -1,4 +1,5 @@
 import {queueResolutionRequest} from './resolution-request.mjs';
+import {assertImportedPostalAddress} from './imported-postal-authority.mjs';
 import {abandonEquivalentPreview} from './abandon-equivalent.mjs';
 import {completeOrderDocumentsSql} from './complete-order-documents.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
@@ -54,7 +55,7 @@ import {correctionCatalog} from './problem-corrections.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 import {assertFullOrderStock} from './stock-gate.mjs';
 import {assertResumeStock} from './resume-stock-policy.mjs';
-import {prepareMissingDraftRecovery,commitMissingDraftRecovery} from './missing-draft-recovery.mjs';
+import {preparePublicationResume,commitPublicationResume} from './publication-resume.mjs';
 import {createProductionCarriers,createTestCarriers} from './carriers-test.mjs';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -70,7 +71,7 @@ const actionTypes={
  'accept-source-change':['platform'],
  'create-product':['mapping','missing'],'activate-product':['inactive'],
  'weight':['weight','weight-unit'],'address':['address','city'],
- 'relay':['relay','relay-search'],'compare-bc':['bc','stock','api-stock','historical-preparation'],'resume-erp':['stock','api-stock','historical-preparation'],'force-stock-label':['stock'],
+ 'relay':['relay','relay-search'],'compare-bc':['bc','stock','api-stock','historical-preparation','erplain-recovery'],'resume-erp':['stock','api-stock','historical-preparation','erplain-recovery'],'force-stock-label':['stock'],
  'refresh':['preparation','unknown','routing','stock','bc',...productTypes,'api-access','api-limit','api-server','api-timeout','api-network','api-stock','api-incomplete','api-http','uncertain','pdf'],
  'recover-pdf':['pdf','uncertain'],'resume':['resolved']
 };
@@ -88,7 +89,7 @@ export function validateResolution(b){
  if(b?.action==='refresh')assertRefreshProvider(b.provider);
  if(!actionTypes[b.action]?.includes(b.type))throw Error('Action incompatible avec le problème sélectionné');
  if(typeof b.id!=='string'||!b.id||!/^[a-f0-9-]{36}$/i.test(String(b.requestId)))throw Error('Commande et identifiant de demande requis');
- const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'abandon-equivalent':['previewJobId'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider']}[b.action]||[])];
+ const allowed=['id','requestId','action','type','sku','resumeAfter',...({'manual-temu-pricing':['currency','priceLines','priceFingerprint','vatRate'],'choose-carrier':['carrier','confirmReplace'],'abandon-equivalent':['previewJobId'],'equivalent-preview':['replacementSku','replaceQuantity','replacementQuantity','scope'],'replace-equivalent':['replacementSku','replaceQuantity','replacementQuantity','scope','previewFingerprint','confirmEquivalent','verifyAndApply'],mapping:['channel','source_sku','target_sku','source_qty','target_qty','notes','variantId','scope'],weight:['weightKg','variantId'],'select-product':['variantId'],'activate-product':['variantId'],'create-product':['label','weightKg'],address:['address'],resume:[],relay:[],refresh:['provider']}[b.action]||[])];
  if(Object.keys(b).some(k=>!allowed.includes(k)))throw Error('La fenêtre ne peut modifier que les informations de ce problème');
  if(['check-sku','weight','select-product','activate-product','create-product'].includes(b.action)&&(!String(b.sku||'').trim()||b.sku.length>199))throw Error('SKU Erplain requis');
  if(b.resumeAfter!==undefined&&typeof b.resumeAfter!=='boolean')throw Error('Option de reprise invalide');
@@ -297,6 +298,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    return {message:j.action==='weight'?(binding.weightKg?'Poids pris en compte : '+new Intl.NumberFormat('fr-FR').format(binding.weightKg*1000)+' g.':'Erplain retourne encore un poids nul : correction non confirmée.'):j.action==='create-product'?'Produit créé et relu dans Erplain LIVE. Aucun stock fictif ajouté.':'Produit Erplain enregistré comme référence commune pour ce SKU.',product:binding,checks:await recheckOrders(db,ids),variant:v};
   }
   if(j.action==='address'){
+   assertImportedPostalAddress(o,b.address);
    await assertOrderEditable(o);const address={...o.address};for(const k of ['name','street','postal','city','country','phone','email'])address[k]=String(b.address[k]||'').trim();
    await stage('Mise à jour de l’adresse de cette commande dans Erplain LIVE');await api.verify();
    // Check every document before changing the first one: a closed BL must also protect its BC.
@@ -353,10 +355,10 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     const total=rows=>{const sums=new Map();for(const l of shippingProductLines(rows)){const sku=l.sku||l.variant?.sku,quantity=Number(l.quantity);if(typeof sku!=='string'||!sku.trim()||!Number.isFinite(quantity)||quantity<=0)throw Error('Produits ou quantités du BC non vérifiables : reprise non autorisée');sums.set(sku,(sums.get(sku)||0)+quantity);}return JSON.stringify([...sums].sort());};
     if(total(desired)!==total(resumeStockLines)&&(o.source_payload?.erplainImported||o.erp_live?.bl?.id))throw Error('Commande V3 et livraison existante différentes : vérifier les quantités avant reprise');
    }
-   const recoveredDraft=await prepareMissingDraftRecovery(db,api,o,{resolutionId:j.id});
+   const recoveredDraft=await preparePublicationResume(db,api,o,{resolutionId:j.id});
    await assertResumeStock(api,recoveredDraft?{...o,erp_live:recoveredDraft}:o,r.Order,resumeStockLines);
    await db.transaction(async tx=>{const e=(await tx.query('SELECT status FROM erp_live_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];if(e?.status==='processing')throw Error('Traitement Erplain en cours');
-    if(recoveredDraft)await commitMissingDraftRecovery(tx,o,recoveredDraft,{resolutionId:j.id,userEmail:j.user_email||'system'});
+    if(recoveredDraft)await commitPublicationResume(tx,o,recoveredDraft,{resolutionId:j.id,userEmail:j.user_email||'system'});
     await tx.query('UPDATE orders SET resolution_pending_resume=false WHERE id=$1',[o.id]);
     await tx.query("INSERT INTO erp_live_jobs(order_id,status) VALUES($1,'pending') ON CONFLICT(order_id) DO UPDATE SET status='pending',error=null,updated_at=now()",[o.id]);
     await tx.query("UPDATE resolution_jobs SET status='waiting',stage='Reprise du BL Erplain',result=$2,updated_at=now() WHERE id=$1",[j.id,JSON.stringify({resume:true})]);});return null;

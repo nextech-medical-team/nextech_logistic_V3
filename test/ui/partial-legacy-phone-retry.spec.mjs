@@ -13,6 +13,7 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await page.route('**/api/partial/retry',r=>{resumed=true;return r.fulfill({json:{ok:true,labelOnly:true,blId:'bl'}});});
  await page.goto('/');await page.getByRole('button',{name:'Préparer une nouvelle livraison',exact:true}).click();
  const dialog=page.locator('dialog.partial-quantity-dialog'),retry=dialog.locator('[data-partial-retry]');await expect(retry).toHaveCount(1);await expect(retry).toHaveAttribute('data-partial-retry','existing-delivery');
+ await expect(dialog.locator('[data-partial-temu-buy],[data-partial-temu-refresh]')).toHaveCount(0);await expect(dialog.locator('#partial-history')).not.toContainText(' · BL : ');
  const input=dialog.locator('[data-partial-line="line"]');await input.fill('1');await page.screenshot({path:'proofs/partial-legacy-phone-before-'+name+'.png',fullPage:true});await retry.click();
  await expect(dialog).toContainText('BL et étiquette prêts');await expect(dialog).toContainText('SYNTHETIC-TRACKING');await expect(dialog).toContainText('Réponse transporteur à rapprocher');await expect(dialog.locator('[data-partial-retry]')).toHaveCount(0);await expect(input).toHaveValue('1');
  await page.screenshot({path:'proofs/partial-legacy-phone-retry-'+name+'.png',fullPage:true});expect(writes).toEqual([{path:'/api/partial/retry',body:{id:'existing-delivery'}}]);expect(errors).toEqual([]);

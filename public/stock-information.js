@@ -44,8 +44,16 @@
  const root=document.getElementById('order-rows');if(!root)return;
  const cache=new Map(),pending=new Map(),queue=[];let running=0;
  const format=value=>value===null||value===undefined?'non vérifiée':Number(value).toLocaleString('fr-FR');
+ function receiptText(product){
+  if(!(product?.incoming>0))return '';
+  const schedule=product.incomingReceipts;
+  const dates=(schedule?.receipts||[]).filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.date)&&Number.isFinite(r.quantity)&&r.quantity>0);
+  if(!dates.length)return schedule?.status==='unverified'||!schedule?'Réception estimée : non vérifiée':'Réception estimée : date non renseignée';
+  const text=dates.map(r=>r.date.slice(8,10)+'/'+r.date.slice(5,7)+'/'+r.date.slice(0,4)+' ('+format(r.quantity)+')').join(' ; ');
+  return 'Réception estimée : '+text+(schedule.status==='verified'?'':' · autres quantités sans date vérifiée');
+ }
  function html(data){
-  return '<span>À venir ERPLAIN : '+esc(format(data.original.incoming))+'</span><br>'+
+  return '<span>À venir ERPLAIN : '+esc(format(data.original.incoming))+'</span><br>'+(receiptText(data.original)?'<span>'+esc(receiptText(data.original))+'</span><br>':'')+
    (data.equivalentCount?'<span>Équivalent'+(data.equivalentCount>1?'s':'')+' enregistré'+(data.equivalentCount>1?'s':'')+' dans V3 : '+data.equivalents.map(e=>esc(e.sku)+' · '+(e.available===null?'stock non vérifié':esc(format(e.available))+' disponible'+(e.available>1?'s':''))).join(' ; ')+(data.equivalentCount>data.equivalents.length?' ; autres équivalents à consulter':'')+'</span>':'<span>Aucun équivalent enregistré dans V3</span>')+
    '<br><span>Emplacement V3 '+esc(data.locationId)+' · lu le '+esc(new Date(data.checkedAt).toLocaleString('fr-FR'))+'</span>';
  }
@@ -66,7 +74,7 @@
   if(Date.now()>=entry.expires){entry.finish({error:true,reason:'lecture différée · aucune réponse stock obtenue'},Date.now()+60000);continue;}
   running++;entry.state='reading';for(const info of entry.nodes)loading(info,'reading');
   const remaining=Math.max(1,entry.expires-Date.now());
-  Promise.race([api('/api/equivalences/stock-information?'+new URLSearchParams({sku:entry.sku}),undefined,{timeoutMs:remaining}),entry.promise]).then(data=>{
+  Promise.race([api('/api/equivalences/stock-information?'+new URLSearchParams({sku:entry.sku,includeIncomingDates:1}),undefined,{timeoutMs:remaining}),entry.promise]).then(data=>{
    if(entry.done)return;
    if(!data?.original||!Array.isArray(data.equivalents)||!Number.isFinite(Date.parse(data.expiresAt)))throw Error('Réponse stock incomplète');
    entry.finish(data,Date.parse(data.expiresAt));
@@ -93,7 +101,7 @@
   info.dataset.expiresAt=String(cache.get(info.dataset.stockInformation)?.until||Date.now()+60000);
   info.setAttribute('aria-busy','false');info.dataset.stockState=data.error?'unavailable':'complete';
   const unknown=data.error||data.original?.incoming===null||data.original?.incoming===undefined;
-  if(info.hasAttribute('data-stock-preview')){info.textContent=info.dataset.stockInformation+' · À venir : '+(unknown?'quantité non vérifiée'+(data.reason?' · '+data.reason:''):format(data.original.incoming));return;}
+  if(info.hasAttribute('data-stock-preview')){info.textContent=info.dataset.stockInformation+' · À venir : '+(unknown?'quantité non vérifiée'+(data.reason?' · '+data.reason:''):format(data.original.incoming)+(receiptText(data.original)?' · '+receiptText(data.original):''));return;}
   info.innerHTML=data.error?'À venir ERPLAIN : quantité non vérifiée · '+esc(data.reason||'lecture indisponible')+'<br>Équivalents V3 : lecture non obtenue':html(data);
   if(unknown){
    const retry=document.createElement('button');retry.type='button';retry.className='link-button';retry.dataset.stockRetry='';retry.textContent='Réessayer la lecture';

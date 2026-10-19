@@ -17,12 +17,15 @@ export function withoutVerifiedWeight(message,sku){
   return part;
  }).filter(x=>x!==null).join(' ; ')||null;
 }
-export async function reconcileVerifiedWeights(db,onlySku=null,onlyOrder=null){
+export async function reconcileVerifiedWeights(db,onlySku=null,onlyOrder=null,providerProof=null){
  const bindings=(await db.query('SELECT * FROM erplain_product_bindings'+(onlySku?' WHERE sku=$1':` b WHERE b.verified_at>now()-interval '24 hours' AND (
   EXISTS(SELECT 1 FROM resolution_jobs j WHERE j.status='review' AND j.error LIKE '%'||b.sku||'%' AND (j.error LIKE '%Poids non renseigné%' OR j.error LIKE '%Poids manquant%' OR j.error LIKE '%Unité de poids%'))
   OR EXISTS(SELECT 1 FROM orders o JOIN lines l ON l.order_id=o.id WHERE coalesce(l.target_sku,(SELECT m.target_sku FROM mappings m WHERE m.channel=o.channel AND m.source_sku=l.source_sku),l.source_sku)=b.sku AND (o.issue LIKE '%Poids%' OR o.issue LIKE '%Unité de poids%' OR (o.erp_live->'lastAudit'->'issues')::text LIKE '%Poids%'))
   OR EXISTS(SELECT 1 FROM erp_live_jobs e JOIN orders o ON o.id=e.order_id JOIN lines l ON l.order_id=e.order_id WHERE coalesce(l.target_sku,(SELECT m.target_sku FROM mappings m WHERE m.channel=o.channel AND m.source_sku=l.source_sku),l.source_sku)=b.sku AND (e.error LIKE '%Poids%' OR e.error LIKE '%Unité de poids%'))
  )`),onlySku?[onlySku]:[])).rows;
+ // A fresh provider read can reconcile diagnostics without creating a permanent
+ // SKU binding (which would also change later stock/BC variant selection).
+ if(providerProof?.sku===onlySku&&!bindings.some(b=>b.sku===onlySku)&&verifiedWeightBinding(providerProof))bindings.push(providerProof);
  for(const b of bindings){
   if(!verifiedWeightBinding(b))continue;
   // A verified SKU binding cannot resolve a different physical variant's
@@ -35,7 +38,8 @@ export async function reconcileVerifiedWeights(db,onlySku=null,onlyOrder=null){
    AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id AND c.status IN ('creating','awaiting_pdf'))`,[b.sku,String(b.live_variant_id),onlyOrder])).rows;
   for(const row of rows)await db.transaction(async tx=>{
    const o=(await tx.query('SELECT id,issue,erp_live,received_at FROM orders WHERE id=$1 FOR UPDATE',[row.id])).rows[0];if(!o)return;
-   const proof=(await tx.query('SELECT * FROM erplain_product_bindings WHERE sku=$1 FOR SHARE',[b.sku])).rows[0];
+   const stored=(await tx.query('SELECT * FROM erplain_product_bindings WHERE sku=$1 FOR SHARE',[b.sku])).rows[0];
+   const proof=stored||(providerProof?.sku===b.sku?providerProof:null);
    if(!verifiedWeightBinding(proof)||String(proof.live_variant_id)!==String(b.live_variant_id))return;
    const lines=(await tx.query('SELECT target_sku,source_sku,source_payload,(SELECT m.target_sku FROM mappings m JOIN orders o ON o.channel=m.channel WHERE o.id=l.order_id AND m.source_sku=l.source_sku) AS mapped_sku FROM lines l WHERE order_id=$1 FOR SHARE',[o.id])).rows;
    if(lines.some(l=>(l.target_sku||l.mapped_sku||l.source_sku)===b.sku&&l.source_payload?.erplainSourceVariantId!=null&&String(l.source_payload.erplainSourceVariantId)!==String(b.live_variant_id)))return;
@@ -60,5 +64,5 @@ export async function reconcileVerifiedWeights(db,onlySku=null,onlyOrder=null){
    if(changed)await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','diagnostic.verified_weight',$1)",[JSON.stringify({orderId:o.id,sku:b.sku,variantId:b.live_variant_id,verifiedAt:proof.verified_at,updatedReviewMessages:changed,businessStatesPreserved:true})]);
   });
  }
- await reconcileGenericOrderWeights(db,onlyOrder);
+ await reconcileGenericOrderWeights(db,onlyOrder,providerProof);
 }

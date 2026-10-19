@@ -1,3 +1,6 @@
+import {resumeArchivedBl} from './erplain-archived-resume.mjs';
+import {preserveImportedPostalAddress} from './imported-postal-authority.mjs';
+import {existingRecoveryCandidate,attachExistingDocuments} from './erplain-existing-recovery.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {recoveredPreparationIssue} from './recovered-preparation-issue.mjs';
 import {completeShippingOrders} from './erplain-document-read.mjs';
@@ -84,7 +87,7 @@ export async function synchronizeRecoveredOrder(db,o,d){
  const messages=(o.erp_live.stockDocument?.id||d.update_stock===true)?problems.filter(p=>!/stock insuffisant/i.test(p)):problems;
  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{bc}',$2::jsonb),erplain_refresh=erplain_refresh||$3::jsonb,resolution_pending_resume=CASE WHEN NOT $4 AND NOT archived THEN true ELSE resolution_pending_resume END WHERE id=$1",[o.id,JSON.stringify(scope?scopeSnapshot(d,scope):d),JSON.stringify({issues:[...new Set(messages)],at:new Date().toISOString(),account:'live'}),Boolean(issued)]);
  if(!issued&&!o.partial_mode&&!o.archived&&address.street&&address.country){
-  await db.query('UPDATE orders SET address=$2,recipient=$3 WHERE id=$1',[o.id,JSON.stringify({...address,street1:a.address_1||'',street2:a.address_2||''}),d.customer?.label||o.recipient]);
+  await db.query('UPDATE orders SET address=$2,recipient=$3 WHERE id=$1',[o.id,JSON.stringify(preserveImportedPostalAddress(o,{...address,street1:a.address_1||'',street2:a.address_2||''})),d.customer?.label||o.recipient]);
   // Only retire a definite preflight rejection, never a carrier creation with
   // uncertain outcome, tracking, response or documents. Preserve its audit.
   const old=(await db.query("SELECT error FROM carrier_jobs c WHERE c.order_id=$1 AND c.status='failed' AND c.creation_started_at IS NULL AND coalesce(c.failure_phase,'preflight')='preflight' AND c.result IS NULL AND c.reference IS NULL AND coalesce(c.tracking,'[]'::jsonb)='[]'::jsonb AND NOT EXISTS(SELECT 1 FROM carrier_documents x WHERE x.order_id=c.order_id)",[o.id])).rows[0];
@@ -107,18 +110,40 @@ export function targetedOrderService(db,api){
   return withShipmentLock(()=>db.transaction(async tx=>{
    const existing=await existingBcOrder(tx,id),r=(await tx.query('SELECT * FROM erplain_manual_review WHERE bc_id=$1',[String(id)])).rows[0];
    await tx.query("INSERT INTO erplain_refresh_cache(account,section,entity_id,reference,detail) VALUES('live','orders',$1,$2,$3) ON CONFLICT(account,section,entity_id) DO UPDATE SET reference=excluded.reference,detail=excluded.detail,missing=false,seen_at=now()",[String(id),d.external_reference||d.label,JSON.stringify(d)]);
-   if(existing&&r?.status!=='pending'){
-    const issues=documentIssues(d,existing),messages=await synchronizeRecoveredOrder(tx,existing,d);
-    return {document:d,...issues,preparationIssues:messages,alreadyRecovered:true,orderId:existing.id,archived:existing.archived,readAt:new Date().toISOString()};
+   const candidate=await existingRecoveryCandidate(tx,d);
+   const pendingAdmission=existing&&r?.status==='pending'&&existing.source_payload?.erplainValidationHold===true&&existing.source_payload.erplainValidation!=='approved';
+   if(candidate&&!pendingAdmission){
+    const issues=documentIssues(d,existing);
+    return {document:d,reviewHash:manualReviewHash(d),...issues,admissionIssues:candidate.blocked?[candidate.blocked]:[],reconcileCandidate:candidate.blocked?null:candidate,existingMatches:candidate.matches,readAt:new Date().toISOString()};
    }
    if(r&&r.status!=='pending')throw Error('Ce BC a fait l’objet d’un refus ou d’une annulation : vérifier son historique');
    await queueManualReview(tx,d,existing?.id||null);
-   const duplicate=(await tx.query('SELECT id FROM orders WHERE reference=$1 AND id IS DISTINCT FROM $2 LIMIT 1',[String(d.external_reference||d.label).trim(),existing?.id||null])).rows.length;
-   const issues=documentIssues(d);if(duplicate)issues.admissionIssues.push('Référence déjà présente dans V3 : rapprochement requis');
+   const issues=documentIssues(d);
    return {document:d,reviewHash:manualReviewHash(d),...issues,readAt:new Date().toISOString()};
   }));
  }
  return {
+  async reactivate(b,user){
+   if(b.confirmed!==true||typeof b.bcId!=='string'||typeof b.orderId!=='string'||typeof b.blId!=='string'||!b.blId||typeof b.reviewHash!=='string')throw Error('Confirmer la réactivation et sélectionner le BL');
+   const d=await read(b.bcId);if(manualReviewHash(d)!==b.reviewHash)throw Error('Le BC ou ses BL ont changé : relire avant de confirmer');
+   return withShipmentLock(()=>db.transaction(async tx=>{
+    const candidate=await existingRecoveryCandidate(tx,d);
+    if(!candidate||candidate.blocked||candidate.orderId!==b.orderId)throw Error(candidate?.blocked||'Correspondance V3 à vérifier');
+    const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[b.orderId])).rows[0];
+    return resumeArchivedBl(tx,o,d,b.blId,user);
+   }));
+  },
+  async reconcile(b,user){
+   if(b.confirmed!==true||typeof b.bcId!=='string'||!b.bcId.trim()||typeof b.orderId!=='string'||!b.orderId||typeof b.reviewHash!=='string')throw Error('Confirmer le rattachement à une commande V3 existante');
+   const d=await read(b.bcId);
+   if(manualReviewHash(d)!==b.reviewHash)throw Error('Le BC ou ses BL ont changé : relire avant de confirmer');
+   return withShipmentLock(()=>db.transaction(async tx=>{
+    if(db.kind==='postgres')await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('nextech:import-order-identity',0))");
+    const candidate=await existingRecoveryCandidate(tx,d);
+    if(!candidate||candidate.blocked||candidate.orderId!==b.orderId)throw Error(candidate?.blocked||'Correspondance V3 modifiée : relire le BC');
+    return attachExistingDocuments(tx,d,b.orderId,user);
+   }));
+  },
   async lookup(b){
    const reference=targetedReference(b.reference);if(b.bcId!==undefined&&(typeof b.bcId!=='string'||!b.bcId.trim()||b.bcId.length>100))throw Error('Sélectionner un seul BC');
    await api.verify();const matches=new Map();let page=1;
@@ -132,10 +157,10 @@ export function targetedOrderService(db,api){
    if(!b.bcId&&candidates.length>1)return {selectionRequired:true,candidates,reference};
    return {...await preview(b.bcId||String(candidates[0].id)),reference};
   },
-  async reread(b){if(typeof b.bcId!=='string'||!b.bcId.trim())throw Error('BC requis');const r=(await db.query('SELECT bc_id FROM erplain_manual_review WHERE bc_id=$1',[b.bcId])).rows[0];if(!r)throw Error('Récupérer ce BC avant de le relire');return preview(b.bcId);},
+  async reread(b){if(typeof b.bcId!=='string'||!b.bcId.trim())throw Error('BC requis');return preview(b.bcId);},
   async list({search='',page=1}={}){
    page=Math.max(1,Math.min(10000,Number(page)||1));
-   const where="o.source_payload->>'erplainImported'='true' AND o.source_payload->>'account'='live' AND (o.reference ILIKE $1 OR o.erp_live->'bc'->>'label' ILIKE $1 OR o.recipient ILIKE $1)";
+   const where="(EXISTS(SELECT 1 FROM erplain_order_identity identity WHERE identity.account='live' AND identity.order_id=o.id) OR (o.source_payload->>'erplainImported'='true' AND o.source_payload->>'account'='live')) AND (o.reference ILIKE $1 OR o.source_reference ILIKE $1 OR o.erp_live->'bc'->>'label' ILIKE $1 OR o.recipient ILIKE $1)";
    const params=['%'+String(search).slice(0,200)+'%'];const total=Number((await db.query('SELECT count(*) n FROM orders o WHERE '+where,params)).rows[0].n);
    const rows=(await db.query(`SELECT o.id,o.reference,o.recipient,o.archived,o.partial_mode,o.source_payload,o.erp_live,o.issue,o.erplain_refresh,o.label_status,o.tracking_status,greatest((o.erplain_refresh->>'manualCheckedAt')::timestamptz,c.seen_at) AS read_at,r.status AS validation_status,EXISTS(SELECT 1 FROM carrier_jobs j WHERE j.order_id=o.id AND (j.result IS NOT NULL OR j.tracking<>'[]'::jsonb OR j.status IN ('pending','creating','awaiting_pdf','ready','review'))) AS has_label,EXISTS(SELECT 1 FROM resolution_jobs j WHERE j.order_id=o.id AND j.status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM erp_live_jobs j WHERE j.order_id=o.id AND j.status IN ('pending','processing')) AS busy FROM orders o LEFT JOIN erplain_refresh_cache c ON c.account='live' AND c.section='orders' AND c.entity_id=o.erp_live->'bc'->>'id' LEFT JOIN erplain_manual_review r ON r.bc_id=o.erp_live->'bc'->>'id' WHERE ${where} ORDER BY o.received_at DESC,o.id LIMIT 25 OFFSET $2`,[...params,(page-1)*25])).rows;
    for(const row of rows){const d=documentIssues(row.erp_live.bc||{},row);row.preparationIssues=[...d.admissionIssues,...d.preparationIssues];if(row.has_label||row.erp_live.stockDocument?.id||row.erp_live.bc?.update_stock===true)row.preparationIssues=row.preparationIssues.filter(p=>!/stock insuffisant/i.test(p));}

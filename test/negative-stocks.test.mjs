@@ -8,7 +8,7 @@ test('history preserves complete server results and excludes interrupted scans',
  const db=new PGlite();
  try{
   await initializeNegativeStocks(db);
-  const reader={async page(page){return {page:Number(page),lastPage:2,locationId:'7',unverified:1,checkedAt:new Date().toISOString(),rows:[{sku:'SKU'+page,available:-Number(page),onHand:0}]};}};
+  const reader={async page(page){return {scope:'erp-orders-with-bl-negative-available-v1',page:Number(page),lastPage:2,locationId:'7',unverified:1,checkedAt:new Date().toISOString(),rows:[{sku:'SKU'+page,available:-Number(page),onHand:0}]};}};
   const service=negativeStocksHistory(db,reader),user={email:'test@example.com'};
   const first=await service.scan({},user);
   assert.equal(first.saved,false);
@@ -23,30 +23,97 @@ test('history preserves complete server results and excludes interrupted scans',
   assert.equal((await service.list()).rows[0].product_count,2);
   await assert.rejects(()=>service.scan({page:2,runId:first.runId},user),/expirée/);
   const changing=await service.scan({},user);
-  reader.page=async()=>({page:2,lastPage:2,locationId:'8',rows:[],unverified:0});
+  reader.page=async()=>({scope:'erp-orders-with-bl-negative-available-v1',page:2,lastPage:2,locationId:'8',rows:[],unverified:0});
   await assert.rejects(()=>service.scan({page:2,runId:changing.runId},user),/Emplacement modifié/);
   assert.equal((await service.list()).rows.length,1);
  }finally{await db.close();}
 });
 
-test('negative quantities are retained at the configured location only',async()=>{
- const variant=(id,available,onHand,extra={})=>({id,sku:'SKU'+id,active:true,track_inventory:true,product:{active:true,label:'Produit'},stock_levels:{data:[{location:{id:'7'},available,on_hand:onHand},{location:{id:'8'},available:-100,on_hand:-100}],paginatorInfo:{hasMorePages:false}},...extra});
- const api={verify:async()=>{},request:async()=>({Variants:{data:[variant(1,'-2',3),variant(2,4,-1),variant(3,0,0),variant(4,-3,-3,{active:false}),variant(5,null,null),variant(6,-1,-1,{stock_levels:{data:[],paginatorInfo:{hasMorePages:true}}})],paginatorInfo:{lastPage:2}}})};
- const service=negativeStocksService(api,'',{location:async()=>'7'});
- const result=await service.page('1');
- assert.deepEqual(result.rows.map(r=>[r.sku,r.available,r.onHand]),[['SKU1',-2,3],['SKU2',4,-1]]);
- assert.equal(result.unverified,2);assert.equal(result.lastPage,2);
- await assert.rejects(()=>service.page('-1'),/invalide/);
+const line=(id,available=-1,onHand=5,extra={})=>({id,quantity:1,label:'Produit BL',location:{id:'7',label:'Default location'},variant:{id:'v'+id,sku:'SKU'+id,track_inventory:true,product:{default_supplier:{label:'Principal'}},stock_levels:{data:[{location:{id:'7'},available,on_hand:onHand},{location:{id:'8'},available:-100,on_hand:-100}],paginatorInfo:{hasMorePages:false}}},...extra});
+const document=(id,lines,status='ready_to_ship')=>({id,label:'CO'+id,status,line_items:lines,shipping_orders:{data:[{id:'bl'+id,label:'SHO'+id,status:'ready_to_ship'}],paginatorInfo:{hasMorePages:false}}});
+function reader(documents,lastPage=1){return negativeStocksService({verify:async()=>{},request:async(query)=>{assert.match(query,/^query /);assert.match(query,/Orders/);return {Orders:{data:documents,paginatorInfo:{lastPage}}};}},'',{location:async()=>'7'});}
+
+test('reports existing BL lines with negative available stock, preserving BL quantities and suppliers',async()=>{
+ const shared=line(1),second={...shared,quantity:3};
+ const result=await reader([document(10,[shared,line(2,0,-5),line(3,2,0)]),document(11,[second])],2).page();
+ assert.deepEqual(result.rows.map(row=>[row.bcLabel,row.blLabel,row.sku,row.orderQuantity,row.available,row.onHand,row.supplier]),[['CO10','SHO10','SKU1',1,-1,5,'Principal'],['CO11','SHO11','SKU1',3,-1,5,'Principal']]);
+ assert.equal(result.lastPage,2);assert.equal(result.scope,'erp-orders-with-bl-negative-available-v1');
 });
 
-test('an incomplete catalog fails instead of claiming no negative stocks',async()=>{
- const service=negativeStocksService({verify:async()=>{},request:async()=>({Variants:{data:[],paginatorInfo:{}}})},'',{location:async()=>'7'});
- await assert.rejects(()=>service.page(),/incomplète/);
+test('excludes cancelled/unpublished BL, fees, other warehouses and unknown stock',async()=>{
+ const malformed=line(5);malformed.variant.stock_levels.paginatorInfo.hasMorePages=true;
+ const missingTracking=line(6);delete missingTracking.variant.track_inventory;
+ const result=await reader([document(1,[line(1)],'cancelled'),document(2,[line(2)],'unpublished'),document(3,[line(3,-1,0,{location:{id:'8'}}),line(4,null,0),malformed,missingTracking,{id:'fee',quantity:1,variant:null}])]).page();
+ assert.equal(result.rows.length,0);assert.equal(result.unverified,3);
 });
 
-test('supplier uses the primary supplier then associated suppliers without inventing missing data',async()=>{
- const variant=(id,product,suppliers)=>({id,sku:String(id),active:true,track_inventory:true,product,suppliers,stock_levels:{data:[{location:{id:7},available:-1,on_hand:0}],paginatorInfo:{hasMorePages:false}}});
- const api={verify:async()=>{},request:async()=>({Variants:{data:[variant(1,{default_supplier:{label:'Principal'}},[{supplier:{label:'Autre'}}]),variant(2,{},[{supplier:{label:'Associe'}},{supplier:{label:'Associe'}}]),variant(3,{},[])],paginatorInfo:{lastPage:1}}})};
+test('incomplete BL pagination fails instead of claiming an empty report',async()=>{
+ await assert.rejects(()=>reader([],undefined).page('0'),/invalide/);
+ await assert.rejects(()=>reader([],null).page(),/incomplète/);
+ assert.equal((await reader([],0).page()).rows.length,0);
+});
+
+test('associated supplier fallback is preserved',async()=>{
+ const product=line(1);product.variant.product={};product.variant.suppliers=[{supplier:{label:'Associe'}},{supplier:{label:'Associe'}}];
+ assert.equal((await reader([document(1,[product])]).page()).rows[0].supplier,'Associe');
+});
+
+test('ERP command CO015844 with -20 available is included only with a created BL',async()=>{
+ const product=line(1,-20,4);product.quantity=10;product.variant.sku='BT-0022-33B-SMS';
+ const order={...document(15844,[product],'active'),label:'CO015844',external_reference:'PO-test'};
+ const noDelivery={...document(15845,[line(2)],'active'),shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}};
+ const result=await reader([order,noDelivery]).page();
+ assert.equal(result.rows[0].bcLabel,'CO015844');assert.equal(result.rows[0].available,-20);assert.equal(result.rows[0].orderQuantity,10);
+ assert.equal(result.rows.length,1);
+ const cancelledDelivery={...noDelivery,shipping_orders:{data:[{id:'cancelled-bl',label:'SHO-cancelled',status:'cancelled'},{id:'draft-bl',label:'SHO-draft',status:'unpublished'}],paginatorInfo:{hasMorePages:false}}};
+ assert.equal((await reader([cancelledDelivery]).page()).rows.length,0);
+});
+
+test('all associated BL pages are read before a command is reported',async()=>{
+ const order=document(1,[line(1)]);order.shipping_orders.paginatorInfo.hasMorePages=true;
+ const api={verify:async()=>{},request:async(query,variables)=>{
+  if(query.includes('V3NegativeStockOrders('))return {Orders:{data:[order],paginatorInfo:{lastPage:1}}};
+  assert.equal(variables.page,2);return {Order:{id:1,shipping_orders:{data:[{id:'extra',label:'SHO-extra',status:'ready_to_ship'}],paginatorInfo:{hasMorePages:false}}}};
+ }};
  const result=await negativeStocksService(api,'',{location:async()=>'7'}).page();
- assert.deepEqual(result.rows.map(row=>row.supplier),['Principal','Associe',null]);
+ assert.equal(result.rows[0].blLabel,'SHO1 ; SHO-extra');
+});
+
+test('missing, blank and malformed BL status never qualifies a command and is flagged',async()=>{
+ for(const status of [undefined,null,'','   ',0,false,{}]){
+  const order=document(1,[line(1)]);order.shipping_orders.data[0].status=status;
+  const result=await reader([order]).page();
+  assert.equal(result.rows.length,0);assert.equal(result.unverified,1);
+ }
+});
+
+test('a valid BL still qualifies the command while an unknown BL is excluded and flagged',async()=>{
+ const order=document(1,[line(1)]);
+ order.shipping_orders.data.push({id:'unknown',label:'SHO-unknown'});
+ const result=await reader([order]).page();
+ assert.equal(result.rows.length,1);assert.equal(result.rows[0].blLabel,'SHO1');assert.equal(result.unverified,1);
+});
+
+test('missing BL status on later pages is recorded in report history',async()=>{
+ const order=document(1,[line(1)]);order.shipping_orders.data[0].status='cancelled';order.shipping_orders.paginatorInfo.hasMorePages=true;
+ const api={verify:async()=>{},request:async query=>query.includes('V3NegativeStockOrders(')?{Orders:{data:[order],paginatorInfo:{lastPage:1}}}:{Order:{id:1,shipping_orders:{data:[{id:'unknown',label:'SHO-unknown'}],paginatorInfo:{hasMorePages:false}}}}};
+ const db=new PGlite();
+ try{
+  await initializeNegativeStocks(db);
+  const history=negativeStocksHistory(db,negativeStocksService(api,'',{location:async()=>'7'}));
+  const result=await history.scan({}, {email:'fixture@example.invalid'});
+  assert.equal(result.saved,true);assert.equal(result.unverified,1);assert.equal(result.rows.length,0);
+  const saved=await history.get(result.runId);assert.equal(saved.snapshot.unverified,1);
+  assert.equal((await history.list()).rows[0].unverified,1);
+ }finally{await db.close();}
+});
+
+test('BL, quantity and negative availability are numeric/text values in Excel',async()=>{
+ const {exportNegativeStocks}=await import('../src/negative-stocks-export.mjs');
+ const {default:ExcelJS}=await import('exceljs');
+ const datedOrder={...document(10,[line(1)]),dated_at:'2026-10-15'};
+ const rows=(await reader([datedOrder]).page()).rows;
+ const book=new ExcelJS.Workbook();await book.xlsx.load(await exportNegativeStocks(rows));
+ const sheet=book.worksheets[0];
+ assert.equal(sheet.getCell('A2').value,'CO10');assert.equal(sheet.getCell('B2').value.toISOString().slice(0,10),'2026-10-15');assert.equal(sheet.getCell('C2').value,'SHO10');assert.equal(sheet.getCell('G2').value,1);assert.equal(sheet.getCell('H2').value,-1);assert.equal(sheet.getCell('J2').value,'Default location');
 });

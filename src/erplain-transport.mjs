@@ -33,8 +33,8 @@ export async function erplainFetch(config,url,buildOptions,{fetchImpl=fetch,read
   // Build the timeout after waiting, so a shared pause cannot expire it.
   const options=buildOptions(),operation=erplainOperation(options),waitMs=Date.now()-waitingAt,sentAt=Date.now();
   let response;
-  try{response=await fetchImpl(url,options);}catch(error){observe({...operation,outcome:'network_error',attempt,waitMs,durationMs:Date.now()-sentAt});throw error;}
-  observe({...operation,status:response.status,outcome:response.status===429?'provider_rate_limited':'response',attempt,waitMs,durationMs:Date.now()-sentAt});
+  try{response=await fetchImpl(url,options);}catch(error){observe({...operation,outcome:'network_error',attempt,waitMs,sentAt,durationMs:Date.now()-sentAt});throw error;}
+  observe({...operation,status:response.status,outcome:response.status===429?'provider_rate_limited':'response',attempt,waitMs,sentAt,durationMs:Date.now()-sentAt});
   // A GraphQL rejection can use HTTP 200. Only a complete, explicit rejection
   // without any data is equivalent to HTTP 429; partial results stay intact.
   if(response.ok&&new URL(url).pathname==='/graphql'){
