@@ -111,3 +111,46 @@ filteredBatchLabels.onclick=async()=>{
   await downloadMerged(ids);
  }catch(e){flash(e.message,true);}finally{filteredBatchLabels.disabled=false;filteredBatchLabels.textContent='Télécharger toutes les étiquettes filtrées';}
 };
+
+// Recovered Erplain BLs are folded under their order; ordinary V3 deliveries stay visible.
+(()=>{
+ const body=document.getElementById('order-rows');if(!body)return;
+ const expanded=new Set();
+ const style=document.createElement('style');
+ style.textContent='#order-rows .delivery-row[hidden]{display:none!important}#order-rows details[data-delivery-group]>summary{cursor:pointer;color:#176b60;font-weight:600;padding:6px 0}#order-rows .delivery-row[data-recovered-bl-display]:not([hidden]){border-left:3px solid #85bcb2}';
+ document.head.append(style);
+ function reconcile(){
+  const groups=new Map();
+  const recovered=new Set((orderRenderData?.partial?.rows||[]).filter(d=>d.recovered_existing_bl===true).map(d=>String(d.id)));
+  for(const row of body.querySelectorAll('tr.delivery-row')){
+   const deliveryId=row.querySelector('[data-delivery-select]')?.dataset.deliverySelect;
+   if(!recovered.has(deliveryId)){row.hidden=false;delete row.dataset.recoveredBlDisplay;continue;}
+   row.dataset.recoveredBlDisplay='true';
+   const id=row.querySelector('[data-delivery-detail]')?.dataset.deliveryDetail;
+   if(!id)continue;if(!groups.has(id))groups.set(id,[]);groups.get(id).push(row);
+  }
+  for(const link of body.querySelectorAll('[data-detail]')){
+   const id=link.dataset.detail,parent=link.closest('tr'),rows=groups.get(id)||[];
+   let control=parent.querySelector('details[data-delivery-group]');
+   if(!rows.length){if(control?.dataset.deliveryGroupFallback==='true')control.remove();continue;}
+   if(!control){
+    control=[...parent.querySelectorAll('details')].find(d=>/BL associé/.test(d.querySelector('summary')?.textContent||''));
+    if(!control){
+     control=document.createElement('details');control.dataset.deliveryGroupFallback='true';
+     const summary=document.createElement('summary');summary.textContent='Livraisons ('+rows.length+')';control.append(summary);
+     (parent.querySelector('[data-erplain-document-kind="bl"]')?.closest('td')||link.parentElement).append(control);
+    }
+    control.dataset.deliveryGroup=id;control.open=expanded.has(id);
+    control.querySelector('summary').title='Afficher ou masquer les livraisons, leurs étiquettes et leurs suivis';
+   }
+   for(const row of rows)row.hidden=!control.open;
+  }
+ }
+ body.addEventListener('toggle',event=>{
+  const control=event.target,id=control.dataset?.deliveryGroup;if(!id||!body.contains(control))return;
+  if(control.open)expanded.add(id);else expanded.delete(id);
+  reconcile();
+ },true);
+ new MutationObserver(reconcile).observe(body,{childList:true,subtree:true});
+ reconcile();
+})();
