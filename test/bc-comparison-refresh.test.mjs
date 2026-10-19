@@ -10,7 +10,7 @@ const {refreshErplainDocuments}=await import(pathToFileURL(path.join(dir,'erplai
 const {reconcileRefreshedBcDiagnostics,physicalComparisonErrors}=await import(new URL('../src/bc-comparison-refresh.mjs',import.meta.url));
 const clone=x=>structuredClone(x);
 function fixture(entry){
- const state={order:clone(entry.order),lines:clone(entry.lines),jobs:clone(entry.jobs).map(j=>({...j,result:{kept:'original'}})),documents:[{pdf:'unchanged',tracking:'unchanged',annotation:'unchanged'}],erp:clone(entry.erp),busy:false};
+ const state={order:clone(entry.order),lines:clone(entry.lines),jobs:clone(entry.jobs).map(j=>({...j,result:{kept:'original'}})),documents:[{pdf:'unchanged',tracking:'unchanged',annotation:'unchanged'}],erp:clone(entry.erp),audits:[],busy:false};
  const writes=[];
  const db={state,writes,async query(sql,args=[]){
   if(sql.startsWith('SELECT source_sku,target_sku,quantity,target_quantity FROM lines'))return {rows:clone(state.lines).map(l=>({source_sku:l.source_sku,target_sku:l.target_sku,quantity:l.quantity,target_quantity:l.target_quantity}))};
@@ -27,6 +27,14 @@ function fixture(entry){
   if(sql.startsWith('UPDATE orders SET erp_live=$2')){writes.push(sql);state.order.erp_live=JSON.parse(args[1]);return {rows:[]}};
   if(sql.startsWith('UPDATE orders SET erp_live=jsonb_set')){writes.push(sql);state.order.erp_live.bcComparisonRefresh=JSON.parse(args[1]);return {rows:[]}};
   if(sql.startsWith('UPDATE resolution_jobs SET result=')){writes.push(sql);const j=state.jobs.find(j=>j.id===args[0]&&j.status==='review'&&j.error===args[4]);if(j){j.result={...(j.result&&typeof j.result==='object'&&!Array.isArray(j.result)?j.result:{previousResult:j.result}),...JSON.parse(args[2])};j.error=args[3]}return {rows:j?[{id:j.id}]:[]}};
+  if(sql==="UPDATE resolution_jobs SET error=$2,result=(CASE WHEN jsonb_typeof(result)='object' THEN result ELSE jsonb_build_object('previousResult',result) END)||$3::jsonb,updated_at=now() WHERE id=$1 AND error=$4"){
+   writes.push(sql);const j=state.jobs.find(j=>j.id===args[0]&&j.error===args[3]);
+   if(j){j.error=args[1];j.result={...(j.result&&typeof j.result==='object'&&!Array.isArray(j.result)?j.result:{previousResult:j.result}),...JSON.parse(args[2])};}
+   return {rows:[],rowCount:j?1:0};
+  }
+  if(sql==="INSERT INTO audit(user_email,action,detail) VALUES('system:stock-incident-recheck','diagnostic.stock_shortage_refreshed',$1)"){
+   writes.push(sql);state.audits.push({action:'diagnostic.stock_shortage_refreshed',detail:JSON.parse(args[0])});return {rows:[],rowCount:1};
+  }
   throw Error('SQL hors périmètre : '+sql);
  },async transaction(fn){const before=clone(state);try{return await fn(db)}catch(e){for(const k of Object.keys(state))delete state[k];Object.assign(state,before);throw e}}};
  const api={async verify(){},async request(q,v){assert.match(q,/^query\s/);assert.equal(String(v.id),String(entry.bc.id));return {Order:clone(entry.bc)}}};
@@ -70,9 +78,22 @@ for(const ref of ['PH2/00638941','2610813'])test('parcours partiel complet réel
 for(const value of [true,false,'',' ',[],{},Infinity])test('réponse BC invalide '+JSON.stringify(value)+' : refus avant projection',async()=>{
  for(const entry of [q,live.orders[0]]){const {state,db,api}=fixture(entry),before=clone(state);api.request=async()=>{const bc=clone(entry.bc);bc.line_items[0].quantity=value;return {Order:bc}};await assert.rejects(refreshErplainDocuments(db,api,entry.id));assert.deepEqual(state,before)}
 });
-test('modification manuelle des quantités BC : afficher courant et garder écart',async()=>{
- const {state,db,api}=fixture(q);api.request=async()=>{const bc=clone(q.bc);bc.line_items[0].quantity=123;return {Order:bc}};
+test('modification manuelle des quantités BC : afficher courant et actualiser la pénurie sans perdre son historique',async()=>{
+ const {state,db,api}=fixture(q),before=clone(state),read=api.request;
+ api.request=async(query,variables)=>{const response=await read(query,variables);response.Order.line_items[0].quantity=123;return response;};
  const result=await refreshErplainDocuments(db,api,q.id);assert.equal(state.order.erp_live.bc.line_items[0].quantity,123);assert.equal(result.comparison.concordant,true);assert.equal(state.jobs[0].error,null);
+ assert.equal(result.stockIncident.status,'active');
+ assert.match(result.stockIncident.currentError,/TR03 : 123 nécessaires/);
+ const previous=before.jobs.find(j=>j.action==='create-product'),current=state.jobs.find(j=>j.id===previous.id);
+ assert.equal(current.error,result.stockIncident.currentError);assert.equal(current.status,previous.status);
+ assert.equal(current.result.kept,'original');assert.equal(current.result.stockDiagnosticRefresh.previousError,previous.error);
+ assert.equal(current.result.stockDiagnosticRefresh.providerMutations,0);
+ assert.deepEqual(state.lines,before.lines);assert.deepEqual(state.documents,before.documents);assert.deepEqual(state.erp,before.erp);
+ assert.equal(state.audits.length,1);assert.equal(state.audits[0].action,'diagnostic.stock_shortage_refreshed');
+ assert.deepEqual(state.audits[0].detail.previousDiagnostics,[{jobId:previous.id,previousError:previous.error}]);
+ assert.equal(state.audits[0].detail.preparationStarted,false);
+ await refreshErplainDocuments(db,api,q.id);
+ assert.equal(state.audits.length,1);assert.equal(current.result.stockDiagnosticRefresh.previousError,previous.error);
 });
 test('identité locale modifiée pendant la requête : refus sans écrasement',async()=>{
  const {state,db,api}=fixture(q);api.request=async()=>{state.order.erp_live.bc.id=999;return {Order:clone(q.bc)}};
