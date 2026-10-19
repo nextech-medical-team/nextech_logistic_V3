@@ -9,6 +9,7 @@ import {readTransientBlIdentity} from './transient-bl-identity.mjs';
 import {prepareMissingDraftRecovery,commitMissingDraftRecovery} from './missing-draft-recovery.mjs';
 import {usesNativeBlCycle} from './native-bl-policy.mjs';
 import {randomUUID} from 'node:crypto';
+import {recoveryTransaction} from './recovery-transaction.mjs';
 
 export async function recordTransientFailure(db,o,message,error){
  const old=o.erp_live?.transientRecovery||{};
@@ -29,7 +30,7 @@ export async function resumeTransientErplain(db,api){
  await db.transaction(async tx=>{
   const cancelled=(await tx.query(`SELECT o.id,o.suspension,o.source_payload,o.label_status,o.tracking_status,o.issue,o.erp_live,e.error FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE e.status='review' AND e.error NOT LIKE 'Demande d’annulation%' AND e.error NOT LIKE 'Commande annulée%'
-   AND (e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL)
+   AND (e.error ~* 'deadlock|SQLSTATE.?(40001|40P01).?|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL)
    AND (o.label_status='cancelled' OR o.tracking_status='cancelled' OR coalesce(o.suspension->>'active','false')='true' OR o.suspension ? 'erplainCancellation')
    ORDER BY e.updated_at LIMIT 50 FOR UPDATE OF o,e SKIP LOCKED`)).rows;
   for(const o of cancelled){const block=cancellationBlock(o);if(!block)continue;await tx.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{transientRecovery}',$2::jsonb) WHERE id=$1",[o.id,JSON.stringify({...o.erp_live.transientRecovery,lastError:o.erp_live.transientRecovery?.lastError||o.error})]);await tx.query('UPDATE erp_live_jobs SET error=$2 WHERE order_id=$1',[o.id,block]);}
@@ -38,7 +39,7 @@ export async function resumeTransientErplain(db,api){
   // worker run guard serializes passes; the short commit below also rejects any
   // concurrent edit, cancellation, or job replacement made during the read.
   const rows=(await db.query(`SELECT o.*,e.error,e.updated_at retry_updated,e.updated_at::text retry_version FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
-   WHERE e.status='review' AND ((o.erp_live->>'phase'='creating_customer' AND e.error=$1 AND o.erp_live->'transientRecovery'->>'originalError' ~* 'Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError') OR e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu') OR (o.channel<>'tender' AND o.erp_live->'bc'->>'id' IS NOT NULL AND e.error ~ '^(BC/BL : rapprochement incomplet ou ambigu|Brouillon BL introuvable|BL Erplain · Brouillon.*introuvable)'))
+   WHERE e.status='review' AND ((o.erp_live->>'phase'='creating_customer' AND e.error=$1 AND o.erp_live->'transientRecovery'->>'originalError' ~* 'Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError') OR e.error ~* 'deadlock|SQLSTATE.?(40001|40P01).?|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu') OR (o.channel<>'tender' AND o.erp_live->'bc'->>'id' IS NOT NULL AND e.error ~ '^(BC/BL : rapprochement incomplet ou ambigu|Brouillon BL introuvable|BL Erplain · Brouillon.*introuvable)'))
    AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
    AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
@@ -140,7 +141,7 @@ export async function resumeTransientErplain(db,api){
     failure=state.transientRecovery.readRateLimited?quotaWaitingMessage:transientErpError(e.message)?'Lecture Erplain temporairement indisponible : rapprochement '+recovery.attempts+'/3':e.message;
    }
    if(!failure)Object.assign(state.transientRecovery,{outcome:'reconciled',actionRequired:false,nextReadCheckAt:null});
-   const committed=await db.transaction(async tx=>{
+   const committed=await recoveryTransaction(db,async tx=>{
     const fresh=(await tx.query(`SELECT o.*,e.error,e.updated_at retry_updated FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
      WHERE o.id=$1 AND e.status='review' AND e.updated_at::text=$2 AND o.erp_live=$3::jsonb
      AND NOT coalesce(o.issue,'') ~* 'commande annulée'
@@ -188,7 +189,7 @@ export async function closeTransientReviews(db){
   await syncSupersededQuotaReviews(tx);
   const rows=(await tx.query(`SELECT r.id,r.error,r.updated_at,to_jsonb(o) AS "order" FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE r.status='review' AND r.stage='Erplain à compléter' AND e.status='complete' AND e.error IS NULL
-   AND (r.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR (r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée') AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'transientRecovery'->>'lastError' ~* 'Erplain HTTP 429'))
+   AND (r.error ~* 'deadlock|SQLSTATE.?(40001|40P01).?|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR (r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée') AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'transientRecovery'->>'lastError' ~* 'Erplain HTTP 429'))
    AND NOT o.resolution_pending_resume AND NOT o.archived AND NOT o.partial_mode
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs a WHERE a.order_id=o.id AND a.status IN ('queued','running','waiting'))
    ORDER BY r.updated_at LIMIT 100 FOR UPDATE OF r,o,e SKIP LOCKED`)).rows;

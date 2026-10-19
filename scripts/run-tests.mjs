@@ -17,6 +17,7 @@ groups.at(-1).push('test/abandon-tracking-preservation.test.mjs');
 groups.at(-1).push('test/stock-information.test.mjs','test/incoming-receipts.test.mjs','test/equivalence-export.test.mjs');
 groups.at(-1).push('test/temu-pdf-archive.test.mjs');
 groups.at(-1).push('test/erplain-customer-input.test.mjs','test/temu-destination-vat.test.mjs');
+groups.at(-1).push('test/recovery-transaction.test.mjs');
 groups.at(-1).push('test/erplain-live-recovery.test.mjs','test/erplain-transient-recovery.test.mjs','test/erplain-shipping-reconciliation.test.mjs');
 groups.at(-1).push('test/manual-platform-cancellation.test.mjs');
 groups.at(-1).push('test/manual-platform-cancellation-ui.test.mjs');
