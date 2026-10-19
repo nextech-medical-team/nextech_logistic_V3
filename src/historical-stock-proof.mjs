@@ -1,5 +1,7 @@
+import {usesNativeBlCycle,readNativeBlCycle} from './native-bl-policy.mjs';
+import {assertFullOrderStock} from './stock-gate.mjs';
 // Match only the existing preparable BL, while keeping the full BC for its stock ledger.
-export function historicalPendingLines(bc,bl){
+export function historicalPendingLines(bc,bl,{allowPendingSiblings=false}={}){
  const all=bc?.line_items,connection=bc?.shipping_orders;
  if(!bl?.id||!['pending','make_the_shipment','in_preparation','ready_to_ship'].includes(bl.status)||!Array.isArray(all)||!Array.isArray(connection?.data)||connection.paginatorInfo?.hasMorePages!==false)throw Error('BL historique en attente non vérifiable');
  const chosen=connection.data.filter(x=>String(x.id)===String(bl.id));
@@ -18,7 +20,7 @@ export function historicalPendingLines(bc,bl){
  }
  for(const other of connection.data){
   if(String(other.id)===String(bl.id)||other.status==='cancelled')continue;
-  if(!['shipped','delivered','completed'].includes(other.status))throw Error('Autre BL encore en préparation : choisir la livraison à rapprocher');
+  if(!(allowPendingSiblings?['pending','make_the_shipment','in_preparation','ready_to_ship','shipped','delivered','completed']:['shipped','delivered','completed']).includes(other.status))throw Error('Autre BL encore en préparation : choisir la livraison à rapprocher');
   allocations(other,fulfilled);
  }
  allocations(chosen[0],selected);
@@ -31,7 +33,7 @@ export function historicalPendingLines(bc,bl){
  return result;
 }
 // Read-only proof for BCs that already deducted stock. No mutations here.
-export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendingBlScope=false,beforeBlPublication=false}={}){
+export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendingBlScope=false,beforeBlPublication=false,allowPendingSiblings=false,reservationOnly=false}={}){
  const fail=reason=>{throw Error('Stock du BC historique non rapproché : '+reason);};
  if(!bc?.id||bc.update_stock!==true||bc.status!=='active')return fail('politique ou statut');
  if(!Array.isArray(bc.line_items)||!Array.isArray(evidence)||!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.paginatorInfo?.hasMorePages!==false)return fail('documents incomplets');
@@ -39,7 +41,7 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
  // Erplain omits unpublished BLs from Order.shipping_orders. For a saved
  // draft ID only, require the complete reverse relation to exactly this BC.
  if(bl){
-  const selected=pendingBlScope?historicalPendingLines(bc,bl):null;
+  const selected=pendingBlScope?historicalPendingLines(bc,bl,{allowPendingSiblings}):null;
   if(!bl.id||typeof bl.update_stock!=='boolean'||(!pendingBlScope&&!((bc.shipping_orders.data.length===1&&String(bc.shipping_orders.data[0].id)===String(bl.id))||(bl.status==='unpublished'&&bc.shipping_orders.data.length===0&&bl.orders?.paginatorInfo?.hasMorePages===false&&bl.orders?.data?.length===1&&String(bl.orders.data[0].id)===String(bc.id))))||!['unpublished','pending','ready_to_ship','make_the_shipment','in_preparation'].includes(bl.status))return fail('BL associé ou politique de stock non conforme');
   const quantities=rows=>{const m=new Map();if(!Array.isArray(rows))return fail('lignes BL absentes');for(const l of rows){if(l.type==='shipping_cost')continue;if(l.type!=='normal'||!l.variant?.id||!l.location?.id||l.quantity==null||!Number.isFinite(Number(l.quantity))||Number(l.quantity)<=0)return fail('lignes BL invalides');const key=String(l.variant.id)+':'+String(l.location.id);m.set(key,(m.get(key)||0)+Number(l.quantity));}return JSON.stringify([...m].sort());};
   if(quantities(bl.line_items)!==quantities(selected||bc.line_items))return fail('quantités ou emplacements BC/BL différents');
@@ -79,23 +81,28 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
  // on its BLs. Reconcile both typed ledgers; never create a second deduction.
  const reserved=expected.size>0&&[...new Set([...expected.keys(),...totals.keys()])].every(key=>{const q=expected.get(key)||0,t=totals.get(key)||{hand:0,available:0};return Math.abs(t.hand)<1e-7&&Math.abs(t.available+q)<1e-7;});
  if(reserved){
+  if(reservationOnly){
+   if(bl||bc.shipping_orders.data.length||evidence.some(p=>!Array.isArray(p.shipping)||p.shipping.length)||blEvidence.length)return fail('réservation seule avec BL ou mouvement existant');
+   for(const l of bc.line_items.filter(l=>l.type==='normal')){
+    if(typeof l.variant.track_inventory!=='boolean')return fail('politique produit non vérifiée');
+    if(!l.variant.track_inventory)continue;
+    if(l.shipped_quantity!==0)return fail('expédition déjà commencée');
+   }
+   return {bcId:String(bc.id),stockOnBc:false,reservationVerified:true,physicalDebitVerified:false,stockModel:'reservation_bc_only',quantities:[...expected].map(([key,quantity])=>({key,quantity})),logIds:[...ids].sort()};
+  }
   // A reservation is sufficient only before creating/publishing the first BL.
   // Final validation still requires its independently reconciled physical debit.
   if(beforeBlPublication===true&&(!bl||bl.status==='unpublished')){
    if(pendingBlScope||bc.shipping_orders.data.length||bl&&bl.update_stock!==true)return fail('réservation avant BL non exclusive');
    if(evidence.some(p=>!Array.isArray(p.shipping)||p.shipping.length)||blEvidence.some(p=>p.rows.length))return fail('mouvement BL présent avant publication');
-   const held=new Map(),physical=new Map();
    for(const l of bc.line_items){
     if(l.type==='shipping_cost')continue;
     if(typeof l.variant.track_inventory!=='boolean')return fail('politique produit non vérifiée');
     if(!l.variant.track_inventory)continue;
-    const number=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0;
-    if(!number(l.reserved_quantity)||!number(l.on_hand)||!number(l.shipped_quantity)||l.shipped_quantity!==0)return fail('réservation ou stock physique non vérifiable');
-    const key=String(l.variant.id)+':'+String(l.location.id);
-    held.set(key,(held.get(key)||0)+l.reserved_quantity);
-    physical.set(key,Math.min(physical.get(key)??Infinity,l.on_hand));
+    const number=v=>typeof v==='number'&&Number.isFinite(v);
+    if(!number(l.on_hand)||!number(l.shipped_quantity)||l.shipped_quantity!==0)return fail('stock physique ou expédition non vérifiable');
    }
-   for(const [key,q] of expected)if(Math.abs((held.get(key)||0)-q)>1e-7||(physical.get(key)||0)+1e-7<q)return fail('réservation ou stock physique insuffisant');
+   assertFullOrderStock(bc.line_items,{preserveInstalled:true});
    return {bcId:String(bc.id),stockOnBc:true,stockModel:'reservation_bc_avant_bl',beforeBlPublication:true,quantities:[...expected].map(([key,quantity])=>({key,quantity})),logIds:[...ids].sort()};
   }
   if(!bl||bl.update_stock!==true)return fail('réservation BC sans mouvement BL vérifiable');
@@ -140,7 +147,7 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
  return {bcId:String(bc.id),stockOnBc:true,quantities:[...expected].map(([key,quantity])=>({key,quantity})),logIds:[...ids].sort()};
 }
 
-export async function readHistoricalStock(api,bc,{additionalVariants=[],bl=null,pendingBlScope=false,beforeBlPublication=false}={}){
+export async function readHistoricalStock(api,bc,{additionalVariants=[],bl=null,pendingBlScope=false,beforeBlPublication=false,allowPendingSiblings=false,reservationOnly=false}={}){
  const created=String(bc?.created_at||'');
  const stamp=/(Z|[+-]\d{2}:\d{2})$/.test(created)?created:created.replace(' ','T')+'Z';
  if(!/^\d{4}-\d{2}-\d{2}[ T]/.test(created)||!Number.isFinite(Date.parse(stamp)))throw Error('Date de création du BC historique non vérifiée');
@@ -164,7 +171,7 @@ export async function readHistoricalStock(api,bc,{additionalVariants=[],bl=null,
   evidence.push({bc:String(bc.id),variant,complete,order:rows,shipping,since});
  }
  const blEvidence=bl?.update_stock===true?await readInheritedBlLedger(api,bl):[];
- return {evidence,blEvidence,proof:verifyHistoricalStock(bc,evidence,{bl,blEvidence,pendingBlScope,beforeBlPublication})};
+ return {evidence,blEvidence,proof:verifyHistoricalStock(bc,evidence,{bl,blEvidence,pendingBlScope,beforeBlPublication,allowPendingSiblings,reservationOnly})};
 }
 
 // A stock-on-BC proof must not coexist with a separate V3 stock deduction.
@@ -179,9 +186,10 @@ export async function assertNoHistoricalStockRemoval(api,o){
 }
 
 export async function historicalPreparationProof(api,o,{beforeBlPublication=false}={}){
+ if(usesNativeBlCycle(o))return (await readNativeBlCycle(api,o,{beforeBlPublication})).observation;
  const id=String(o.erp_live?.bc?.id||'');
  if(!/^\d+$/.test(id))throw Error('BC historique non identifié');
- const r=await api.request('query V3HistoricalPreparation($id:ID!){Order(id:$id){id created_at status update_stock line_items{id type quantity reserved_quantity shipped_quantity on_hand location{id} variant{id track_inventory}} shipping_orders(first:100){data{id status update_stock line_items{parent_id type quantity location{id} variant{id}}} paginatorInfo{hasMorePages}}}}',{id});
+ const r=await api.request('query V3HistoricalPreparation($id:ID!){Order(id:$id){id created_at status update_stock line_items{id type quantity reserved_quantity shipped_quantity on_hand available location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id status update_stock line_items{parent_id type quantity location{id} variant{id}}} paginatorInfo{hasMorePages}}}}',{id});
  const bc=r.Order;
  if(String(bc?.id)!==id)throw Error('BC historique demandé non reçu');
  const expected=rows=>{const m=new Map();if(!Array.isArray(rows))throw Error('Produits historiques absents');for(const l of rows){if(l.type==='shipping_cost')continue;if((l.type&&l.type!=='normal')||!l.variant?.id||!l.location?.id||!Number.isFinite(Number(l.quantity))||Number(l.quantity)<=0)throw Error('Produits historiques incomplets');const k=String(l.variant.id)+':'+String(l.location.id);m.set(k,(m.get(k)||0)+Number(l.quantity));}return JSON.stringify([...m].sort());};
@@ -195,7 +203,20 @@ export async function historicalPreparationProof(api,o,{beforeBlPublication=fals
  }
  if(pendingBlScope){if(!bl||!o.erp_live.pendingBlIds.map(String).includes(String(bl.id))||expected(o.items)!==expected(historicalPendingLines(bc,bl)))throw Error('BL en attente modifié : produits ou quantités à rapprocher');}
  await assertNoHistoricalStockRemoval(api,o);
- return (await readHistoricalStock(api,bc,{bl,pendingBlScope,beforeBlPublication,additionalVariants:(o.erp_live.historicalStockProof?.quantities||[]).map(l=>l.key.split(':')[0])})).proof;
+ const proof=(await readHistoricalStock(api,bc,{bl,pendingBlScope,beforeBlPublication,additionalVariants:(o.erp_live.historicalStockProof?.quantities||[]).map(l=>l.key.split(':')[0])})).proof;
+ // A matching debit proves that Erplain wrote the movement, not that the
+ // movement was covered by stock. Check its remaining balances before a new
+ // BL is published. Never turn this into a gate for an existing BL's label.
+ if(beforeBlPublication&&(!bl||bl.status==='unpublished')&&!proof.stockModel){
+  for(const l of bc.line_items.filter(l=>l.type==='normal')){
+   if(typeof l.variant?.track_inventory!=='boolean')throw Error('Stock non vérifiable : politique produit absente');
+   if(!l.variant.track_inventory)continue;
+   const numeric=v=>(typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v));
+   if(![l.on_hand,l.available].every(numeric))throw Error('Stock non vérifiable après débit BC : '+l.variant.sku);
+   if(Number(l.on_hand)<0||Number(l.available)<0)throw Error('BL bloqué — stock insuffisant après débit BC : '+l.variant.sku);
+  }
+ }
+ return proof;
 }
 
 // A BC that already deducted both quantities may pass its immutable flag to

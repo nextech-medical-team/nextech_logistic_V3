@@ -1,4 +1,5 @@
 import {usesRecordedBc} from './existing-bc-execution.mjs';
+import {hasCreatedBl} from './created-bl-label.mjs';
 export function excelOriginalLines(o,lines){
  if(o.erp_live?.equivalentOriginalLines===undefined)return lines;
  const original=o.erp_live.equivalentOriginalLines;
@@ -6,7 +7,7 @@ export function excelOriginalLines(o,lines){
  return original;
 }
 export function verifyExcelTemuDetail(o,lines,detail){
- if(usesRecordedBc(o)){if(detail?.parentOrderMap?.parentOrderSn!==o.reference||!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('Identité TEMU non reçue');return;}
+ if(usesRecordedBc(o)||hasCreatedBl(o)){if(detail?.parentOrderMap?.parentOrderSn!==o.reference||!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('Identité TEMU non reçue');return;}
  lines=excelOriginalLines(o,lines);
  if(detail?.parentOrderMap?.parentOrderSn!==o.reference||!Array.isArray(detail.orderList)||!lines.length||lines.length!==detail.orderList.length)throw Error('Articles différents entre Excel et TEMU');
  const seen=new Set();

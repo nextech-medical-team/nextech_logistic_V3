@@ -29,7 +29,7 @@ for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{wi
  await page.goto('/');await expect(page.locator('#order-rows tr')).toHaveCount(7);await expect(page.locator('.monitoring-result')).toHaveCount(7);
  await expect(page.locator('#order-rows')).not.toContainText(stale);await expect(page.locator('.monitoring-result').first()).toContainText(waiting);
  await expect(page.locator('.compact-problem').filter({hasText:'Validation stock / BL à actualiser'})).toHaveCount(2);
- const first=page.locator('#order-rows tr').filter({hasText:'TEST-MONITOR-0'});await first.locator('.processing-details-toggle').click();await first.locator('.monitoring-result').scrollIntoViewIfNeeded();
+ const first=page.locator('#order-rows tr').filter({hasText:'TEST-MONITOR-0'});await first.locator('[data-order-more-info]').click();await expect(page.locator('#order-rows .order-row-expanded .monitoring-result')).toBeHidden();await first.scrollIntoViewIfNeeded();
  await page.screenshot({path:'proofs/carrier-monitor-'+name+'.png',fullPage:false});expect(writes).toEqual([]);expect(errors).toEqual([]);
  fs.writeFileSync('proofs/carrier-monitor-'+name+'.json',JSON.stringify({status:'PASS',viewport,cases:7,obsoleteDisplayed:0,independentReasonsPreserved:true,productionLabelsPreserved:5,preparationErrorsPreserved:2,writes,errors,scope:'Actual full UI with persisted stale monitors and current carrier; synthetic data'}));
 });

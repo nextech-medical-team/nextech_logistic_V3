@@ -30,8 +30,9 @@ export function evaluateStockIncident(order,bc,{historicalProof=null}={}){
   if(String(historicalProof?.bcId)!==String(bc.id)||historicalProof.stockOnBc!==true||!Array.isArray(historicalProof.quantities)||!equal(wanted,new Map(historicalProof.quantities.map(x=>[x.key,x.quantity]))))throw Error('Journal de débit BC non confirmé');
   return {status:'resolved',basis:'verified_bc_ledger',bcId:String(bc.id),blId:String(matches[0].id),logIds:historicalProof.logIds};
  }
- if(active.length||bc.update_stock!==false)throw Error('BL ou débit historique existant : rapprochement requis');
- try{assertFullOrderStock(bc.line_items);}catch(e){if(stockIncidentOnly(e.message))return {status:'active',basis:'current_available_stock',currentError:e.message,bcId:String(bc.id)};throw e;}
+ if(active.length)throw Error('BL ou débit historique existant : rapprochement requis');
+ if(bc.update_stock===true&&(String(historicalProof?.bcId)!==String(bc.id)||historicalProof.reservationVerified!==true||historicalProof.physicalDebitVerified!==false))throw Error('Réservation BC sans débit physique non confirmée');
+ try{assertFullOrderStock(bc.line_items,{preserveInstalled:order.channel==='tender'});}catch(e){if(stockIncidentOnly(e.message))return {status:'active',basis:'current_available_stock',currentError:e.message,bcId:String(bc.id)};throw e;}
  return {status:'resolved',basis:'current_available_stock',bcId:String(bc.id),preparationRequired:true};
 }
 export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,now=()=>Date.now()}={}){
@@ -51,7 +52,7 @@ export async function reconcileStockIncident(db,api,id,{bc,comparison,readError,
   if(comparison?.concordant!==true||comparison.mappingFingerprint!==mapping||(frozen&&comparison.authority!=='recorded_bc'))throw Error(frozen?'Lecture du BC enregistré et de ses BL non confirmée':'Produits/quantités V3 et BC non confirmés');
   if(initial.erp_live?.documentSource?.stockHolds?.length)throw Error('Mouvement de stock à rapprocher');
   let historicalProof=null;
-  if(bc?.update_stock===true){const actual=(await api.request('query V3StockIncidentCreated($id:ID!){Order(id:$id){id created_at}}',{id:String(bc.id)})).Order;if(String(actual?.id)!==String(bc.id))throw Error('Identité BC non confirmée');historicalProof=(await readHistoricalStock(api,{...bc,created_at:actual.created_at},{bl:initial.erp_live.bl})).proof;}
+  if(bc?.update_stock===true){const actual=(await api.request('query V3StockIncidentCreated($id:ID!){Order(id:$id){id created_at}}',{id:String(bc.id)})).Order;if(String(actual?.id)!==String(bc.id))throw Error('Identité BC non confirmée');historicalProof=(await readHistoricalStock(api,{...bc,created_at:actual.created_at},{bl:initial.erp_live.bl,reservationOnly:!initial.erp_live.bl?.id})).proof;}
   proof=evaluateStockIncident(initial,bc,{historicalProof});
  }catch(e){proof={status:'unverified',currentError:'Stock : vérification impossible — '+e.message};}
  proof={...proof,checkedAt:new Date(now()).toISOString(),mappingFingerprint:mapping,...(frozen?{authority:'recorded_bc'}:{}),shipmentFingerprint:fingerprint,readOnly:true,preparationNotStarted:true};

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {resumeTransientErplain,recordTransientFailure} from '../src/erplain-transient-recovery.mjs';
+import {customerCreationStarted,customerCreationFailed,canRetryCustomerCreation} from '../src/customer-creation-recovery.mjs';
 import {retryDecision} from '../src/erp-transient-policy.mjs';
 import {erplainBatchError} from '../src/erplain-accounts.mjs';
 
@@ -55,15 +56,15 @@ test('database recovery reconciles drafts and customers using reads only',async(
   const recovered=await check(customer,found);
   assert.equal(recovered.state.phase,'customer_created');assert.equal(recovered.state.customer.id,'9');
   assert.equal(recovered.calls[0].v.where.value,'C1');
-  await check(customer,{Customers:{data:[],paginatorInfo:{hasMorePages:false}}},{resumed:false,error:/aucune nouvelle création/});
-  const rejected=await check({...customer,transientRecovery:{customerCreationRejected:true}},{Customers:{data:[],paginatorInfo:{hasMorePages:false}}});
-  assert.equal(rejected.state.phase,undefined);assert.equal(rejected.state.customerNumber,'C1');assert.equal(rejected.state.transientRecovery.customerCreationRejected,false);
+  await check(customer,{Customers:{data:[],paginatorInfo:{hasMorePages:false}}},{resumed:false,error:/aucune nouvelle cr[ée]ation/});
+  const rejected=await check({...customer,customerCreationAttempt:customerCreationFailed(customerCreationStarted(order(customer)),{httpStatus:429,confirmedRateLimitRejection:true})},{Customers:{data:[],paginatorInfo:{hasMorePages:false}}});
+  assert.equal(rejected.state.phase,undefined);assert.equal(rejected.state.customerNumber,'C1');assert.equal(rejected.state.customerReconciliation.retryAuthorizedBy,'confirmed_no_write');
   await check(customer,{Customers:{...found.Customers,data:[...found.Customers.data,...found.Customers.data]}},{resumed:false,error:/ambigu/});
-  await check({...customer,phase:'customer_created',customer:{id:'other'}},found,{resumed:false,error:/différent/});
+  await check({...customer,phase:'customer_created',customer:{id:'other'}},found,{resumed:false,error:/différent/i});
   await check({},{Company:{id:100174}});
   await check({},{Company:{id:1}},{resumed:false,error:/Identité/});
   const limited=Object.assign(Error('Erplain HTTP 429'),{httpStatus:429,erplainReadOnly:true,retryAfter:120});
-  const deferred=await check(draft,limited,{resumed:false,error:/automatiques programmées/});
+  const deferred=await check(draft,limited,{resumed:false,error:/automatique programmée/});
   assert.equal(deferred.state.transientRecovery.attempts,0);
   assert.ok(Date.parse(deferred.state.transientRecovery.nextReadCheckAt)>Date.now());
  }finally{await engine.close();}
@@ -72,7 +73,9 @@ test('database recovery reconciles drafts and customers using reads only',async(
  test('only explicit whole-request rate-limit rejection releases customer creation',async()=>{
  for(const confirmed of [true,false,undefined]){
   const o=order({phase:'creating_customer'});
-  await recordTransientFailure({query:async()=>({rows:[]})},o,'Erplain HTTP 429',{httpStatus:429,confirmedRateLimitRejection:confirmed});
-  assert.equal(o.erp_live.transientRecovery.customerCreationRejected,confirmed===true);
+  const error={httpStatus:429,confirmedRateLimitRejection:confirmed};
+  o.erp_live.customerCreationAttempt=customerCreationFailed(customerCreationStarted(o),error);
+  await recordTransientFailure({query:async()=>({rows:[]})},o,'Erplain HTTP 429',error);
+  assert.equal(canRetryCustomerCreation(o,'V3:o'),confirmed===true);
  }
 });

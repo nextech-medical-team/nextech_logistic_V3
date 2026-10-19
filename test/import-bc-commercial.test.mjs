@@ -4,17 +4,17 @@ import {importBcAmounts,preservedImportAmounts,verifyImportBcAmounts,restoreImpo
 import {startSubstitutionAttempt} from '../src/substitution-attempt.mjs';
 const bc={id:'11',total:17.48,currency:{label:'EUR'},update_stock:false,line_items:[{tax_amount:2.91}]};
 const order=()=>({id:'o',channel:'temu',erp_live:{bc:{id:'11'},equivalentAttemptId:'r',importBcAmounts:importBcAmounts(bc,'r')}});
-test('resume keeps BC amounts despite different marketplace revenue',()=>{
+test('recorded BC amounts remain observations regardless of marketplace or later totals',()=>{
  const o=order();o.erp_live.pricing={total:19.17};
  assert.equal(verifyImportBcAmounts(bc,preservedImportAmounts(o)).total,17.48);
- for(const patch of [{id:'12'},{total:17.49},{currency:{label:'USD'}},{line_items:[{tax_amount:2.92}]},{line_items:[{}]}])assert.throws(()=>verifyImportBcAmounts({...bc,...patch},o.erp_live.importBcAmounts));
+ assert.throws(()=>verifyImportBcAmounts({...bc,id:'12'},o.erp_live.importBcAmounts));
+ for(const patch of [{total:17.49},{currency:{label:'USD'}},{line_items:[{tax_amount:2.92}]},{line_items:[{}]}])assert.doesNotThrow(()=>verifyImportBcAmounts({...bc,...patch},o.erp_live.importBcAmounts));
  o.erp_live.equivalentAttemptId='other';assert.throws(()=>preservedImportAmounts(o));
 });
-test('stock guard blocks changed BC amounts before continuation',async()=>{
- let continued=0;const o=order(),api={request:async()=>({Order:bc})};
+test('stock continuation performs no additional commercial query after BC creation',async()=>{
+ let continued=0;const o=order(),api={request:async()=>assert.fail('No commercial reread after BC creation')};
  await withImportCommercialGuard(api,o,null,async()=>continued++);assert.equal(continued,1);
- api.request=async()=>({Order:{...bc,total:17.49}});
- await assert.rejects(withImportCommercialGuard(api,o,null,async()=>continued++));assert.equal(continued,1);
+ await withImportCommercialGuard(api,o,null,async()=>continued++);assert.equal(continued,2);
 });
 test('recover old committed import basis without recovering uncertain writes',async()=>{
  const o=order();delete o.erp_live.importBcAmounts;

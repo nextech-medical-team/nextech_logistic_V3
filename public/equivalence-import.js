@@ -7,18 +7,23 @@
  const feedback=section.querySelector('[data-feedback]'),apply=section.querySelector('[data-apply]'),selected=new Set(),known=new Set();
  let batchId=null,batch=null,timer=null,busy=false;
  const downloads=document.createElement('div');downloads.className='actions';
- const help=document.createElement('p');help.textContent='Exportez les lignes des commandes en rupture, choisissez les SKU dans l’onglet Équivalents proposés, puis complétez Onglet type. Supprimez les lignes que vous ne souhaitez pas remplacer. Consultez Contrôles pour les commandes non vérifiées ou exclues. Aucun remplacement au téléchargement.';
+ const help=document.createElement('p');help.textContent='L’export reprend le filtre « stock insuffisant » avec les autres filtres conservés de Commandes et livraisons. Toutes les commandes figurent dans Commandes du filtre. Onglet type contient les seules lignes vérifiées pour l’import standard ; les autres parcours et les données non vérifiables restent détaillés dans le fichier. Choisissez les équivalents puis analysez le fichier. Aucun remplacement au téléchargement.';
  section.querySelector('form').before(downloads,help);
  for(const [path,label] of [['template','Télécharger le modèle Excel'],['shortages','Exporter les ruptures et équivalents']]){
   const button=document.createElement('button');button.type='button';button.textContent=label;downloads.append(button);
   button.onclick=async()=>{
    const buttons=[...downloads.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);feedback.textContent=path==='shortages'?'Lecture des commandes et des stocks Erplain… Cette vérification peut prendre plusieurs minutes.':'Préparation du modèle…';
    try{
-    let result=await api('/api/equivalence-import/'+path);
-    if(result.id){const id=result.id;while(result.status==='checking'){await new Promise(resolve=>setTimeout(resolve,2000));result=await api('/api/equivalence-import/export?id='+encodeURIComponent(id));}if(result.status==='failed')throw Error(result.error);}
+    const scopeParams=typeof orderFilterParams==='function'?orderFilterParams():new URLSearchParams(typeof lastOrdersQuery!=='undefined'?lastOrdersQuery:'');scopeParams.delete('page');scopeParams.delete('pageSize');
+    let result=await api('/api/equivalence-import/'+path+(path==='shortages'&&scopeParams.size?'?'+scopeParams:''));
+    if(result.id){const id=result.id,startedAt=result.startedAt||Date.now();while(result.status==='checking'){
+     const p=result.progress,elapsed=Math.max(0,Math.floor((Date.now()-startedAt)/1000)),stage={identity:'Vérification Erplain',orders:'Lecture des commandes',alternatives:'Vérification des équivalents',workbook:'Création du fichier Excel'}[p?.phase]||'Préparation';
+     feedback.textContent=stage+(p?' · '+p.processed+' / '+p.total+' commandes examinées · '+p.rows+' ligne(s) en rupture':'')+' · '+elapsed+' s écoulées.'+(p?.updatedAt&&Date.now()-p.updatedAt>15000?' Attente de réponse Erplain ou du quota partagé ; le traitement continue.':'');
+     await new Promise(resolve=>setTimeout(resolve,2000));result=await api('/api/equivalence-import/export?id='+encodeURIComponent(id));
+    }if(result.status==='failed')throw Error(result.error);}
     const bytes=Uint8Array.from(atob(result.file),c=>c.charCodeAt(0));
     const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),link=document.createElement('a');link.href=url;link.download=result.filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
-    feedback.textContent=path==='shortages'?result.rows+' ligne(s) en rupture exportée(s). '+result.unverified+' commande(s) non vérifiable(s) : consultez Contrôles dans le fichier.':'Modèle téléchargé : remplissez Onglet type puis analysez le fichier.';
+    feedback.textContent=path==='shortages'?(result.scopeTotal!==undefined?result.scopeTotal+' commande(s) du filtre exportée(s) dans Commandes du filtre, dont '+result.scopeBlocked+' « À compléter ». ':'')+result.rows+' ligne(s) vérifiée(s) dans Onglet type. '+result.unverified+' commande(s) non vérifiable(s) : consultez les contrôles et parcours dédiés dans le fichier.':'Modèle téléchargé : remplissez Onglet type puis analysez le fichier.';
    }catch(e){feedback.textContent=e.message;}finally{buttons.forEach(b=>b.disabled=false);}
   };
  }

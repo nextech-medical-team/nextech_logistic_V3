@@ -1,49 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {erplainCustomerInput,ensureErplainCustomerNumber} from '../src/erplain-customer-input.mjs';
+import {readFile} from 'node:fs/promises';
+import {erplainCustomerInput} from '../src/erplain-customer-input.mjs';
 import {customerCheckpointResult} from '../src/temu-customer-checkpoint.mjs';
-const order=()=>({id:'order-1',channel:'temu',recipient:'Peter Švrčke',source_payload:{origin:'temu_excel'},erp_live:{customerNumber:'CL-0042'},address:{street:'1 Test',postal:'01001',city:'Test',country:'SK',email:'test@example.invalid',phone:'+421123456'},selectedSourceLines:[{source_payload:{excel:{'prénom du destinataire':'Peter','nom de famille du destinataire':'Švrčke'}}}]});
-test('TEMU customer includes contact, native number and both default addresses',()=>{
- const input=erplainCustomerInput(order());
- assert.equal(input.customer_type,'individual');assert.equal(input.first_name,'Peter');assert.equal(input.last_name,'Švrčke');assert.equal(input.customer_number,'CL-0042');
- assert.equal(input.email,'test@example.invalid');assert.equal(input.phone,'+421123456');
- assert.deepEqual(input.addresses.data.map(a=>a.type),['billing','shipping']);
- for(const a of input.addresses.data){assert.equal(a.default,true);assert.equal(a.address_1,'1 Test');assert.equal(a.postal_code,'01001');assert.equal(a.country,'SK');assert.equal(a.label,'Peter Švrčke');}
+const order=()=>({id:'order-1',channel:'temu',recipient:'Peter Švrčke',source_payload:{origin:'temu_excel'},erp_live:{}});
+test('new TEMU customer restores October 13 payload without number-generation prerequisite',()=>{
+ const o=order();
+ assert.deepEqual(erplainCustomerInput(o),{label:'Peter Švrčke',customer_number:'V3:order-1',customer_type:'individual',notes:'Compte V3. Aucun email envoyé.'});
+ assert.deepEqual(o.erp_live,{});
+ assert.deepEqual(erplainCustomerInput(o),erplainCustomerInput(o));
+ delete o.erp_live;assert.equal(erplainCustomerInput(o).customer_number,'V3:order-1');
 });
-test('explicit compound names are preserved and API full names have a fallback',()=>{
- const o=order();o.selectedSourceLines[0].source_payload.excel={'Recipient first name':'Jean Pierre','Recipient last name':'De la Tour'};
- assert.equal(erplainCustomerInput(o).first_name,'Jean Pierre');assert.equal(erplainCustomerInput(o).last_name,'De la Tour');
- delete o.selectedSourceLines;assert.equal(erplainCustomerInput(o).last_name,'Švrčke');
- o.source_payload.company='Entreprise';o.source_payload.client='Entreprise';assert.equal(erplainCustomerInput(o).customer_type,'company');assert.equal(erplainCustomerInput(o).label,'Entreprise');
+test('already persisted customer number remains the creation and recovery key',()=>{
+ for(const number of ['CL-0042','V3:order-1']){
+  const o=order();o.erp_live.customerNumber=number;
+  assert.equal(erplainCustomerInput(o).customer_number,number);
+  const result={Customers:{data:[{id:'77',customer_number:number}],paginatorInfo:{hasMorePages:false}}};
+  assert.equal(customerCheckpointResult(result,o.id,number).id,'77');
+  assert.throws(()=>customerCheckpointResult(result,o.id,'OTHER'),/ambigu/);
+  result.Customers.data.push({id:'78',customer_number:number});
+  assert.throws(()=>customerCheckpointResult(result,o.id,number),/ambigu/);
+ }
 });
-test('native number is persisted and reused; missing number or address blocks creation',async()=>{
- const o=order();delete o.erp_live.customerNumber;let calls=0,saved=0;
- const api={request:async q=>{calls++;assert.match(q,/GenerateCustomerNumber/);return {GenerateCustomerNumber:'CL-0043'};}};
- await ensureErplainCustomerNumber(api,o,async current=>{saved++;assert.equal(current.erp_live.customerNumber,'CL-0043');});
- await ensureErplainCustomerNumber(api,o,async()=>assert.fail('already persisted'));
- assert.equal(calls,1);assert.equal(saved,1);
- delete o.address.street;assert.throws(()=>erplainCustomerInput(o),/adresse/);
- delete o.erp_live.customerNumber;assert.throws(()=>erplainCustomerInput(o),/numéro/);
- await assert.rejects(ensureErplainCustomerNumber({request:async()=>({GenerateCustomerNumber:null})},o,async()=>assert.fail('invalid number')),/non reçu/);
+test('customer type and other channels retain their existing policy',()=>{
+ const o=order();o.source_payload.company='Entreprise';o.source_payload.client='Entreprise';
+ assert.equal(erplainCustomerInput(o).customer_type,'company');assert.equal(erplainCustomerInput(o).label,'Entreprise');
+ o.channel='amazon';o.erp_live.customerNumber='CL-TEMU';assert.equal(erplainCustomerInput(o).customer_number,'V3:order-1');
 });
-test('recovery recognizes native and legacy numbers and rejects ambiguous results',()=>{
- const result=number=>({Customers:{data:[{id:'77',customer_number:number}],paginatorInfo:{hasMorePages:false}}});
- assert.equal(customerCheckpointResult(result('CL-0042'),'order-1','CL-0042').id,'77');
- assert.equal(customerCheckpointResult(result('V3:order-1'),'order-1').id,'77');
- assert.throws(()=>customerCheckpointResult(result('CL-OTHER'),'order-1','CL-0042'),/ambigu/);
- const duplicated=result('CL-0042');duplicated.Customers.data.push({...duplicated.Customers.data[0],id:'78'});
- assert.throws(()=>customerCheckpointResult(duplicated,'order-1','CL-0042'),/ambigu/);
-});
-test('number generation preserves provider errors instead of hiding them behind a missing number',async()=>{
- const {erplainAccount}=await import('../src/erplain-accounts.mjs');
- const previous=process.env.ERPLAIN_LIVE_WRITES;process.env.ERPLAIN_LIVE_WRITES='1';
- try{
-  const api=erplainAccount('unused','live',{loadConfig:async()=>({url:'https://api.erplain.app/graphql',companyId:100174,apiKey:'fake-test-key'}),fetchImpl:async(_url,options)=>{
-   const {query}=JSON.parse(options.body);
-   return new Response(JSON.stringify(query.includes('V3CheckAccount')?{data:{Company:{id:100174}}}:{data:{GenerateCustomerNumber:null},errors:[{path:['GenerateCustomerNumber'],message:'Customer sequence unavailable'}]}),{status:200});
-  }});
-  await api.verify();const o=order();delete o.erp_live.customerNumber;
-  await assert.rejects(ensureErplainCustomerNumber(api,o,async()=>assert.fail('no number to save')),/Customer sequence unavailable/);
-  assert.equal(o.erp_live.customerNumber,undefined);
- }finally{if(previous===undefined)delete process.env.ERPLAIN_LIVE_WRITES;else process.env.ERPLAIN_LIVE_WRITES=previous;}
+test('production worker no longer invokes number generation and keeps customer reuse guards',async()=>{
+ const source=await readFile(new URL('../src/erplain-live-workflow.mjs',import.meta.url),'utf8');
+ assert.doesNotMatch(source,/ensureErplainCustomerNumber|GenerateCustomerNumber/);
+ assert.match(source,/!o\.erp_live\.bc&&!o\.erp_live\.customer/);
+ assert.match(source,/mutationBlock\(fresh/);
+ assert.match(source,/'CreateCustomer',erplainCustomerInput/);
 });

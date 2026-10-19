@@ -77,3 +77,124 @@ const estimatesNav=document.createElement('button');estimatesNav.textContent='De
 addView('live-estimates','<div class="panel padded"><h2>Devis ERPLAIN LIVE</h2><p>ERPLAIN LIVE est connecté en lecture seule. Les écritures et la reprise des documents restent suspendues jusqu’au GO.</p><p id="estimate-count"></p><table><thead><tr><th>Devis source</th><th>Devis LIVE</th><th>Contrôle des lignes et du total</th></tr></thead><tbody id="estimate-rows"></tbody></table></div>');
 const estimatesShow=show;show=async function(view){if(view!=='live-estimates')return estimatesShow(view);currentView=view;document.querySelectorAll('.view').forEach(el=>el.hidden=el.id!=='view-'+view);$('title').textContent='Devis Erplain LIVE';try{const r=await api('/api/live-estimates');$('estimate-count').textContent=r.rows.filter(x=>x.verified).length+' / '+r.rows.length+' devis vérifiés';$('estimate-rows').innerHTML=r.rows.map(x=>'<tr><td>'+esc(x.source)+'</td><td>'+esc(x.target||'—')+'</td><td>'+esc(x.verified?'Vérifié':x.error||'En attente')+'</td></tr>').join('');}catch(e){flash(e.message,true);}};
 
+
+// Negative stocks view is part of the existing workspace bundle.
+(()=>{
+ const main=document.querySelector('#app main');if(!main||document.getElementById('view-negative-stocks'))return;
+ const nav=document.querySelector('#app nav');
+ if(nav){
+  const navigation=nav.querySelector('[data-view="negative-stocks"]')||document.createElement('button');
+  navigation.type='button';navigation.dataset.view='negative-stocks';navigation.textContent='Stocks négatifs';
+  navigation.onclick=()=>show('negative-stocks');
+  const stocks=nav.querySelector('[data-view="stocks"]');
+  if(stocks)stocks.after(navigation);
+  else{
+   const settings=[...nav.querySelectorAll('.nav-group')].find(group=>group.querySelector('summary')?.textContent==='Paramètres');
+   (settings?.querySelector('div')||nav).append(navigation);
+  }
+ }
+ const panel=document.createElement('section');panel.id='view-negative-stocks';panel.className='view panel padded';panel.hidden=true;
+ panel.innerHTML='<h2>Stocks négatifs</h2><p>Commandes ERP avec BL contenant des produits dont le stock disponible actuel est négatif, dans l’emplacement ERPLAIN configuré.</p><button type="button" id="negative-stocks-load">Afficher les stocks négatifs</button><p role="status" aria-live="polite"></p><div class="table-wrap"><table hidden><thead><tr><th>BC ERP</th><th aria-sort="descending"><button type="button" id="negative-stock-sort-date" title="Trier par date du BC ERP">Date BC ↓</button></th><th>BL associés</th><th>SKU</th><th>Produit</th><th>Fournisseur</th><th>Quantité commandée</th><th>Disponible actuel</th><th>Physique actuel</th><th>Emplacement</th></tr></thead><tbody></tbody></table></div>';
+ const history=document.createElement('section');
+ history.innerHTML='<label for="negative-stock-reports" style="display:block;margin-bottom:6px">Rapports récents</label><select id="negative-stock-reports" style="width:420px;max-width:100%;min-height:44px"><option value="">Rapports récents...</option></select><p role="status" aria-live="polite"></p>';
+ panel.append(history);
+ main.append(panel);
+ const button=panel.querySelector('button'),status=panel.querySelector('[role="status"]'),table=panel.querySelector('table'),body=panel.querySelector('tbody');
+ const historyStatus=history.querySelector('p'),reportSelect=history.querySelector('select');
+ const toolbar=document.createElement('div');toolbar.className='negative-stock-toolbar';
+ const action=document.createElement('div');action.className='negative-stock-action';
+ const actionLabel=document.createElement('span');actionLabel.textContent='Lecture ERPLAIN';action.append(actionLabel,button);
+ toolbar.append(action,history);status.before(toolbar);
+ const searchBox=document.createElement('div');searchBox.className='negative-stock-search';
+ searchBox.innerHTML='<label for="negative-stock-search">SKU ou nom de produit</label><input id="negative-stock-search" type="search" placeholder="Rechercher un SKU ou un produit…"><small role="status" aria-live="polite"></small>';
+ toolbar.prepend(searchBox);
+ const searchInput=searchBox.querySelector('input'),searchCount=searchBox.querySelector('small');let displayedRows=null;
+ const normalizeSearch=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('fr-FR');
+ const exportButton=document.createElement('button');exportButton.type='button';exportButton.textContent='Exporter Excel';exportButton.disabled=true;
+ const exportBar=document.createElement('div');exportBar.className='negative-stock-export';exportBar.append(exportButton);table.parentElement.before(exportBar);
+ let exportRows=[];
+ exportButton.onclick=async()=>{
+  exportButton.disabled=true;
+  try{
+   const response=await fetch('/api/stocks/negative/export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:exportRows})});
+   if(!response.ok){const error=await response.json();throw Error(error.error||'Export indisponible');}
+   const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='stocks-negatifs-'+new Date().toISOString().slice(0,10)+'.xlsx';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  }catch(error){status.textContent='Export Excel indisponible : '+error.message;}
+  finally{exportButton.disabled=displayedRows===null;}
+ };
+ searchInput.addEventListener('input',()=>{if(displayedRows!==null)renderRows(displayedRows);});
+
+ const verifyButtonLabel='Lancer la vérification';
+ button.textContent=verifyButtonLabel;
+ function emptyRow(target,text,columns){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=columns;cell.textContent=text;row.append(cell);target.replaceChildren(row);}
+ table.hidden=false;emptyRow(body,'Cliquez sur « Lancer la vérification » pour rechercher les commandes ERP avec BL et disponible négatif.',10);
+ // Date sorting helpers: missing dates stay last in either direction.
+ function negativeStockDate(value){
+  if(typeof value!=='string'||!value.trim())return null;
+  const stamp=Date.parse(value);return Number.isFinite(stamp)?stamp:null;
+ }
+ function formatNegativeStockDate(value){const stamp=negativeStockDate(value);return stamp===null?'Non renseigné':new Date(stamp).toLocaleDateString('fr-FR',{timeZone:'UTC'});}
+ function compareNegativeStockDates(a,b,direction){
+  const left=negativeStockDate(a.bcDate),right=negativeStockDate(b.bcDate);
+  if(left===null&&right!==null)return 1;if(right===null&&left!==null)return -1;
+  return (left!==null&&right!==null?(left-right)*direction:0)||(a.bcLabel||'').localeCompare(b.bcLabel||'','fr')||a.sku.localeCompare(b.sku,'fr');
+ }
+ // End date sorting helpers.
+ let dateSortDirection=-1;
+ const dateSortButton=panel.querySelector('#negative-stock-sort-date');
+ dateSortButton.onclick=()=>{
+  dateSortDirection*=-1;dateSortButton.textContent='Date BC '+(dateSortDirection===1?'↑':'↓');
+  dateSortButton.closest('th').setAttribute('aria-sort',dateSortDirection===1?'ascending':'descending');
+  if(displayedRows!==null)renderRows(displayedRows);
+ };
+ function renderRows(rows){
+  displayedRows=rows;
+  const query=normalizeSearch(searchInput.value.trim());
+  const filtered=rows.filter(row=>normalizeSearch(row.sku).includes(query)||normalizeSearch(row.label).includes(query));
+  exportRows=[...filtered].sort((a,b)=>compareNegativeStockDates(a,b,dateSortDirection));exportButton.disabled=false;
+  searchCount.textContent=filtered.length+' ligne(s) de commande affichée(s) sur '+rows.length;
+  body.replaceChildren();
+  for(const row of exportRows){const tr=document.createElement('tr');for(const value of [row.bcLabel||'Non renseigné',formatNegativeStockDate(row.bcDate),row.blLabel||'Aucun BL',row.sku,row.label,row.supplier||'Non renseigné',row.orderQuantity??null,row.available,row.onHand,row.locationLabel||'Non renseigné']){const td=document.createElement('td');td.textContent=value===null?'Non vérifié':typeof value==='number'?value.toLocaleString('fr-FR'):value;tr.append(td);}body.append(tr);}
+  table.hidden=false;if(!filtered.length)emptyRow(body,rows.length?'Aucun produit ne correspond à votre recherche.':'Aucune commande ERP contenant un produit à stock disponible négatif.',10);
+ }
+ async function loadHistory(){
+  const selected=reportSelect.value;reportSelect.disabled=true;historyStatus.textContent='';
+  try{
+   const data=await api('/api/stocks/negative/history');
+   reportSelect.replaceChildren(new Option('Rapports récents...',''));
+   for(const entry of data.rows){reportSelect.append(new Option(new Date(entry.completed_at).toLocaleString('fr-FR')+' · '+entry.product_count+' ligne(s) de commande · emplacement '+entry.location_id,entry.id));}
+   if([...reportSelect.options].some(option=>option.value===selected))reportSelect.value=selected;
+   if(!data.rows.length)historyStatus.textContent='Aucun rapport enregistré.';
+  }catch(error){historyStatus.textContent=error.message.includes('Route inexistante')?'Les rapports seront disponibles après activation du service.':'Chargement des rapports impossible. Réessayez en actualisant les stocks.';}
+  finally{reportSelect.disabled=false;}
+ }
+ reportSelect.onchange=async()=>{
+  const id=reportSelect.value;if(!id||button.disabled)return;
+  reportSelect.disabled=true;button.disabled=true;
+  try{const saved=await api('/api/stocks/negative/history/detail?'+new URLSearchParams({id}));renderRows(saved.snapshot.rows);status.textContent='Rapport du '+new Date(saved.completed_at).toLocaleString('fr-FR')+' · emplacement '+saved.snapshot.locationId+(saved.snapshot.unverified?' · '+saved.snapshot.unverified+' élément(s) non vérifié(s).':'.');}
+  catch(error){status.textContent='Rapport indisponible : '+error.message;}
+  finally{reportSelect.disabled=false;button.disabled=false;}
+ };
+ // Verify only on explicit request; opening the module reads saved reports only.
+ new MutationObserver(()=>{if(!panel.hidden)loadHistory();}).observe(panel,{attributes:true,attributeFilter:['hidden']});
+ button.onclick=async()=>{
+  if(button.disabled)return;
+  displayedRows=null;exportRows=[];exportButton.disabled=true;searchCount.textContent='';
+  button.disabled=true;button.textContent='Vérification en cours…';panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des commandes ERP avec BL en cours…',10);loadHistory();
+  try{
+   let page=1,lastPage=1,locationId=null,unverified=0,runId=null;const rows=[];
+   do{
+    status.textContent=`Lecture des commandes ERP : page ${page} / ${lastPage}…`;
+    const data=await api('/api/stocks/negative/scan',{page,runId},{timeoutMs:60000});
+    runId=data.runId;
+    if(!Array.isArray(data.rows)||data.page!==page||!Number.isInteger(data.lastPage)||data.lastPage<page)throw Error('Réponse stock incomplète');
+    if(locationId!==null&&locationId!==data.locationId)throw Error('Emplacement modifié pendant la lecture. Relancez la recherche.');
+    locationId=data.locationId;lastPage=data.lastPage;unverified+=data.unverified;rows.push(...data.rows);page++;
+   }while(page<=lastPage);
+   renderRows(rows);
+   status.textContent=`${new Set(rows.map(row=>row.bcId)).size} BC ERP · ${rows.length} ligne(s) à stock disponible négatif · emplacement ${locationId} · lecture terminée à ${new Date().toLocaleTimeString('fr-FR')}.`+(unverified?` ${unverified} élément(s) non vérifié(s) : résultat potentiellement incomplet.`:'');
+   await loadHistory();
+  }catch(error){status.textContent=error.message.includes('Route inexistante')?'Le service de stocks négatifs n’est pas encore actif. Redémarrez le serveur pour charger les stocks et les rapports.':'Lecture interrompue : '+error.message;emptyRow(body,'Aucun résultat à afficher pour le moment.',10);}
+  finally{button.disabled=false;button.textContent=verifyButtonLabel;panel.setAttribute('aria-busy','false');}
+ };
+})();

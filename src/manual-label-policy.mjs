@@ -1,5 +1,6 @@
 import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
+import {parcelWeightKg} from './weight-arithmetic.mjs';
 export function assertManualLabelOrder(o,carrier,{manualChoice=false}={}){const suspended=suspensionBlock(o);if(suspended)throw Error(suspended);
  if(!o)throw Error('Commande introuvable');
  assertDirectCarrierAllowed(o,carrier,{manualChoice});
@@ -18,5 +19,5 @@ export async function additionalLabelWeight(db,o){
  let weight=0;
  for(const l of rows){const q=Number(l.target_quantity??(l.source_qty?Number(l.quantity)*Number(l.target_qty)/Number(l.source_qty):l.quantity)),w=Number(l.weight_kg);if(!Number.isFinite(w)||w<=0||!Number.isFinite(q)||q<=0)throw Error((l.target_sku||l.source_sku)+' · Poids ou quantité manquant');weight+=w*q;}
  if(!Number.isFinite(weight)||weight<=0)throw Error('Poids du colis invalide');
- return Math.ceil(weight*1000)/1000;
+ return parcelWeightKg(weight);
 }

@@ -7,7 +7,7 @@ import {carrierEligible,priorityOrder} from '../src/order-priority.mjs';
 async function fixture({existing=false,missingTable=false}={}){
  const engine=new PGlite();await engine.waitReady;
  await engine.exec(`CREATE TABLE schema_migrations(version TEXT PRIMARY KEY);
- INSERT INTO schema_migrations VALUES('application-20261005-robustness-5');
+ INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); INSERT INTO schema_migrations VALUES('partial-erplain-retry-20261016-1'); INSERT INTO schema_migrations VALUES('partial-temu-label-20261016-1');
  CREATE TABLE orders(id TEXT PRIMARY KEY,suspension JSONB DEFAULT '{}',resolution_pending_resume BOOLEAN DEFAULT true,processing_priority_at TIMESTAMPTZ);
  INSERT INTO orders(id) VALUES('pending'),('creating'),('ready'),('review');`);
  if(!missingTable)await engine.exec(`CREATE TABLE carrier_jobs(order_id TEXT PRIMARY KEY,carrier TEXT,status TEXT,stock_override JSONB,creation_id TEXT,updated_at TIMESTAMPTZ DEFAULT now(),attempts INT DEFAULT 0,tracking JSONB DEFAULT '[]',result JSONB${existing?',manual_bl_request JSONB':''});
@@ -29,7 +29,7 @@ test('upgrade existing schema restores carrier selection without replaying initi
   const selected=await db.query(`SELECT * FROM carrier_jobs WHERE ${carrierEligible} ORDER BY ${priorityOrder('carrier_jobs')}`);
   assert.deepEqual(selected.rows.map(r=>r.order_id),['pending']);
   const after=(await db.query('SELECT * FROM carrier_jobs ORDER BY order_id')).rows;
-  assert.deepEqual(after.map(({manual_bl_request,...r})=>r),before);
+  assert.deepEqual(after.map(({manual_bl_request,creation_started_at,failure_phase,original_error,...r})=>r),before);
   assert(after.every(r=>r.manual_bl_request===null));
   assert.equal((await db.query("SELECT count(*)::int n FROM schema_migrations WHERE version='carrier-manual-bl-request-20261013-1'")).rows[0].n,1);
  }finally{await engine.close();}
@@ -40,7 +40,7 @@ test('existing manual requests survive repeated and concurrent startup migration
   const before=(await db.query('SELECT * FROM carrier_jobs ORDER BY order_id')).rows;
   await Promise.all([initializeAppSchema(db,[]),initializeAppSchema(db,[])]);
   await initializeAppSchema(db,[]);
-  assert.deepEqual((await db.query('SELECT * FROM carrier_jobs ORDER BY order_id')).rows,before);
+  assert.deepEqual((await db.query('SELECT * FROM carrier_jobs ORDER BY order_id')).rows.map(({creation_started_at,failure_phase,original_error,...r})=>r),before);
   assert.equal((await db.query("SELECT count(*)::int n FROM schema_migrations WHERE version='carrier-manual-bl-request-20261013-1'")).rows[0].n,1);
  }finally{await engine.close();}
 });

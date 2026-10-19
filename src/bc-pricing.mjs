@@ -58,11 +58,11 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
  if([...lines,...products].some(l=>!decimalNumber(l?.quantity)||Number(l.quantity)<=0))throw Error('BC · Quantité du prix source absente ou invalide');
  const src=order.source_payload||{},currency=sourceCurrency(order);
  const equal=(a,b)=>acceptedMonetaryDifference(a,b,{currency,eurExchangeRate,total:expected});
- const entries=[];
- function add(product,gross,tax,rate,label,basis='net',grossCalculation={unit:gross,quantity:1,discounts:[],additions:[]}){
+ const entries=[],commercialObservations=[];
+ function add(product,gross,tax,rate,label,basis='net',grossCalculation={unit:gross,quantity:1,discounts:[],additions:[]},preferredCodes=null){
   if(!Number.isFinite(gross)||gross<0||!Number.isFinite(tax)||tax<0||tax>gross)throw Error('BC · Montants incohérents : '+label);
   const quantity=product?.quantity||1;
-  const tax_codes=taxCode(rate,codes),appliedRate=tax_codes.length?Number(codes.find(c=>String(c.id)===tax_codes[0].id).tax_rates[0].rate):0;
+  const tax_codes=preferredCodes??taxCode(rate,codes),appliedRate=tax_codes.length?Number(codes.find(c=>String(c.id)===tax_codes[0].id).tax_rates[0].rate):0;
   const grossDecimal=decimalTotal(grossCalculation.unit,grossCalculation.quantity,grossCalculation.discounts,grossCalculation.additions);
   entries.push({item:{...(product||{type:'shipping_cost',description:label,quantity:1}),price:(gross-tax)/quantity,tax_codes,apply_discount_rules:false},gross,tax,rate:appliedRate,basis,grossDecimal,grossCalculation});
  }
@@ -78,7 +78,7 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
    if(hits.length!==1||used.has(key))throw Error('TEMU · Prix de ligne absent ou ambigu : '+l.source_sku);used.add(key);
    const x=hits[0];if(!decimalNumber(x.quantity)||Number(x.quantity)!==Number(l.quantity))throw Error('TEMU · Quantité du prix incohérente : '+l.source_sku);
    const b=money(x.basePrice,'Prix produit'),t=money(x.productTaxAmount,'TVA produit'),s=money(x.shipAmountTotalTaxIncl,'Livraison'),st=money(x.shipTaxAmount,'TVA livraison');
-   if(x.unitBasePrice&&!equal(money(x.unitBasePrice,'Prix unitaire')*Number(l.quantity),b))throw Error('TEMU · Prix total et unitaire incohérents');
+   if(x.unitBasePrice&&!equal(money(x.unitBasePrice,'Prix unitaire')*Number(l.quantity),b))commercialObservations.push({code:'source_unit_total_difference',sku:l.source_sku,blocking:false});
    // The seller-revenue projection derives net/tax cents from allocated gross
    // revenue. Those derived net cents are not an original net-price authority.
    const basis=data.v3CommercialBasis?.source==='temu_estimated_revenue'&&data.v3CommercialBasis?.vatBasis==='seller_gross_at_source_rates'?'gross':'net';
@@ -88,13 +88,13 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
   });
   if(used.size!==data.orderList.length)throw Error('TEMU · Toutes les lignes de prix doivent être rapprochées');
   expected=money(parent.estimatedRevenue,'Revenu vendeur');
-  if(!equal(base,money(parent.basePriceTotal,'Total produits'))||!equal(shipping,money(parent.shippingAmountTotal,'Total livraison'))||!equal(taxTotal,money(parent.taxTotal,'Total TVA')))throw Error('TEMU · Détail des montants différent des totaux');
+  if(!equal(base,money(parent.basePriceTotal,'Total produits'))||!equal(shipping,money(parent.shippingAmountTotal,'Total livraison'))||!equal(taxTotal,money(parent.taxTotal,'Total TVA')))commercialObservations.push({code:'source_component_total_difference',blocking:false});
   // TEMU's line taxes precede platform discounts. The parent provides the final
   // tax total. Allocate that actual source total in cents, conserving the sum.
   const after=parent.taxTotalAfterDiscount?money(parent.taxTotalAfterDiscount,'TVA après remise'):taxTotal;
-  if(parent.estimatedRevenueDeduction&&money(parent.estimatedRevenueDeduction,'Retenue vendeur'))throw Error('TEMU · Retenue sur revenu à ventiler avant création du BC');
-  if(after!==taxTotal){
-   if(!taxTotal&&after)throw Error('TEMU · Ventilation de TVA impossible');
+  if(parent.estimatedRevenueDeduction&&money(parent.estimatedRevenueDeduction,'Retenue vendeur'))commercialObservations.push({code:'source_seller_deduction',amount:money(parent.estimatedRevenueDeduction,'Retenue vendeur'),blocking:false});
+  if(after!==taxTotal&&!taxTotal)commercialObservations.push({code:'source_tax_allocation_unavailable',received:after,calculated:taxTotal,blocking:false});
+  if(after!==taxTotal&&taxTotal){
    const parts=entries.map((e,i)=>{const exact=cents(after)*e.tax/taxTotal;return {i,value:Math.floor(exact),fraction:exact-Math.floor(exact)};});
    let rest=cents(after)-parts.reduce((s,p)=>s+p.value,0);for(const p of [...parts].sort((a,b)=>b.fraction-a.fraction)){if(rest-->0)p.value++;}
    for(const p of parts){const e=entries[p.i];e.grossCalculation={unit:e.gross,quantity:1,discounts:[e.tax],additions:[p.value/100]};e.grossDecimal=decimalTotal(e.grossCalculation.unit,1,e.grossCalculation.discounts,e.grossCalculation.additions);e.gross=e.gross-e.tax+p.value/100;e.tax=p.value/100;e.item.price=(e.gross-e.tax)/e.item.quantity;}
@@ -121,12 +121,35 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
   const originalLines=order.erp_live?.equivalentOriginalLines||order.erp_live?.previousCancelledCycle?.equivalentOriginalLines;
   const pricingRows=lines.map(l=>l.source_payload?.origin==='erplain_live_equivalent'&&lines.length===1&&originalLines?.length===1?originalLines[0].source_payload:l.source_payload||{});
   const taxContext={currency,eurExchangeRate,preferExactRate,total:pricingRows.reduce((sum,r)=>sum+amount(r.itemprice,'Prix Amazon')+amount(r.shippingprice,'Livraison Amazon'),0)};
+  const receivedTax=(gross,tax,product)=>{
+   try{return {tax,rate:rateFromTax(gross-tax,tax,codes,order.address?.country,taxContext),codes:null};}
+   catch(error){
+    // Incoherent source tax does not override the product's configured ERP
+    // rate. Only an explicit, uniquely identified catalogue rate is usable.
+    const selected=Array.isArray(product?.tax_codes)?product.tax_codes:null;
+    const configured=selected?.length===0?{rate:0,codes:[]}:selected?.length===1?codes.filter(c=>String(c.id)===String(selected[0].id)&&c.active!==false&&c.tax_rates?.length===1):null;
+    let rate,preferred;
+    if(configured?.rate===0){rate=0;preferred=[];}
+    else if(Array.isArray(configured)&&configured.length===1){rate=Number(configured[0].tax_rates[0].rate);preferred=[{id:String(configured[0].id)}];}
+    if(!Number.isFinite(rate)||rate<0)throw error;
+    const calculated=cents(gross-gross/(1+rate/100))/100;
+    commercialObservations.push({code:'source_tax_difference_supplier_rate',received:tax,calculated,rate,blocking:false});
+    return {tax:calculated,rate,codes:preferred};
+   }
+  };
   lines.forEach((l,i)=>{const r=l.source_payload?.origin==='erplain_live_equivalent'&&lines.length===1&&originalLines?.length===1?originalLines[0].source_payload:(l.source_payload||{}),gross=amount(r?.itemprice,'Prix Amazon · '+l.source_sku),tax=amount(r?.itemtax,'TVA Amazon · '+l.source_sku);
-   if(optional(r.itempromotiondiscount,'Remise Amazon')||optional(r.shippromotiondiscount,'Remise livraison Amazon'))throw Error('Amazon · Ventilation TVA des remises à vérifier');
-   add(products[i],gross,tax,rateFromTax(gross-tax,tax,codes,order.address?.country,taxContext),l.source_sku,'gross');
-   const ship=amount(r.shippingprice,'Prix livraison Amazon'),st=amount(r.shippingtax,'TVA livraison Amazon');if(ship||st)add(null,ship,st,rateFromTax(ship-st,st,codes,order.address?.country,taxContext),'Livraison Amazon · '+l.source_sku,'gross');
+   if(optional(r.itempromotiondiscount,'Remise Amazon')||optional(r.shippromotiondiscount,'Remise livraison Amazon'))commercialObservations.push({code:'source_discount_supplier_rules',sku:l.source_sku,itemDiscount:optional(r.itempromotiondiscount,'Remise Amazon'),shippingDiscount:optional(r.shippromotiondiscount,'Remise livraison Amazon'),blocking:false});
+   const itemTax=receivedTax(gross,tax,products[i]);add(products[i],gross,itemTax.tax,itemTax.rate,l.source_sku,'gross',{unit:gross,quantity:1,discounts:[],additions:[]},itemTax.codes);
+   const ship=amount(r.shippingprice,'Prix livraison Amazon'),st=amount(r.shippingtax,'TVA livraison Amazon');if(ship||st){
+    let rate;try{rate=rateFromTax(ship-st,st,codes,order.address?.country,taxContext);}catch(error){
+     if(ship<st)throw error;const price=ship-st;
+     entries.push({item:{type:'shipping_cost',description:'Livraison Amazon · '+l.source_sku,quantity:1,price,apply_discount_rules:true},gross:price,tax:0,taxUnspecified:true,rate:null,basis:'net',grossDecimal:decimalTotal(price,1),grossCalculation:{unit:price,quantity:1,discounts:[],additions:[]}});
+     commercialObservations.push({code:'source_shipping_tax_unspecified',received:st,receivedGross:ship,blocking:false});
+    }
+    if(rate!==undefined)add(null,ship,st,rate,'Livraison Amazon · '+l.source_sku,'gross');
+   }
   });
- }else if(['tender','samples'].includes(order.channel)){
+ }else if(order.channel==='tender'){
   lines.forEach((l,i)=>{const r=l.source_payload||{},unit=r.puht??r.prixunitaireht??r.prix;
    const net=present(unit)?amount(unit,'Prix HT · '+l.source_sku)*Number(l.quantity):amount(r.totalht,'Total HT · '+l.source_sku);
    if(optional(r.rem,'Remise ligne')||optional(r.remiseglobale,'Remise globale'))throw Error('BC · Remise source à préciser avant création');
@@ -138,10 +161,34 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
   if(optional(src.coutsdexpedition,'Frais de livraison'))throw Error('BC · TVA des frais de livraison à renseigner');
   // Excel's "Total" is a line total, not the order total copied on its first row.
   if(lines.every(l=>present(l.source_payload?.total)))expected=lines.reduce((s,l)=>s+amount(l.source_payload.total,'Total ligne'),0);
+ }else if(order.channel==='samples'){
+  lines.forEach((l,i)=>{const r=l.source_payload||{},unit=r.puht??r.prixunitaireht??r.prix;
+   const net=present(unit)?amount(unit,'Prix HT · '+l.source_sku)*Number(l.quantity):amount(r.totalht,'Total HT · '+l.source_sku);
+   const sourceDiscount=optional(r.rem,'Remise ligne')||optional(r.remiseglobale,'Remise globale');if(sourceDiscount)commercialObservations.push({code:'source_discount_supplier_rules',sku:l.source_sku,received:sourceDiscount,blocking:false});
+   const rate=amount(r.taxes,'Taux TVA · '+l.source_sku),tax=cents(net*rate/100)/100;
+   add(products[i],cents(net)/100+tax,tax,rate,l.source_sku);
+   // Tender prices retain Excel precision; Erplain computes totals and taxes.
+   if(order.channel==='tender')entries.at(-1).item.price=present(unit)&&Number(products[i].quantity)===Number(l.quantity)?amount(unit,'Prix HT · '+l.source_sku):net/Number(products[i].quantity);
+  });
+  const shippingCost=optional(src.coutsdexpedition,'Frais de livraison');
+  if(shippingCost){
+   // The received charge is transmitted, never dropped. No source tax rate
+   // is guessed: omit the optional codes and let ERPLAIN apply its defaults.
+   const item={type:'shipping_cost',description:'Livraison source',quantity:1,price:shippingCost,apply_discount_rules:true};
+   entries.push({item,gross:shippingCost,tax:0,taxUnspecified:true,rate:null,basis:'net',grossDecimal:decimalTotal(shippingCost,1),grossCalculation:{unit:shippingCost,quantity:1,discounts:[],additions:[]}});
+   commercialObservations.push({code:'source_shipping_tax_unspecified',received:shippingCost,blocking:false});
+  }
+  // Excel's "Total" is a line total, not the order total copied on its first row.
+  if(lines.every(l=>present(l.source_payload?.total)))expected=lines.reduce((s,l)=>s+amount(l.source_payload.total,'Total ligne'),0);
  }else throw Error('BC · Source des prix non configurée : '+order.channel);
  const total=cents(entries.reduce((s,e)=>s+e.gross,0))/100,tax=cents(entries.reduce((s,e)=>s+e.tax,0))/100;
+ if(order.channel==='tender'){
  if(expected!==undefined&&!acceptedBcTotal({total},{total:expected,currency,eurExchangeRate}))throw Error('BC · Total source incohérent : détail '+total.toFixed(2)+' / attendu '+expected.toFixed(2)+' '+currency);
  return {version:2,currency,eurExchangeRate,tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:e.item.tax_codes.map(t=>String(t.id)).sort(),unitPrice:e.item.price,gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
+ }
+ if(commercialObservations.some(x=>x.code==='source_discount_supplier_rules'))for(const entry of entries)entry.item.apply_discount_rules=true;
+ const sourceTotalObservation=expected===undefined?null:{received:expected,calculated:total,difference:total-expected,blocking:false};
+ return {version:2,currency,eurExchangeRate,sourceTotalObservation,commercialObservations,taxSourceComplete:!entries.some(e=>e.taxUnspecified),tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:(e.item.tax_codes||[]).map(t=>String(t.id)).sort(),taxUnspecified:e.taxUnspecified===true,unitPrice:e.item.price,gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
 }
 // User-authorized OR policy: strictly below EUR 0.50 or 5% of order total.
 // Currency rates retain Erplain's quote: foreign units per default EUR.

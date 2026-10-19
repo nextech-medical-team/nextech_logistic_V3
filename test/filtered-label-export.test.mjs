@@ -32,7 +32,9 @@ test('merged PDF includes all 501 orders and their additional parcels without so
   if(sql.startsWith('SELECT orders.*'))return {rows:[{id:args[0],reference:args[0],channel:'amazon',carrier:'gls',skus:['SKU'],erp_live:{}}]};
   if(sql.startsWith('SELECT d.pdf,d.document_index FROM carrier_documents'))return {rows:[{pdf:bytes,document_index:0}]};
   if(sql.startsWith('SELECT id,pdf FROM extra_parcels'))return {rows:args[0]==='order-0'?[{id:'extra',pdf:bytes}]:[]};
-  if(sql.startsWith('SELECT source_hash,pdf FROM label_sku_copies'))return {rows:[{source_hash:before,pdf:bytes}]};
+  if(sql.startsWith('SELECT source_hash,pdf,order_id,created_at FROM label_sku_copies'))return {rows:[{source_hash:before,pdf:bytes,order_id:args[0],created_at:'2026-10-01'}]};
+  if(sql.startsWith('SELECT id,carrier,partial_mode FROM orders'))return {rows:[{id:args[0],carrier:'gls',partial_mode:false}]};
+  if(sql.startsWith('SELECT detail FROM audit'))return {rows:[]};
   throw Error('Unexpected query '+sql);
  }};
  const job={};const began=performance.now();await buildLabelDownload(db,{ids:Array.from({length:count},(_,i)=>'order-'+i)},job);

@@ -1,4 +1,5 @@
-import {usesRecordedBc,recordedBcPricing} from './existing-bc-execution.mjs';
+import {substitutionExecutionSnapshot} from './substitution-execution-snapshot.mjs';
+import {exactStockAvailability,exactQuantitySum,exactQuantityDifference} from './stock-decimal.mjs';
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
 import {importBcAmounts} from './import-bc-commercial.mjs';
 import {chooseDocumentStockVariant} from './document-stock-choice.mjs';
@@ -8,62 +9,60 @@ import {provePartialRemainder,assertPartialShippingPreserved} from './partial-su
 import {findRecordedSubstitution,recordedSubstitutionPlan} from './substitution-recovery.mjs';
 import {readHistoricalStock,verifyHistoricalStock,assertNoHistoricalStockRemoval} from './historical-stock-proof.mjs';
 import {verifySubstitutionShipping} from './substitution-shipping-check.mjs';
-import {temuSellerTotals} from './temu-commercial-source.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
 import {rememberEquivalence} from './equivalence-catalog.mjs';
-import {verifySourceCommercialTotals} from './bc-pricing.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {assertWholeTemuPackage} from './temu-label-pdf.mjs';
 import {resolveWeight} from './erplain-readonly.mjs';
-const fingerprint=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+const fingerprint=v=>createHash('sha256').update(JSON.stringify(substitutionExecutionSnapshot(v))).digest('hex');
 const bcFields='id label created_at status total tax_type currency{label} update_stock line_items{id type quantity price discount discount_rule_amount ecotax tax_amount tax_codes{id tax_rates{rate}} reserved_quantity available on_hand location{id} variant{id sku active track_inventory weight_amount weight_unit product{id active}}} shipping_orders(first:100){data{id label status update_stock line_items{id type quantity location{id} variant{id sku}}} paginatorInfo{hasMorePages}}';
 export function validateSubstitution(b,apply=false){
  if(typeof b.sku!=='string'||!b.sku.trim()||typeof b.replacementSku!=='string'||!b.replacementSku.trim()||b.replacementSku.length>199)throw Error('SKU original et SKU équivalent requis');
  if(b.sku.trim()===b.replacementSku.trim())throw Error('Choisir un SKU différent du produit en rupture');
- for(const field of ['replaceQuantity','replacementQuantity'])if(!Number.isFinite(Number(b[field]))||Number(b[field])<=0)throw Error('Quantités de remplacement strictement positives requises');
+ for(const field of ['replaceQuantity','replacementQuantity'])if(!['number','string'].includes(typeof b[field])||String(b[field]).trim()===''||!Number.isFinite(Number(b[field]))||Number(b[field])<=0)throw Error('Quantités de remplacement strictement positives requises');
  if(!['order','permanent'].includes(b.scope))throw Error('Choisir la portée de l’équivalence');
- if(apply&&(!/^[a-f0-9]{64}$/.test(b.previewFingerprint||'')||b.confirmEquivalent!==true))throw Error('Vérifier et confirmer le produit équivalent avant enregistrement');
+ if(b.verifyAndApply!==undefined&&b.verifyAndApply!==true)throw Error('Option de remplacement direct invalide');
+ if(apply&&(b.confirmEquivalent!==true||b.verifyAndApply!==true&&!/^[a-f0-9]{64}$/.test(b.previewFingerprint||'')))throw Error('Vérifier et confirmer le produit équivalent avant enregistrement');
 }
+function inclusivePrice(bc,l){const price=Number(l.price)-Number(l.tax_amount)/Number(l.quantity);return bc.tax_type==='inclusive'&&l.price!=null&&l.tax_amount!=null&&Number.isFinite(price)?{price}:{};}
 export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,historicalStock=null,partialProof=null}={}){
  validateSubstitution(b);
- if(!['inclusive','exclusive'].includes(bc?.tax_type))throw Error('BC · Mode HT/TTC absent ou inconnu');
  if(!bc?.id||![false,true].includes(bc.update_stock)||!['pending','unpublished','active'].includes(bc.status))throw Error('BC LIVE non modifiable : vérifier son statut et sa politique de stock');
  const historicalProof=bc.update_stock===true?verifyHistoricalStock(bc,historicalStock?.evidence):null;
  if(historicalProof&&b.scope!=='order')throw Error('BC historique : choisir « Équivalence juste pour cette commande » pour conserver une reprise vérifiable.');
  if(!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.data.length&&!partialProof)throw Error('Un BL existe déjà : le remplacement nécessite un rapprochement de la livraison');
  const allLines=bc.line_items,lines=shippingProductLines(allLines||[]);
  if(!Array.isArray(allLines)||allLines.some(l=>l.type!=='normal'&&l.type!=='shipping_cost'))throw Error('BC avec lignes particulières : contrôle manuel requis');
- if(allLines.some(l=>!l.id||l.price==null||!Number.isFinite(Number(l.price))||Number(l.price)<0||!Number.isFinite(Number(l.quantity))||Number(l.quantity)<=0||l.tax_amount==null||!Number.isFinite(Number(l.tax_amount))||Number(l.tax_amount)<0||Number(l.discount)||Number(l.discount_rule_amount)||Number(l.ecotax)))throw Error('BC · Lignes commerciales incomplètes ou remisées');
+ if(allLines.some(l=>!l.id||!Number.isFinite(Number(l.quantity))||Number(l.quantity)<=0))throw Error('BC · Identités ou quantités de lignes incomplètes');
  const shipping=allLines.filter(l=>l.type==='shipping_cost');
  if(shipping.some(l=>!l.id))throw Error('Ligne de livraison incomplète');
- if(!lines?.length||lines.some(l=>l.tax_amount==null||!Number.isFinite(Number(l.tax_amount))||Number(l.tax_amount)<0||!l.variant?.sku||!l.location?.id||!l.id||l.price==null||!Number.isFinite(Number(l.price))||!Number.isFinite(Number(l.quantity))||Number(l.quantity)<=0))throw Error('BC avec lignes particulières ou incomplètes : vérifier les équivalents dans Erplain');
+ if(!lines?.length||lines.some(l=>!l.variant?.sku||!l.location?.id||!l.id||!Number.isFinite(Number(l.quantity))||Number(l.quantity)<=0))throw Error('BC avec lignes particulières ou incomplètes : vérifier les équivalents dans Erplain');
  const originals=lines.filter(l=>l.variant.sku===b.sku.trim());
  if(originals.length!==1)throw Error('SKU original absent ou présent sur plusieurs lignes du BC');
  const original=originals[0],replace=Number(b.replaceQuantity),quantity=Number(b.replacementQuantity);
  if(partialProof&&(String(partialProof.bcId)!==String(bc.id)||String(partialProof.originalLineId)!==String(original.id)||Number(original.quantity)-replace<partialProof.allocatedOriginal))throw Error('Quantité déjà allouée : remplacement interdit');
- if(lines.some(l=>l.type!=='normal'||Number(l.discount)||Number(l.discount_rule_amount)||Number(l.ecotax)))throw Error('BC avec kit, remise ou écotaxe : modifier l’équivalent dans Erplain puis actualiser dans V3');
  if(replace>Number(original.quantity))throw Error('La quantité remplacée dépasse la quantité du BC');
  if(!variant?.id||variant.sku!==b.replacementSku.trim()||variant.active===false||variant.product?.active===false)throw Error('Produit équivalent actif requis dans Erplain LIVE');
  let weight;try{weight=resolveWeight([variant],variant.sku).weightKg;}catch(e){throw Error('Produit équivalent ['+variant.sku+'] : '+e.message);}
- const taxes=a=>JSON.stringify((a||[]).map(t=>String(t.id)).sort());
- if(!preserveSourceTaxes&&Number(original.price)!==0&&(!Array.isArray(original.tax_codes)||!Array.isArray(variant.tax_codes)||taxes(original.tax_codes)!==taxes(variant.tax_codes)))throw Error('Taxes différentes : vérifier le remplacement dans Erplain');
+ if(typeof variant.track_inventory!=='boolean')throw Error('API Erplain · Politique de stock du produit équivalent non vérifiée');
  if(variant.track_inventory!==false){
-  if(!Array.isArray(variant.stock_levels?.data)||variant.stock_levels.paginatorInfo?.hasMorePages)throw Error('API Erplain · Stock du produit équivalent incomplet');
+  if(!Array.isArray(variant.stock_levels?.data)||variant.stock_levels.paginatorInfo?.hasMorePages!==false)throw Error('API Erplain · Stock du produit équivalent incomplet');
   const stocks=variant.stock_levels.data.filter(s=>String(s.location?.id)===String(original.location.id));
-  if(stocks.length!==1||[stocks[0].available,stocks[0].on_hand].some(v=>v==null||!Number.isFinite(Number(v))))throw Error('API Erplain · Stock de l’emplacement non reçu');
+  if(stocks.length!==1||[stocks[0].available,stocks[0].on_hand].some(v=>!['number','string'].includes(typeof v)||String(v).trim()===''||!Number.isFinite(Number(v))))throw Error('API Erplain · Stock de l’emplacement non reçu');
   // Historical BC quantities were already deducted; require only the added quantity.
-  const existing=historicalProof?0:Math.max(0,lines.filter(l=>String(l.variant.id)===String(variant.id)&&String(l.location.id)===String(original.location.id)).reduce((n,l)=>n+Number(l.quantity),0)-(partialProof?.allocated[String(variant.id)+':'+String(original.location.id)]||0));
-  if(Math.min(Number(stocks[0].available),Number(stocks[0].on_hand))<quantity+existing)throw Error('Produit de remplacement ['+variant.sku+'] : stock insuffisant. Quantité totale nécessaire : '+(quantity+existing)+' unités ; stock disponible : '+Math.min(Number(stocks[0].available),Number(stocks[0].on_hand))+' unités ; quantité manquante : '+Math.round((quantity+existing-Math.min(Number(stocks[0].available),Number(stocks[0].on_hand)))*1e6)/1e6+' unités. Remplacement non enregistré. Choisissez un autre produit ou réduisez la quantité à remplacer.');
+  const prior=historicalProof?'0':exactQuantityDifference(exactQuantitySum(lines.filter(l=>String(l.variant.id)===String(variant.id)&&String(l.location.id)===String(original.location.id)).map(l=>l.quantity)),partialProof?.allocated[String(variant.id)+':'+String(original.location.id)]||0),existing=Number(prior)<0?'0':prior;
+  const stockRows=[quantity,existing].map(quantity=>({quantity,reserved_quantity:0,available:stocks[0].available,on_hand:stocks[0].on_hand})),budget=exactStockAvailability(stockRows);
+  if(!budget.sufficient)throw Error('Produit de remplacement ['+variant.sku+'] : stock insuffisant. Quantité totale nécessaire : '+budget.need+' unités ; stock disponible : '+budget.usable+' unités ; quantité manquante : '+budget.missing+' unités. Remplacement non enregistré. Choisissez un autre produit ou réduisez la quantité à remplacer.');
  }
  const remaining=Number(original.quantity)-replace;
  for(const l of lines.filter(l=>l!==original||remaining>0)){try{resolveWeight([l.variant],l.variant.sku);}catch(e){throw Error('Produit restant ['+l.variant.sku+'] : '+e.message);}}
  // Existing IDs retain commercial fields not edited by this action.
- const items=lines.filter(l=>l!==original||remaining>0).map(l=>({id:String(l.id),quantity:l===original?remaining:Number(l.quantity),...(bc.tax_type==='inclusive'?{price:Number(l.price)-Number(l.tax_amount)/Number(l.quantity)}:{})}));
- for(const l of shipping)items.push({id:String(l.id),quantity:Number(l.quantity),...(bc.tax_type==='inclusive'?{price:Number(l.price)-Number(l.tax_amount)/Number(l.quantity)}:{})});
- const originalNet=Number(original.price)-(bc.tax_type==='inclusive'?Number(original.tax_amount)/Number(original.quantity):0);
+ const items=lines.filter(l=>l!==original||remaining>0).map(l=>({id:String(l.id),quantity:l===original?remaining:Number(l.quantity),...inclusivePrice(bc,l)}));
+ for(const l of shipping)items.push({id:String(l.id),quantity:Number(l.quantity),...inclusivePrice(bc,l)});
+ const originalNet=original.price==null?NaN:Number(original.price)-(bc.tax_type==='inclusive'?Number(original.tax_amount)/Number(original.quantity):0);
  const newPrice=originalNet*replace/quantity;
- items.push({variant:{id:String(variant.id)},location:{id:String(original.location.id)},quantity,price:newPrice,tax_codes:original.tax_codes.map(t=>({id:String(t.id)})),apply_discount_rules:false});
+ items.push({variant:{id:String(variant.id)},location:{id:String(original.location.id)},quantity,...(Number.isFinite(newPrice)?{price:newPrice}:{}),...(Array.isArray(original.tax_codes)?{tax_codes:original.tax_codes.map(t=>({id:String(t.id)}))}:{}),apply_discount_rules:false});
  const expected=lines.filter(l=>l!==original||remaining>0).map(l=>({sku:l.variant.sku,quantity:l===original?remaining:Number(l.quantity)}));expected.push({sku:variant.sku,quantity});
  return {commercialBefore:bc,bcId:String(bc.id),originalSku:original.variant.sku,replacementSku:variant.sku,replaceQuantity:replace,replacementQuantity:quantity,remaining,available:variant.track_inventory===false?null:Math.min(Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).available),Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).on_hand)),weightKg:weight,items,expected,previewFingerprint:fingerprint({bc,variant:{id:variant.id,sku:variant.sku,weight_amount:variant.weight_amount,weight_unit:variant.weight_unit},replace,quantity}),message:'Produit et stock vérifiés dans Erplain LIVE. Remplacement limité à cette commande.'};
 }
@@ -85,14 +84,11 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   assertWholeTemuPackage(o,originals,temu.result,temu.packages[0]);
   if(!(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1 AND package=$2',[o.reference,temu.packages[0]])).rows.length)throw Error('Récupérer le PDF TEMU acheté avant remplacement');
  }
- const labelNotice=o.partial_mode?'Les livraisons, étiquettes et suivis existants sont conservés intégralement. Seul le reliquat du BC est modifié ; aucun achat ni réimpression automatique.':temu||carrier?'Étiquette existante conservée intégralement, y compris ses mentions SKU, quantités et numéro de suivi. Le remplacement concerne la commande et le BC ; aucun achat ni réimpression automatique.':'Après validation du stock et du BL, l’étiquette sera créée automatiquement. Aucun clic supplémentaire ne sera nécessaire.';
+ const labelNotice=o.partial_mode?'Les livraisons, étiquettes et suivis existants sont conservés intégralement. Seul le reliquat du BC est modifié ; aucun achat ni réimpression automatique.':temu||carrier?'Même étiquette et même suivi conservés. Les mentions SKU et quantités de l’édition V3 sont actualisées automatiquement avec l’équivalent. Téléchargez cette édition pour la réimprimer ; aucun nouvel achat.':'Après validation du stock et du BL, l’étiquette sera créée automatiquement. Aucun clic supplémentaire ne sera nécessaire.';
  await stage('Lecture du BC et du produit équivalent');await api.verify();
  const {Order:bc}=await api.request(`query V3SubstitutionBC($id:ID!){Order(id:$id){${bcFields}}}`,{id:String(o.erp_live.bc.id)});
  if(String(bc?.id)!==String(o.erp_live.bc.id))throw Error('API Erplain · BC demandé non reçu');
- // The manually supplied import preserves the current BC commercial basis.
- // This option is supplied by the import service, never by the request body.
- if(preserveBcAmounts&&(!Array.isArray(bc.line_items)||!bc.line_items.length))throw Error('BC · Lignes commerciales non reçues');
- const sourceAmounts=usesRecordedBc(o)?recordedBcPricing(o,bc):preserveBcAmounts?{total:bc.total,tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:o.channel==='temu'?temuSellerTotals(o):o.erp_live.pricing||(o.source_payload?.erplainImported?{total:Number(bc.total),tax:bc.line_items.reduce((n,l)=>n+Number(l.tax_amount),0),currency:bc.currency?.label}:null);if(!usesRecordedBc(o))verifySourceCommercialTotals(bc,sourceAmounts);
+ // A recorded BC is authoritative: no amount/source comparison after creation.
  if(bc.update_stock===true)await assertNoHistoricalStockRemoval(api,o);
  let plan=await findRecordedSubstitution(db,o,b,bc,api);
  if(!plan){
@@ -134,7 +130,14 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   }else if(fingerprint(substitutionMappingSnapshot(mappingLines))!==fingerprint(substitutionMappingSnapshot((plan.recordedMappingBefore||[]).map(r=>({source_sku:r.source_sku,mapped_sku:r.target_sku,mapping_source_qty:r.source_qty,mapping_target_qty:r.target_qty})))))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');
  }
  const permanent=b.scope==='permanent'?(plan.localCommitted?plan.recordedPermanent:permanentEquivalentMapping(o,plan.attemptRecovery?plan.commercialBefore:bc,b,mappingLines)):null;if(plan.attemptRecovery&&((permanent===null)!==(plan.recordedPermanent===null)||['channel','source_sku','target_sku','source_qty','target_qty'].some(k=>permanent?.[k]!==plan.recordedPermanent?.[k])))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');plan.labelNotice=labelNotice;plan.previewFingerprint=fingerprint({plan:plan.previewFingerprint,scope:b.scope,permanent,shopifyStatusProof:plan.shopifyStatusProof||null,temu:temu?{status:temu.status,packages:temu.packages,result:temu.result?.packageInfoResultList}:null,carrier:carrier?{creation:carrier.creation_id,reference:carrier.reference,tracking:carrier.tracking}:null});if(!apply)return plan;
- if(plan.previewFingerprint!==b.previewFingerprint)throw Error('BC ou produit modifié depuis la vérification : contrôler de nouveau');
+ // One explicit submission verifies the current ERP state and applies that same
+ // plan in the existing locked worker. No browser round trip or saved preview.
+ if(b.verifyAndApply===true)b={...b,previewFingerprint:plan.previewFingerprint};
+ if(plan.previewFingerprint!==b.previewFingerprint){
+  const saved=(await db.query("SELECT result,payload FROM resolution_jobs WHERE order_id=$1 AND action='equivalent-preview' AND status='complete' AND result->>'previewFingerprint'=$2 ORDER BY created_at DESC LIMIT 1",[o.id,b.previewFingerprint])).rows[0],prior=saved?.result;
+  const operation=p=>({bc:p.commercialBefore,items:p.items,expected:p.expected,bcId:p.bcId,originalSku:p.originalSku,replacementSku:p.replacementSku,replaceQuantity:p.replaceQuantity,replacementQuantity:p.replacementQuantity,weightKg:p.weightKg});
+  if(b.scope!=='order'||saved?.payload?.scope!==b.scope||prior?.labelNotice!==plan.labelNotice||!prior||fingerprint(operation(prior))!==fingerprint(operation(plan)))throw Error('BC ou produit modifié depuis la vérification : contrôler de nouveau');
+ }
  if(plan.localCommitted){
   const attempt=await startSubstitutionAttempt(db,o,b,plan,permanent,mappingLines);
   const recoveredResult={...plan.completionResult,importDeferred:deferResume};
@@ -154,13 +157,11 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  const updated=changed.UpdateOrder;
  let historicalAfter=null;
  try{
- if(!usesRecordedBc(o))verifySourceCommercialTotals(updated,sourceAmounts);
- if(preserveBcAmounts&&(Math.round(Number(updated.total)*100)!==Math.round(Number(sourceAmounts.total)*100)||Math.round(updated.line_items.reduce((n,l)=>n+Number(l.tax_amount),0)*100)!==Math.round(Number(sourceAmounts.tax)*100)))throw Error('Remplacement à rapprocher : les montants du BC ont changé.');
  if(!updated||String(updated.id)!==plan.bcId||updated.update_stock!==bc.update_stock||(updated.shipping_orders?.data?.length&&!plan.partialProof)||totals(shippingProductLines(updated.line_items||[]).map(l=>({sku:l.variant?.sku,quantity:l.quantity})))!==totals(plan.expected))throw Error('Remplacement non confirmé : relire le BC dans Erplain avant toute nouvelle tentative');
  if(plan.partialProof)assertPartialShippingPreserved(plan.commercialBefore,updated);
  if(!plan.reconcileOnly)verifySubstitutionShipping(bc,updated);
  if(attempt){
-  if(updated.shipping_orders?.paginatorInfo?.hasMorePages!==false||updated.line_items.some(l=>Number(l.discount)||Number(l.discount_rule_amount)||Number(l.ecotax)||l.type==='normal'&&(l.variant?.active!==true||l.variant?.product?.active!==true)))throw Error('Résultat du remplacement incomplet ou modifié : rapprocher le BC avant reprise.');
+  if(updated.shipping_orders?.paginatorInfo?.hasMorePages!==false||updated.line_items.some(l=>l.type==='normal'&&(l.variant?.active!==true||l.variant?.product?.active!==true)))throw Error('Résultat du remplacement incomplet ou modifié : rapprocher le BC avant reprise.');
   const request={...b,scope:'order'};
   recordedSubstitutionPlan(updated,request,{id:b.requestId,status:'review',error:'Frais de livraison modifiés : rapprochement requis',payload:request},{status:'complete',payload:request,result:plan},o);
  }
@@ -176,7 +177,8 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   }
   if(permanent)await tx.query('INSERT INTO mappings(channel,source_sku,target_sku,source_qty,target_qty,notes,updated_at) VALUES($1,$2,$3,$4,$5,$6,now()) ON CONFLICT(channel,source_sku) DO UPDATE SET target_sku=excluded.target_sku,source_qty=excluded.source_qty,target_qty=excluded.target_qty,notes=excluded.notes,updated_at=now()',[permanent.channel,permanent.source_sku,permanent.target_sku,permanent.source_qty,permanent.target_qty,'Équivalence permanente confirmée']);
   if(Number(plan.replaceQuantity)===Number(plan.replacementQuantity))await rememberEquivalence(tx,plan.originalSku,plan.replacementSku);
-  const state={...o.erp_live,equivalentOriginalLines:o.erp_live.equivalentOriginalLines||originals,equivalentItems:shippingProductLines(updated.line_items).map(l=>({variant:{id:String(l.variant.id)},location:{id:String(l.location.id)},quantity:Number(l.quantity),price:Number(l.price),description:l.variant.sku})),equivalentRefreshedAt:new Date().toISOString(),labelReprintNotice:labelNotice||null,equivalentReconciledFrom:plan.recoveredFrom||null,phase:'bc_created',verifiedAt:null,stockCheckedAt:null,labelPreparationFingerprint:null};
+  const state={...o.erp_live,bc:{...o.erp_live.bc,...updated},equivalentOriginalLines:o.erp_live.equivalentOriginalLines||originals,equivalentItems:shippingProductLines(updated.line_items).map(l=>({variant:{id:String(l.variant.id)},location:{id:String(l.location.id)},quantity:Number(l.quantity),price:Number(l.price),description:l.variant.sku})),equivalentRefreshedAt:new Date().toISOString(),labelReprintNotice:labelNotice||null,equivalentReconciledFrom:plan.recoveredFrom||null,phase:'bc_created',verifiedAt:null,stockCheckedAt:null,labelPreparationFingerprint:null};
+  state.substitutionDiagnostics={bcId:String(updated.id),retiredSkus:[...new Set([...(String(o.erp_live.substitutionDiagnostics?.bcId)===String(updated.id)?o.erp_live.substitutionDiagnostics.retiredSkus||[]:[]),...shippingProductLines(bc.line_items).map(l=>l.variant.sku)])].filter(sku=>!updated.line_items.some(l=>l.variant?.sku===sku))};
   if(attempt)state.equivalentAttemptId=b.requestId;
   state.documentSource={...o.erp_live.documentSource,checkedAt:new Date().toISOString(),lines:shippingProductLines(updated.line_items).map(l=>({lineId:String(l.id),sku:l.variant.sku,quantity:Number(l.quantity)})),shippingOrders:updated.shipping_orders.data};
   if(preserveBcAmounts&&attempt)state.importBcAmounts=importBcAmounts(updated,b.requestId);

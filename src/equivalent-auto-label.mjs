@@ -1,5 +1,7 @@
+import {retiredLabelPreparationReview} from './post-bl-preparation-review.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {temuLabelPolicyMessage} from './temu-label-policy.mjs';
+import {hasCreatedBl} from './created-bl-label.mjs';
 import {randomUUID} from 'node:crypto';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
 import {assertManualLabelOrder} from './manual-label-policy.mjs';
@@ -11,6 +13,7 @@ export function assertPreparedLabelOrder(o,e){
   const hold=suspensionBlock(o);if(hold)throw Error(hold);
   if(o.archived||o.partial_mode||o.source_payload?.externalLabel?.active||['cancelled','shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande TEMU non admissible à une nouvelle étiquette');
  }else assertManualLabelOrder(o,o?.carrier);
+ if(hasCreatedBl(o)){if(cancellationBlock(o))throw Error(cancellationBlock(o));if(o.duplicate_of)throw Error('Commande en doublon');if(String(o.reference||'').startsWith('DEMO-'))throw Error('Commande fictive');return;}
  const blocked=cancellationBlock(o)||o.source_payload?.erplainValidationHold&&'Validation Erplain suspendue'||o.source_payload?.marketplacePendingCorrection&&'Commande modifiée sur la plateforme'||o.duplicate_of&&'Commande en doublon'||o.issue;
  if(blocked)throw Error(String(blocked));
  if(String(o.reference||'').startsWith('DEMO-'))throw Error('Commande fictive');
@@ -34,10 +37,10 @@ export async function advanceEquivalentLabel(db,job,{repair=false}={}){
   if(o.partial_mode||j.result?.partialRemainder)return {handled:false};
   const busy=(await tx.query("SELECT id FROM resolution_jobs WHERE order_id=$1 AND id<>$2 AND status IN ('queued','running','waiting')",[o.id,j.id])).rows;
   if(busy.length)return {handled:true,state:'busy'};
-  const latest=(await tx.query('SELECT id,status,created_at FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[o.id])).rows[0];
-  if(latest?.status==='review'&&latest.id!==j.id)throw Error('Correction plus récente à vérifier avant étiquette');
+  const latest=(await tx.query('SELECT id,status,error,created_at FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[o.id])).rows[0];
+  if(latest?.status==='review'&&latest.id!==j.id&&(!hasCreatedBl(o)||!retiredLabelPreparationReview(latest.error)))throw Error('Correction plus récente à vérifier avant étiquette');
   const e=(await tx.query('SELECT status,error FROM erp_live_jobs WHERE order_id=$1 FOR SHARE',[o.id])).rows[0];
-  if(e?.status==='pending'||e?.status==='processing')return {handled:true,state:'erp_waiting'};
+  if(e?.status==='processing'||!hasCreatedBl(o)&&e?.status==='pending')return {handled:true,state:'erp_waiting'};
   assertPreparedLabelOrder(o,e);
   await tx.query('SELECT id FROM lines WHERE order_id=$1 ORDER BY id FOR SHARE',[o.id]);
   await assertLabelStockGate(tx,o);

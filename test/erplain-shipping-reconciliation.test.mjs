@@ -19,12 +19,13 @@ test('one incomplete BL read does not block another order or lose its existing B
 test('BC search only proves absence with a complete unambiguous provider response',async()=>{
  const o={id:'local',reference:'PO-1-2'};
  const run=result=>recoverOrder({request:async q=>{assert.match(q,/^query /);return result;}},o);
- for(const result of [null,{}, {Orders:{data:[]}}, {Orders:{data:[],paginatorInfo:{}}}])await assert.rejects(run(result),/Réponse BC incomplète/);
+ for(const result of [null,{}, {Orders:{data:[]}}, {Orders:{data:[],paginatorInfo:{}}}])await assert.rejects(run(result),/incomplète/);
  const result=data=>({Orders:{data,paginatorInfo:{hasMorePages:false}}});
  assert.equal(await run(result([])),null);
  const bc={id:'12',status:'unpublished',external_reference:o.reference,internal_notes:'[V3:local]'};
  assert.equal((await run(result([bc]))).id,'12');
- for(const invalid of [{...bc,internal_notes:''},{...bc,status:'cancelled'},{...bc,status:'completed'},{...bc,id:null}])await assert.rejects(run(result([invalid])),/aucune nouvelle création|identité absente/);
+ assert.equal((await run(result([{...bc,status:'completed'}]))).id,'12');
+ for(const invalid of [{...bc,internal_notes:''},{...bc,status:'cancelled'},{...bc,id:null}])await assert.rejects(run(result([invalid])),/avant création|aucune nouvelle création|identité absente/);
  await assert.rejects(run(result([bc,{...bc,id:'13'}])),/multiples/);
  await assert.rejects(run({Orders:{data:[bc],paginatorInfo:{hasMorePages:true}}}),/Trop de BC/);
 });

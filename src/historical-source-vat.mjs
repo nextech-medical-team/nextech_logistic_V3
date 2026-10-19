@@ -1,4 +1,4 @@
-import {usesRecordedBc} from './existing-bc-execution.mjs';
+import {usesRecordedBc,fiscalAttemptHasNoLogisticsChange} from './existing-bc-execution.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {bcAllowedSql} from './bc-authorization.mjs';
 import {mutationBlock} from './erp-transient-policy.mjs';
@@ -83,7 +83,7 @@ export function sourceVatPlan(bc,o){
 }
 
 export async function alignHistoricalSourceVat(api,o,{save,guard,preserveLabels}){
- if(usesRecordedBc(o)){if(o.erp_live?.sourceVatAttempt?.status==='uncertain')throw Error('TVA source · Mutation incertaine : rapprochement fournisseur requis, aucune réécriture');return {unchanged:true,authority:'recorded_erplain_bc',sourceAlignmentDisabled:true};}
+ if(usesRecordedBc(o)){if(!fiscalAttemptHasNoLogisticsChange(o,o.erp_live.bc))throw Error('TVA source · Mutation incertaine : rapprochement fournisseur requis, aucune réécriture');return {unchanged:true,authority:'recorded_erplain_bc',sourceAlignmentDisabled:true};}
  if(o.channel!=='temu'||o.erp_live?.phase!=='historical_review'||!o.erp_live.bc?.id||o.erp_live.bl?.id||o.partial_mode||o.erp_live.equivalentItems||o.source_payload?.erplainImported)return {skipped:true};
  const read=async()=>(await api.request(`query V3SourceVatBC($id:ID!){Order(id:$id){${alignmentFields}}}`,{id:String(o.erp_live.bc.id)})).Order;
  const bc=await read(),plan=sourceVatPlan(bc,o),attempt=o.erp_live.sourceVatAttempt;

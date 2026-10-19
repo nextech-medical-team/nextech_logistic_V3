@@ -1,0 +1,22 @@
+import {test,expect} from '@playwright/test';
+import fs from 'node:fs';
+for(const [name,viewport] of [['desktop',{width:1440,height:1000}],['mobile',{width:390,height:844}]])test('single submission checks current stock and reports shortage '+name,async({page})=>{
+ test.setTimeout(120000);
+ let fresh=false;const writes=[],errors=[];await page.setViewportSize(viewport);page.on('pageerror',e=>errors.push(e.message));
+ const row=()=>({id:'recheck',reference:'SYNTHETIC-RECHECK',channel:'shopify',carrier:'gls',recipient:'Synthetic',address:{country:'FR'},sku_lines:[{sku:'A',quantity:96,mapping_exists:true},{sku:'D',quantity:96,mapping_exists:true}],source_payload:{},erp_live:{bc:{id:1,status:'active'},phase:'bc_created'},label_status:'pending',tracking_status:'not_shipped',document_count:0,pending_equivalent:{sku:'A',replacementSku:'B',replaceQuantity:96,replacementQuantity:96,scope:'order',previewJobId:'preview',error:fresh?'Produit de remplacement [B] : stock insuffisant. Quantité totale nécessaire : 96 unités ; stock disponible : 13 unités ; quantité manquante : 83 unités.':'Reprendre le remplacement : nouvelle vérification nécessaire',recheckRequired:!fresh},erp_live_job:{status:'review',error:'BL bloqué — stock insuffisant : A : 96 nécessaires, 63 utilisables, manque 33'}});
+ await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:[row()],total:1,page:1,pages:1,summary:{},transportStats:[]}}));
+ await page.route('**/api/resolutions/context**',r=>r.fulfill({json:{order:row(),lines:[{source_sku:'A',target_sku:'A',quantity:96,target_quantity:96},{source_sku:'D',target_sku:'D',quantity:96,target_quantity:96}],erpJob:row().erp_live_job,products:[],active:null}}));
+ await page.route('**/api/resolutions',r=>{const body=r.request().postDataJSON();writes.push(body);fresh=true;return r.fulfill({status:202,json:{id:'fresh-preview'}});});
+ await page.route('**/api/resolutions/job**',r=>r.fulfill({json:{id:'fresh-preview',action:'replace-equivalent',status:'review',error:row().pending_equivalent.error}}));
+ await page.goto('/',{waitUntil:'domcontentloaded'});
+ await expect(page.getByRole('button',{name:'B Vérifier le remplacement',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'A Bloqué : stock insuffisant',exact:true})).toBeVisible();
+ await page.screenshot({path:'proofs/equivalent-preview-recheck-'+name+'-before.png'});
+ await page.getByRole('button',{name:'B Vérifier le remplacement',exact:true}).click();
+ await expect(page.locator('[name="replacementSku"]')).toHaveValue('B');await expect(page.locator('[name="replaceQuantity"]')).toHaveValue('96');
+ await page.getByRole('button',{name:'Remplacer et poursuivre la commande',exact:true}).click();
+ await expect(page.locator('form [data-preview][role]')).toContainText('stock disponible : 13',{timeout:20000});await expect(page.locator('form [data-preview][role]')).toContainText('quantité manquante : 83');
+ expect(writes).toHaveLength(1);expect(writes[0].action).toBe('replace-equivalent');expect(writes[0].confirmEquivalent).toBe(true);expect(writes[0].verifyAndApply).toBe(true);expect(writes[0].previewFingerprint).toBeUndefined();expect(errors).toEqual([]);
+ await page.screenshot({path:'proofs/equivalent-preview-recheck-'+name+'-after.png'});
+ fs.writeFileSync('proofs/equivalent-preview-recheck-'+name+'.json',JSON.stringify({status:'PASS',viewport,writes:1,action:'replace-equivalent',replacementWrites:0,quantitiesPreserved:true,stockPreserved:true,errors}));
+});

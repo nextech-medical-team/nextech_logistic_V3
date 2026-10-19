@@ -4,8 +4,17 @@ import {shippingProductLines} from './erplain-shipping-lines.mjs';
 // Human decision: a persisted BC is the execution authority for every channel.
 // Commercial fields are observations, never prerequisites for BLs or labels.
 export const usesRecordedBc=o=>!!o?.erp_live?.bc?.id;
+export function fiscalAttemptHasNoLogisticsChange(order,bc){
+ const attempt=order.erp_live?.sourceVatAttempt;
+ if(attempt?.status!=='uncertain')return true;
+ if(order.channel==='tender')return false;
+ // Exceptional old-write reconciliation only: never compare tax, price or
+ // totals. The persisted pre-write products, quantities and stock policy must
+ // prove that this uncertainty has no logistical effect.
+ try{return attempt.before?.id!=null&&String(attempt.before.id)===String(bc?.id)&&typeof attempt.stockPolicy==='boolean'&&bc.update_stock===attempt.stockPolicy&&recordedBcFingerprint(attempt.before)===recordedBcFingerprint(bc);}catch{return false;}
+}
 export function assertRecordedBc(order,bc,{allowedStatuses=['active','pending','unpublished']}={}){
- if([order.erp_live?.mappingAlignmentAttempt,order.erp_live?.sourceVatAttempt].some(a=>a?.status==='uncertain'))throw Error('BC enregistré · Modification incertaine : rapprochement fournisseur requis');
+ if(order.erp_live?.mappingAlignmentAttempt?.status==='uncertain'||!fiscalAttemptHasNoLogisticsChange(order,bc))throw Error('BC enregistré · Modification incertaine : rapprochement fournisseur requis');
  if(!bc||String(bc.id)!==String(order.erp_live?.bc?.id)||!allowedStatuses.includes(bc.status))throw Error('BC enregistré · Identité ou état du document non confirmé');
  return bc;
 }
@@ -21,6 +30,12 @@ export function recordedBcItems(bc){
 }
 export function recordedBcFingerprint(bc){
  return createHash('sha256').update(JSON.stringify({bcId:String(bc.id),items:recordedBcItems(bc).map(l=>[l.variant.id,l.location.id,l.quantity]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)))})).digest('hex');
+}
+
+// This proof describes the complete recorded BC, even when preparation uses
+// only the lines of a remaining BL. Keep shipment-scope proofs separate.
+export function recordedBcPreparationAuthority(bc){
+ return {kind:'recorded_bc',bcId:String(bc.id),fingerprint:recordedBcFingerprint(bc)};
 }
 export function recordedBcPricing(order,bc,options){
  assertRecordedBc(order,bc,options);

@@ -98,10 +98,22 @@ Une marge nulle, négative ou inconnue ne déclenche aucun achat automatique. Le
 
 ### Fiche client TEMU en production
 
-La création transmet le prénom et le nom du rapport Excel (ou, à défaut, sépare le nom complet reçu), les coordonnées disponibles et deux adresses par défaut, facturation et livraison. Le numéro est obtenu par `GenerateCustomerNumber` dans Erplain puis conservé dans `erp_live.customerNumber` avant la création. Les clients sont créés successivement pour ne pas demander plusieurs fois le même prochain numéro. La reprise après interruption recherche ce numéro ; les anciennes fiches `V3:…` restent reconnues. Ces changements concernent les nouvelles créations et ne modifient pas les fiches déjà enregistrées.
+La création reprend le comportement du 13 octobre : libellé du client, type Individuel/Société et numéro technique stable `V3:<id commande>`. Elle ne demande plus de numéro à `GenerateCustomerNumber` et ne dépend plus de cet appel pour démarrer. Les adresses du BC restent transmises par le parcours BC existant.
+
+Si `erp_live.customerNumber` a déjà été enregistré par la version du 14 octobre, il est conservé pour la création et la recherche de reprise. Les clients et documents déjà enregistrés restent réutilisés. Les protections contre une reprise ambiguë restent actives ; les commandes en erreur doivent repasser par le contrôle de préparation habituel après déploiement.
 
 Les nouveaux BC TEMU (Excel et API) conservent le règlement vendeur TTC. Selon la règle demandée, le taux standard du pays de livraison s’applique aux produits et à la livraison, indépendamment de la taxe de la fiche produit et de celle du rapport. Le code sélectionne la taxe active correspondante dans Erplain. Une taxe absente ou ambiguë, ou un pays non couvert, bloque la création sans taux de secours. Les BC existants ne sont pas réécrits. Le calcul de marge utilise également les montants HT recalculés au taux du pays.
 
 Taux vérifiés le 14 octobre 2026 : AT 20, BE 21, BG 20, CY 19, CZ 21, DE 19, DK 25, EE 24, GR 24, ES 21, FI 25,5, FR 20, HR 25, HU 27, IE 23, IT 22, LT 21, LU 17, LV 21, MT 18, NL 21, PL 23, PT 23, RO 21, SE 25, SI 22, SK 23, GB 20, CH 8,1, NO 25 (%). Ce tableau implémente la règle standard demandée, sans détermination des taux réduits par produit ni des régimes territoriaux particuliers.
 
 Sources : [Union européenne](https://europa.eu/youreurope/business/finance-and-tax/vat/vat-rules-rates/index_en.htm), [Royaume-Uni](https://www.gov.uk/vat-rates), [Suisse](https://www.estv.admin.ch/en/vat-rates-switzerland), [Norvège](https://www.skatteetaten.no/satser/merverdiavgift/).
+
+### Reprise du BL après import
+
+Une reprise `resume` ou `resume-erp` terminée après la préparation Excel initiale est reconnue par le parcours de devis manuel et par le worker d’achat automatique. La demande d’import d’origine doit rester présente et terminée ; une intervention en cours, en revue, en erreur, en lecture seule ou partielle ne lève pas l’attente. Les reprises de prix manuels ou de remplacement ne donnent pas cette autorisation automatique. Les contrôles du BL, du devis, de marge pour l’achat automatique et d’unicité de l’achat restent applicables.
+
+Le message « Quantités réservées non confirmées » détaille désormais le SKU et les quantités commandées, réservées et expédiées reçues de l’API. Une valeur absente est distinguée de zéro. L’affichage « Non alloué » du BC Erplain correspond à l’allocation aux BL et ne suffit pas à diagnostiquer la réservation du stock ([indicateurs Erplain](https://support.erplain.com/fr/support/solutions/articles/77000523093-indicateurs-de-progr%C3%A8s-vente-)).
+
+### Étiquette manuelle avec BL déjà publié
+
+Le devis et la confirmation d’achat manuels utilisent le BL publié enregistré, comme les autres parcours d’étiquette. Les anciens indicateurs d’import Excel ne sont plus exigés à cette étape. Le refus de réservation de la demande d’import initiale peut rester dans l’historique sans empêcher l’achat lorsque le BL est désormais publié. Les autres revues, corrections en cours, suspensions, annulations, choix de transport existants et protections contre les doubles achats restent bloquants. Le contrôle est répété sous verrou avant la prise en charge de l’achat. L’admission automatique et ses contrôles de marge restent distincts.

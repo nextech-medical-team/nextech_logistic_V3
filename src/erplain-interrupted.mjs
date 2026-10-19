@@ -113,7 +113,7 @@ export function interruptedErplainRecovery(db,directory,{api=erplainAccount(dire
     await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','erplain.interrupted_reconciled',$1)",[JSON.stringify({orderId:o.id,bcId:erp.bc.id,blId:erp.bl.id,stockId:erp.stockDocument.id,externalWrites:0})]);
     return {status:'complete',orderId:o.id};
    });
-  },['erplain-live-workflow','stock-mutations']);}finally{running=false;}
+  },['stock-mutations']);}finally{running=false;}
  }
  return {run,get running(){return running;}};
 }

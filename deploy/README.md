@@ -42,3 +42,7 @@ Les demandes CI et leurs rapports sont conservés sur le serveur et ramenés dan
 
 Le bouton conserve les tests, la file FIFO, les protections GitHub, la sauvegarde, le verrou serveur et la fin naturelle des traitements. Il ne lève pas une dépendance métier ou une divergence de sources. La surveillance Section7 peut préparer et vérifier, mais ne doit plus déclencher de publication automatiquement.
 
+
+## Budget des tests isolés serveur
+
+La suite npm test dispose de 1 200 secondes, avec échec bloquant à expiration avant sauvegarde, pause ou installation. Le diagnostic du 16 octobre 2026 sur le commit f6a11550705b480af7398985685fa8345ebe7c11 a terminé les 48 groupes en 877,4 secondes : le plafond précédent de 900 secondes ne laissait que 22,6 secondes de marge. Ce budget borné conserve tous les tests et leur isolation ; il ne transforme aucun dépassement ni test échoué en réussite. Les autres délais restent inchangés.

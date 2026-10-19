@@ -1,0 +1,7 @@
+# Recover TEMU labels before deciding on another purchase
+
+The automatic worker previously selected only `ready` and `to_buy` jobs. A failed API read or a missing job could therefore remain outside the queue after a BL was published. It also required commercial amounts before looking for an already-paid label, and interpreted the successful recovery inside `prepare` as an exception instead of a recovered result.
+
+Published BLs now make untouched `api_error` and absent jobs discoverable. The worker uses the native recovery path before amounts or margins. Existing packages/documents return their actual state without a purchase. If no shipment exists, recovery supplies a fresh quote; the existing positive-margin check and before-claim validation still apply. No uncertain, purchasing, failed-shipment, existing-package, cancelled or complete job becomes a purchase retry. No BC, stock, mapping, fiscal or preparation check is added after BL publication.
+
+This complements the separate known-weight/cache correction in PR225. It does not adjust existing labels, carrier/address data or weights, and does not clear any uncertain attempt. Tests use isolated PostgreSQL/PGlite and synthetic providers; live purchases are never regression tests. Publish through Section7 and verify the installed source plus existing PDF hashes. Roll back the worker source with normal deployment controls; never restore documents or supplier state.

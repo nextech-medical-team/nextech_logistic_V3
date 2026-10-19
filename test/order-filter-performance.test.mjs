@@ -86,19 +86,21 @@ test('one statistics query preserves document families, unique counts, filters, 
   assert.deepEqual(subset,{transportStats:[{family:'mixed',orders:1}],summary:{total:2,blocked:2,delivered:0,labels:1}});
   assert.deepEqual(await orderStatistics(db,new URLSearchParams(),[]),{transportStats:[],summary:{total:0,blocked:0,delivered:0,labels:0}});
   assert.deepEqual((await orderStatistics(db,new URLSearchParams('country=BE'))).summary,{total:0,blocked:0,delivered:0,labels:0});
-  assert.equal((await orderStatistics(db,new URLSearchParams('status=production_ready&status=sandbox_ready'))).summary.total,3);
+  // Delivered is now its own display status, never an active label/preparation state.
+  assert.equal((await orderStatistics(db,new URLSearchParams('status=production_ready&status=sandbox_ready'))).summary.total,2);
+  assert.equal((await orderStatistics(db,new URLSearchParams('status=delivered'))).summary.total,1);
  }finally{await db.close();}
 });
 
 test('phased details retain diagnostic dependencies and all displayed fields while display joins touch only the selected page',async()=>{
  const base=[
-  {id:'complete',channel:'temu',reference:'COMPLETE',source_payload:{historicalShipments:[{tracking:'HISTORY'}]},erp_live:{bc:{id:'bc'}},partial_mode:true,document_count:0,issue:'Stock insuffisant'},
+  {id:'complete',channel:'temu',reference:'COMPLETE',source_payload:{historicalShipments:[{tracking:'HISTORY'}]},erp_live:{bc:{id:'bc'}},partial_mode:true,partial_allocation:[{sku:'A',remaining:0}],document_count:0,issue:'Stock insuffisant'},
   {id:'replacement',channel:'amazon',reference:'REPLACEMENT',source_payload:{},erp_live:{},sku_lines:[{sku:'OLD',source_sku:'OLD',quantity:1,mapping_exists:true}],issue:'Stock insuffisant'},
   {id:'temu',channel:'temu',reference:'REFUSED',source_payload:{},erp_live:{},issue:null},
  ];
  function mock(){const calls=[];return {calls,async query(sql,[ids]){
   calls.push({sql,ids});
-  if(sql.startsWith('SELECT order_id,bl'))return {rows:[{order_id:'complete',bl:{id:'bl'}}]};
+  if(sql.startsWith('SELECT order_id,bl'))return {rows:[{order_id:'complete',bl:{id:'bl'},status:'ready',environment:'production',documents:1}]};
   if(sql.startsWith('SELECT id,transport_choice'))return {rows:ids.map(id=>({id,transport_choice:null}))};
   if(sql.startsWith('SELECT DISTINCT ON'))return {rows:ids.includes('replacement')?[{order_id:'replacement',action:'equivalent-preview',status:'complete',payload:{sku:'OLD',replacementSku:'NEW',replaceQuantity:1},result:{previewFingerprint:'proof'}}]:[]};
   if(sql.startsWith('SELECT reference,status'))return {rows:ids.map(reference=>({reference,status:reference==='REFUSED'?'shipment_error':'paid',error:reference==='REFUSED'?'Shipping address error':null,result:{},plan:{}}))};
@@ -115,7 +117,7 @@ test('phased details retain diagnostic dependencies and all displayed fields whi
  for(const row of all)projectCurrentDiagnostics(row);for(const row of phased)projectCurrentDiagnostics(row);
  const classify=currentProblemClassifier();
  assert.deepEqual(selectProblemOrders(phased,[],classify).problemTypes,selectProblemOrders(all,[],classify).problemTypes);
- assert.equal(classify(phased[0]).length,0);assert.ok(classify(phased[1]).some(p=>p.label==='Confirmer le remplacement'));assert.ok(classify(phased[2]).some(p=>p.provider==='TEMU'));
+ assert.equal(classify(phased[0]).length,0);assert.ok(classify(phased[1]).some(p=>p.label==='Appliquer le remplacement'));assert.ok(classify(phased[2]).some(p=>p.provider==='TEMU'));
  // Match the route's payload reduction before the display phase.
  for(const row of all)row.source_payload={};for(const row of phased)row.source_payload={};
  await orderPageDetails(two,phased.slice(1,2),'display');

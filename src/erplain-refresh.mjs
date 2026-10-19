@@ -1,3 +1,4 @@
+import {preserveImportedPostalAddress} from './imported-postal-authority.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {targetedOrderService} from './erplain-targeted-orders.mjs';
 import {initializeManualReview,queueManualReview,manualReviewService} from './erplain-manual-validation.mjs';
@@ -111,14 +112,14 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
     const hasLabel=(await db.query("SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND (status='ready' OR result IS NOT NULL OR tracking<>'[]'::jsonb)",[o.id])).rows.length;
     // Save the external document snapshot, never set ERP jobs to pending or complete.
     await db.query('UPDATE orders SET erp_live=jsonb_set(erp_live,ARRAY[$2],$3::jsonb),erplain_refresh=erplain_refresh||$4::jsonb WHERE id=$1',[o.id,key,JSON.stringify({...o.erp_live[key],...document}),JSON.stringify({at:new Date().toISOString(),account:job.account,jobId:job.id})]);
-    if(section==='orders'&&!hasLabel&&!o.partial_mode){const a=orderAddress(document.shipping_address,o.recipient);if(a.street&&a.country)await db.query('UPDATE orders SET address=$2,resolution_pending_resume=true WHERE id=$1',[o.id,JSON.stringify({...o.address,...a})]);}
+    if(section==='orders'&&!hasLabel&&!o.partial_mode){const a=orderAddress(document.shipping_address,o.recipient);if(a.street&&a.country)await db.query('UPDATE orders SET address=$2,resolution_pending_resume=true WHERE id=$1',[o.id,JSON.stringify(preserveImportedPostalAddress(o,{...o.address,...a}))]);}
     const issues=[];
     if(section==='orders'){
      const local=(await db.query('SELECT target_sku sku,target_quantity quantity FROM lines WHERE order_id=$1',[o.id])).rows;
      const sum=ls=>{const m=new Map();for(const l of ls){const sku=l.sku||l.variant?.sku;m.set(sku,(m.get(sku)||0)+Number(l.quantity));}return JSON.stringify([...m].sort());};
      if(!usesRecordedBc(o)&&sum(local)!==sum(shippingProductLines(document.line_items)))issues.push('BC Erplain modifié : produits ou quantités différents de V3');
      if(hasLabel&&!same(orderAddress(document.shipping_address,o.recipient),orderAddress({label:o.address.name,address_1:o.address.street,city:o.address.city,postal_code:o.address.postal,country:o.address.country,phone:o.address.phone},o.recipient)))issues.push('Adresse Erplain modifiée : étiquette existante à vérifier');
-     if(!hasLabel&&!o.partial_mode&&!issues.length){try{assertFullOrderStock(document.line_items||[]);}catch(e){issues.push(e.message);}}
+     if(!hasLabel&&!o.partial_mode&&!issues.length){try{assertFullOrderStock(document.line_items||[],{preserveInstalled:o.channel==='tender'});}catch(e){issues.push(e.message);}}
     }
     await db.query('UPDATE orders SET erplain_refresh=erplain_refresh||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({issues})]);
     if(issues.length)result.warnings.push(...issues.map(i=>o.reference+' : '+i));
@@ -134,7 +135,7 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
    if(['orders','deliveries'].includes(section))ids=await withShipmentLock(()=>applyDocuments(job,section,records,result));
    if(section==='stocks'&&job.account==='live'){
     const candidates=(await db.query("SELECT DISTINCT o.* FROM orders o JOIN lines l ON l.order_id=o.id WHERE NOT o.archived AND NOT o.partial_mode AND coalesce(l.target_sku,l.source_sku)=ANY($1::text[]) AND o.erp_live->'bc'->>'id' IS NOT NULL AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id AND c.status NOT IN ('failed','superseded')) AND NOT EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status IN ('pending','processing')) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting'))",[records.map(v=>v.sku)])).rows;
-    for(let i=0;i<candidates.length;i++){const o=candidates[i];await checkpoint(job,{section,phase:'Recontrôle du stock des commandes',done:i,total:candidates.length});let issues=[];try{const r=await api.request('query V3RefreshStockOrder($id:ID!){Order(id:$id){id line_items{quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}}}',{id:String(o.erp_live.bc.id)});if(!r.Order?.line_items?.length)throw Error('API Erplain · Stock du BC non reçu');assertFullOrderStock(r.Order.line_items);await db.query("UPDATE erp_live_jobs SET error=null,updated_at=now() WHERE order_id=$1 AND status='review' AND error ~* 'stock'",[o.id]);}catch(e){issues=[e.message];result.warnings.push(o.reference+' : '+e.message);}
+    for(let i=0;i<candidates.length;i++){const o=candidates[i];await checkpoint(job,{section,phase:'Recontrôle du stock des commandes',done:i,total:candidates.length});let issues=[];try{const r=await api.request('query V3RefreshStockOrder($id:ID!){Order(id:$id){id line_items{quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}}}',{id:String(o.erp_live.bc.id)});if(!r.Order?.line_items?.length)throw Error('API Erplain · Stock du BC non reçu');assertFullOrderStock(r.Order.line_items,{preserveInstalled:o.channel==='tender'});await db.query("UPDATE erp_live_jobs SET error=null,updated_at=now() WHERE order_id=$1 AND status='review' AND error ~* 'stock'",[o.id]);}catch(e){issues=[e.message];result.warnings.push(o.reference+' : '+e.message);}
      const previous=(o.erplain_refresh?.issues||[]).filter(t=>!/stock/i.test(t));await db.query('UPDATE orders SET erplain_refresh=erplain_refresh||$2::jsonb WHERE id=$1',[o.id,JSON.stringify({issues:[...previous,...issues],stockCheckedAt:new Date().toISOString()})]);ids.push(o.id);
     }
    }
@@ -170,6 +171,8 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
   const manualReview=manualReviewService(db,apiFactory('live'));
   const targeted=targetedOrderService(db,apiFactory('live'));
   if(p==='/api/erplain-refresh/targeted-lookup'&&req.method==='POST'){json(res,200,await targeted.lookup(await body(req)));return true;}
+  if(p==='/api/erplain-refresh/targeted-reactivate'&&req.method==='POST'){json(res,200,await targeted.reactivate(await body(req),user));return true;}
+  if(p==='/api/erplain-refresh/targeted-reconcile'&&req.method==='POST'){json(res,200,await targeted.reconcile(await body(req),user));return true;}
   if(p==='/api/erplain-refresh/targeted-reread'&&req.method==='POST'){json(res,200,await targeted.reread(await body(req)));return true;}
   if(p==='/api/erplain-refresh/recovered-orders'&&req.method==='GET'){json(res,200,await targeted.list({search:url.searchParams.get('search')||'',page:url.searchParams.get('page')}));return true;}
   if(p==='/api/erplain-refresh/manual-review'&&req.method==='GET'){json(res,200,await manualReview.list());return true;}

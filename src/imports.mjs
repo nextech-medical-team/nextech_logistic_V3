@@ -1,3 +1,6 @@
+import * as tenderImports from './imports-tender-preserved.mjs';
+import {positiveImportQuantity} from './quantity-value.mjs';
+import {initializeImportReceptions,importCandidates,matchImport,recordImportReception,shopIdentity} from './import-reception.mjs';
 import {postalHeaders,postalCellValue,importPostalCode} from './import-postal-code.mjs';
 import {cancelledImportSql,releaseCancelledImportReferences} from './cancelled-import-reimport.mjs';
 import {tenderPhone} from './tender-label-fields.mjs';
@@ -134,7 +137,7 @@ export async function readTable(buffer,filename,{exactNotes=false,shopifyRecords
 
 }
 
-function number(v){const n=Number(String(v).replace(/\s/g,'').replace(',','.'));if(!Number.isFinite(n)||n<=0)throw new Error('Quantité positive requise');return n;}
+const number=positiveImportQuantity;
 
 export async function importMapping(db,buffer,filename){
 
@@ -167,6 +170,7 @@ export async function importMapping(db,buffer,filename){
 
 
 export async function parseOrders(buffer,filename,channel){
+  if(channel==='tender')return tenderImports.parseOrders(buffer,filename,channel);
 
   if(!['amazon','tender','samples','shopify'].includes(channel))throw new Error('Canal d’import invalide');
 
@@ -174,7 +178,7 @@ export async function parseOrders(buffer,filename,channel){
 
   const rows=await readTable(buffer,filename,{exactNotes:channel==='tender'}),groups=new Map(),errors=[];
 
-  let reference='';const invalid=new Set(),rawByRef=new Map();
+  let reference='';const invalid=new Set(),rawByRef=new Map(),sourceRows=new Map();
 
   for(const r of rows){
 
@@ -194,6 +198,11 @@ export async function parseOrders(buffer,filename,channel){
       if(!sku)throw new Error('SKU absent');
 
       const quantity=number(channel==='amazon'?r.quantitypurchased:r.qte);
+      if(['tender','samples'].includes(channel)){
+       const signature=JSON.stringify(Object.entries(r).filter(([k])=>!['row','referenceexterne'].includes(k)).sort(([a],[b])=>a.localeCompare(b)));
+       const seen=sourceRows.get(ref)||new Set();if(seen.has(signature))throw Error('Lignes source identiques sans identifiant distinct : quantité à rapprocher');seen.add(signature);sourceRows.set(ref,seen);
+      }
+
 
       if(!groups.has(ref)){
 
@@ -220,15 +229,21 @@ export async function parseOrders(buffer,filename,channel){
 }
 
 export async function previewOrders(db,buffer,filename,channel,options={}){
+  if(channel==='tender')return tenderImports.previewOrders(db,buffer,filename,channel,options);
   const parsed=await parseOrders(buffer,filename,channel);
   if(channel==='shopify')await completeShopifyFileOrders(parsed,options.shopifyReader);
-  const existing=(await db.query(`SELECT DISTINCT ON (coalesce(source_reference,reference)) coalesce(source_reference,reference) AS reference,recipient,label_status,erp_status,source_payload FROM orders WHERE NOT (${cancelledImportSql}) AND channel=$1 AND coalesce(source_reference,reference)=ANY($2::text[]) ORDER BY coalesce(source_reference,reference),received_at`,[channel,parsed.valid.map(o=>o.reference)])).rows;
-  const byRef=new Map(existing.map(o=>[o.reference,o]));
-  const orders=parsed.valid.map(o=>({reference:o.reference,recipient:o.recipient,lines:o.lines.length,quantity:o.lines.reduce((n,l)=>n+l.quantity,0),issue:o.visibilityReason||null,recoverable:!!byRef.get(o.reference)?.source_payload?.visibilityHold,duplicate:byRef.has(o.reference)&&!byRef.get(o.reference)?.source_payload?.visibilityHold,existing:byRef.get(o.reference)||null}));
+  const candidates=await importCandidates(db,parsed.valid,channel);
+  const byRef=new Map(parsed.valid.map(o=>[o.reference,matchImport(o,candidates,channel)]).filter(([,m])=>m.existing).map(([r,m])=>[r,{...m.existing,identityAmbiguous:m.ambiguous}]));
+  const sourceLines=(await db.query('SELECT order_id,source_sku,quantity FROM lines WHERE order_id=ANY($1::text[])',[candidates.map(o=>o.id)])).rows;
+  const signature=rows=>{const sums=new Map();for(const row of rows)sums.set(row.source_sku,(sums.get(row.source_sku)||0)+Number(row.quantity));return JSON.stringify([...sums].sort());};
+  for(const o of parsed.valid){const old=byRef.get(o.reference);if(old&&!old.identityAmbiguous&&signature(o.lines)!==signature(sourceLines.filter(l=>l.order_id===old.id)))old.receivedDifference=true;}
+  const orders=parsed.valid.map(o=>({reference:o.reference,recipient:o.recipient,lines:o.lines.length,quantity:o.lines.reduce((n,l)=>n+l.quantity,0),issue:byRef.get(o.reference)?.identityAmbiguous?'Identité à rapprocher : réception conservée, aucun nouveau BdC':byRef.get(o.reference)?.receivedDifference?'Réception différente : produits ou quantités à rapprocher, commande existante conservée':o.visibilityReason||null,recoverable:!!byRef.get(o.reference)?.source_payload?.visibilityHold,duplicate:byRef.has(o.reference)&&!byRef.get(o.reference)?.source_payload?.visibilityHold,existing:byRef.get(o.reference)||null}));
   return {rows:parsed.rows,errors:parsed.errors,orders,newCount:orders.filter(o=>!o.duplicate).length,duplicateCount:orders.filter(o=>o.duplicate).length};
 }
 
 export async function importOrders(db,buffer,filename,channel,selection,options={}){
+  if(channel==='tender')return tenderImports.importOrders(db,buffer,filename,channel,selection,options);
+  await initializeImportReceptions(db);
   const parsed=await parseOrders(buffer,filename,channel),rows=parsed.rows,errors=parsed.errors;
   if(selection!==undefined&&(!Array.isArray(selection)||selection.some(r=>typeof r!=='string')))throw new Error('Sélection de commandes invalide');
   const chosen=selection===undefined?null:new Set(selection);
@@ -238,9 +253,10 @@ export async function importOrders(db,buffer,filename,channel,selection,options=
   if(!Array.isArray(duplicates)||duplicates.some(r=>typeof r!=='string'||!chosen?.has(r)))throw new Error('Sélection de doublons invalide');
   if(duplicates.length&&!/^[a-f0-9-]{36}$/i.test(options.requestId||''))throw new Error('Identifiant de validation requis');
   const signature=createHash('sha256').update(buffer).update(JSON.stringify([channel,filename,selection,duplicates])).digest('hex');
-  let created=0,copies=0,recovered=0,replayed=null;
+  let created=0,copies=0,recovered=0,replayed=null,conflicts=[];
 
   await db.transaction(async tx=>{
+    if(db.kind==='postgres')await tx.query("SELECT pg_advisory_xact_lock(hashtextextended('nextech:import-order-identity',0))");
 
     if(options.requestId){
       if(!/^[a-f0-9-]{36}$/i.test(options.requestId))throw new Error('Identifiant de validation invalide');
@@ -248,13 +264,21 @@ export async function importOrders(db,buffer,filename,channel,selection,options=
       if(!inserted.rows.length){const prior=(await tx.query('SELECT signature,result FROM import_receipts WHERE id=$1',[options.requestId])).rows[0];if(prior.signature!==signature)throw new Error('Validation déjà utilisée pour une autre sélection');if(prior.result?.cancellation)throw new Error('Cet import a été annulé. Analysez de nouveau votre fichier avant de valider une nouvelle sélection.');replayed=prior.result;return;}
     }
     await releaseCancelledImportReferences(tx,channel,valid.map(o=>o.reference));
-    const existing=(await tx.query(`SELECT DISTINCT ON (coalesce(source_reference,reference)) id,source_payload,coalesce(source_reference,reference) AS reference FROM orders WHERE NOT (${cancelledImportSql}) AND channel=$1 AND coalesce(source_reference,reference)=ANY($2::text[]) ORDER BY coalesce(source_reference,reference),received_at`,[channel,valid.map(o=>o.reference)])).rows;
+    const candidates=await importCandidates(tx,valid,channel);
+    const matches=new Map(valid.map(o=>[o.reference,matchImport(o,candidates,channel)]));
+    const existing=valid.map(o=>{const m=matches.get(o.reference);return m.existing?{...m.existing,reference:o.reference,identityAmbiguous:m.ambiguous}:null;}).filter(Boolean);
     const byRef=new Map(existing.map(o=>[o.reference,o.id]));
-    for(const o of valid.filter(o=>!o.visibilityHold&&!duplicates.includes(o.reference))){const old=existing.find(e=>e.reference===o.reference&&e.source_payload?.visibilityHold);if(!old)continue;
+    conflicts=existing.filter(o=>o.identityAmbiguous).map(o=>({reference:o.reference,orderId:o.id,message:'Identité commerciale à rapprocher ; réception conservée, aucun nouveau document'}));
+    for(const o of valid.filter(o=>!o.visibilityHold&&!matches.get(o.reference)?.ambiguous)){const old=existing.find(e=>e.reference===o.reference&&e.source_payload?.visibilityHold);if(!old)continue;
      await tx.query('UPDATE orders SET recipient=$2,address=$3,source_date=$4,source_payload=$5,issue=$6 WHERE id=$1',[old.id,o.recipient,JSON.stringify(o.address),o.source_date,JSON.stringify({...o.source_payload,visibilityHold:false}),'Données récupérées · Préparation à vérifier']);
      for(const l of o.lines)await tx.query('INSERT INTO lines(id,order_id,source_line,source_sku,quantity,source_payload) VALUES($1,$2,$3,$4,$5,$6)',[l.id,old.id,l.source_line,l.source_sku,l.quantity,JSON.stringify(l.source_payload)]);recovered++;
     }
-    for(const o of valid){o.source_reference=o.reference;if(duplicates.includes(o.reference)&&byRef.has(o.reference)){o.duplicate_of=byRef.get(o.reference);o.reference+=' / copie '+o.id;copies++;}}
+    for(const o of valid){o.source_reference=o.reference;
+     if(channel==='shopify'&&!byRef.has(o.reference)&&candidates.some(c=>c.channel===channel&&c.reference===o.reference)){
+      const shop=shopIdentity(o);if(!shop)throw Error('Boutique source à préciser');
+      o.reference+=' / boutique '+shop;o.source_payload={...o.source_payload,importIdentityReference:true};
+     }
+    }
 
     for(const o of valid.filter(o=>o.visibilityHold&&!byRef.has(o.source_reference)))if(await retainVisibleOrder(tx,o,o.visibilityReason))created++;
     const result=await tx.query(`INSERT INTO orders(id,channel,reference,source_reference,duplicate_of,recipient,address,source_date,source_payload) SELECT id,channel,reference,source_reference,duplicate_of,recipient,address,source_date,source_payload FROM jsonb_to_recordset($1::jsonb) AS x(id text,channel text,reference text,source_reference text,duplicate_of text,recipient text,address jsonb,source_date text,source_payload jsonb) ON CONFLICT(channel,reference) DO NOTHING RETURNING id`,[JSON.stringify(valid.filter(o=>!o.visibilityHold&&(!byRef.has(o.source_reference)||o.duplicate_of)))]);
@@ -269,11 +293,12 @@ export async function importOrders(db,buffer,filename,channel,selection,options=
 
     await tx.query(`INSERT INTO jobs(id,order_id,kind) SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(id text,order_id text,kind text)`,[JSON.stringify(jobs)]);
 
-    if(options.requestId)await tx.query('UPDATE import_receipts SET result=$2 WHERE id=$1',[options.requestId,JSON.stringify({rows,created,copies,recovered,excluded:parsed.valid.length-valid.length,skipped:valid.length-created,errors,message:`${created} commandes importées dont ${copies} copies volontaires ; ${recovered} fiches complétées ; ${valid.length-created} déjà présentes ignorées`})]);
+    for(const o of parsed.valid){const original=o.source_reference||o.reference,selected=!chosen||chosen.has(original),match=matches.get(original),createdHere=ids.has(o.id);await recordImportReception(tx,o,{channel,filename,receiptId:options.requestId,orderId:createdHere?o.id:match?.existing?.id||null,outcome:!selected?'excluded':match?.ambiguous?'identity_review':createdHere?'created':o.visibilityHold?'invalid_received':'duplicate_received'});}
+    if(options.requestId)await tx.query('UPDATE import_receipts SET result=$2 WHERE id=$1',[options.requestId,JSON.stringify({rows,created,copies,recovered,conflicts,excluded:parsed.valid.length-valid.length,skipped:valid.length-created,errors,message:`${created} commandes importées sans copie de doublon ; ${recovered} fiches complétées ; ${valid.length-created} déjà présentes ignorées`})]);
   });
 
   if(replayed)return {...replayed,replayed:true};
-  return {rows,created,copies,recovered,excluded:parsed.valid.length-valid.length,skipped:valid.length-created,errors,message:`${created} commandes importées dont ${copies} copies volontaires ; ${recovered} fiches complétées ; ${valid.length-created} déjà présentes ignorées`};
+  return {rows,created,copies,recovered,conflicts,excluded:parsed.valid.length-valid.length,skipped:valid.length-created,errors,message:`${created} commandes importées sans copie de doublon ; ${recovered} fiches complétées ; ${valid.length-created} déjà présentes ignorées`};
 
 }
 

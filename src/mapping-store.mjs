@@ -10,7 +10,7 @@ export async function saveMapping(db,input){
  const b=normalizeMapping(input);
  return db.transaction(async tx=>{
   await tx.query(`INSERT INTO mappings(channel,source_sku,target_sku,source_qty,target_qty,notes,updated_at) VALUES($1,$2,$3,$4,$5,$6,now()) ON CONFLICT(channel,source_sku) DO UPDATE SET target_sku=excluded.target_sku,source_qty=excluded.source_qty,target_qty=excluded.target_qty,notes=excluded.notes,updated_at=now()`,[b.channel,b.source_sku,b.target_sku,b.source_qty,b.target_qty,b.notes]);
-  const ids=(await tx.query(`SELECT o.id FROM orders o WHERE o.channel=$1 AND ${mutablePreparation} AND EXISTS(SELECT 1 FROM lines l WHERE l.order_id=o.id AND l.source_sku=$2)`,[b.channel,b.source_sku])).rows.map(x=>x.id);
+  const ids=(await tx.query(`SELECT o.id FROM orders o WHERE o.channel=$1 AND nullif(o.erp_live->'bc'->>'id','') IS NULL AND ${mutablePreparation} AND EXISTS(SELECT 1 FROM lines l WHERE l.order_id=o.id AND l.source_sku=$2) FOR UPDATE OF o`,[b.channel,b.source_sku])).rows.map(x=>x.id);
   await tx.query(`UPDATE lines SET target_sku=null,target_quantity=null,source_payload=source_payload-'erplainSourceVariantId'-'erplainCorrectedWeightKg' WHERE source_sku=$1 AND order_id=ANY($2::text[])`,[b.source_sku,ids]);
   await tx.query(`UPDATE jobs SET status='pending',available_at=now(),error=null WHERE kind='label' AND order_id=ANY($1::text[]) AND status<>'processing'`,[ids]);
   return {mapping:b,affected:ids};

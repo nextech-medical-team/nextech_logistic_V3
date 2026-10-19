@@ -1,8 +1,12 @@
+import {assertTemuLabelOrder,assertTemuLabelPurchaseOrder,positiveTemuClaimGuard} from './temu-label-order-policy.mjs';
 import {recoverMissingTemuPdfs} from './temu-pdf-archive.mjs';
+import {readConfirmedTemuShipments,temuLabelFailure} from './temu-shipment-remediation.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
+import {hasCreatedBl} from './created-bl-label.mjs';
+import {recordedBlQuantityData} from './temu-bl-quantity-data.mjs';
 import {retiredCommercialControl} from './post-bc-control-recovery.mjs';
 import {verifyExcelTemuDetail} from './temu-excel-identity.mjs';
-import {completedExcelPreparation} from './temu-excel-purchase-admission.mjs';
+import {assertExcelLabelPreparation} from './temu-excel-label-admission.mjs';
 import {isTemuExcel,verifiedExcelCommercial} from './temu-excel-commercial.mjs';
 import {assertLabelStockGate} from './label-stock-gate.mjs';
 import {hasExternalLabel} from './temu-external-label.mjs';
@@ -12,6 +16,11 @@ import {randomUUID,createHash} from 'node:crypto';
 export async function initializeTemuShipping(db){await db.exec(`CREATE TABLE IF NOT EXISTS temu_label_jobs(reference TEXT PRIMARY KEY,status TEXT NOT NULL,plan JSONB,attempt_id TEXT,packages JSONB NOT NULL DEFAULT '[]',result JSONB,error TEXT,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());CREATE TABLE IF NOT EXISTS temu_label_documents(reference TEXT REFERENCES temu_label_jobs(reference) ON DELETE CASCADE,package TEXT,pdf BYTEA,PRIMARY KEY(reference,package));`);if(db.recoverInterrupted!==false)await db.query("UPDATE temu_label_jobs SET status='uncertain',error='Achat interrompu : récupération obligatoire, aucun nouvel achat automatique' WHERE status='purchasing'");}
 export function canonicalTemuValue(value){if(Array.isArray(value))return value.map(canonicalTemuValue);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalTemuValue(value[key])]));return value;}
 export const hash=v=>createHash('sha256').update(JSON.stringify(canonicalTemuValue(v))).digest('hex');
+export function temuParcelWeight(order,fixedWeight){
+ if(fixedWeight!=null)return fixedWeight;
+ const known=Number(order?.weight_kg);
+ return Number.isFinite(known)&&known>0.25?String(Math.ceil(known*1000)/1000):'0.25';
+}
 export async function readTemuShipments(api,reference,detail){
  if(detail?.parentOrderMap?.parentOrderSn!==reference||!detail.orderList?.length)throw Error('TEMU · Articles absents pour lire les expéditions');
  const orderSns=[...new Set(detail.orderList.map(l=>l.orderSn))];
@@ -21,13 +30,14 @@ export async function readTemuShipments(api,reference,detail){
  return {shipmentInfoDTO};
 }
 const names=v=>(v||[]).filter(x=>typeof x==='string'||x?.value===1||x?.value==='1'||x?.value===true).map(x=>typeof x==='string'?x:x.name);
-export function inspectTemu(detail,reference){
+export function inspectTemu(detail,reference,quantityData=[]){
  const p=detail.parentOrderMap,items=detail.orderList;if(p?.parentOrderSn!==reference||!Array.isArray(items)||!items.length)throw new Error('Identité ou articles TEMU incomplets');
  const flags=[...names(p.parentOrderLabel),...items.flatMap(i=>names(i.orderLabel))];
  // Platform risk/address/cancellation labels remain indicative; actual data and provider responses are checked below.
  if([p,...items].some(x=>String(x.orderPaymentType).toUpperCase()==='COD'))throw new Error('Paiement à la livraison incompatible');
  const packages=[...new Set(items.flatMap(i=>(i.packageSnInfo||[]).map(x=>x.packageSn)))];if(packages.some(x=>!/^PK-\d+$/.test(x)))throw new Error('Colis TEMU invalide');
- const lines=items.map(i=>({parentOrderSn:reference,orderSn:String(i.orderSn||''),quantity:Number(i.quantity)}));
+ const quantities=new Map(quantityData.map(l=>[l.orderSn,l.quantity]));
+ const lines=items.map(i=>({parentOrderSn:reference,orderSn:String(i.orderSn||''),quantity:Number(i.quantity)>0?Number(i.quantity):quantities.get(String(i.orderSn))??Number(i.quantity)}));
  if(lines.some(l=>!l.orderSn||!Number.isInteger(l.quantity)||l.quantity<=0)||new Set(lines.map(l=>l.orderSn)).size!==lines.length)throw new Error('Articles ou quantités TEMU invalides');
  const pres=items.map(i=>names(i.orderLabel).includes('Y2_advance_sale'));if(pres.some(Boolean)&&!pres.every(Boolean))throw new Error('Précommandes et commandes ordinaires à séparer');
  return {lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,status:Number(p.parentOrderStatus),fingerprint:hash({reference,lines,packages,signature:flags.includes('signature_required_on_delivery'),hours:pres.some(Boolean)?360:120,payment:[p,...items].map(x=>x.orderPaymentType),deadline:p.expectShipLatestTime}),deadline:Number(p.expectShipLatestTime)*1000};
@@ -49,8 +59,25 @@ function excelShipmentProof(order,lines){
 }
 function recordedBcQuoteId(plan){
  const request={...plan.request,sendRequestList:plan.request.sendRequestList.map(parcel=>({...parcel,orderSendInfoList:parcel.orderSendInfoList.map(({quantity,...identity})=>identity)}))};
- return hash({request,amount:plan.amount,currency:plan.currency,preparationFingerprint:plan.preparationFingerprint??null});
+ return hash({request,amount:plan.amount,currency:plan.currency,preparationFingerprint:plan.preparationFingerprint??null,...(plan.blAuthority?{blAuthority:plan.blAuthority}:{})});
 }
+
+function assertExistingBlLabelOrder(order){
+ const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);
+ if(order.archived||order.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(order.tracking_status))throw Error('Commande annulée ou expédiée : aucun nouvel achat');
+ if(order.partial_mode)throw Error('Utiliser le BL et les quantités de la livraison partielle');
+ if(!hasCreatedBl(order))throw Error('BL publié absent : préparation à terminer avant achat');
+}
+const postBlAutomaticClaimGuard=` AND EXISTS(SELECT 1 FROM orders o WHERE o.id=$4 AND o.reference=temu_label_jobs.reference
+ AND NOT o.archived AND NOT o.partial_mode AND o.transport_choice IS NULL
+ AND coalesce(o.tracking_status,'not_shipped') NOT IN ('cancelled','shipped','in_transit','delivered') AND coalesce(o.label_status,'')<>'cancelled'
+ AND o.erp_live->'bl'->>'id'=$5::text
+ AND o.erp_live->'bl'->>'status' IN ('pending','make_the_shipment','in_preparation','ready_to_ship')
+ AND o.suspension=$6::jsonb
+ AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id)
+ AND NOT EXISTS(SELECT 1 FROM carrier_documents d WHERE d.order_id=o.id)
+ AND NOT EXISTS(SELECT 1 FROM extra_parcels x WHERE x.order_id=o.id)
+ AND NOT EXISTS(SELECT 1 FROM temu_label_documents t WHERE t.reference=o.reference))`;
 
 export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={}){
  const active=new Set();let warehouseCache=null,warehouseAt=0;
@@ -58,16 +85,21 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
  const job=async reference=>(await db.query('SELECT * FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
  async function quote(reference,channelId,fresh={}){
   const localOrders=(await db.query('SELECT * FROM orders WHERE reference=$1',[reference])).rows;if(quoteOrderPolicy)await quoteOrderPolicy(reference);else for(const order of localOrders){const blocked=suspensionBlock(order);if(blocked)throw Error(blocked);}
-  const excelOrder=!quoteOrderPolicy&&localOrders.find(isTemuExcel);
+  if(!quoteOrderPolicy&&localOrders.some(o=>!o.archived&&o.partial_mode))throw Error('Utiliser le BL et les quantités de la livraison partielle');
+  const financialOrder=!quoteOrderPolicy&&localOrders.find(o=>o.channel==='temu'&&!o.archived);
+  if(financialOrder)assertTemuLabelOrder(financialOrder);
+  const excelOrder=!financialOrder&&!quoteOrderPolicy&&localOrders.find(isTemuExcel);
+  const blOrder=!quoteOrderPolicy&&localOrders.find(o=>!o.archived&&hasCreatedBl(o));
+  if(blOrder)assertExistingBlLabelOrder(blOrder);
   let excelProof;
-  if(excelOrder){
-   if(excelOrder.archived||excelOrder.label_status==='cancelled'||['cancelled','shipped','in_transit','delivered'].includes(excelOrder.tracking_status)||(excelOrder.issue&&!(usesRecordedBc(excelOrder)&&retiredCommercialControl(excelOrder.issue)))||!excelOrder.source_payload.temuExcelPreparation||excelOrder.resolution_pending_resume&&!await completedExcelPreparation(db,excelOrder))throw Error('Excel TEMU : préparation à terminer avant achat');
+  if(excelOrder&&!blOrder){
+   await assertExcelLabelPreparation(db,excelOrder);
    await assertLabelStockGate(db,excelOrder);
    const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[excelOrder.id])).rows;if(!usesRecordedBc(excelOrder))verifiedExcelCommercial(excelOrder,lines);
    excelProof={order:excelOrder,lines};
   }
-  const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=fixedWeight??(excelOrder?'0.25':Number.isFinite(knownWeight)&&knownWeight>0.25?String(Math.ceil(knownWeight*1000)/1000):'0.25');
-  const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),info=inspectTemu(detail,reference);
+  const parcelWeight=temuParcelWeight(localOrders[0],fixedWeight);
+  const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),quantityData=await recordedBlQuantityData(db,blOrder,detail),info=inspectTemu(detail,reference,quantityData);
   if(excelProof)verifyExcelTemuDetail(excelProof.order,excelProof.lines,detail);
   const existing=fresh.shipments||await readTemuShipments(api,reference,detail);
   if(info.packages.length||(existing.shipmentInfoDTO||[]).length)throw new Error('Une expédition existe déjà dans TEMU : utiliser Récupérer les étiquettes');
@@ -81,7 +113,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   if(new Set(eligible.map(o=>o.currency)).size>1)throw new Error('Offres dans plusieurs devises : vérification nécessaire');
   const chosen=channelId?eligible.find(o=>o.channelId===Number(channelId)):eligible[0];if(!chosen)throw new Error('TEMU · Aucun service disponible : '+(offers.length?[...new Set(offers.map(o=>o.unavailableReason).filter(Boolean))].join(' ; ').slice(0,300):'aucune offre renvoyée par TEMU'));
   const request={sendType:0,shipLater:true,shipLaterLimitTime:String(info.hours),sendRequestList:[chosen.parcel]};
-  const plan={reference,offers,selected:chosen.channelId,amount:chosen.amount,currency:chosen.currency,request,orderFingerprint:info.fingerprint,expiresAt:Date.now()+600000};if(excelProof)plan.preparationFingerprint=hash(excelShipmentProof(excelProof.order,excelProof.lines));const recorded=localOrders.some(o=>!o.archived&&usesRecordedBc(o));plan.executionAuthority=recorded?'recorded_bc':'source';plan.id=recorded?recordedBcQuoteId(plan):hash({request,amount:plan.amount,currency:plan.currency,orderFingerprint:plan.orderFingerprint,...(excelProof?{preparationFingerprint:plan.preparationFingerprint}:{})});Object.defineProperty(plan,'excelProof',{value:excelProof});return plan;
+  const plan={reference,offers,selected:chosen.channelId,amount:chosen.amount,currency:chosen.currency,request,orderFingerprint:info.fingerprint,expiresAt:Date.now()+600000,...(quantityData.length?{quantityData}: {})};if(excelProof)plan.preparationFingerprint=hash(excelShipmentProof(excelProof.order,excelProof.lines));if(blOrder)plan.blAuthority={orderId:blOrder.id,blId:String(blOrder.erp_live.bl.id)};const recorded=!!blOrder||localOrders.some(o=>!o.archived&&usesRecordedBc(o));plan.executionAuthority=blOrder?'recorded_bl':recorded?'recorded_bc':'source';plan.id=recorded?recordedBcQuoteId(plan):hash({request,amount:plan.amount,currency:plan.currency,orderFingerprint:plan.orderFingerprint,...(excelProof?{preparationFingerprint:plan.preparationFingerprint}:{})});if(financialOrder)plan.financialAuthority={orderId:financialOrder.id};Object.defineProperty(plan,'excelProof',{value:excelProof});return plan;
  }
  async function recover(reference,fresh={}){return locked(reference,async()=>{
   if(hasExternalLabel((await db.query("SELECT channel,source_payload FROM orders WHERE reference=$1 AND channel='temu'",[reference])).rows[0]))return job(reference);
@@ -90,14 +122,22 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   if(!packages.length)throw new Error('Aucun colis retrouvé : vérifier TEMU avant tout nouvel achat');if(packages.some(p=>!/^PK-\d+$/.test(p)))throw new Error('Identifiant de colis invalide');
   await db.query(`INSERT INTO temu_label_jobs(reference,status,packages) VALUES($1,'pending',$2) ON CONFLICT(reference) DO UPDATE SET packages=excluded.packages`,[reference,JSON.stringify(packages)]);
   const result=await api.read('bg.logistics.shipment.result.get',{packageSnList:packages});result.source='temu_direct';result.observedAt=new Date().toISOString();
+  if(Array.isArray(result.packageInfoResultList)&&result.packageInfoResultList.length===0){
+   const confirmed=await readConfirmedTemuShipments(api,reference,packages);
+   if(confirmed){
+    for(const p of j?.result?.packageInfoResultList||[]){const current=confirmed.find(c=>c.packageSn===p.packageSn);if(p.trackingNumber&&current?.trackingNumber!==p.trackingNumber)throw Error('TEMU · Suivi existant différent : conserver les documents et vérifier le colis');}
+    result.packageInfoResultList=confirmed;result.confirmedShipmentSource='bg.logistics.shipment.v2.get';result.previousLabelResult=j?.result?.previousLabelResult||{status:j?.status,error:j?.error,result:j?.result};
+   }
+  }
   for(const p of result.packageInfoResultList||[]){p.carrier=p.shippingCompanyName||p.carrier;p.amount=p.estimatedAmount??p.amount;p.currency=p.estimatedCurrencyCode||p.currency;p.costEstimated=p.estimatedAmount!==undefined;}
   const details=result.packageInfoResultList||[];for(const p of details){if(!packages.includes(p.packageSn)||!p.orderSendInfoList?.length||!p.orderSendInfoList.some(l=>l.parentOrderSn===reference))throw new Error('Identité du colis non vérifiable');}
   if(new Set(details.map(p=>p.packageSn)).size!==packages.length||details.length!==packages.length)throw new Error('Résultat TEMU incomplet : récupération à relancer');
   const {count,documentWarnings}=await recoverMissingTemuPdfs(db,api,reference,details);
   const refused=details.find(p=>Number(p.shippingLabelStatus)===2);
-  const unavailable=count<packages.length&&documentWarnings.length>0;
+  const confirmedOnly=!!result.confirmedShipmentSource;
+  const unavailable=count<packages.length&&(documentWarnings.length>0||confirmedOnly);
   const status=refused?'shipment_error':count===packages.length?'complete':unavailable?'document_unavailable':'pending';
-  const error=refused?('TEMU · Étiquette refusée : '+String(refused.failReasonText||'motif non communiqué').slice(0,250)):unavailable?(documentWarnings.some(w=>/picked up.*cannot be printed/i.test(w))?'TEMU · PDF non réimprimable : colis déjà collecté':'TEMU · PDF indisponible : '+documentWarnings.join(' ; ').slice(0,300)):status==='pending'?'TEMU · PDF en attente chez TEMU':null;
+  const error=refused?temuLabelFailure(refused.failReasonText):unavailable?(confirmedOnly?'TEMU · Expédition confirmée avec suivi ; PDF absent de l’archive. Récupérer le document existant, sans rachat.':documentWarnings.some(w=>/picked up.*cannot be printed/i.test(w))?'TEMU · PDF non réimprimable : colis déjà collecté':'TEMU · PDF indisponible : '+documentWarnings.join(' ; ').slice(0,300)):status==='pending'?'TEMU · PDF en attente chez TEMU':null;
   await db.query('UPDATE temu_label_jobs SET status=$2,error=$3,result=$4::jsonb,updated_at=now() WHERE reference=$1',[reference,status,error,JSON.stringify({...result,documentWarnings})]);return job(reference);
  });}
  return {list:()=>api.read('bg.order.list.v2.get',{pageNumber:1,pageSize:20,sortby:'createTime'}),history:async()=>(await db.query('SELECT *, (SELECT count(*)::int FROM temu_label_documents d WHERE d.reference=j.reference) documents FROM temu_label_jobs j ORDER BY updated_at DESC LIMIT 100')).rows,
@@ -109,14 +149,33 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
    const admission=beforeClaim?await beforeClaim(current):null;
    const proof=admission?.orderProof;
    if(beforeClaim&&(!proof||admission.allowed!==true||!Number.isFinite(admission.audit?.profit)||admission.audit.profit<=0||admission.audit.planId!==current.id))throw Error('Preuve de préparation et marge positive automatique absente');
-   const guard=proof?` AND EXISTS(SELECT 1 FROM orders o WHERE o.id=$4 AND o.reference=temu_label_jobs.reference AND NOT o.archived AND NOT o.simulation AND NOT o.partial_mode AND NOT o.resolution_pending_resume AND o.issue IS NULL AND o.transport_choice IS NULL AND o.erp_live=$5::jsonb AND o.source_payload=$6::jsonb AND o.address=$7::jsonb AND o.suspension=$8::jsonb AND o.weight_kg IS NOT DISTINCT FROM $9::numeric AND coalesce((SELECT jsonb_agg(to_jsonb(l) ORDER BY source_line,id) FROM lines l WHERE l.order_id=o.id),'[]'::jsonb)=$10::jsonb AND EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status='complete') AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id) AND NOT EXISTS(SELECT 1 FROM carrier_documents d WHERE d.order_id=o.id) AND NOT EXISTS(SELECT 1 FROM extra_parcels x WHERE x.order_id=o.id) AND NOT EXISTS(SELECT 1 FROM temu_label_documents t WHERE t.reference=o.reference) AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting','review')) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting','review')))`:'';
-   const args=[reference,randomUUID(),JSON.stringify(j.plan),...(proof?[proof.id,JSON.stringify(proof.erpLive),JSON.stringify(proof.sourcePayload),JSON.stringify(proof.address),JSON.stringify(proof.suspension),proof.weight,JSON.stringify(proof.lines||[])]:[])];
+   const financial=proof&&current.financialAuthority;
+   const guard=financial?positiveTemuClaimGuard:proof&&current.blAuthority?postBlAutomaticClaimGuard:proof?` AND EXISTS(SELECT 1 FROM orders o WHERE o.id=$4 AND o.reference=temu_label_jobs.reference AND NOT o.archived AND NOT o.simulation AND NOT o.partial_mode AND NOT o.resolution_pending_resume AND o.issue IS NULL AND o.transport_choice IS NULL AND o.erp_live=$5::jsonb AND o.source_payload=$6::jsonb AND o.address=$7::jsonb AND o.suspension=$8::jsonb AND o.weight_kg IS NOT DISTINCT FROM $9::numeric AND coalesce((SELECT jsonb_agg(to_jsonb(l) ORDER BY source_line,id) FROM lines l WHERE l.order_id=o.id),'[]'::jsonb)=$10::jsonb AND EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status='complete') AND NOT EXISTS(SELECT 1 FROM carrier_jobs c WHERE c.order_id=o.id) AND NOT EXISTS(SELECT 1 FROM carrier_documents d WHERE d.order_id=o.id) AND NOT EXISTS(SELECT 1 FROM extra_parcels x WHERE x.order_id=o.id) AND NOT EXISTS(SELECT 1 FROM temu_label_documents t WHERE t.reference=o.reference) AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting','review')) AND NOT EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status IN ('queued','running','waiting','review')))`:'';
+   const args=[reference,randomUUID(),JSON.stringify(j.plan),...(financial?[proof.id,JSON.stringify(proof.sourcePayload),JSON.stringify(proof.address),JSON.stringify(proof.suspension),proof.weight,JSON.stringify(proof.lines||[])]:proof?(current.blAuthority?[proof.id,current.blAuthority.blId,JSON.stringify(proof.suspension)]:[proof.id,JSON.stringify(proof.erpLive),JSON.stringify(proof.sourcePayload),JSON.stringify(proof.address),JSON.stringify(proof.suspension),proof.weight,JSON.stringify(proof.lines||[])]):[])];
    const claimSql="UPDATE temu_label_jobs SET status='purchasing',attempt_id=$2,updated_at=now() WHERE reference=$1 AND status='ready' AND attempt_id IS NULL AND plan=$3::jsonb"+guard+" RETURNING reference,attempt_id";
-   const claim=await (current.excelProof?db.transaction(async tx=>{
-    const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[current.excelProof.order.id])).rows[0];
+   const claim=await (current.financialAuthority||current.blAuthority||current.excelProof?db.transaction(async tx=>{
+    const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[current.financialAuthority?.orderId||current.blAuthority?.orderId||current.excelProof.order.id])).rows[0];
+    if(current.financialAuthority){
+     assertTemuLabelPurchaseOrder(o);
+     if(String(o.erp_live.bl.id)!==current.blAuthority?.blId)throw Error('BL associé modifié avant achat');
+     if(hasExternalLabel(o)||(await tx.query('SELECT 1 FROM temu_label_documents WHERE reference=$1 LIMIT 1',[reference])).rows.length)throw Error('Étiquette existante à conserver : aucun nouvel achat');
+     const claimed=await tx.query(claimSql,args);
+     if(proof&&claimed.rows.length)await tx.query('INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) VALUES($1,$2,$3,$4)',[claimed.rows[0].attempt_id,reference,current.id,JSON.stringify({...admission.audit,policy:'positive-margin-after-bl-v3'})]);
+     return claimed;
+    }
+    if(current.blAuthority){
+     if(!o||String(o.erp_live?.bl?.id)!==current.blAuthority.blId)throw Error('BL associé modifié avant achat');
+     assertExistingBlLabelOrder(o);
+     const activeWrites=(await tx.query("SELECT order_id FROM correction_jobs WHERE order_id=$1 AND status IN ('queued','applying','checking') UNION ALL SELECT order_id FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running')",[o.id])).rows;
+     if(activeWrites.length)throw Error('correction ou reprise en cours');
+     if(hasExternalLabel(o)||(await tx.query('SELECT 1 FROM temu_label_documents WHERE reference=$1 LIMIT 1',[reference])).rows.length)throw Error('Étiquette existante à conserver : aucun nouvel achat');
+     const claimed=await tx.query(claimSql,args);
+     if(proof&&claimed.rows.length)await tx.query('INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) VALUES($1,$2,$3,$4)',[claimed.rows[0].attempt_id,reference,current.id,JSON.stringify(admission.audit)]);
+     return claimed;
+    }
     const lines=(await tx.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[o.id])).rows;
     if(hash(excelShipmentProof(o,lines))!==current.preparationFingerprint)throw Error('Préparation Excel modifiée avant achat');
-    if(o.resolution_pending_resume&&!await completedExcelPreparation(tx,o))throw Error('Préparation Excel modifiée avant achat');
+    await assertExcelLabelPreparation(tx,o);
     await assertLabelStockGate(tx,o);
     const claimed=await tx.query(claimSql,args);
     if(proof&&claimed.rows.length)await tx.query('INSERT INTO temu_automatic_purchase_audit(attempt_id,reference,plan_id,decision) VALUES($1,$2,$3,$4)',[claimed.rows[0].attempt_id,reference,current.id,JSON.stringify(admission.audit)]);

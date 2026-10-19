@@ -1,12 +1,16 @@
 import {test,expect} from '@playwright/test';
-test('single confirmation automatically resolves the shop, skips duplicates and retries only failed preparation',async({page})=>{
+for(const settingsState of ['initial','collapsed'])test('single confirmation automatically resolves the shop, skips duplicates and retries only failed preparation with '+settingsState+' settings',async({page})=>{
  const confirmations=[],preparations=[];let firstFailure=true;
  await page.route('**/api/import/temu/preview',route=>route.fulfill({json:{hash:'hash',files:[{filename:'test.xlsx',rows:3,orders:3}],newCount:2,duplicateCount:1,errors:[],repeatedLines:0,countries:[{country:'FR',total:3,newCount:2,duplicateCount:1,errorCount:0}],orders:['PO-1-1','PO-1-2','PO-1-3'].map((reference,i)=>({reference,country:'FR',recipient:'Client fictif',lines:1,quantity:1,issues:[],eligible:i<2,duplicate:i===2}))}}));
  await page.route('**/api/temu/excel/shops?*',route=>route.fulfill({json:{shops:[{mallId:'one',country:'FR'},{mallId:'two',country:'FR'}]}}));
  await page.route('**/api/import/temu/confirm',route=>{confirmations.push(route.request().postDataJSON());return route.fulfill({json:{created:2,skipped:0,results:['PO-1-1','PO-1-2'].map(reference=>({reference,country:'FR',status:'created'}))}});});
  await page.route('**/api/temu/excel/preview?*',route=>route.fulfill({json:{fingerprint:'proof'}}));
  await page.route('**/api/temu/excel/prepare',route=>{const b=route.request().postDataJSON();preparations.push(b);if(b.reference==='PO-1-1'&&firstFailure){firstFailure=false;return route.fulfill({status:400,json:{error:'Lecture TEMU à réessayer'}});}return route.fulfill({json:{message:'Demandée'}});});
- await page.goto('/');await expect(page.locator('#app')).toBeVisible();await page.locator('nav details').filter({has:page.locator('[data-view="imports"]')}).locator('summary').click();await page.locator('[data-view="imports"]').click();await expect(page.locator('#temu-excel-preview')).toBeAttached();
+ await page.goto('/');await expect(page.locator('#app')).toBeVisible();
+ const settings=page.locator('nav details').filter({has:page.locator('[data-view="imports"]')});
+ if(settingsState==='collapsed'&&await settings.evaluate(el=>el.open))await settings.locator('summary').click();
+ if(!await settings.evaluate(el=>el.open))await settings.locator('summary').click();
+ await page.locator('[data-view="imports"]').click();await expect(page.locator('#temu-excel-preview')).toBeAttached();
  await page.locator('#import-kind').selectOption('temu_excel');await page.locator('#import-file').setInputFiles({name:'test.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from('mock file')});await page.getByRole('button',{name:'Analyser les fichiers',exact:true}).click();
  const panel=page.locator('#temu-excel-preview'),confirm=panel.locator('[data-confirm]');await expect(panel.locator('[data-orders] input:checked')).toHaveCount(2);await expect(confirm).toBeEnabled();await expect(panel.locator('[data-reference="PO-1-3"]')).toBeDisabled();
  await expect(panel.locator('[data-shop-country]')).toHaveCount(0);await expect(confirm).toBeEnabled();await confirm.click();

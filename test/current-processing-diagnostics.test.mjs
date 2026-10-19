@@ -6,6 +6,7 @@ async function fixture(){const db=new PGlite();await db.waitReady;await db.exec(
 CREATE TABLE orders(id text PRIMARY KEY,reference text,channel text,archived boolean,source_payload jsonb,erp_live jsonb,suspension jsonb,issue text,resolution_pending_resume boolean,processing_priority_at timestamptz,tracking_status text,label_status text,transport_choice text);
 CREATE TABLE erp_live_jobs(order_id text,status text,error text,state_since timestamptz,updated_at timestamptz);
 CREATE TABLE carrier_jobs(order_id text,status text,error text,state_since timestamptz,updated_at timestamptz,carrier text,stock_override jsonb,attempts integer,manual_bl_request jsonb,creation_id text);
+CREATE TABLE carrier_documents(order_id text);
 CREATE TABLE resolution_jobs(order_id text,status text,error text,state_since timestamptz,updated_at timestamptz,created_at timestamptz,action text,result jsonb,stage text);
 CREATE TABLE temu_label_jobs(reference text,status text,error text,state_since timestamptz,updated_at timestamptz);
 CREATE TABLE temu_sync_jobs(reference text,status text,started_at timestamptz,updated_at timestamptz);
@@ -39,3 +40,31 @@ const {db,at}=await fixture();try{
  assert.equal(JSON.stringify({orders:(await db.query('SELECT * FROM orders')).rows,jobs:(await db.query('SELECT * FROM erp_live_jobs')).rows}),before);
  assert(!Object.hasOwn(rows[0],'diagnostic_order'),'full order remains internal');
 }finally{await db.close();}});
+
+test('SQL processing reclassifies a historical post-BL mapping refusal without changing jobs',async()=>{
+ const {db,at}=await fixture();try{
+  const error='Mapping modifié avant création : recontrôle requis';
+  await db.exec("ALTER TABLE carrier_jobs ADD COLUMN tracking jsonb DEFAULT '[]'; ALTER TABLE carrier_jobs ADD COLUMN result jsonb; ALTER TABLE carrier_jobs ADD COLUMN creation_started_at timestamptz; ALTER TABLE carrier_jobs ADD COLUMN failure_phase text;");
+  await db.exec('ALTER TABLE orders ADD COLUMN carrier text');
+  await db.query("UPDATE orders SET erp_live=$1,source_payload='{}',issue=null,carrier='gls',label_status='production_pending'",[{bl:{id:'BL',status:'ready_to_ship'}}]);
+  await db.exec("UPDATE erp_live_jobs SET status='complete',error=null");
+  await db.query("INSERT INTO carrier_jobs(order_id,status,error,carrier,updated_at) VALUES('A','failed',$1,'gls',$2)",[error,at]);
+  await db.query("INSERT INTO resolution_jobs(order_id,status,error,action,result,created_at,updated_at) VALUES('A','review',$1,'choose-carrier','{}',$2,$2)",[error,at]);
+  const before=JSON.stringify((await db.query('SELECT * FROM carrier_jobs')).rows);
+  const [row]=await processingRows(db,['A']);assert.equal(row.state,'manual');assert.equal(row.label_manual_request_required,true);assert.equal(row.reason,null);assert(!row.activities.some(a=>a.state==='blocked'));
+  assert(row.label_diagnostic_history.some(h=>h.reason===error));assert.equal(JSON.stringify((await db.query('SELECT * FROM carrier_jobs')).rows),before);
+ }finally{await db.close();}
+});
+
+test('SQL processing acknowledges queued GLS choice before carrier changes and preserves database state',async()=>{
+ const {db,at,before}=await fixture();try{
+  await db.exec('ALTER TABLE resolution_jobs ADD COLUMN id text; ALTER TABLE resolution_jobs ADD COLUMN payload jsonb;');
+  await db.query("UPDATE orders SET source_payload='{}',issue=null,erp_live=$1",[{bl:{id:'BL',status:'ready_to_ship'}}]);
+  await db.exec("UPDATE erp_live_jobs SET status='complete',error=null");
+  await db.query("INSERT INTO resolution_jobs(id,order_id,status,action,payload,created_at,updated_at,state_since,stage) VALUES('request','A','queued','choose-carrier',$1,$2,$2,$2,'En attente')",[{carrier:'gls'},at]);
+  await db.query("INSERT INTO temu_label_jobs(reference,status,error,state_since,updated_at) VALUES('PO-TARGET','shipment_error','TEMU · Étiquette refusée : ancien essai',$1,$1)",[before]);
+  const original=JSON.stringify((await db.query('SELECT * FROM resolution_jobs')).rows);
+  const [row]=await processingRows(db,['A']);assert.equal(row.service,'GLS');assert.equal(row.state,'queued');assert.match(row.stage,/Demande GLS reçue/);assert.equal(Date.parse(row.manual_label_request.received_at),Date.parse(at));assert(!row.activities.some(a=>a.service==='TEMU'&&a.state==='blocked'));
+  assert.equal(JSON.stringify((await db.query('SELECT * FROM resolution_jobs')).rows),original);
+ }finally{await db.close();}
+});

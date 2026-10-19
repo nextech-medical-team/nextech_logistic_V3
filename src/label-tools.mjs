@@ -1,3 +1,4 @@
+import {assertImportedPostalAddress} from './imported-postal-authority.mjs';
 import {currentPartialSkuPdf} from './label-sku-copy.mjs';
 import {skuCopyRoutes} from './label-sku-routes.mjs';
 import {assertLabelStockGate,shipmentFingerprint} from './label-stock-gate.mjs';
@@ -50,6 +51,7 @@ export async function labelTools({p,req,res,db,user,body,json,audit,permitted}){
   const weight=Number(b.weight);if(!Number.isFinite(weight)||weight<=0||weight>3000)throw new Error('Poids total en kg requis');if(!['gls','gls_pharma','gofo'].includes(b.carrier))throw new Error('Transporteur direct requis');
   await db.transaction(async tx=>{
    const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows[0];if(!o||o.partial_mode||o.channel==='temu')throw new Error('Commande absente ou circuit non compatible');
+   assertImportedPostalAddress(o,address);
    if(o.channel==='shopify'&&o.source_payload?.shopifyDeliveryMode==='relay')throw new Error('Commande Relais GLS : circuit GLS Shop requis, aucune création domicile autorisée');
    const existing=(await tx.query('SELECT * FROM carrier_jobs WHERE order_id=$1 FOR UPDATE',[o.id])).rows[0];const heldPending=existing?.status==='pending'&&o.resolution_pending_resume===true;
    if(existing&&((existing.status!=='failed'&&!heldPending)||existing.result||existing.tracking?.length))throw new Error('Expédition existante ou incertaine : aucune recréation autorisée');
