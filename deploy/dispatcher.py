@@ -98,6 +98,9 @@ def deploy(commit,packet=None):
   git('merge-base','--is-ancestor',baseline['commit'],commit)
   old,new=tree(baseline['commit']),tree(commit)
   names=set(old)|set(new);current=read_current(names)
+  from plan import reconcile_overlay_sources
+  old,reconciled=reconcile_overlay_sources(old,new,current,baseline,lambda sha,name:git('show',sha+':'+name))
+  if reconciled:report['reconciledOverlays']=reconciled
   changed=plan(old,new,current,baseline['serverHashes']);report['files']=changed
   if packet is None:raise ValueError('Manifeste CI absent')
   proofs={name:base64.b64decode(value,validate=True) for name,value in packet['proofs'].items()}
