@@ -30,7 +30,7 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(code&&Number(code)>=500)return result('api-server','API '+apiName+' · Erreur serveur ('+code+')','');
  if(/timeout|timed out|délai.*dépass|AbortError/i.test(text))return result('api-timeout','API '+apiName+' · Délai dépassé','');
  if(/injoignable|Connexion.*impossible|fetch failed|réseau|certificat/i.test(text))return result('api-network','API '+apiName+' · Connexion impossible','');
- if(/Stock non vérifiable|stock non reçu/i.test(text))return result('api-stock','API Erplain : stock non reçu');
+ if(/Stock non vérifiable|stock non reçu/i.test(text))return result('api-stock','Stock Erplain à vérifier');
  if(/API.*non reçue|Réponse.*incomplète/i.test(text))return result('api-incomplete','API '+apiName+' · Réponse incomplète','');
  if((!text.includes(';')&&text.startsWith("Erplain LIVE · Informations obligatoires manquantes : "))||["Erplain LIVE · Numéro de téléphone invalide : corriger avant création de l’étiquette","Erplain LIVE · Pays ou code postal invalide"].includes(text))return {...result('unknown',text,''),provider:'Erplain'};
  if(/Correspondance SKU (?:absente|introuvable)|Mapping.*(?:manquant|introuvable|absent)/i.test(text))return result('mapping','Mapping manquant');

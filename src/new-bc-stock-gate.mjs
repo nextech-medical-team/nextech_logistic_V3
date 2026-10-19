@@ -1,5 +1,12 @@
 import {assertFullOrderStock} from './stock-gate.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
+const stockNumber=value=>(typeof value==='number'||typeof value==='string'&&value.trim()!=='')&&Number.isFinite(Number(value));
+function locationStock(variant,location){
+ const levels=variant?.stock_levels;
+ if(!Array.isArray(levels?.data)||levels.paginatorInfo?.hasMorePages!==false)return null;
+ const matches=levels.data.filter(row=>String(row?.location?.id)===location);
+ return matches.length===1&&[matches[0].on_hand,matches[0].available].every(stockNumber)?matches[0]:null;
+}
 // Resolution workers may already own stock-mutations. Always acquire that
 // lock before BC numbering to avoid inversion with automatic preparation.
 export function withSalesBcPublicationLock(fn){
@@ -9,7 +16,7 @@ export function withSalesBcPublicationLock(fn){
 // A new BC has no reservations of its own. Incoming quantities are excluded.
 export async function assertNewBcStock(api,lines,products){
  if(!Array.isArray(lines)||!lines.length)throw Error('Stock non vérifiable avant BC : lignes absentes');
- const snapshots=new Map(),checked=[];
+ const snapshots=new Map(),rereads=new Map(),checked=[];
  for(const line of lines){
   if(line.type==='shipping_cost'&&!line.variant)continue;
   const id=String(line.variant?.id||''),location=String(line.location?.id||'');
@@ -23,9 +30,20 @@ export async function assertNewBcStock(api,lines,products){
    variant=found[0];snapshots.set(id,variant);
   }
   if(!variant.track_inventory){checked.push({...line,variant});continue;}
-  const levels=variant.stock_levels,found=levels?.data?.filter(s=>String(s.location?.id)===location);
-  if(levels?.paginatorInfo?.hasMorePages!==false||found?.length!==1)throw Error('Stock non vérifiable avant BC : emplacement incomplet');
-  checked.push({...line,variant,on_hand:found[0].on_hand,available:found[0].available,reserved_quantity:0});
+  let stock=locationStock(variant,location);
+  if(!stock){
+   // Re-read the exact variant, never infer zero from an absent location or use
+   // a different warehouse's quantities. Share this fresh read within this check.
+   if(!rereads.has(id)){
+    const response=await api.request('query V3NewBcStockDetail($id:ID!){Variant(id:$id){id sku track_inventory stock_levels(first:100){data{location{id} on_hand available} paginatorInfo{hasMorePages}}}}',{id});
+    const detail=response?.Variant;
+    if(String(detail?.id)!==id||detail.sku!==variant.sku||detail.track_inventory!==true)throw Error('Stock non vérifiable avant BC : identité produit non confirmée après relecture : '+variant.sku);
+    rereads.set(id,detail);
+   }
+   stock=locationStock(rereads.get(id),location);
+   if(!stock)throw Error('Stock non vérifiable avant BC : '+variant.sku+' · emplacement '+location+' : quantités absentes ou incomplètes après relecture Erplain');
+  }
+  checked.push({...line,variant,on_hand:stock.on_hand,available:stock.available,reserved_quantity:0});
  }
  return assertFullOrderStock(checked);
 }

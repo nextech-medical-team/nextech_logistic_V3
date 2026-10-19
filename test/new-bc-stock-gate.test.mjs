@@ -25,6 +25,61 @@ test('incomplete pagination refuses',async()=>{const f=fixture();f.variant.stock
 test('missing location refuses',async()=>{const f=fixture();f.variant.stock_levels.data=[];await assert.rejects(()=>f.run());});
 test('unknown balances refuse',async()=>{const f=fixture();f.variant.stock_levels.data[0].on_hand=null;await assert.rejects(()=>f.run());});
 test('untracked product permitted',async()=>{const f=fixture();f.variant.track_inventory=false;assert.equal(await f.run(),true);});
+
+function rereadFixture(stock){
+ const f=fixture(),initial=f.api.request;f.variant.stock_levels=conn([]);
+ f.api.request=async(q,v)=>{
+  if(!q.includes('V3NewBcStockDetail'))return initial(q,v);
+  f.calls.push({q,v});assert.match(q,/^query /);assert.deepEqual(v,{id:'642510'});
+  return {Variant:{...f.variant,stock_levels:conn(stock)}};
+ };
+ return f;
+}
+test('missing list stock is recovered by an exact variant read before BC',async()=>{
+ const f=rereadFixture([{location:{id:100934},on_hand:300,available:200}]);
+ assert.equal(await f.run(),true);assert.equal(f.calls.length,2);
+});
+test('explicit zero in the exact read is a shortage, never an API absence',async()=>{
+ const f=rereadFixture([{location:{id:100934},on_hand:0,available:0}]);
+ await assert.rejects(()=>f.run(),/stock insuffisant.*200 nécessaires, 0 utilisables, manque 200/);
+});
+test('an empty exact read stays unknown with SKU and warehouse in the diagnosis',async()=>{
+ const f=rereadFixture([]);
+ await assert.rejects(()=>f.run(),/Stock non vérifiable.*TR03.*100934.*après relecture/);
+});
+test('another warehouse cannot satisfy the selected warehouse',async()=>{
+ const f=rereadFixture([{location:{id:999},on_hand:9000,available:9000}]);
+ await assert.rejects(()=>f.run(),/Stock non vérifiable.*100934/);
+});
+test('exact read rejects mismatched identity or tracking policy',async()=>{
+ for(const patch of [{id:999},{sku:'OTHER'},{track_inventory:false}]){
+  const f=rereadFixture([{location:{id:100934},on_hand:500,available:500}]),request=f.api.request;
+  f.api.request=async(q,v)=>{const r=await request(q,v);if(r.Variant)Object.assign(r.Variant,patch);return r;};
+  await assert.rejects(()=>f.run(),/identité produit non confirmée/);
+ }
+});
+test('exact read requires complete pagination, unique warehouse and numeric balances',async()=>{
+ for(const kind of ['pagination','duplicate','null','blank','boolean']){
+  const f=rereadFixture([{location:{id:100934},on_hand:500,available:500}]),request=f.api.request;
+  f.api.request=async(q,v)=>{const r=await request(q,v);if(r.Variant){const c=r.Variant.stock_levels;
+   if(kind==='pagination')c.paginatorInfo.hasMorePages=true;
+   if(kind==='duplicate')c.data.push(c.data[0]);
+   if(kind==='null')c.data[0].available=null;
+   if(kind==='blank')c.data[0].available='';
+   if(kind==='boolean')c.data[0].available=false;
+  }return r;};
+  await assert.rejects(()=>f.run(),/Stock non vérifiable/);
+ }
+});
+test('duplicate lines share the detail read while preserving total demand',async()=>{
+ const f=rereadFixture([{location:{id:100934},on_hand:300,available:300}]);
+ await assert.rejects(()=>f.run([f.line,f.line]),/400 nécessaires.*300 utilisables/);assert.equal(f.calls.length,2);
+});
+test('detail read network refusal does not become zero or permit BC creation',async()=>{
+ const f=rereadFixture([]),request=f.api.request;
+ f.api.request=async(q,v)=>{if(q.includes('V3NewBcStockDetail'))throw Error('Erplain HTTP 429');return request(q,v);};
+ await assert.rejects(()=>f.run(),/Erplain HTTP 429/);
+});
 test('fresh shortage prevents activation mutation',async()=>{
  const f=fixture(),mutations=[];const api={request:async(q,v)=>{
   if(q.includes('V3BcNumberRead'))return {Order:{id:1949944,status:'unpublished',update_stock:true,line_items:[f.line]}};
