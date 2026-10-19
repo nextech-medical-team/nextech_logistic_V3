@@ -37,7 +37,7 @@ import {refreshManualOrder} from './manual-erplain-orders.mjs';
 import {erplainCustomerInput} from './erplain-customer-input.mjs';
 import {reconcileFullStock} from './stock-cycle.mjs';
 import {publishHistoricalBl,assertHistoricalBlNumber} from './bl-numbering.mjs';
-import {publishIncrementalBc} from './bc-numbering.mjs';
+import {publishIncrementalBc,numberedNewBcInput} from './bc-numbering.mjs';
 import {ensureTemuBcPricing,temuBcPricingLoader} from './temu-bc-pricing.mjs';
 import {loadShopifyConfig,shopifyCollector} from './marketplace-collection.mjs';
 import {buildBcPricing,verifyBcPricing,verifySourceCommercialTotals,sourceCurrency} from './bc-pricing.mjs';
@@ -93,8 +93,8 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
   if(operation==='CreateOrder'&&!stockLocked){
    // Serialize each fresh read and BC creation across workers and shipments.
    // The next order must see the previous BC's reservation/debit.
-   for(const o of orders)await withShipmentLock(async()=>{
-    try{await assertNewBcStock(api,input(o).line_items,o.selectedProducts);await batchMutation([o],phase,field,type,operation,input,selection,{stockLocked:true});}
+   for(const o of orders)await withSalesBcPublicationLock(async()=>{
+    try{await batchMutation([o],phase,field,type,operation,input,selection,{stockLocked:true});}
     catch(e){o.failed=true;await fail(o,e);}
    });
    return;
@@ -107,9 +107,11 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
   }
   for(const o of orders){const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];const block=mutationBlock(fresh,{allowHeldBc:activeBcOnlyOrderId===o.id&&['CreateCustomer','CreateOrder'].includes(operation)});if(block){o.failed=true;await fail(o,new Error(block));continue;}if(operation==='CreateOrder')o.erp_live.bcReservationPolicy='erplain_bc_bl';o.erp_live.phase=phase;if(operation==='CreateCustomer')o.erp_live.customerCreationAttempt=customerCreationStarted(o);await save(o);}
   orders=orders.filter(o=>!o.failed);if(!orders.length)return;
+  const inputs={};for(let i=0;i<orders.length;i++){const value=input(orders[i]);inputs['p'+i]=operation==='CreateOrder'?await numberedNewBcInput(api,value):value;}
+  if(operation==='CreateOrder')for(let i=0;i<orders.length;i++)await assertNewBcStock(api,inputs['p'+i].line_items,orders[i].selectedProducts);
   const q='mutation V3Batch('+orders.map((o,i)=>'$p'+i+':'+type+'!').join(',')+'){'+orders.map((o,i)=>`p${i}:${operation}(input:$p${i}){${selection}}`).join(' ')+'}';
-  let result;try{result=await api.request(q,Object.fromEntries(orders.map((o,i)=>['p'+i,input(o)])),0,true);}catch(error){if(operation==='CreateCustomer')for(const o of orders){o.erp_live.customerCreationAttempt=customerCreationFailed(o.erp_live.customerCreationAttempt,error);await save(o);}throw error;}
-  for(let i=0;i<orders.length;i++){if(!result['p'+i]?.id){orders[i].failed=true;await fail(orders[i],new Error(result._v3Errors?.find(e=>e.path?.[0]==='p'+i)?.message||'Réponse incomplète '+phase));continue;}if(operation==='CreateCustomer')orders[i].erp_live.customerCreationAttempt={...orders[i].erp_live.customerCreationAttempt,outcome:'confirmed',customerId:result['p'+i].id};orders[i].erp_live[field]=result['p'+i];orders[i].erp_live.phase=field+'_created';await save(orders[i]);}
+  let result;try{result=await api.request(q,inputs,0,true);}catch(error){if(operation==='CreateCustomer')for(const o of orders){o.erp_live.customerCreationAttempt=customerCreationFailed(o.erp_live.customerCreationAttempt,error);await save(o);}throw error;}
+  for(let i=0;i<orders.length;i++){if(!result['p'+i]?.id){orders[i].failed=true;await fail(orders[i],new Error(result._v3Errors?.find(e=>e.path?.[0]==='p'+i)?.message||'Réponse incomplète '+phase));continue;}if(operation==='CreateCustomer')orders[i].erp_live.customerCreationAttempt={...orders[i].erp_live.customerCreationAttempt,outcome:'confirmed',customerId:result['p'+i].id};orders[i].erp_live[field]=result['p'+i];orders[i].erp_live.phase=field+'_created';await save(orders[i]);if(operation==='CreateOrder'&&(result['p'+i].status!=='active'||result['p'+i].label!==inputs['p'+i].label||result['p'+i].update_stock!==true)){orders[i].failed=true;await fail(orders[i],new Error('BC · Création numérotée non confirmée : rapprocher le même identifiant, aucune nouvelle création'));}}
   if(operation==='CreateOrder')await db.query("UPDATE settings SET value=jsonb_set(value,'{current}',to_jsonb((value->>'current')::int+$1::int)) WHERE key='erplain_live_capacity'",[orders.filter(o=>!o.failed&&o.erp_live.bc?.id).length]);
  }
  async function run({bcOnlyOrderId}={}){if(running)return;running=true;activeBcOnlyOrderId=bcOnlyOrderId||null;let working=[];
@@ -246,7 +248,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     catch(e){o.failed=true;await fail(o,e);}
    }
    working=working.filter(o=>!o.failed);
-   await batchMutation(working.filter(o=>!o.erp_live.bc),'creating_bc','bc','OrderInput','CreateOrder',o=>newSalesBcInput(o,references.priceLevelId),'id label update_stock');
+   await batchMutation(working.filter(o=>!o.erp_live.bc),'creating_bc','bc','OrderInput','CreateOrder',o=>newSalesBcInput(o,references.priceLevelId),'id label status update_stock');
    working=working.filter(o=>!o.failed);if(!working.length)return;
    // Number the persisted BC without comparing its commercial fields to a source.
    // Retrying an API failure reuses the same BC; it never creates another one.

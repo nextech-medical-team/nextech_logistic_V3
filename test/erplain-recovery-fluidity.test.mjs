@@ -145,3 +145,11 @@ test('missing saved BC searches immutable identity, never guesses from its numbe
  api.request=async(q,v)=>{calls++;assert.match(q,/^query /);if(q.includes('V3TransientBL'))return {Order:null};assert.match(q,/V3RecoverReference/);assert.equal(JSON.stringify(v).includes('C0016034'),false);return {Orders:{data:[{id:789,status:'active',external_reference:'V3:0'}],paginatorInfo:{hasMorePages:false}}};};assert.equal(await resumeTransientErplain(db,api),0);assert.equal(calls,2);
  const saved=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;assert.equal(saved.bc.id,123);assert.equal(saved.documentReconciliation.candidateBcId,'789');assert.match((await engine.query('SELECT error FROM erp_live_jobs')).rows[0].error,/autre identité/);await resumeTransientErplain(db,api);assert.equal(calls,2);
 });
+
+for(const scenario of ['draft','draft-with-bl','wrong-id','incomplete','cancelled','policy-unknown','policy-changed'])test('legacy BC recovery '+scenario,async t=>{
+ const {engine,db,api}=await fixture(t,1);
+ await engine.query('UPDATE orders SET erp_live=$1',[JSON.stringify({phase:'bc_created',bc:{id:123,label:'C0016088',status:'unpublished',update_stock:true},transientRecovery:{attempts:0,lastError:'Erplain HTTP 429'}})]);
+ let reads=0;api.request=async q=>{reads++;assert.match(q,/^query V3TransientBL/);return {Order:{id:scenario==='wrong-id'?999:123,status:scenario==='cancelled'?'cancelled':'unpublished',update_stock:scenario==='policy-unknown'?undefined:scenario==='policy-changed'?false:true,shipping_orders:{data:scenario==='draft-with-bl'?[{id:456}]:[],paginatorInfo:{hasMorePages:scenario==='incomplete'}}}};};
+ assert.equal(await resumeTransientErplain(db,api),scenario==='draft'?1:0);assert.equal(reads,1);
+ const after=(await engine.query('SELECT erp_live FROM orders')).rows[0].erp_live;assert.equal(after.bc.id,123);assert.equal(after.bl,undefined);assert.equal(after.phase,'bc_created');
+});
