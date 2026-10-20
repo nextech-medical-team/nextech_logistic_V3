@@ -188,7 +188,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
 
     if(!sku)throw Error('BC · Mapping manquant : '+l.source_sku);
     const binding=bindings.get(sku);
-    let lookup=await api.request('query V3BcLookup($where:QueryVariantsWhereWhereConditions!){Variants(first:100,where:$where){data{id sku active weight_amount weight_unit tax_codes{id} product{id active} stock_levels(first:100){data{location{id} available on_hand} paginatorInfo{hasMorePages}}} paginatorInfo{hasMorePages}}}',{where:{column:'SKU',operator:'EQ',value:sku}});
+    let lookup=await api.request('query V3BcLookup($where:QueryVariantsWhereWhereConditions!){Variants(first:100,where:$where){data{id sku active weight_amount weight_unit variant_prices{id amount} tax_codes{id} product{id active} stock_levels(first:100){data{location{id} available on_hand} paginatorInfo{hasMorePages}}} paginatorInfo{hasMorePages}}}',{where:{column:'SKU',operator:'EQ',value:sku}});
     if(!lookup.Variants?.data||lookup.Variants.paginatorInfo?.hasMorePages)throw Error('BC · Vérification produit Erplain LIVE incomplète : '+sku);
     lookup.Variants.data=lookup.Variants.data.map(v=>sameSku(v.sku,sku)&&v.sku!==sku?{...v,erplainSku:v.sku,sku}:v);
     if(!lookup.Variants.data.some(v=>v.sku===sku)){
