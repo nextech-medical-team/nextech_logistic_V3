@@ -24,7 +24,7 @@
    if(r.status==='different'){
     const fix=document.createElement('button');fix.textContent='Corriger le prix';
     fix.onclick=async()=>{
-     fix.disabled=true;fix.textContent='Correction…';
+     error.textContent='';fix.disabled=true;fix.textContent='Correction…';
      try{
       const updated=await api('/api/price-verification/correct',{id:r.id,bcId:r.bcId,bc:r.bc,source:r.source});
       tr.children[2].textContent=money(updated.bc);tr.children[3].textContent=money(updated.source);

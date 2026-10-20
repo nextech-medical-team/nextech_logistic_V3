@@ -17,7 +17,7 @@ try{
  const results=children.map(child=>new Promise((resolve,reject)=>{child.on('message',m=>{if(m.grant)grants.push(m);if(m.done)resolve(m);if(m.error)reject(Error(m.error));});child.once('error',reject);}));
  for(let i=0;i<3;i++){
   children[i].send({acquire:true,traffic:i===0?'background':'foreground',count:i===0?2:4});
-  if(i<2){const until=Date.now()+5000;for(;;){const exists=(await pool.query('SELECT to_regclass($1) name',[schema+'.erplain_quota_waiters'])).rows[0].name;
+  if(i<2){const until=Date.now()+5000;for(;;){const exists=(await pool.query('SELECT to_regclass($1) AS name',[schema+'.erplain_quota_waiters'])).rows[0].name;
    if(exists&&Number((await pool.query('SELECT count(*) n FROM '+schema+'.erplain_quota_waiters')).rows[0].n)>=i+1)break;
    if(Date.now()>until)throw Error('Admission ticket not registered');await sleep(20);}}
  }

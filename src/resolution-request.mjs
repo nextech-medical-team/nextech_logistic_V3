@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 // Shared submission path. Execution stays in the existing resolution worker.
 export async function queueResolutionRequest(db,b,user){
  const previous=(await db.query('SELECT * FROM resolution_jobs WHERE request_id=$1',[b.requestId])).rows[0];
- if(previous){const keys=x=>JSON.stringify(Object.entries(x).sort());if(keys(previous.payload)!==keys(b))throw Error('Identifiant déjà utilisé pour une autre intervention');return {id:previous.id};}
+ if(previous){const keys=x=>{const value={...x};if(b.action==='replace-equivalent'&&b.verifyAndApply===true&&value.verifyAndApply===true){delete value.substitutionAttempt;delete value.previewFingerprint;}return JSON.stringify(Object.entries(value).sort());};if(keys(previous.payload)!==keys(b))throw Error('Identifiant déjà utilisé pour une autre intervention');return {id:previous.id};}
  let id=randomUUID();
  await db.transaction(async tx=>{
   if(!(await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[b.id])).rows.length)throw Error('Commande introuvable');

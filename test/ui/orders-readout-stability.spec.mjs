@@ -5,7 +5,7 @@ async function fixture(page){let rows=[order('A'),order('B')],tick=0,partials=[]
  await page.route('**/api/partial/visible',r=>r.fulfill({json:{rows:partials}}));
  await page.route('**/api/orders/processing',r=>r.fulfill({json:{at:new Date().toISOString(),rows:rows.map(o=>({id:o.id,stage:'Préparation à corriger',state:'blocked',since:'2026-10-13T10:00:00Z',reason:'Stock insuffisant',canPrioritize:true}))}}));
  await page.route('**/api/equivalences/stock-information?*',r=>r.fulfill({json:{original:{incoming:10000},equivalents:[],equivalentCount:0,locationId:'TEST',checkedAt:'2026-10-14T10:00:00Z',expiresAt:'2099-01-01T00:00:00Z'}}));
- await page.goto('/');await expect(page.locator('[data-detail="A"]')).toBeVisible();await expect(page.locator('.order-processing').first()).toBeVisible();
+ await page.goto('/');await expect(page.locator('[data-detail="A"]')).toBeVisible();await expect(page.locator('.order-processing').first()).toHaveCount(1);
  return {errors,change:()=>{rows[0]={...rows[0],document_count:1,label_status:'production_ready',carrier_job:{status:'ready',environment:'production',tracking:['TEST-TRACKING']}};},remove:()=>{rows=rows.slice(1);},partial:()=>{partials=[{id:'P',order_id:'A',reference:'UI-A',status:'ready',created_at:'2026-10-13T10:00:00Z',selection:[{sku:'TEST-SKU',quantity:1}],documents:0,tracking:[],address:{country:'FR'},erp_live:{},bl:{status:'ready_to_ship'},weight_kg:1,parcel_count:1,carrier:'gls'}];}};
 }
 

@@ -117,7 +117,7 @@ test('phased details retain diagnostic dependencies and all displayed fields whi
  for(const row of all)projectCurrentDiagnostics(row);for(const row of phased)projectCurrentDiagnostics(row);
  const classify=currentProblemClassifier();
  assert.deepEqual(selectProblemOrders(phased,[],classify).problemTypes,selectProblemOrders(all,[],classify).problemTypes);
- assert.equal(classify(phased[0]).length,0);assert.ok(classify(phased[1]).some(p=>p.label==='Confirmer le remplacement'));assert.ok(classify(phased[2]).some(p=>p.provider==='TEMU'));
+ assert.equal(classify(phased[0]).length,0);assert.ok(classify(phased[1]).some(p=>p.label==='Appliquer le remplacement'));assert.ok(classify(phased[2]).some(p=>p.provider==='TEMU'));
  // Match the route's payload reduction before the display phase.
  for(const row of all)row.source_payload={};for(const row of phased)row.source_payload={};
  await orderPageDetails(two,phased.slice(1,2),'display');

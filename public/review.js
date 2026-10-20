@@ -18,7 +18,7 @@ $('mapping-import').onclick=()=>{$('import-kind').value='mapping';show('imports'
 const erpButton=document.createElement('button');erpButton.id='erp-create';erpButton.textContent='Créer BC puis BL dans Erplain LIVE';batch.append(erpButton);
 erpButton.onclick=async()=>{try{const r=await api('/api/erplain/live/queue',{ids:[...selected]});flash(`${r.queued} commandes ajoutées à la file Erplain LIVE. Suivi dans « BC / BL LIVE ».`);}catch(e){flash(e,true);}};
 const selectionBeforeErp=selection;selection=()=>{selectionBeforeErp();erpButton.disabled=!selected.size||!['admin','manager'].includes(user?.role);};
-for(const [id,title] of [['stocks','Stocks Erplain'],['negative-stocks','Stocks négatifs'],['routing','Règles transporteurs'],['erp-live','BC / BL LIVE'],['temu-shipping','Préparation TEMU']]){const b=document.createElement('button');b.dataset.view=id;b.textContent=title;nav.insertBefore(b,nav.querySelector('[data-view="coverage"]'));b.onclick=()=>show(id);}
+for(const [id,title] of [['stocks','Stocks Erplain'],['routing','Règles transporteurs'],['erp-live','BC / BL LIVE'],['temu-shipping','Préparation TEMU']]){const b=document.createElement('button');b.dataset.view=id;b.textContent=title;nav.insertBefore(b,nav.querySelector('[data-view="coverage"]'));b.onclick=()=>show(id);}
 addView('stocks',`<div class="panel padded"><h2>Stocks Erplain NEXTECH · lecture seule</h2><p>Quantités en stock et disponibles issues de l’API. Ce cache est informatif et ne bloque pas les étiquettes. Les stocks du compte Erplain LIVE sont distincts.</p><div class="filters"><input id="stock-search" placeholder="SKU ou produit"><button id="stock-reload">Actualiser la liste</button><button id="stock-sync" class="primary">Récupérer les stocks par API</button></div><p id="stock-state"></p><div class="table-wrap"><table><thead><tr><th>SKU</th><th>Produit</th><th>En stock</th><th>Disponible</th><th>Actif</th><th>Dernière lecture</th></tr></thead><tbody id="stock-rows"></tbody></table></div><div class="pagination"><button id="stock-prev">Précédent</button><span id="stock-count"></span><button id="stock-next">Suivant</button></div></div>`);
 let stockPage=1,stockPages=1;
 async function stocksView(){const r=await api('/api/stocks?'+new URLSearchParams({page:stockPage,search:$('stock-search').value}));stockPages=r.pages;$('stock-state').textContent=r.sync.running?`Lecture en cours : ${r.sync.done} / ${r.sync.total}`:r.sync.error||'Cache local disponible. Aucune écriture dans Erplain NEXTECH.';$('stock-sync').disabled=r.sync.running||!['admin','manager'].includes(user.role);$('stock-count').textContent=`${r.total} références · ${r.page} / ${r.pages}`;$('stock-rows').innerHTML=r.rows.map(x=>`<tr>${[x.sku,x.label,x.on_hand??'Non fourni',x.available??'Non fourni',x.active?'Oui':'Non',new Date(x.updated_at).toLocaleString('fr-FR')].map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('');}
@@ -94,7 +94,7 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
   }
  }
  const panel=document.createElement('section');panel.id='view-negative-stocks';panel.className='view panel padded';panel.hidden=true;
- panel.innerHTML='<h2>Stocks négatifs</h2><p>Produits actifs à stock disponible ou physique négatif dans l’emplacement ERPLAIN configuré.</p><button type="button" id="negative-stocks-load">Afficher les stocks négatifs</button><p role="status" aria-live="polite"></p><div style="overflow-x:auto"><table hidden><thead><tr><th>SKU</th><th>Produit</th><th>Fournisseur</th><th>Disponible</th><th>Physique</th></tr></thead><tbody></tbody></table></div>';
+ panel.innerHTML='<h2>Stocks négatifs</h2><p>Commandes ERP avec BL contenant des produits dont le stock disponible actuel est négatif, dans l’emplacement ERPLAIN configuré.</p><button type="button" id="negative-stocks-load">Afficher les stocks négatifs</button><p role="status" aria-live="polite"></p><div class="table-wrap"><table hidden><thead><tr><th>BC ERP</th><th aria-sort="descending"><button type="button" id="negative-stock-sort-date" title="Trier par date du BC ERP">Date BC ↓</button></th><th>BL associés</th><th>SKU</th><th>Produit</th><th>Fournisseur</th><th>Quantité commandée</th><th>Disponible actuel</th><th>Physique actuel</th><th>Emplacement</th></tr></thead><tbody></tbody></table></div>';
  const history=document.createElement('section');
  history.innerHTML='<label for="negative-stock-reports" style="display:block;margin-bottom:6px">Rapports récents</label><select id="negative-stock-reports" style="width:420px;max-width:100%;min-height:44px"><option value="">Rapports récents...</option></select><p role="status" aria-live="polite"></p>';
  panel.append(history);
@@ -124,25 +124,45 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
  };
  searchInput.addEventListener('input',()=>{if(displayedRows!==null)renderRows(displayedRows);});
 
- button.textContent='Actualiser les stocks négatifs';
+ const verifyButtonLabel='Lancer la vérification';
+ button.textContent=verifyButtonLabel;
  function emptyRow(target,text,columns){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=columns;cell.textContent=text;row.append(cell);target.replaceChildren(row);}
- table.hidden=false;emptyRow(body,'Chargement des stocks négatifs à l’ouverture du module…',5);
+ table.hidden=false;emptyRow(body,'Cliquez sur « Lancer la vérification » pour rechercher les commandes ERP avec BL et disponible négatif.',10);
+ // Date sorting helpers: missing dates stay last in either direction.
+ function negativeStockDate(value){
+  if(typeof value!=='string'||!value.trim())return null;
+  const stamp=Date.parse(value);return Number.isFinite(stamp)?stamp:null;
+ }
+ function formatNegativeStockDate(value){const stamp=negativeStockDate(value);return stamp===null?'Non renseigné':new Date(stamp).toLocaleDateString('fr-FR',{timeZone:'UTC'});}
+ function compareNegativeStockDates(a,b,direction){
+  const left=negativeStockDate(a.bcDate),right=negativeStockDate(b.bcDate);
+  if(left===null&&right!==null)return 1;if(right===null&&left!==null)return -1;
+  return (left!==null&&right!==null?(left-right)*direction:0)||(a.bcLabel||'').localeCompare(b.bcLabel||'','fr')||a.sku.localeCompare(b.sku,'fr');
+ }
+ // End date sorting helpers.
+ let dateSortDirection=-1;
+ const dateSortButton=panel.querySelector('#negative-stock-sort-date');
+ dateSortButton.onclick=()=>{
+  dateSortDirection*=-1;dateSortButton.textContent='Date BC '+(dateSortDirection===1?'↑':'↓');
+  dateSortButton.closest('th').setAttribute('aria-sort',dateSortDirection===1?'ascending':'descending');
+  if(displayedRows!==null)renderRows(displayedRows);
+ };
  function renderRows(rows){
   displayedRows=rows;
   const query=normalizeSearch(searchInput.value.trim());
   const filtered=rows.filter(row=>normalizeSearch(row.sku).includes(query)||normalizeSearch(row.label).includes(query));
-  exportRows=[...filtered].sort((a,b)=>a.sku.localeCompare(b.sku,'fr'));exportButton.disabled=false;
-  searchCount.textContent=filtered.length+' produit(s) affiché(s) sur '+rows.length;
+  exportRows=[...filtered].sort((a,b)=>compareNegativeStockDates(a,b,dateSortDirection));exportButton.disabled=false;
+  searchCount.textContent=filtered.length+' ligne(s) de commande affichée(s) sur '+rows.length;
   body.replaceChildren();
-  for(const row of [...filtered].sort((a,b)=>a.sku.localeCompare(b.sku,'fr'))){const tr=document.createElement('tr');for(const value of [row.sku,row.label,row.supplier||'Non renseigné',row.available,row.onHand]){const td=document.createElement('td');td.textContent=value===null?'Non vérifié':typeof value==='number'?value.toLocaleString('fr-FR'):value;tr.append(td);}body.append(tr);}
-  table.hidden=false;if(!filtered.length)emptyRow(body,rows.length?'Aucun produit ne correspond à votre recherche.':'Aucun stock négatif dans ce rapport.',5);
+  for(const row of exportRows){const tr=document.createElement('tr');for(const value of [row.bcLabel||'Non renseigné',formatNegativeStockDate(row.bcDate),row.blLabel||'Aucun BL',row.sku,row.label,row.supplier||'Non renseigné',row.orderQuantity??null,row.available,row.onHand,row.locationLabel||'Non renseigné']){const td=document.createElement('td');td.textContent=value===null?'Non vérifié':typeof value==='number'?value.toLocaleString('fr-FR'):value;tr.append(td);}body.append(tr);}
+  table.hidden=false;if(!filtered.length)emptyRow(body,rows.length?'Aucun produit ne correspond à votre recherche.':'Aucune commande ERP contenant un produit à stock disponible négatif.',10);
  }
  async function loadHistory(){
   const selected=reportSelect.value;reportSelect.disabled=true;historyStatus.textContent='';
   try{
    const data=await api('/api/stocks/negative/history');
    reportSelect.replaceChildren(new Option('Rapports récents...',''));
-   for(const entry of data.rows){reportSelect.append(new Option(new Date(entry.completed_at).toLocaleString('fr-FR')+' · '+entry.product_count+' produit(s) · emplacement '+entry.location_id,entry.id));}
+   for(const entry of data.rows){reportSelect.append(new Option(new Date(entry.completed_at).toLocaleString('fr-FR')+' · '+entry.product_count+' ligne(s) de commande · emplacement '+entry.location_id,entry.id));}
    if([...reportSelect.options].some(option=>option.value===selected))reportSelect.value=selected;
    if(!data.rows.length)historyStatus.textContent='Aucun rapport enregistré.';
   }catch(error){historyStatus.textContent=error.message.includes('Route inexistante')?'Les rapports seront disponibles après activation du service.':'Chargement des rapports impossible. Réessayez en actualisant les stocks.';}
@@ -151,20 +171,20 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
  reportSelect.onchange=async()=>{
   const id=reportSelect.value;if(!id||button.disabled)return;
   reportSelect.disabled=true;button.disabled=true;
-  try{const saved=await api('/api/stocks/negative/history/detail?'+new URLSearchParams({id}));renderRows(saved.snapshot.rows);status.textContent='Rapport du '+new Date(saved.completed_at).toLocaleString('fr-FR')+' · emplacement '+saved.snapshot.locationId+(saved.snapshot.unverified?' · '+saved.snapshot.unverified+' stock(s) non vérifié(s).':'.');}
+  try{const saved=await api('/api/stocks/negative/history/detail?'+new URLSearchParams({id}));renderRows(saved.snapshot.rows);status.textContent='Rapport du '+new Date(saved.completed_at).toLocaleString('fr-FR')+' · emplacement '+saved.snapshot.locationId+(saved.snapshot.unverified?' · '+saved.snapshot.unverified+' élément(s) non vérifié(s).':'.');}
   catch(error){status.textContent='Rapport indisponible : '+displayErrorMessage(error);}
   finally{reportSelect.disabled=false;button.disabled=false;}
  };
- let opened=false;
- new MutationObserver(()=>{if(!panel.hidden){if(!opened){opened=true;button.onclick();}else loadHistory();}}).observe(panel,{attributes:true,attributeFilter:['hidden']});
+ // Verify only on explicit request; opening the module reads saved reports only.
+ new MutationObserver(()=>{if(!panel.hidden)loadHistory();}).observe(panel,{attributes:true,attributeFilter:['hidden']});
  button.onclick=async()=>{
   if(button.disabled)return;
   displayedRows=null;exportRows=[];exportButton.disabled=true;searchCount.textContent='';
-  button.disabled=true;panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des stocks ERPLAIN en cours…',5);loadHistory();
+  button.disabled=true;button.textContent='Vérification en cours…';panel.setAttribute('aria-busy','true');table.hidden=false;emptyRow(body,'Lecture des commandes ERP avec BL en cours…',10);loadHistory();
   try{
    let page=1,lastPage=1,locationId=null,unverified=0,runId=null;const rows=[];
    do{
-    status.textContent=`Lecture des stocks ERPLAIN : page ${page} / ${lastPage}…`;
+    status.textContent=`Lecture des commandes ERP : page ${page} / ${lastPage}…`;
     const data=await api('/api/stocks/negative/scan',{page,runId},{timeoutMs:60000});
     runId=data.runId;
     if(!Array.isArray(data.rows)||data.page!==page||!Number.isInteger(data.lastPage)||data.lastPage<page)throw Error('Réponse stock incomplète');
@@ -172,9 +192,9 @@ const estimatesShow=show;show=async function(view){if(view!=='live-estimates')re
     locationId=data.locationId;lastPage=data.lastPage;unverified+=data.unverified;rows.push(...data.rows);page++;
    }while(page<=lastPage);
    renderRows(rows);
-   status.textContent=`${rows.length} produit(s) à stock négatif · emplacement ${locationId} · lecture terminée à ${new Date().toLocaleTimeString('fr-FR')}.`+(unverified?` ${unverified} produit(s) avec stock non vérifié : résultat potentiellement incomplet.`:'');
+   status.textContent=`${new Set(rows.map(row=>row.bcId)).size} BC ERP · ${rows.length} ligne(s) à stock disponible négatif · emplacement ${locationId} · lecture terminée à ${new Date().toLocaleTimeString('fr-FR')}.`+(unverified?` ${unverified} élément(s) non vérifié(s) : résultat potentiellement incomplet.`:'');
    await loadHistory();
-  }catch(error){status.textContent=error.message.includes('Route inexistante')?'Le service de stocks négatifs n’est pas encore actif. Redémarrez le serveur pour charger les stocks et les rapports.':'Lecture interrompue : '+displayErrorMessage(error);emptyRow(body,'Aucun résultat à afficher pour le moment.',5);}
-  finally{button.disabled=false;panel.setAttribute('aria-busy','false');}
+  }catch(error){status.textContent=displayErrorMessage(error).includes('Route inexistante')?'Le service de stocks négatifs n’est pas encore actif. Redémarrez le serveur pour charger les stocks et les rapports.':'Lecture interrompue : '+displayErrorMessage(error);emptyRow(body,'Aucun résultat à afficher pour le moment.',10);}
+  finally{button.disabled=false;button.textContent=verifyButtonLabel;panel.setAttribute('aria-busy','false');}
  };
 })();
