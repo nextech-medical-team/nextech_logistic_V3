@@ -45,4 +45,6 @@ Le bouton conserve les tests, la file FIFO, les protections GitHub, la sauvegard
 
 ## Budget des tests isolés serveur
 
-La suite npm test dispose de 1 200 secondes, avec échec bloquant à expiration avant sauvegarde, pause ou installation. Le diagnostic du 16 octobre 2026 sur le commit f6a11550705b480af7398985685fa8345ebe7c11 a terminé les 48 groupes en 877,4 secondes : le plafond précédent de 900 secondes ne laissait que 22,6 secondes de marge. Ce budget borné conserve tous les tests et leur isolation ; il ne transforme aucun dépassement ni test échoué en réussite. Les autres délais restent inchangés.
+La suite npm test dispose de 1 800 secondes, avec échec bloquant à expiration avant sauvegarde, pause ou installation. Le diagnostic du 20 octobre 2026 sur le commit 2ed0f6cd87ae1f3ce033d5e666c6f8811272fe44 a terminé les 61 groupes en 1 261,46 secondes, sans échec, sous le compte isolé nextech-build avec une priorité nice 10. Cette mesure dépasse le plafond précédent de 1 200 secondes ; elle ne démontre pas une régression fonctionnelle. Le budget de 30 minutes garde une marge bornée pour les variations de charge, sans supprimer de tests ni transformer un dépassement ou un échec en réussite. Les autres délais restent inchangés.
+
+L’exécuteur installé ne se met pas à jour avec les fichiers applicatifs : sa mise à jour Section7 exige revue, tests, empreinte fraîche, sauvegarde et verrou intégral. Une demande échouée reste conservée ; publier un nouveau commit après correction, sans réinitialiser ni rejouer la demande échouée.

@@ -69,7 +69,7 @@ class DispatcherTests(unittest.TestCase):
     return b''
    with patch.object(d,'validate_manifest',return_value=True),patch.object(d,'BUILD_ROOT',td),patch.object(d,'STATE',state),patch.object(d,'APP',app),patch.object(d,'fetch',return_value='b'*40),patch.object(d,'git',side_effect=lambda *args:archive.getvalue() if args[0]=='archive' else b''),patch.object(d,'tree',side_effect=[{'public/x.js':b'old'},{'public/x.js':b'new'}]),patch.object(d,'verify_environment',return_value='hash'),patch.object(d,'run',side_effect=isolated_run),patch.object(d,'install_file') as install,patch.object(d,'guard') as guard:
     result=d.deploy('b'*40,{'manifest':{},'proofs':{}})
-   self.assertEqual(len(seen),1);self.assertEqual(seen[0]['timeout'],1200)
+   self.assertEqual(len(seen),1);self.assertEqual(seen[0]['timeout'],1800)
    self.assertEqual(seen[0]['env'],{'PATH':'/usr/bin:/bin','HOME':'/var/lib/nextech-build','NODE_ENV':'test','CI':'true'})
    self.assertEqual(result['status'],'failed');self.assertFalse(result['installed']);self.assertFalse(result['paused']);self.assertNotIn('backup',result)
    install.assert_not_called();guard.assert_not_called()
