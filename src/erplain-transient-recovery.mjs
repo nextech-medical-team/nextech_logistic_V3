@@ -1,7 +1,7 @@
 import {customerGuard,customerRecoveryError,legacyBcCreationMessage,canRetryCustomerCreation} from './customer-creation-recovery.mjs';
 import {erplainCustomerInput} from './erplain-customer-input.mjs';
 import {customerCheckpointResult} from './temu-customer-checkpoint.mjs';
-import {cancellationBlock,retryDecision,transientErpError,reconciliationError} from './erp-transient-policy.mjs';
+import {cancellationBlock,retryDecision,transientErpError,reconciliationError,pendingTransientRecovery} from './erp-transient-policy.mjs';
 import {recoverOrder} from './erplain-document-metadata.mjs';
 import {quotaReadRetryAt,quotaWaitingMessage} from './erplain-quota-wait.mjs';
 import {reconcilePublicationState} from './publication-recovery.mjs';
@@ -9,6 +9,7 @@ import {readTransientBlIdentity} from './transient-bl-identity.mjs';
 import {prepareMissingDraftRecovery,commitMissingDraftRecovery} from './missing-draft-recovery.mjs';
 import {usesNativeBlCycle} from './native-bl-policy.mjs';
 import {randomUUID} from 'node:crypto';
+import {recoverCompletedTemuResumeHolds} from './transient-resume-hold.mjs';
 
 export async function recordTransientFailure(db,o,message,error){
  const old=o.erp_live?.transientRecovery||{};
@@ -26,6 +27,7 @@ export async function recordTransientFailure(db,o,message,error){
 }
 
 export async function resumeTransientErplain(db,api){
+ await recoverCompletedTemuResumeHolds(db);
  await db.transaction(async tx=>{
   const cancelled=(await tx.query(`SELECT o.id,o.suspension,o.source_payload,o.label_status,o.tracking_status,o.issue,o.erp_live,e.error FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE e.status='review' AND e.error NOT LIKE 'Demande d’annulation%' AND e.error NOT LIKE 'Commande annulée%'
@@ -38,7 +40,7 @@ export async function resumeTransientErplain(db,api){
   // worker run guard serializes passes; the short commit below also rejects any
   // concurrent edit, cancellation, or job replacement made during the read.
   const rows=(await db.query(`SELECT o.*,e.error,e.updated_at retry_updated,e.updated_at::text retry_version FROM orders o JOIN erp_live_jobs e ON e.order_id=o.id
-   WHERE e.status='review' AND ((o.erp_live->>'phase'='creating_customer' AND e.error=$1 AND o.erp_live->'transientRecovery'->>'originalError' ~* 'Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError') OR e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu') OR (o.channel<>'tender' AND o.erp_live->'bc'->>'id' IS NOT NULL AND e.error ~ '^(BC/BL : rapprochement incomplet ou ambigu|Brouillon BL introuvable|BL Erplain · Brouillon.*introuvable)'))
+   WHERE e.status='review' AND (e.error ~ '^Incident temporaire Erplain : rapprochement et reprise automatique en attente [()0-9/]+$' OR (o.erp_live->>'phase'='creating_customer' AND e.error=$1 AND o.erp_live->'transientRecovery'->>'originalError' ~* 'Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError') OR e.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR o.erp_live->'transientRecovery'->>'lastError' IS NOT NULL OR (o.erp_live->>'phase'='publishing_bl' AND e.error ~ 'Publication à vérifier|Traitement interrompu') OR (o.channel<>'tender' AND o.erp_live->'bc'->>'id' IS NOT NULL AND e.error ~ '^(BC/BL : rapprochement incomplet ou ambigu|Brouillon BL introuvable|BL Erplain · Brouillon.*introuvable)'))
    AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
    AND coalesce(o.tracking_status,'') NOT IN ('cancelled','shipped','delivered','in_transit') AND coalesce(o.label_status,'')<>'cancelled'
    AND NOT (coalesce(o.source_payload,'{}') ? 'marketplacePendingCorrection')
@@ -186,20 +188,22 @@ export async function syncSupersededQuotaReviews(tx){
 export async function closeTransientReviews(db){
  return db.transaction(async tx=>{
   await syncSupersededQuotaReviews(tx);
-  const rows=(await tx.query(`SELECT r.id,r.error,r.updated_at,to_jsonb(o) AS "order" FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
+  const rows=(await tx.query(`SELECT r.id,r.error,r.updated_at,r.result,to_jsonb(o) AS "order" FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE r.status='review' AND r.stage='Erplain à compléter' AND e.status='complete' AND e.error IS NULL
-   AND (r.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR (r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée') AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'transientRecovery'->>'lastError' ~* 'Erplain HTTP 429'))
+   AND (r.error ~ '^Incident temporaire Erplain : rapprochement et reprise automatique en attente [()0-9/]+$' OR r.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR (r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée') AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'transientRecovery'->>'lastError' ~* 'Erplain HTTP 429'))
    AND NOT o.resolution_pending_resume AND NOT o.archived AND NOT o.partial_mode
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs a WHERE a.order_id=o.id AND a.status IN ('queued','running','waiting'))
    ORDER BY r.updated_at LIMIT 100 FOR UPDATE OF r,o,e SKIP LOCKED`)).rows;
   for(const r of rows){const o=r.order,s=o.erp_live||{};
-   const raw=['Erplain temporairement limité : vérification et reprise automatiques programmées',quotaWaitingMessage].includes(r.error)&&s.transientRecovery?.readRateLimited===true?s.transientRecovery.lastError:r.error;
+   const raw=pendingTransientRecovery(r.error)||['Erplain temporairement limité : vérification et reprise automatiques programmées',quotaWaitingMessage].includes(r.error)&&s.transientRecovery?.readRateLimited===true?s.transientRecovery?.lastError:r.error;
    // The current BC/BL reservation flow deliberately has no separate stock
    // removal. Its worker completion plus fresh bl_ready proof is authoritative;
    // never require a new document or provider write just to retire an old error.
    const stockComplete=!!s.stockDocument?.id&&s.stockDocument.status==='completed'&&s.stockDocument.update_stock===true;
    const bcFlowComplete=s.bc?.update_stock===true&&s.phase==='bl_ready';
-   if(!transientErpError(raw)||cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||!s.bc?.id||!s.bl?.id||s.bc.status!=='active'||!['ready_to_ship','make_the_shipment'].includes(s.bl.status)||(!stockComplete&&!bcFlowComplete)||!(new Date(s.verifiedAt).getTime()>new Date(r.updated_at).getTime()))continue;
+   const resumedTemu=o.channel==='temu'&&r.result?.resume===true&&r.result?.erpOnly===true;
+   const confirmedStatus=['ready_to_ship','make_the_shipment'].includes(s.bl?.status)||resumedTemu&&bcFlowComplete&&['pending','in_preparation'].includes(s.bl?.status);
+   if(!transientErpError(raw)||cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||!s.bc?.id||!s.bl?.id||s.bc.status!=='active'||!confirmedStatus||(!stockComplete&&!bcFlowComplete)||!(new Date(s.verifiedAt).getTime()>new Date(r.updated_at).getTime()))continue;
    await tx.query("UPDATE resolution_jobs SET status='complete',error=null,stage='Incident Erplain résolu',result=coalesce(result,'{}'::jsonb)||$2::jsonb,updated_at=now() WHERE id=$1",[r.id,JSON.stringify({resolvedPreviousError:r.error,reconciledAt:new Date().toISOString(),verifiedAt:s.verifiedAt,completionAuthority:bcFlowComplete?'completed_bc_bl_flow':'completed_stock_document'})]);
   }
  });
