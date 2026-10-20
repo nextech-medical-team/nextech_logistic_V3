@@ -2,8 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {buildSubstitution} from '../src/stock-substitution.mjs';
 import {recordedSubstitutionPlan} from '../src/substitution-recovery.mjs';
-import {substitutionExecutionSnapshot} from '../src/substitution-execution-snapshot.mjs';
+import {substitutionExecutionSnapshot,substitutionBcSnapshot} from '../src/substitution-execution-snapshot.mjs';
 import {verifySubstitutionShipping} from '../src/substitution-shipping-check.mjs';
+
+test('shared BC stock drift is ignored, but order identity and allocations remain protected',()=>{
+ const {bc,b,v}=fixture();
+ const before=structuredClone(bc);
+ before.line_items[0].available=-200;before.line_items[0].on_hand=-200;
+ const after=structuredClone(before);
+ after.line_items[0].available=-100;after.line_items[0].on_hand=-100;
+ assert.equal(buildSubstitution(before,v,b).previewFingerprint,buildSubstitution(after,v,b).previewFingerprint);
+ assert.equal(before.line_items[0].on_hand,-200,'original evidence remains intact');
+ for(const mutate of [
+  x=>{x.line_items[0].reserved_quantity=1;},
+  x=>{x.line_items[0].quantity=11;},
+  x=>{x.line_items[0].variant.id='different';},
+  x=>{x.line_items[0].location.id='different';},
+  x=>{x.status='pending';},
+  x=>{x.shipping_orders.data.push({id:'new-bl'});}
+ ]){
+  const changed=structuredClone(after);mutate(changed);
+  assert.notDeepEqual(substitutionBcSnapshot(before),substitutionBcSnapshot(changed));
+ }
+ assert.notDeepEqual(substitutionExecutionSnapshot(before),substitutionExecutionSnapshot(after),'historical recovery snapshots keep their stock evidence');
+});
 
 function fixture(){
  const v=sku=>({id:sku,sku,active:true,product:{active:true},track_inventory:true,weight_amount:1,weight_unit:'g',stock_levels:{data:[{location:{id:'L'},available:50,on_hand:50}],paginatorInfo:{hasMorePages:false}}});
