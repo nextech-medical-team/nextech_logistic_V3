@@ -1,4 +1,4 @@
-import {substitutionExecutionSnapshot} from './substitution-execution-snapshot.mjs';
+import {substitutionExecutionSnapshot,substitutionBcSnapshot} from './substitution-execution-snapshot.mjs';
 import {exactStockAvailability,exactQuantitySum,exactQuantityDifference} from './stock-decimal.mjs';
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
 import {importBcAmounts} from './import-bc-commercial.mjs';
@@ -64,7 +64,7 @@ export function buildSubstitution(bc,variant,b,{preserveSourceTaxes=false,histor
  const newPrice=originalNet*replace/quantity;
  items.push({variant:{id:String(variant.id)},location:{id:String(original.location.id)},quantity,...(Number.isFinite(newPrice)?{price:newPrice}:{}),...(Array.isArray(original.tax_codes)?{tax_codes:original.tax_codes.map(t=>({id:String(t.id)}))}:{}),apply_discount_rules:false});
  const expected=lines.filter(l=>l!==original||remaining>0).map(l=>({sku:l.variant.sku,quantity:l===original?remaining:Number(l.quantity)}));expected.push({sku:variant.sku,quantity});
- return {commercialBefore:bc,bcId:String(bc.id),originalSku:original.variant.sku,replacementSku:variant.sku,replaceQuantity:replace,replacementQuantity:quantity,remaining,available:variant.track_inventory===false?null:Math.min(Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).available),Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).on_hand)),weightKg:weight,items,expected,previewFingerprint:fingerprint({bc,variant:{id:variant.id,sku:variant.sku,weight_amount:variant.weight_amount,weight_unit:variant.weight_unit},replace,quantity}),message:'Produit et stock vérifiés dans Erplain LIVE. Remplacement limité à cette commande.'};
+ return {commercialBefore:bc,bcId:String(bc.id),originalSku:original.variant.sku,replacementSku:variant.sku,replaceQuantity:replace,replacementQuantity:quantity,remaining,available:variant.track_inventory===false?null:Math.min(Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).available),Number(variant.stock_levels.data.find(l=>String(l.location?.id)===String(original.location.id)).on_hand)),weightKg:weight,items,expected,previewFingerprint:fingerprint({bc:substitutionBcSnapshot(bc),variant:{id:variant.id,sku:variant.sku,weight_amount:variant.weight_amount,weight_unit:variant.weight_unit},replace,quantity}),message:'Produit et stock vérifiés dans Erplain LIVE. Remplacement limité à cette commande.'};
 }
 function totals(lines){const sums=new Map();for(const l of lines)sums.set(l.sku,(sums.get(l.sku)||0)+Number(l.quantity));return JSON.stringify([...sums].sort());}
 export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},directory,shopifyReader,deferResume=false,preserveBcAmounts=false}={}){
@@ -135,7 +135,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  if(b.verifyAndApply===true)b={...b,previewFingerprint:plan.previewFingerprint};
  if(plan.previewFingerprint!==b.previewFingerprint){
   const saved=(await db.query("SELECT result,payload FROM resolution_jobs WHERE order_id=$1 AND action='equivalent-preview' AND status='complete' AND result->>'previewFingerprint'=$2 ORDER BY created_at DESC LIMIT 1",[o.id,b.previewFingerprint])).rows[0],prior=saved?.result;
-  const operation=p=>({bc:p.commercialBefore,items:p.items,expected:p.expected,bcId:p.bcId,originalSku:p.originalSku,replacementSku:p.replacementSku,replaceQuantity:p.replaceQuantity,replacementQuantity:p.replacementQuantity,weightKg:p.weightKg});
+  const operation=p=>({bc:substitutionBcSnapshot(p.commercialBefore),items:p.items,expected:p.expected,bcId:p.bcId,originalSku:p.originalSku,replacementSku:p.replacementSku,replaceQuantity:p.replaceQuantity,replacementQuantity:p.replacementQuantity,weightKg:p.weightKg});
   if(b.scope!=='order'||saved?.payload?.scope!==b.scope||prior?.labelNotice!==plan.labelNotice||!prior||fingerprint(operation(prior))!==fingerprint(operation(plan)))throw Error('BC ou produit modifié depuis la vérification : contrôler de nouveau');
  }
  if(plan.localCommitted){

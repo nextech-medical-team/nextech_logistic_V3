@@ -10,7 +10,7 @@ import {currentMappingLine} from '../src/current-mapping-line.mjs';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
-for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-drift','legacy-queued-price-drift','single-action','single-action-lost-response'])test('moteur réel : '+scenario,async()=>{
+for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-drift','legacy-queued-price-drift','single-action','single-action-lost-response','shared-stock-drift','legacy-shared-stock-drift','replacement-stock-lost'])test('moteur réel : '+scenario,async()=>{
  const stockReview=scenario==='stock-review',moneyDrift=scenario==='lost-response-price-drift'||scenario==='single-action-lost-response',legacy=scenario==='legacy-queued-price-drift',preserveBcAmounts=scenario==='bc-amounts'||moneyDrift||legacy;
  const pg=new PGlite();await pg.waitReady;
  try{
@@ -50,6 +50,22 @@ for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-
   const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],b={id:'o',requestId:randomUUID(),sku,replacementSku,replaceQuantity:quantity,replacementQuantity,scope:'order'};
   const preview=scenario.startsWith('single-action')?null:await substitution(db,api,o,b,{preserveBcAmounts});
   Object.assign(b,scenario.startsWith('single-action')?{confirmEquivalent:true,verifyAndApply:true}:{confirmEquivalent:true,previewFingerprint:preview.previewFingerprint});
+  if(scenario.includes('shared-stock-drift')){
+   // Another order restores the shared source stock between preview and worker.
+   if(scenario==='legacy-shared-stock-drift'){
+    b.previewFingerprint='b'.repeat(64);preview.previewFingerprint=b.previewFingerprint;
+    await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status,result) VALUES($1,'o',$1,'equivalent-preview',$2,'complete',$3)",[randomUUID(),JSON.stringify(b),JSON.stringify(preview)]);
+   }
+   for(const l of bc.line_items){l.available=0;l.on_hand=0;}
+  }
+  if(scenario==='replacement-stock-lost'){
+   const target=variants[replacementSku].stock_levels.data[0],saved={...target};
+   target.available=0;target.on_hand=0;
+   const count=writes;
+   await assert.rejects(substitution(db,api,o,b,{apply:true,deferResume,preserveBcAmounts}),/stock insuffisant/);
+   assert.equal(writes,count,'insufficient live replacement stock must prevent provider writes');
+   Object.assign(target,saved);
+  }
   if(legacy){
    b.previewFingerprint='a'.repeat(64);preview.previewFingerprint=b.previewFingerprint;
    await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status,result) VALUES($1,'o',$1,'equivalent-preview',$2,'complete',$3)",[randomUUID(),JSON.stringify(b),JSON.stringify(preview)]);
