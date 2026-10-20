@@ -79,9 +79,14 @@ export async function hasUncertainCarrierHistory(db,id,{manualRequest=false,chan
  return false;
 }
 export async function markCarrierCreationStarted(db,id){
- const r=await db.query(`UPDATE carrier_jobs SET creation_started_at=now(),failure_phase=null,updated_at=now()
+ await db.transaction(async tx=>{
+ // Match admission/retry lock order. The suspension trigger also reads orders;
+ // locking the job first can deadlock against an order-first admission.
+ await tx.query('SELECT id FROM orders WHERE id=$1 FOR SHARE',[id]);
+ const r=await tx.query(`UPDATE carrier_jobs SET creation_started_at=now(),failure_phase=null,updated_at=now()
  WHERE order_id=$1 AND status='creating' AND creation_started_at IS NULL RETURNING order_id`,[id]);
  if(r.rows.length!==1)throw Error('Création déjà engagée : rapprocher son résultat');
+ });
 }
 export async function recordCarrierFailure(db,id,{status,error,creationStarted,hasResult}){
  const phase=!creationStarted&&!hasResult?'preflight':'provider';

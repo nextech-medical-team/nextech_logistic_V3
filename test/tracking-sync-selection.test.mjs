@@ -4,7 +4,8 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 
 const source=readFileSync(new URL('../public/tracking-sync.js',import.meta.url),'utf8');
-function setup({ids=['order-1'],deliveries=[],active=false,race=false,clearDuringRead=false}={}){
+const errorPresentation=readFileSync(new URL('../public/compact-problems.js',import.meta.url),'utf8');
+function setup({ids=['order-1'],deliveries=[],active=false,race=false,clearDuringRead=false,apiError=null}={}){
  const elements=new Map(),requests=[],created=[];
  const element=()=>({textContent:'',hidden:false,disabled:false,elements:{search:{value:''}},setAttribute(){},addEventListener(){},after(){}});
  const find=key=>{if(!elements.has(key))elements.set(key,element());return elements.get(key);};
@@ -15,11 +16,14 @@ function setup({ids=['order-1'],deliveries=[],active=false,race=false,clearDurin
   setInterval(){},setTimeout(){},clearTimeout(){},
   api:async(url,body)=>{
    requests.push({url,body});
+   if(apiError)throw apiError;
    if(body)return {run:{id:'new-run'},existing:race};
    if(clearDuringRead)selected.clear();
    return {runs:active?[{id:'other-run',status:'running'}]:[],canApply:false,workerAvailable:true};
   }};
- vm.runInNewContext(source,context);
+ vm.createContext(context);
+ vm.runInContext(errorPresentation,context,{filename:'public/compact-problems.js'});
+ vm.runInContext(source,context,{filename:'public/tracking-sync.js'});
  return {requests,find,launch:find('[data-again]').onclick};
 }
 
@@ -52,4 +56,13 @@ test('existing global run is not submitted as a test of the selection',async()=>
 test('concurrent run returned by the server is not displayed as the selected run',async()=>{
  const ui=setup({race:true});await ui.launch();assert.equal(ui.requests.length,2);
  assert.match(ui.find('[data-error]').textContent,/démarrer ailleurs/);
+});
+
+test('tracking errors use the real shared formatter without submitting a synchronization',async()=>{
+ const error=Object.assign(Error('Too Many Requests'),{status:429});
+ const ui=setup({apiError:error});await ui.launch();
+ assert.equal(ui.requests.length,1);assert.equal(ui.requests.filter(r=>r.body).length,0);
+ assert.equal(ui.find('[data-error]').hidden,false);
+ assert.equal(ui.find('[data-error]').textContent,'API Erplain · Limite atteinte (429)');
+ assert.equal(error.message,'Too Many Requests');assert.equal(error.status,429);
 });

@@ -116,7 +116,7 @@ test('missing BL validation is not a stock shortage, including stored legacy ove
   const orders=Array.from({length:44},(_,i)=>({id:String(i),channel:'temu',erp_live:{},temu_job:{status:'to_buy',error:message}}));
   const result=selectProblemOrders(orders,[],classify);
   assert.equal(result.problemTypes.some(p=>p.label==='Bloqué : stock insuffisant'),false);
-  assert.equal(result.problemTypes.find(p=>p.label==='Validation stock / BL à effectuer').count,44);
+  assert.equal(result.problemTypes.find(p=>p.label==='Validation stock / BL à actualiser').count,44);
  }
  const actual=classify({id:'shortage',channel:'temu',erp_live_job:{status:'review',error:'BL bloqué — stock insuffisant : SKU : 1 nécessaires, 0 utilisables, manque 1'}});
  assert.ok(actual.some(p=>p.type==='stock'&&p.label==='Bloqué : stock insuffisant'));

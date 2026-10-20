@@ -39,6 +39,15 @@ test('stock badge and shared filter identify the failed BC SKU even when source 
  const multi=c.compactProblems({...order,erp_live_job:{error:raw+' ; OTHER : 2 nécessaires, 0 utilisables, manque 2'}});assert.deepEqual(Array.from(multi,p=>p.sku),['LSP20061930','OTHER']);
  assert.equal(c.compactProblems({...order,tracking_status:'delivered'}).length,0);
 });
+test('preserved BC waiting message is hidden while actionable stock shortages remain visible',()=>{
+ const c=classifier(),wait='En attente de stock : BC disponible, préparation du BL suspendue';
+ const order={channel:'shopify',sku_lines:[],erp_live:{bc:{id:'bc',status:'active'}},erp_live_job:{status:'review',error:wait}};
+ assert.equal(c.compactProblems(order).some(p=>p.detail===wait),false);
+ const shortage='BL bloqué — stock insuffisant : SKU : 5 nécessaires, 2 utilisables, manque 3';
+ const result=c.compactProblems({...order,issue:shortage});
+ assert.ok(result.some(p=>p.type==='stock'&&p.sku==='SKU'&&p.detail.includes('manque 3')));
+ assert.equal(result.some(p=>p.detail===wait),false);
+});
 test('order-only mapping after BC is refused before labels, lines or global mappings can be touched',async()=>{
  let reads=0;const db={transaction:f=>f({query:async(sql)=>{assert.match(sql,/SELECT id,erp_live FROM orders.*FOR UPDATE/);reads++;return {rows:[{id:'o',erp_live:{bc:{id:'bc'}}}]};}})};
  await assert.rejects(applyMappingScope(db,{scope:'order',source_qty:1,target_qty:30},'o',()=>assert.fail('no global write')),/Remplacer un produit/);assert.equal(reads,1);

@@ -19,7 +19,7 @@
  const outcome={updated:'BL Erplain mis à jour',proposed:'Mise à jour Erplain proposée',unchanged:'Statut inchangé',error:'À vérifier'};
  let page=1,search='',timer,busy=false,loading=false,options=null,runId=null,version=0,historyKey=null,historyCursor=null;
  const canLaunch=()=>user&&['admin','manager','operator'].includes(user.role);
- const fail=e=>{find('[data-error]').hidden=false;find('[data-error]').textContent=e.message||String(e);};
+ const fail=e=>{find('[data-error]').hidden=false;find('[data-error]').textContent=displayErrorMessage(e)||String(e);};
  const clearError=()=>{find('[data-error]').hidden=true;find('[data-error]').textContent='';};
  function buttons(){launch.disabled=busy||!canLaunch();find('[data-again]').disabled=busy||!canLaunch()||!options?.workerAvailable;}
  function schedule(){clearTimeout(timer);if(panel.open)timer=setTimeout(()=>refresh().catch(fail),3000);}
@@ -38,7 +38,7 @@
    if(!data.workerAvailable)find('[data-progress]').textContent+=' Le service de synchronisation est actuellement indisponible.';
    find('[data-rows]').innerHTML=data.rows.length?data.rows.map(r=>{
     const v=r.result;
-    return `<tr><td>${esc(r.reference)}<small>BL ${esc(v.blId||'absent')}${v.partialId?' · livraison partielle':''}</small></td><td>${esc((v.carrier||'').toUpperCase())}<small>${(v.tracking||[]).map(esc).join('<br>')||'Suivi absent'}</small></td><td>${esc(status(v.carrierStatus))}<small>${esc(date(v.carrierObservedAt))}</small></td><td>${esc(status(v.lastKnownErplain))}${v.outcome==='proposed'?'<small>Proposé : '+esc(status(v.proposed))+'</small>':''}</td><td>${esc(date(r.created_at))}<small>${esc(v.error||v.localError||outcome[v.outcome]||'')}${v.error&&!v.observedAt&&v.carrierObservedAt?' · dernier suivi connu conservé':''}</small></td><td><button type="button" data-history-key="${esc(r.target_key)}" data-reference="${esc(r.reference)}">Voir l’historique</button></td></tr>`;
+    return `<tr><td>${esc(r.reference)}<small>BL ${esc(v.blId||'absent')}${v.partialId?' · livraison partielle':''}</small></td><td>${esc((v.carrier||'').toUpperCase())}<small>${(v.tracking||[]).map(esc).join('<br>')||'Suivi absent'}</small></td><td>${esc(status(v.carrierStatus))}<small>${esc(date(v.carrierObservedAt))}</small></td><td>${esc(status(v.lastKnownErplain))}${v.outcome==='proposed'?'<small>Proposé : '+esc(status(v.proposed))+'</small>':''}</td><td>${esc(date(r.created_at))}<small>${(v.error||v.localError?errorDetailsHtml(v.error||v.localError):esc(outcome[v.outcome]||''))}${v.error&&!v.observedAt&&v.carrierObservedAt?' · dernier suivi connu conservé':''}</small></td><td><button type="button" data-history-key="${esc(r.target_key)}" data-reference="${esc(r.reference)}">Voir l’historique</button></td></tr>`;
    }).join(''):'<tr><td colspan="6">Aucun résultat. Lancez une synchronisation pour récupérer les suivis disponibles.</td></tr>';
    find('[data-page]').textContent=`${data.total} livraisons · page ${data.page} / ${data.pages}`;find('[data-prev]').disabled=page<=1;find('[data-next]').disabled=page>=data.pages;
   }finally{loading=false;schedule();}
@@ -90,6 +90,6 @@
  find('[data-search-form]').onsubmit=e=>{e.preventDefault();search=e.target.elements.search.value;page=1;refresh().catch(fail);};
  find('[data-prev]').onclick=()=>{page--;refresh().catch(fail);};find('[data-next]').onclick=()=>{page++;refresh().catch(fail);};
  find('[data-rows]').onclick=e=>{const b=e.target.closest('[data-history-key]');if(b)showHistory(b.dataset.historyKey,b.dataset.reference).catch(fail);};
- panel.addEventListener('close',()=>{version++;clearTimeout(timer);if(typeof orders==='function'&&currentView==='orders')orders().catch(e=>flash(e.message,true));});
+ panel.addEventListener('close',()=>{version++;clearTimeout(timer);if(typeof orders==='function'&&currentView==='orders')orders().catch(e=>flash(e,true));});
  setInterval(buttons,2000);buttons();
 })();

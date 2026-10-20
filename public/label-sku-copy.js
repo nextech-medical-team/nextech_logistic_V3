@@ -6,7 +6,7 @@ function skuCopyUnits(value){
 }
 document.addEventListener('click',event=>{
  const button=event.target.closest?.('[data-sku-copy]');if(!button)return;
- event.preventDefault();openSkuCopy(button.dataset.skuCopy).catch(e=>flash(e.message,true));
+ event.preventDefault();openSkuCopy(button.dataset.skuCopy).catch(e=>flash(e,true));
 });
 async function openSkuCopy(id){
  const data=await api('/api/labels/sku-copy?id='+encodeURIComponent(id));
@@ -23,7 +23,7 @@ async function openSkuCopy(id){
    const status=form.querySelector('[data-result]');if(!replacements.length){status.textContent='Aucune mention modifiée. Vous pouvez télécharger le PDF actuel.';return;}
    busy=true;const submit=form.querySelector('button[type="submit"]');submit.disabled=true;
    try{const r=await api('/api/labels/sku-copy',{id,key:doc.key,token:doc.token,replacements,confirmed:form.elements.confirmed.checked});status.textContent=r.message;form.querySelectorAll('input').forEach(x=>x.disabled=true);const a=document.createElement('a');a.href=file;a.textContent='Télécharger l’étiquette corrigée';a.target='_blank';a.rel='noopener';status.append(document.createElement('br'),a);await orders();}
-   catch(e){status.textContent=e.message;submit.disabled=false;}finally{busy=false;}
+   catch(e){status.textContent=displayErrorMessage(e);submit.disabled=false;}finally{busy=false;}
   };
  }
 }

@@ -18,4 +18,8 @@ export async function completeShippingOrders(api,bc){
  }
 }
 export const documentBusySql="SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM partial_deliveries WHERE order_id=$1 AND (status IN ('creating_bl','selecting_lines','publishing_bl','creating_stock','finalizing_bl','creating_label','awaiting_pdf') OR to_jsonb(partial_deliveries)->'temu_label'->>'state'='purchasing') UNION ALL SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status='creating'";
-export async function assertDocumentIdle(db,id){if((await db.query(documentBusySql,[id])).rows.length)throw Error('Traitement en cours : attendre sa fin avant actualisation Erplain')}
+export async function assertDocumentIdle(db,id,{resolutionId}={}){
+ // Exclude only this running refresh; all other operations remain blockers.
+ const sql=resolutionId?documentBusySql.replace("FROM resolution_jobs WHERE order_id=$1 AND","FROM resolution_jobs WHERE order_id=$1 AND (id<>$2 OR action IS DISTINCT FROM 'refresh' OR status<>'running') AND"):documentBusySql;
+ if((await db.query(sql,resolutionId?[id,resolutionId]:[id])).rows.length)throw Error('Traitement en cours : attendre sa fin avant actualisation Erplain');
+}

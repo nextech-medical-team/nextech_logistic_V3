@@ -4,11 +4,12 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
 const source=await readFile(new URL('../public/review.js',import.meta.url),'utf8');
+const formatter=await readFile(new URL('../public/compact-problems.js',import.meta.url),'utf8');
 const handlers=source.slice(source.indexOf('// Verify only on explicit request;'),source.lastIndexOf('})();'));
 function fixture(api){
  let onVisibility;const renders=[],reads=[],attributes={};
  const context={MutationObserver:class{constructor(callback){onVisibility=callback;}observe(){}},panel:{hidden:false,setAttribute:(key,value)=>attributes[key]=value},button:{disabled:false,textContent:'Lancer la vérification'},verifyButtonLabel:'Lancer la vérification',displayedRows:[],exportRows:[],exportButton:{disabled:false},searchCount:{textContent:''},status:{textContent:''},table:{hidden:false},body:{},loadHistory:async()=>{reads.push('history');},emptyRow:()=>{},renderRows:rows=>renders.push(rows),api:(...args)=>{reads.push(args);return api(...args);},URLSearchParams,Date,Set};
- vm.createContext(context);vm.runInContext(handlers,context);
+ vm.createContext(context);vm.runInContext(formatter,context);vm.runInContext(handlers,context);
  return {context,renders,reads,attributes,open:()=>onVisibility()};
 }
 test('opening and reopening the module reads reports without launching an ERP scan',()=>{

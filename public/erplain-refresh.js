@@ -11,7 +11,7 @@ const button=document.createElement('button');button.dataset.view='erplain-refre
 const el=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=v=>v?new Date(v).toLocaleString('fr-FR',{timeZone:'Europe/Paris'}):'Pas encore relu';
 let page=1,busy=false,preview=null,listGeneration=0;
-const note=(text,error=false)=>{el('erplain-one-note').textContent=text;el('erplain-one-note').style.color=error?'#b42318':'';};
+const note=(text,error=false)=>{el('erplain-one-note').textContent=error?displayErrorMessage(text):text;el('erplain-one-note').style.color=error?'#b42318':'';};
 function setBusy(value){busy=value;el('erplain-one-fetch').disabled=value;for(const b of el('erplain-one-preview').querySelectorAll('button'))b.disabled=value;}
 const post=(path,data)=>api('/api/erplain-refresh/'+path,{...data});
 function documentHtml(d){
@@ -42,7 +42,7 @@ async function lookup(reference,bcId){
  if(busy)return;reference=String(reference||'').trim();if(!reference){note('Saisissez un numéro de BC ou une référence externe.',true);return;}
  setBusy(true);note('Lecture du BC dans Erplain LIVE…');
  try{const r=await post('targeted-lookup',{reference,...(bcId?{bcId}: {})});renderPreview(r);if(!r.notFound)note(r.selectionRequired?'Sélectionnez le BC à vérifier.':'Lecture terminée.');}
- catch(e){preview=null;el('erplain-one-preview').replaceChildren();note(e.message,true);}finally{setBusy(false);if(preview?.admissionIssues?.length){const b=panel.querySelector('[data-erplain-approve]');if(b)b.disabled=true;}}
+ catch(e){preview=null;el('erplain-one-preview').replaceChildren();note(e,true);}finally{setBusy(false);if(preview?.admissionIssues?.length){const b=panel.querySelector('[data-erplain-approve]');if(b)b.disabled=true;}}
 }
 async function loadRecovered(){
  const generation=++listGeneration;
@@ -57,9 +57,9 @@ async function loadRecovered(){
  }).join('')}</tbody></table>`:'<p>Aucune commande récupérée ne correspond à cette recherche.</p>';
 }
 el('erplain-one-form').onsubmit=e=>{e.preventDefault();lookup(el('erplain-one-reference').value);};
-document.addEventListener('erplain-documents-refreshed',()=>{if(currentView==='erplain-refresh')loadRecovered().catch(e=>note(e.message,true));});
-el('erplain-recovered-form').onsubmit=e=>{e.preventDefault();page=1;loadRecovered().catch(e=>note(e.message,true));};
-el('erplain-recovered-prev').onclick=()=>{page--;loadRecovered().catch(e=>note(e.message,true));};el('erplain-recovered-next').onclick=()=>{page++;loadRecovered().catch(e=>note(e.message,true));};
+document.addEventListener('erplain-documents-refreshed',()=>{if(currentView==='erplain-refresh')loadRecovered().catch(e=>note(e,true));});
+el('erplain-recovered-form').onsubmit=e=>{e.preventDefault();page=1;loadRecovered().catch(e=>note(e,true));};
+el('erplain-recovered-prev').onclick=()=>{page--;loadRecovered().catch(e=>note(e,true));};el('erplain-recovered-next').onclick=()=>{page++;loadRecovered().catch(e=>note(e,true));};
 panel.addEventListener('click',async event=>{
  const b=event.target.closest('button');if(!b||busy)return;
  try{
@@ -85,9 +85,9 @@ panel.addEventListener('click',async event=>{
    if(r.changed){renderPreview(r);note('Le BC a changé : une nouvelle validation est nécessaire.',true);}
    else{preview={...preview,alreadyRecovered:true,orderId:r.orderId,archived:r.archived};renderPreview(preview);note(r.alreadyRecovered?'Commande déjà récupérée.':'Entrée dans V3 validée. La préparation reste à lancer.');page=1;await loadRecovered();await orders();}
   }
- }catch(e){note(e.message,true);}finally{setBusy(false);if(preview?.admissionIssues?.length){const approve=panel.querySelector('[data-erplain-approve]');if(approve)approve.disabled=true;}}
+ }catch(e){note(e,true);}finally{setBusy(false);if(preview?.admissionIssues?.length){const approve=panel.querySelector('[data-erplain-approve]');if(approve)approve.disabled=true;}}
 });
 const before=show;show=async view=>{await before(view);if(view==='erplain-refresh'){
- await loadRecovered();try{const s=await api('/api/erplain/live-reference'),box=el('live-reference-summary');box.replaceChildren();const names={products:'Produits / variantes',stocks:'Stocks accessibles',suppliers:'Fournisseurs',taxes:'Codes TVA',currencies:'Devises',locations:'Emplacements'};for(const [key,v]of Object.entries(s.references||{})){const p=document.createElement('p');p.textContent=(names[key]||key)+' : accès vérifié · '+v.total;box.append(p);}}catch(e){el('live-reference-summary').textContent=e.message;}
+ await loadRecovered();try{const s=await api('/api/erplain/live-reference'),box=el('live-reference-summary');box.replaceChildren();const names={products:'Produits / variantes',stocks:'Stocks accessibles',suppliers:'Fournisseurs',taxes:'Codes TVA',currencies:'Devises',locations:'Emplacements'};for(const [key,v]of Object.entries(s.references||{})){const p=document.createElement('p');p.textContent=(names[key]||key)+' : accès vérifié · '+v.total;box.append(p);}}catch(e){el('live-reference-summary').textContent=displayErrorMessage(e);}
 }};
 })();

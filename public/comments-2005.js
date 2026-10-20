@@ -28,7 +28,7 @@ function inlineEditor2005(host,{value,type,min,max,label,save}){
  const cancel=document.createElement('button');cancel.type='button';cancel.textContent='Annuler';
  const message=document.createElement('small');message.setAttribute('role','status');
  cancel.onclick=()=>{delete host.dataset.inlineEditing;host.replaceChildren(...saved);};
- ok.onclick=async()=>{ok.disabled=true;cancel.disabled=true;input.disabled=true;message.textContent='Enregistrement…';try{await save(input.value);delete host.dataset.inlineEditing;host.replaceChildren(...saved);await orders();}catch(e){message.textContent=e.message;ok.disabled=false;cancel.disabled=false;input.disabled=false;}};
+ ok.onclick=async()=>{ok.disabled=true;cancel.disabled=true;input.disabled=true;message.textContent='Enregistrement…';try{await save(input.value);delete host.dataset.inlineEditing;host.replaceChildren(...saved);await orders();}catch(e){message.textContent=displayErrorMessage(e);ok.disabled=false;cancel.disabled=false;input.disabled=false;}};
  input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();ok.click();}if(e.key==='Escape'&&!cancel.disabled)cancel.click();};
  host.append(input,ok,cancel,message);input.focus();input.select();
 }
@@ -44,7 +44,7 @@ document.addEventListener('click',e=>{
 const missingExport=document.createElement('a');missingExport.className='button';missingExport.href='/api/mappings/missing/export';missingExport.textContent='Exporter tous les SKU à mapper';$('view-mappings').querySelector('.panel').prepend(missingExport);
 
 $('clear-filters').classList.add('primary');$('reload').classList.add('primary');
-const erpRefreshButton=document.createElement('button');erpRefreshButton.textContent='Actualiser les statuts Erplain';$('reload').after(erpRefreshButton);erpRefreshButton.onclick=async()=>{erpRefreshButton.disabled=true;try{const r=await api('/api/erplain/status/refresh',{});flash(r.message);await orders();}catch(e){flash(e.message,true);}finally{erpRefreshButton.disabled=false;}};
+const erpRefreshButton=document.createElement('button');erpRefreshButton.textContent='Actualiser les statuts Erplain';$('reload').after(erpRefreshButton);erpRefreshButton.onclick=async()=>{erpRefreshButton.disabled=true;try{const r=await api('/api/erplain/status/refresh',{});flash(r.message);await orders();}catch(e){flash(e,true);}finally{erpRefreshButton.disabled=false;}};
 
 $('status').add(new Option('Tous les problèmes','__problems'));
 const allProblemsButton=document.createElement('button');allProblemsButton.id='all-problems';allProblemsButton.textContent='Tous les problèmes';allProblemsButton.title='Afficher les commandes bloquées, les erreurs transporteurs, Erplain et colis supplémentaires';allProblemsButton.className='primary';allProblemsButton.onclick=()=>{resetFilters();if($('problem-type'))$('problem-type').selectedIndex=-1;$('status').value='__problems';compactFilters.forEach(x=>x.sync());show('orders');};$('clear-filters').after(allProblemsButton);

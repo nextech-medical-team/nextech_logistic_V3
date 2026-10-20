@@ -175,7 +175,7 @@ async function refreshAndResumeOrder(id){
 
 
 
-document.addEventListener('click',event=>{const b=event.target.closest?.('[data-resume-order]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();refreshAndResumeOrder(b.dataset.resumeOrder).catch(e=>flash(e.message,true));},true);
+document.addEventListener('click',event=>{const b=event.target.closest?.('[data-resume-order]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();refreshAndResumeOrder(b.dataset.resumeOrder).catch(e=>flash(e,true));},true);
 
 
 
@@ -183,11 +183,11 @@ document.addEventListener('click',event=>{const b=event.target.closest?.('[data-
 
 
 
-document.addEventListener('click',event=>{const b=event.target.closest?.('[data-exact-problem]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();openCorrection(b.dataset.exactProblem,b.dataset.problemType,b.dataset.problemSku,b.dataset.problemDetail).catch(e=>flash(e.message,true));},true);
+document.addEventListener('click',event=>{const b=event.target.closest?.('[data-exact-problem]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();openCorrection(b.dataset.exactProblem,b.dataset.problemType,b.dataset.problemSku,b.dataset.problemDetail).catch(e=>flash(e,true));},true);
 
 
 
-document.addEventListener('click',event=>{const b=event.target.closest?.('[data-replace-product]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();openOrderReplacement(b.dataset.replaceProduct).catch(e=>flash(e.message,true));},true);
+document.addEventListener('click',event=>{const b=event.target.closest?.('[data-replace-product]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();openOrderReplacement(b.dataset.replaceProduct).catch(e=>flash(e,true));},true);
 
 
 
@@ -207,11 +207,11 @@ orders=async function(){await correctionRows();for(const row of $('order-rows').
 
 
 
- for(const b of row.querySelectorAll('[data-exact-problem]'))b.onclick=()=>openCorrection(id,b.dataset.problemType,b.dataset.problemSku,b.dataset.problemDetail).catch(e=>flash(e.message,true));
+ for(const b of row.querySelectorAll('[data-exact-problem]'))b.onclick=()=>openCorrection(id,b.dataset.problemType,b.dataset.problemSku,b.dataset.problemDetail).catch(e=>flash(e,true));
 
 
 
- const cell=row.cells[row.cells.length-2];if(!cell?.matches('[data-platform-status],[data-erplain-tracking]')&&!cell?.querySelector('[data-exact-problem]'))for(const b of cell?.querySelectorAll('.badge')||[])if(/compléter|vérifier|erreur|attente/i.test(b.textContent)){const button=document.createElement('button');button.textContent=b.textContent;button.className=b.className;button.onclick=()=>openCorrection(id).catch(e=>flash(e.message,true));b.replaceWith(button);}
+ const cell=row.cells[row.cells.length-2];if(!cell?.matches('[data-platform-status],[data-erplain-tracking]')&&!cell?.querySelector('[data-exact-problem]'))for(const b of cell?.querySelectorAll('.badge')||[])if(/compléter|vérifier|erreur|attente/i.test(b.textContent)){const button=document.createElement('button');button.textContent=b.textContent;button.className=b.className;button.onclick=()=>openCorrection(id).catch(e=>flash(e,true));b.replaceWith(button);}
 
 
 
@@ -223,7 +223,7 @@ const detailBeforeResolution=orderDetail;
 
 
 
-orderDetail=async function(id){const request=await detailBeforeResolution(id);if(!orderDetailIsCurrent(request))return null;for(const b of $('order-detail').querySelectorAll('button'))if(b.textContent==='Compléter les informations et créer l’étiquette'){b.textContent='Résoudre un problème';b.onclick=()=>{dialog.close();openCorrection(id).catch(e=>flash(e.message,true));};}return request;};
+orderDetail=async function(id){const request=await detailBeforeResolution(id);if(!orderDetailIsCurrent(request))return null;for(const b of $('order-detail').querySelectorAll('button'))if(b.textContent==='Compléter les informations et créer l’étiquette'){b.textContent='Résoudre un problème';b.onclick=()=>{dialog.close();openCorrection(id).catch(e=>flash(e,true));};}return request;};
 
 
 
@@ -351,11 +351,11 @@ function resolutionDialog(title,reference){
 
 
 
-  const detail=document.createElement('p');detail.textContent=message||(success?'Vous pouvez maintenant vérifier la commande.':'Vérifiez la commande avant de relancer le traitement.');
+  const detail=document.createElement('p');detail.textContent=(success?message:displayErrorMessage(message))||(success?'Vous pouvez maintenant vérifier la commande.':'Vérifiez la commande avant de relancer le traitement.');
 
 
 
-  const view=document.createElement('button');view.type='button';view.textContent=queuedHandle||pendingRequest?'Vérifier le traitement enregistré':success?'Voir la commande':'Résoudre le problème restant';view.onclick=async()=>{modal.close();try{await orders();await openRemainingProblem(ctx.order.id);}catch(e){flash(e.message,true);}};
+  const view=document.createElement('button');view.type='button';view.textContent=queuedHandle||pendingRequest?'Vérifier le traitement enregistré':success?'Voir la commande':'Résoudre le problème restant';view.onclick=async()=>{modal.close();try{await orders();await openRemainingProblem(ctx.order.id);}catch(e){flash(e,true);}};
 
 
 
@@ -446,7 +446,7 @@ function resolutionDialog(title,reference){
 
     queuedHandle.carrier=r.requested_carrier||queuedHandle.carrier;
     const receipt=ctx.order.channel!=='tender'&&r.action==='choose-carrier'&&r.requested_carrier?manualRequestFeedbackText(r.status,r.requested_carrier):null;
-    state.textContent=r.error||receipt||r.stage;if(receipt&&!r.error&&!receiptShown){flash(receipt);receiptShown=true;}
+    state.textContent=r.error?displayErrorMessage(r.error):receipt||r.stage;if(receipt&&!r.error&&!receiptShown){flash(receipt);receiptShown=true;}
     clearInterval(timer);
     const observation=Date.now();let observedStatus=r.status,observedSince=r.state_since,observedService=['equivalent-preview','replace-equivalent','check-sku','compare-bc','weight','reconcile-bc'].includes(r.action||action)?'V3 → Erplain':'V3',observedStep=r.stage||'';
     if(r.status==='waiting'){try{const follow=await api('/api/orders/processing',{ids:[ctx.order.id]});const current=follow.rows?.[0];if(current?.manual_label_request)state.textContent=current.manual_label_request.message;if(current?.state){observedStatus=({active:'running',queued:'queued',blocked:'review'})[current.state];observedSince=current.since;observedService='V3 → '+current.service;observedStep=current.step;}}catch{observedStatus='unconfirmed';}}
@@ -478,7 +478,7 @@ function resolutionDialog(title,reference){
 
 
 
-    if(r.status==='review'&&effectiveAction==='compare-bc'&&r.result?.readOnly===true&&r.result?.bc){queuedHandle=null;state.textContent=r.error||r.result.message||'Comparaison à vérifier';return r.result;}
+    if(r.status==='review'&&effectiveAction==='compare-bc'&&r.result?.readOnly===true&&r.result?.bc){queuedHandle=null;state.textContent=r.error?displayErrorMessage(r.error):r.result.message||'Comparaison à vérifier';return r.result;}
     if(['review','cancelled','failed'].includes(r.status)){queuedHandle=null;review=true;const error=Error(r.error||r.result?.message||(r.status==='cancelled'?'Demande annulée. Vérifiez le résultat métier avant toute nouvelle intervention.':'Résultat à vérifier'));error.correctionRecorded=recorded;if(r.result?.readOnly===true){error.providerDiagnostic=true;error.message=(r.result.message||'Lecture fournisseur partielle.')+' Vérification nécessaire : '+error.message;}else if(recorded)error.message=(r.result.message||'Correction enregistrée.')+' Problème restant : '+error.message;throw error;}
 
 
@@ -495,7 +495,7 @@ function resolutionDialog(title,reference){
 
 
 
-  }catch(e){if(!queuedHandle&&pendingRequest&&[400,401,403,404,422].includes(e.status))pendingRequest=null;if(pendingRequest)e.message+=' Le résultat de l’enregistrement est inconnu. Vérifiez la commande ; une nouvelle vérification identique conservera le même identifiant.';if(queuedHandle)e.message+=' La demande est déjà enregistrée ; sa prochaine vérification reprendra le même traitement, sans nouvelle soumission.';if(!closed){state.textContent=e.message;finished(ctx,false,e.message,review,e.correctionRecorded,e.providerDiagnostic);if(review){modal.dataset.allowOrderRefresh='true';try{await orders();}catch{state.textContent=e.message+' Actualisation du tableau indisponible ; utilisez Actualiser la liste.';}finally{delete modal.dataset.allowOrderRefresh;}}else await orders().catch(()=>{});if(!body.querySelector('[data-reopen]')){const next=document.createElement('button');next.dataset.reopen='true';next.textContent='Voir le problème restant';next.onclick=()=>{modal.close();openCorrection(ctx.order.id).catch(e=>flash(e.message,true));};body.append(next);}}throw e;}finally{clearInterval(timer);if(!closed){if(!clock.textContent.includes('non confirmé'))clock.textContent+=' · durée de consultation : '+Math.floor((Date.now()-start)/1000)+' s';busy(false);}}
+  }catch(e){if(!queuedHandle&&pendingRequest&&[400,401,403,404,422].includes(e.status))pendingRequest=null;if(pendingRequest)e.message+=' Le résultat de l’enregistrement est inconnu. Vérifiez la commande ; une nouvelle vérification identique conservera le même identifiant.';if(queuedHandle)e.message+=' La demande est déjà enregistrée ; sa prochaine vérification reprendra le même traitement, sans nouvelle soumission.';if(!closed){state.textContent=displayErrorMessage(e);finished(ctx,false,e.message,review,e.correctionRecorded,e.providerDiagnostic);if(review){modal.dataset.allowOrderRefresh='true';try{await orders();}catch{state.textContent=displayErrorMessage(e)+' Actualisation du tableau indisponible ; utilisez Actualiser la liste.';}finally{delete modal.dataset.allowOrderRefresh;}}else await orders().catch(()=>{});if(!body.querySelector('[data-reopen]')){const next=document.createElement('button');next.dataset.reopen='true';next.textContent='Voir le problème restant';next.onclick=()=>{modal.close();openCorrection(ctx.order.id).catch(e=>flash(e,true));};body.append(next);}}throw e;}finally{clearInterval(timer);if(!closed){if(!clock.textContent.includes('non confirmé'))clock.textContent+=' · durée de consultation : '+Math.floor((Date.now()-start)/1000)+' s';busy(false);}}
 
 
 
@@ -615,7 +615,7 @@ async function openCorrection(id,type,sku,detail){
 
 
 
-  if(!problems.length){d.body.innerHTML='<p></p>';d.body.firstElementChild.textContent=ctx.order.partial_mode?'Livraison partielle : consultez les livraisons existantes et le reliquat avant toute nouvelle préparation.':ctx.erpJob?.status==='processing'?'Préparation Erplain en cours. Aucun motif de blocage reçu ; attendez son résultat avant de relancer.':ctx.erpJob?.status==='review'||ctx.order.erp_status==='live_review'?'Préparation Erplain à vérifier. Aucun motif détaillé reçu ; consultez le BC, les BL et le traitement avant de relancer.':ctx.order.resolution_pending_resume?'Les corrections sont enregistrées ; la reprise de la préparation reste à demander.':'Aucun problème de préparation restant.';if(ctx.order.partial_mode||ctx.order.erp_status==='live_review'||['processing','review'].includes(ctx.erpJob?.status)){const view=document.createElement('button');view.type='button';view.textContent='Voir la commande et ses livraisons';view.onclick=()=>{d.modal.close();orderDetail(ctx.order.id).catch(e=>flash(e.message,true));};d.body.append(view);}if(ctx.order.resolution_pending_resume){const b=document.createElement('button');b.textContent='Reprendre la commande';b.onclick=async()=>{try{await d.job(ctx,'resume','resolved');await orders();}catch{}};d.body.append(b);}addImportCorrectionActions(ctx,d);return;}
+  if(!problems.length){d.body.innerHTML='<p></p>';d.body.firstElementChild.textContent=ctx.order.partial_mode?'Livraison partielle : consultez les livraisons existantes et le reliquat avant toute nouvelle préparation.':ctx.erpJob?.status==='processing'?'Préparation Erplain en cours. Aucun motif de blocage reçu ; attendez son résultat avant de relancer.':ctx.erpJob?.status==='review'||ctx.order.erp_status==='live_review'?'Préparation Erplain à vérifier. Aucun motif détaillé reçu ; consultez le BC, les BL et le traitement avant de relancer.':ctx.order.resolution_pending_resume?'Les corrections sont enregistrées ; la reprise de la préparation reste à demander.':'Aucun problème de préparation restant.';if(ctx.order.partial_mode||ctx.order.erp_status==='live_review'||['processing','review'].includes(ctx.erpJob?.status)){const view=document.createElement('button');view.type='button';view.textContent='Voir la commande et ses livraisons';view.onclick=()=>{d.modal.close();orderDetail(ctx.order.id).catch(e=>flash(e,true));};d.body.append(view);}if(ctx.order.resolution_pending_resume){const b=document.createElement('button');b.textContent='Reprendre la commande';b.onclick=async()=>{try{await d.job(ctx,'resume','resolved');await orders();}catch{}};d.body.append(b);}addImportCorrectionActions(ctx,d);return;}
 
 
 
@@ -716,7 +716,7 @@ function renderResolution(ctx,problem){
 
 
 
- function button(text,fn){const b=document.createElement('button');b.type='button';b.textContent=text;b.onclick=()=>Promise.resolve().then(fn).catch(e=>{d.state.textContent=e.message;});fields.append(b);return b;}
+ function button(text,fn){const b=document.createElement('button');b.type='button';b.textContent=text;b.onclick=()=>Promise.resolve().then(fn).catch(e=>{d.state.textContent=displayErrorMessage(e);});fields.append(b);return b;}
 
 
 
@@ -728,7 +728,7 @@ function renderResolution(ctx,problem){
 
 
 
-  const next=document.createElement('button');next.textContent='Voir les problèmes restants';next.type='button';next.onclick=()=>{d.modal.close();openCorrection(ctx.order.id).catch(e=>flash(e.message,true));};result.append(next);
+  const next=document.createElement('button');next.textContent='Voir les problèmes restants';next.type='button';next.onclick=()=>{d.modal.close();openCorrection(ctx.order.id).catch(e=>flash(e,true));};result.append(next);
 
 
 
@@ -959,7 +959,7 @@ function renderResolution(ctx,problem){
 
 
 
-  form.onsubmit=async e=>{e.preventDefault();try{if(!checked||checked.sku!==form.elements.target_sku.value.trim())await verify();if(!checked||!['active','duplicate'].includes(checked.status)||!choice?.value)throw Error('Vérifier et choisir un produit Erplain actif avant d’enregistrer');const values=Object.fromEntries(new FormData(form));await saved(await task('mapping',{...values,variantId:choice.value}));}catch(e){d.state.textContent=e.message;}};
+  form.onsubmit=async e=>{e.preventDefault();try{if(!checked||checked.sku!==form.elements.target_sku.value.trim())await verify();if(!checked||!['active','duplicate'].includes(checked.status)||!choice?.value)throw Error('Vérifier et choisir un produit Erplain actif avant d’enregistrer');const values=Object.fromEntries(new FormData(form));await saved(await task('mapping',{...values,variantId:choice.value}));}catch(e){d.state.textContent=displayErrorMessage(e);}};
 
 
 
@@ -1188,6 +1188,18 @@ function renderResolution(ctx,problem){
 
 
   fields.innerHTML='<p class="resolution-diagnostic">'+esc(problem.detail||'Le motif détaillé n’a pas été enregistré.')+'</p>'+temuRefusalDetailsHtml(problem,ctx);
+  if(problem.type==='customer'){
+   const number=ctx.order.channel==='temu'&&ctx.order.erp_live?.customerNumber||'V3:'+ctx.order.id;
+   fields.innerHTML+='<p>Numéro client à rechercher dans Erplain : <strong>'+esc(number)+'</strong></p><p>Actualiser recherche le client existant. Si vous avez vérifié son absence dans Erplain, vous pouvez autoriser une nouvelle tentative. Une création précédente peut avoir abouti sans réponse : vérifiez avant de confirmer.</p>';
+   if(['temu','amazon'].includes(ctx.order.channel)){
+    const label=document.createElement('label'),confirmation=document.createElement('input');confirmation.type='checkbox';
+    label.append(confirmation,document.createTextNode(' J’ai vérifié dans Erplain que ce client est absent et j’autorise une nouvelle création.'));fields.append(label);
+    const retry=button('Autoriser la création du client et reprendre',async()=>{
+     if(!confirmation.checked)throw Error('Vérifiez le client dans Erplain et cochez la confirmation.');
+     await saved(await task('refresh',{provider:'Erplain',confirmCustomerAbsent:true,customerNumber:number,resumeAfter:true}));
+    });retry.disabled=true;confirmation.onchange=()=>{retry.disabled=!confirmation.checked;};
+   }
+  }
 
 
 
@@ -1198,6 +1210,16 @@ function renderResolution(ctx,problem){
  }
 
 
+
+ if(['bc','unknown','api-incomplete'].includes(problem.type)&&/BC[^\n]*(?:introuvable|absent)|Lignes BC non reçues/i.test((problem.detail||'')+' '+problem.label)&&['temu','amazon'].includes(ctx.order.channel)&&ctx.order.erp_live?.bc?.id&&!ctx.order.erp_live?.bl?.id&&!ctx.order.partial_mode){
+  const p=document.createElement('p');p.textContent='Si le BC enregistré est réellement absent, V3 peut vérifier les documents et le stock avant d’autoriser sa recréation. L’étiquette existante sera conservée.';fields.append(p);
+  const label=document.createElement('label'),confirm=document.createElement('input');confirm.type='checkbox';
+  label.append(confirm,document.createTextNode(' J’autorise la recréation du BC pour '+ctx.order.reference+' uniquement si les contrôles confirment son absence.'));fields.append(label);
+  const recovery=button('Vérifier le BC absent et reprendre',async()=>{
+   if(!confirm.checked)throw Error('Confirmez la reprise de cette commande.');
+   await saved(await task('refresh',{provider:'Erplain',confirmMissingBc:true,missingBcId:String(ctx.order.erp_live.bc.id),orderReference:ctx.order.reference,resumeAfter:true}));
+  });recovery.disabled=true;confirm.onchange=()=>{recovery.disabled=!confirm.checked;};
+ }
 
  if(ctx.active){const p=document.createElement('p');p.textContent='Intervention enregistrée à l’ouverture : '+(ctx.active.stage||'Étape non transmise.');d.body.prepend(p);}
 
@@ -1373,7 +1395,7 @@ function openStockEquivalent(ctx,problem){
 
 
  const enabled=()=>{const abandon=d.body.querySelector('[data-abandon-equivalent]');if(abandon){abandon.disabled=busy||done;abandon.hidden=done;}if(done||d.modal.dataset.equivalentSubmitted)delete d.modal.dataset.unsavedEquivalent;else if(!busy&&!d.modal.dataset.unsavedEquivalent?.includes('tentée')&&initialValues()!==originalValues)d.modal.dataset.unsavedEquivalent='Le remplacement n’est pas lancé. Fermer sans enregistrer ?';apply.disabled=busy||done;apply.textContent=busy?'Vérification et remplacement en cours…':partialRemainder?'Remplacer le reliquat et poursuivre':'Remplacer et poursuivre la commande';};
- const showError=e=>{preview.setAttribute('role','alert');preview.textContent=(e.correctionRecorded?'Remplacement enregistré. ':e.saveAttempted?'Résultat de l’enregistrement à vérifier avant de relancer : ':'Remplacement non enregistré : ')+e.message+(e.message.includes('Poids non renseigné')?' · Renseignez le poids du produit '+(/Produit restant \[([^\]]+)\]/.exec(e.message)?.[1]||values().replacementSku)+' dans Erplain, puis réessayez.':'');};
+ const showError=e=>{preview.setAttribute('role','alert');preview.textContent=(e.correctionRecorded?'Remplacement enregistré. ':e.saveAttempted?'Résultat de l’enregistrement à vérifier avant de relancer : ':'Remplacement non enregistré : ')+displayErrorDetail(e)+(e.message.includes('Poids non renseigné')?' · Renseignez le poids du produit '+(/Produit restant \[([^\]]+)\]/.exec(e.message)?.[1]||values().replacementSku)+' dans Erplain, puis réessayez.':'');};
 
 
 
@@ -1406,7 +1428,7 @@ function openStockEquivalent(ctx,problem){
 
 
 
-document.addEventListener('click',event=>{const b=event.target.closest?.('[data-choose-carrier]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();openCarrierChoice(b.dataset.chooseCarrier).catch(e=>flash(e.message,true));},true);
+document.addEventListener('click',event=>{const b=event.target.closest?.('[data-choose-carrier]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();openCarrierChoice(b.dataset.chooseCarrier).catch(e=>flash(e,true));},true);
 
 
 
@@ -1471,7 +1493,7 @@ async function openCarrierChoice(id){
 
 
 
- }catch(e){form.querySelector('[data-feedback]').textContent=e.message;busy=false;button.disabled=false;}};
+ }catch(e){form.querySelector('[data-feedback]').textContent=displayErrorMessage(e);busy=false;button.disabled=false;}};
 
 
 
@@ -1492,8 +1514,8 @@ async function openExternalLabel(id){
   let busy=false;form.onsubmit=async event=>{event.preventDefault();if(busy)return;busy=true;const button=form.querySelector('button');button.disabled=true;try{
    let pdf=null;const file=form.elements.pdf.files[0];if(file){if(file.size>10*1024*1024)throw Error('PDF trop volumineux (maximum 10 Mo)');pdf=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error('Lecture du PDF impossible'));reader.readAsDataURL(file);});}
    const result=await api('/api/temu/external-label',{id,carrier:form.elements.carrier.value,tracking:form.elements.tracking.value,confirmed:form.elements.confirmed.checked,pdf});form.querySelector('[data-feedback]').textContent=result.message||'Étiquette déjà enregistrée';await orders();
-  }catch(e){form.querySelector('[data-feedback]').textContent=e.message;busy=false;button.disabled=false;}};
- }catch(e){alert(e.message);}
+  }catch(e){form.querySelector('[data-feedback]').textContent=displayErrorMessage(e);busy=false;button.disabled=false;}};
+ }catch(e){alert(displayErrorMessage(e));}
 }
 
 // A BL is sufficient for this explicit label action; preparation diagnostics remain visible.
@@ -1508,4 +1530,4 @@ function addDirectBlLabelButtons(){
 }
 new MutationObserver(addDirectBlLabelButtons).observe(document.getElementById('order-rows'),{childList:true});
 addDirectBlLabelButtons();
-document.addEventListener('click',async event=>{const b=event.target.closest?.('[data-direct-bl-label]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();if(b.disabled)return;b.disabled=true;try{const r=await api('/api/carriers/from-bl',{id:b.dataset.directBlLabel});flash(r.status==='ready'?'Étiquette déjà disponible':'Génération de l’étiquette lancée');await orders();}catch(e){flash(e.message,true);b.disabled=false;}},true);
+document.addEventListener('click',async event=>{const b=event.target.closest?.('[data-direct-bl-label]');if(!b)return;event.preventDefault();event.stopImmediatePropagation();if(b.disabled)return;b.disabled=true;try{const r=await api('/api/carriers/from-bl',{id:b.dataset.directBlLabel});flash(r.status==='ready'?'Étiquette déjà disponible':'Génération de l’étiquette lancée');await orders();}catch(e){flash(e,true);b.disabled=false;}},true);

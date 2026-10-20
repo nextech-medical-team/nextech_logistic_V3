@@ -40,7 +40,7 @@
   find('[data-confirm]').textContent=result?(remaining.length?'Reprendre les préparations restantes ('+remaining.length+')':'Traitement de la sélection terminé'):'Importer et préparer les commandes sélectionnées';
   find('[data-confirm]').disabled=busy||!draft||(result?!remaining.length:!chosen.size);
   find('[data-new]').disabled=busy||!draft||!!result;find('[data-none]').disabled=busy||!draft||!!result;
-  find('[data-orders]').innerHTML=preview.orders.slice((page-1)*100,page*100).map(o=>`<tr><td><input type="checkbox" data-reference="${esc(o.reference)}" aria-label="Importer ${esc(o.reference)}" ${chosen.has(o.reference)?'checked':''} ${busy||!draft||result||!o.eligible?'disabled':''}></td><td>${esc(o.reference)}</td><td>${esc(country(o.country))}</td><td>${esc(o.recipient)}</td><td>${o.lines} / ${o.quantity}</td><td>${esc(o.issues.length?o.issues.join(' ; '):o.duplicate?'Déjà présente — ignorée':'Nouvelle commande')}</td></tr>`).join('');
+  find('[data-orders]').innerHTML=preview.orders.slice((page-1)*100,page*100).map(o=>`<tr><td><input type="checkbox" data-reference="${esc(o.reference)}" aria-label="Importer ${esc(o.reference)}" ${chosen.has(o.reference)?'checked':''} ${busy||!draft||result||!o.eligible?'disabled':''}></td><td>${esc(o.reference)}</td><td>${esc(country(o.country))}</td><td>${esc(o.recipient)}</td><td>${o.lines} / ${o.quantity}</td><td>${esc(o.issues.length?o.issues.map(e=>displayErrorMessage(e,'TEMU')).join(' ; '):o.duplicate?'Déjà présente — ignorée':'Nouvelle commande')}</td></tr>`).join('');
  }
  find('[data-orders]').onchange=e=>{const ref=e.target.dataset.reference;if(!ref||busy||!draft||result)return;e.target.checked?chosen.add(ref):chosen.delete(ref);render();};
  find('[data-new]').onclick=()=>{chosen.clear();for(const o of preview.orders)if(o.eligible)chosen.add(o.reference);render();};
@@ -62,10 +62,10 @@
    for(const o of preview.orders)if(o.eligible)chosen.add(o.reference);
    find('[data-summary]').textContent=`${preview.files.length} fichier(s) · ${preview.orders.length} commandes · ${preview.newCount} nouvelles valides · ${preview.duplicateCount} déjà présentes · ${preview.errors.length} erreurs · ${preview.repeatedLines} lignes répétées ignorées`;
    find('[data-countries]').innerHTML=preview.countries.map(c=>`<tr><td>${esc(c.country)}</td><td>${c.total}</td><td>${c.newCount}</td><td>${c.duplicateCount}</td><td>${c.errorCount}</td></tr>`).join('');
-   find('[data-files]').innerHTML=preview.files.map(f=>`<p>${esc(f.filename)} : ${f.orders} commandes, ${f.rows} lignes${f.error?' — '+esc(f.error):''}</p>`).join('');
+   find('[data-files]').innerHTML=preview.files.map(f=>`<p>${esc(f.filename)} : ${f.orders} commandes, ${f.rows} lignes${f.error?' — '+errorDetailsHtml(f.error,'TEMU'):''}</p>`).join('');
    find('[data-errors]').innerHTML=preview.errors.map(r=>`<li>${esc(r.filename)}${r.row?' · ligne '+r.row:''}${r.reference?' · '+esc(r.reference):''} : ${esc(r.message)}</li>`).join('');
    $('import-result').textContent='Analyse terminée. Vérifiez l’aperçu avant de confirmer.';panel.hidden=false;
-  }catch(error){$('import-result').textContent=error.message;}finally{setBusy(false);}
+  }catch(error){$('import-result').textContent=displayErrorMessage(error);}finally{setBusy(false);}
  };
  find('[data-confirm]').onclick=async()=>{
   if(busy||!draft||!chosen.size)return;
@@ -87,14 +87,14 @@
    if(!held){draft=null;chosen.clear();}
    window.dispatchEvent(new Event('temu-excel-imported'));
    await stats().catch(()=>{});
-  }catch(error){find('[data-result]').textContent=error.message;}finally{setBusy(false);}
+  }catch(error){find('[data-result]').textContent=displayErrorMessage(error);}finally{setBusy(false);}
  };
  find('[data-report]').onclick=()=>{
   if(!preview)return;
   const lines=['Import TEMU Excel',...preview.countries.map(c=>`${c.country} : ${c.total} commandes, ${c.newCount} nouvelles valides, ${c.duplicateCount} déjà présentes, ${c.errorCount} à corriger`),
    ...preview.files.map(f=>`${f.filename} : ${f.rows} lignes, ${f.orders} commandes${f.error?' — '+f.error:''}`),
    ...preview.errors.map(e=>`${e.filename} · ${e.row||''} · ${e.reference||''} : ${e.message}`),
-   ...(result?[result.message,...result.results.map(r=>`${r.reference} · ${r.country} · ${r.status==='created'?(preparation.get(r.reference)?.message||'Importée · préparation à reprendre'):'Ignorée : '+r.reason}`)]:['Analyse uniquement — import non confirmé',...preview.orders.map(o=>`${o.reference} · ${country(o.country)} · ${o.issues.length?o.issues.join(' ; '):o.duplicate?'Déjà présente':'Nouvelle valide'}`)])];
+   ...(result?[result.message,...result.results.map(r=>`${r.reference} · ${r.country} · ${r.status==='created'?(preparation.get(r.reference)?.message||'Importée · préparation à reprendre'):'Ignorée : '+r.reason}`)]:['Analyse uniquement — import non confirmé',...preview.orders.map(o=>`${o.reference} · ${country(o.country)} · ${o.issues.length?o.issues.map(e=>displayErrorMessage(e,'TEMU')).join(' ; '):o.duplicate?'Déjà présente':'Nouvelle valide'}`)])];
   const url=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/plain;charset=utf-8'})),link=document.createElement('a');link.href=url;link.download='rapport-import-temu.txt';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
  };
 })();
