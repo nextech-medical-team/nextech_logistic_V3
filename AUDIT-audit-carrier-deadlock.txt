@@ -1,0 +1,10 @@
+AUDIT CORRECTION CARRIER_JOBS - 20 octobre 2026
+Branche : fix/audit-carrier-deadlock-20261020
+Base commune : 321895c. Pas de deploiement.
+Cause confirmee : la prise de job verrouillait carrier_jobs, puis le trigger v3_suspension_job_guard prenait orders FOR SHARE. L'admission manuelle verrouille orders puis carrier_jobs. Inversion reproduite dans PostgreSQL reel.
+Correction : verrouillage orders avant carrier_jobs, SKIP LOCKED sur les deux et revalidation de l'eligibilite. Meme ordre pour l'enregistrement des PDF. Trois essais maximum uniquement pour les transactions SQL locales annulees (40P01 / 40001). Aucune reprise automatique de l'appel transporteur.
+Preuve PostgreSQL reel : ancien algorithme 1 deadlock ; nouveau 120 prises concurrentes, 30 prises uniques, 0 deadlock, 0 appel fournisseur. Test execute dans nextech_audit_test_20261020_carrier, base supprimee et absence verifiee. Tables de production intactes.
+Tests : admission automatique, provenance creation et reprise PDF, erreurs SQL bornees. Injection d'un deadlock apres INSERT PDF : rollback puis succes avec un seul achat transporteur et un seul PDF.
+Limite : le test cible cette inversion et ne garantit pas l'absence de tout autre deadlock. Observation des logs necessaire apres deploiement. Les autres processus doivent conserver le meme ordre.
+Reproduction : node --test test/carrier-deadlock-retry.test.mjs test/automatic-carrier-admission.test.mjs test/carrier-attempt-proof-db.test.mjs
+Test PostgreSQL : script scripts/audit-carrier-postgres.mjs ; base dediee prefixee nextech_audit_test_, PGUSER et PGHOST explicites. Ne jamais viser une base de production.

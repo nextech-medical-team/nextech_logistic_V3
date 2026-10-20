@@ -6,6 +6,21 @@ import {initializeCarrierJobs,createCarrierWorkers} from '../src/carrier-jobs.mj
 import {initializeAppSchema} from '../src/schema-startup.mjs';
 import {hasUncertainCarrierHistory} from '../src/carrier-attempt-proof.mjs';
 import {synchronizeRecoveredOrder} from '../src/erplain-targeted-orders.mjs';
+test('PDF persistence deadlock retries SQL without another carrier purchase',async()=>{
+ const {e,db,job}=await fixture();try{
+  await queueLabelFromBl(db,'o',{email:'operator'});
+  const transact=db.transaction;let injected=false,posts=0;
+  db.transaction=fn=>transact(tx=>fn({...tx,query:async(sql,params)=>{
+   const r=await tx.query(sql,params);
+   if(!injected&&sql.startsWith('INSERT INTO carrier_documents')){injected=true;throw Object.assign(Error('deadlock fixture'),{code:'40P01'});}
+   return r;
+  }}));
+  const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async(_o,{beforeCreate})=>{await beforeCreate();posts++;return {reference:'R',tracking:['T']};},gofoLabel:async()=>Buffer.from('%PDF-1.4 test').toString('base64')}});
+  await workers.run('gofo');await workers.run('gofo');
+  assert.equal(injected,true);assert.equal(posts,1);assert.equal((await job()).status,'ready');
+  assert.equal((await db.query('SELECT count(*)::int n FROM carrier_documents')).rows[0].n,1);
+ }finally{await e.close();}
+});
 async function fixture(){
  const e=new PGlite();await e.waitReady;const wrap=x=>({query:(s,p=[])=>x.query(s,p),exec:s=>x.exec(s)});
  const db={...wrap(e),transaction:fn=>e.transaction(tx=>fn(wrap(tx))),withLocks:async(_,fn)=>fn(),recoverInterrupted:false};
