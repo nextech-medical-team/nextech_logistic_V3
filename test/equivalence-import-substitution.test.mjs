@@ -10,7 +10,7 @@ import {currentMappingLine} from '../src/current-mapping-line.mjs';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
-for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-drift','legacy-queued-price-drift','single-action','single-action-lost-response','shared-stock-drift','legacy-shared-stock-drift','replacement-stock-lost'])test('moteur réel : '+scenario,async()=>{
+for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-drift','legacy-queued-price-drift','single-action','single-action-lost-response','shared-stock-drift','legacy-shared-stock-drift','replacement-stock-lost','temu-address-refused','single-action-temu-address-refused'])test('moteur réel : '+scenario,async()=>{
  const stockReview=scenario==='stock-review',moneyDrift=scenario==='lost-response-price-drift'||scenario==='single-action-lost-response',legacy=scenario==='legacy-queued-price-drift',preserveBcAmounts=scenario==='bc-amounts'||moneyDrift||legacy;
  const pg=new PGlite();await pg.waitReady;
  try{
@@ -87,6 +87,23 @@ for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-
    variants.B.stock_levels.data[0].available=100;
   }
   return substitution(db,api,o,b,{apply:true,deferResume,preserveBcAmounts});
+ }
+ if(scenario.endsWith('temu-address-refused')){
+  await db.query("UPDATE orders SET channel='temu',reference='PO-1-2',transport_choice=null WHERE id='o'");
+  const result={source:'temu_direct',observedAt:new Date().toISOString(),packageInfoResultList:[{packageSn:'PK-1',shippingLabelStatus:2,failReasonText:'The shipping address contains non-English characters.',trackingNumber:'',orderSendInfoList:[{parentOrderSn:'PO-1-2',orderSn:'1',quantity:20},{parentOrderSn:'PO-1-2',orderSn:'2',quantity:10}]}]};
+  await db.query("INSERT INTO temu_label_jobs VALUES('PO-1-2','shipment_error',$1,'original-attempt',$2)",[JSON.stringify(['PK-1']),JSON.stringify(result)]);
+  const before=(await db.query('SELECT * FROM temu_label_jobs')).rows;
+  const outcome=await replace('A','B',20,false);
+  assert.equal(writes,1);assert.equal(outcome.temuLabelRefused,true);assert.equal(outcome.temuLabelPreserved,false);
+  assert.match(outcome.message,/Préparation suspendue/);
+  assert.deepEqual((await db.query('SELECT * FROM temu_label_jobs')).rows,before);
+  assert.equal((await db.query('SELECT * FROM temu_label_documents')).rows.length,0);
+  assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);
+  assert.equal(bc.shipping_orders.data.length,0);
+  assert.deepEqual(bc.line_items.map(l=>l.variant.sku).sort(),['B','C']);
+  assert.equal((await db.query("SELECT resolution_pending_resume FROM orders WHERE id='o'")).rows[0].resolution_pending_resume,true);
+  assert.equal((await db.query("SELECT status FROM erp_live_jobs WHERE order_id='o'")).rows[0].status,'review');
+  return;
  }
  if(preserveBcAmounts){
   await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{pricing,total}','35') WHERE id='o'");

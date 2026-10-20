@@ -86,7 +86,7 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
     for(const p of parcels){try{const t=await api.read('temu.track.trackinginfo.get',{packageSn:p.packageSn});if(t.packageSn!==p.packageSn||String(t.trackingNum||'').trim()!==String(p.trackingNumber||'').trim())throw Error('TEMU · Suivi incompatible avec le colis');for(const e of t.trackingInfo||[]){const raw=e.logisticsUpdatedAt,at=/^\d{10,13}$/.test(raw||'')?new Date(Number(raw)*(String(raw).length===10?1000:1)).toISOString():raw;if(!Number.isFinite(Date.parse(at)))throw Error('TEMU · Date du suivi non vérifiable');events.push({source:'temu_tracking',trackingKey:t.trackingNum,code:e.logisticsStatus,label:e.statusText,at});}}catch(e){if(isTemuReadDeferred(e))throw e;trackingErrors.push({package:p.packageSn,error:directError(e)});}}
     await db.query('UPDATE temu_label_jobs SET result=result||$2::jsonb WHERE reference=$1',[reference,JSON.stringify({deliveryStatuses:events,trackingErrors,trackingVerifiedAt:trackingErrors.length?null:now})]);
     if(!o.transport_choice&&!trackingErrors.length)await db.query('UPDATE orders SET tracking_status=$2 WHERE id=$1',[o.id,trackingState(parcels.map(p=>({...p,status:1})),events,o.tracking_status||'not_shipped')]);
-    if(j.status==='complete')await recoverTemuSubstitutionReviews(db,reference);
+    if(['complete','shipment_error'].includes(j.status))await recoverTemuSubstitutionReviews(db,reference);
     return {reference,status:j.status,documents:true,error:j.error||null};
    }
    const old=(await db.query('SELECT * FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];

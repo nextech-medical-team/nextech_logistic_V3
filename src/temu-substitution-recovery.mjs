@@ -1,6 +1,7 @@
 import {assertWholeTemuPackage} from './temu-label-pdf.mjs';
 import {cancellationBlock} from './erp-transient-policy.mjs';
 import {randomUUID} from 'node:crypto';
+import {verifiedRefusedSubstitutionPackage} from './temu-refused-substitution.mjs';
 
 export const temuSubstitutionRecoveryError='Achat TEMU en cours, incertain ou multi-colis : récupérer et vérifier le colis avant remplacement';
 
@@ -8,6 +9,7 @@ export function verifiedSubstitutionPackage(order,job,lines,documents){
  if(!order||order.channel!=='temu'||order.archived||order.partial_mode||order.suspension?.active||order.suspension?.erplainCancellation||cancellationBlock(order)
  ||order.source_payload?.marketplacePendingCorrection||order.source_payload?.visibilityHold||!order.erp_live?.bc?.id||order.erp_live.bl?.id||order.erp_live.stockDocument
  ||/^(creating|publishing)/.test(order.erp_live.phase||'')||['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status))return false;
+ if(verifiedRefusedSubstitutionPackage(order,job,lines,documents))return true;
  if(job?.status!=='complete'||job.error||job.result?.source!=='temu_direct'||job.packages?.length!==1||!lines?.length)return false;
  const packageSn=job.packages[0];
  if(!/^PK-\d+$/.test(packageSn))return false;
@@ -35,7 +37,7 @@ export async function recoverTemuSubstitutionReviews(db,reference){
   if(latest?.status!=='review'||latest.error!==temuSubstitutionRecoveryError||!['equivalent-preview','replace-equivalent'].includes(latest.action)||latest.payload?.importRow||latest.payload?.substitutionAttempt)return 0;
   // Quantities remain the operator's choice and are checked against the fresh BC.
   const id=randomUUID(),payload={...latest.payload,action:'equivalent-preview',requestId:randomUUID()};delete payload.previewFingerprint;delete payload.confirmEquivalent;
-  await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status,stage) VALUES($1,$2,$3,'equivalent-preview',$4::jsonb,'queued','Colis TEMU récupéré · nouvelle vérification du remplacement')",[id,order.id,payload.requestId,JSON.stringify(payload)]);
+  await tx.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status,stage) VALUES($1,$2,$3,'equivalent-preview',$4::jsonb,'queued','État du colis TEMU vérifié · nouvelle vérification du remplacement')",[id,order.id,payload.requestId,JSON.stringify(payload)]);
   await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','temu.substitution_recovered',$1)",[JSON.stringify({orderId:order.id,previousJobId:latest.id,jobId:id,package:job.packages[0],externalWrites:0,labelPurchaseUnchanged:true})]);
   return 1;
  });
