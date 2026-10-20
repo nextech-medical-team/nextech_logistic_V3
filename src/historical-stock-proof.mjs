@@ -203,7 +203,20 @@ export async function historicalPreparationProof(api,o,{beforeBlPublication=fals
  }
  if(pendingBlScope){if(!bl||!o.erp_live.pendingBlIds.map(String).includes(String(bl.id))||expected(o.items)!==expected(historicalPendingLines(bc,bl)))throw Error('BL en attente modifié : produits ou quantités à rapprocher');}
  await assertNoHistoricalStockRemoval(api,o);
- return (await readHistoricalStock(api,bc,{bl,pendingBlScope,beforeBlPublication,additionalVariants:(o.erp_live.historicalStockProof?.quantities||[]).map(l=>l.key.split(':')[0])})).proof;
+ const proof=(await readHistoricalStock(api,bc,{bl,pendingBlScope,beforeBlPublication,additionalVariants:(o.erp_live.historicalStockProof?.quantities||[]).map(l=>l.key.split(':')[0])})).proof;
+ // A matching debit proves that Erplain wrote the movement, not that the
+ // movement was covered by stock. Check its remaining balances before a new
+ // BL is published. Never turn this into a gate for an existing BL's label.
+ if(beforeBlPublication&&(!bl||bl.status==='unpublished')&&!proof.stockModel){
+  for(const l of bc.line_items.filter(l=>l.type==='normal')){
+   if(typeof l.variant?.track_inventory!=='boolean')throw Error('Stock non vérifiable : politique produit absente');
+   if(!l.variant.track_inventory)continue;
+   const numeric=v=>(typeof v==='number'||typeof v==='string'&&v.trim()!=='')&&Number.isFinite(Number(v));
+   if(![l.on_hand,l.available].every(numeric))throw Error('Stock non vérifiable après débit BC : '+l.variant.sku);
+   if(Number(l.on_hand)<0||Number(l.available)<0)throw Error('BL bloqué — stock insuffisant après débit BC : '+l.variant.sku);
+  }
+ }
+ return proof;
 }
 
 // A BC that already deducted both quantities may pass its immutable flag to
@@ -211,6 +224,12 @@ export async function historicalPreparationProof(api,o,{beforeBlPublication=fals
 // Never infer that solely from flags: require a complete BL ledger with no
 // independent movement, before AND after publication through preparationProof.
 export async function readInheritedBlLedger(api,bl){
+ if(bl?.id&&!/^\d{4}-\d{2}-\d{2}[ T]/.test(String(bl.created_at||''))){
+  const fresh=(await api.request('query V3InheritedBlDate($id:ID!){ShippingOrder(id:$id){id created_at status update_stock line_items{type quantity variant{id} location{id}}}}',{id:String(bl.id)})).ShippingOrder;
+  const quantities=rows=>Array.isArray(rows)?JSON.stringify(rows.map(l=>[l.type,String(l.variant?.id||''),String(l.location?.id||''),String(l.quantity)]).sort()):null;
+  if(!fresh||String(fresh.id)!==String(bl.id)||fresh.status!==bl.status||fresh.update_stock!==bl.update_stock||!Array.isArray(fresh.line_items)||quantities(fresh.line_items)!==quantities(bl.line_items))throw Error('BL historique modifié ou introuvable : actualiser les documents avant vérification du stock');
+  bl={...bl,created_at:fresh.created_at};
+ }
  const created=String(bl?.created_at||'');
  if(!bl?.id||!/^\d{4}-\d{2}-\d{2}[ T]/.test(created)||!Number.isFinite(Date.parse(created.replace(' ','T'))))throw Error('Journal BL historique : date absente');
  const evidence=[];

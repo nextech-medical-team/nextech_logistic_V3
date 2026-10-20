@@ -1,5 +1,6 @@
 import {resolveWeight} from './erplain-readonly.mjs';
 import {convertedQuantity} from './domain.mjs';
+import {parcelWeightKg} from './weight-arithmetic.mjs';
 // Produce per-order weights from exactly the variants used for that order's BC.
 // Zero means explicitly unknown; SQL COALESCE must not borrow another variant's
 // global SKU weight in that case. The caller keeps the missing-weight problem.
@@ -24,7 +25,7 @@ export function selectedProductWeights(lines,products,items){
  for(const i of items){const id=String(i.variant?.id||''),q=Number(i.quantity);if(!id||!Number.isFinite(q)||q<=0)throw Error('Poids sélectionnés : articles BC incomplets');actual.set(id,(actual.get(id)||0)+q);}
  if(planned.size!==actual.size||[...planned].some(([id,q])=>Math.abs(q-(actual.get(id)??NaN))>1e-6||!actual.has(id)))throw Error('Poids sélectionnés : quantités différentes du BC');
  if(!Number.isFinite(weightKg))throw Error('Poids sélectionnés : poids total invalide');
- return {updates,missing,weightKg:missing.length?null:Math.ceil(weightKg*1000)/1000};
+ return {updates,missing,weightKg:missing.length?null:parcelWeightKg(weightKg)};
 }
 
 // This writes only preparation metadata, never products, BCs, BLs or labels.

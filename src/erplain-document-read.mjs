@@ -1,4 +1,4 @@
-export const documentBlFields='id label external_reference notes status update_stock shipping_address{id label address_1 address_2 postal_code city country phone} line_items{id type parent_id quantity price tax_amount description variant{id sku} location{id}}';
+export const documentBlFields='id created_at label external_reference notes status update_stock shipping_address{id label address_1 address_2 postal_code city country phone} line_items{id type parent_id quantity price tax_amount description variant{id sku} location{id}}';
 const orderFields='id label external_reference notes dated_at status total currency{id label} update_stock customer{id label} account_representative{id label} shipping_address{id label address_1 address_2 postal_code city country phone} line_items{id type label description quantity price tax_amount shipped_quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}}';
 export async function readErplainDocuments(api,id){
  const bc=(await api.request(`query V3DocumentRead($id:ID!){Order(id:$id){${orderFields} shipping_orders(first:100,page:1){data{${documentBlFields}} paginatorInfo{hasMorePages}}}}`,{id:String(id)})).Order;
@@ -17,5 +17,9 @@ export async function completeShippingOrders(api,bc){
   if(String(next?.id)!==String(id))throw Error('Erplain · BC modifié pendant pagination');connection=next.shipping_orders;
  }
 }
-export const documentBusySql="SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM partial_deliveries WHERE order_id=$1 AND status IN ('creating_bl','publishing_bl','creating_stock','finalizing_bl','creating_label','awaiting_pdf') UNION ALL SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status='creating'";
-export async function assertDocumentIdle(db,id){if((await db.query(documentBusySql,[id])).rows.length)throw Error('Traitement en cours : attendre sa fin avant actualisation Erplain')}
+export const documentBusySql="SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT 1 FROM partial_deliveries WHERE order_id=$1 AND (status IN ('creating_bl','selecting_lines','publishing_bl','creating_stock','finalizing_bl','creating_label','awaiting_pdf') OR to_jsonb(partial_deliveries)->'temu_label'->>'state'='purchasing') UNION ALL SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1 AND status='creating'";
+export async function assertDocumentIdle(db,id,{resolutionId}={}){
+ // Exclude only this running refresh; all other operations remain blockers.
+ const sql=resolutionId?documentBusySql.replace("FROM resolution_jobs WHERE order_id=$1 AND","FROM resolution_jobs WHERE order_id=$1 AND (id<>$2 OR action IS DISTINCT FROM 'refresh' OR status<>'running') AND"):documentBusySql;
+ if((await db.query(sql,resolutionId?[id,resolutionId]:[id])).rows.length)throw Error('Traitement en cours : attendre sa fin avant actualisation Erplain');
+}

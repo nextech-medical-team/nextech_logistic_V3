@@ -5,12 +5,23 @@ import os from 'node:os';import path from 'node:path';
 import {documentMetadata,representativeLabel} from '../src/erplain-document-metadata.mjs';
 import {buildBcPricing} from '../src/bc-pricing.mjs';
 
-test('TEMU file origin and destination select their own manager label without silently defaulting to France',()=>{assert.equal(representativeLabel({channel:'temu',address:{country:'IT'}}),'TEMU IT');assert.equal(representativeLabel({channel:'temu',source_payload:{temuCountry:'DE'}}),'TEMU DE');assert.match(representativeLabel({channel:'temu'}),/préciser/);});
+test('all TEMU countries and missing country use the configured TEMU FR manager',async()=>{
+ const directory=await mkdtemp(path.join(os.tmpdir(),'v3-temu-manager-'));
+ try{
+  await writeFile(path.join(directory,'account-representatives.json'),JSON.stringify({sourceCompany:100174,targetCompany:100174,rows:[{label:'TEMU FR',active:true,liveId:'42'},{label:'TEMU DE',active:true,liveId:'99'}]}));
+  for(const country of ['FR','DE','IT','SK','HU','BE','ES','NL','PL','RO','CH','GB','']){
+   const o={channel:'temu',reference:'PO-TEST',address:{country},source_payload:{temuCountry:country},erp_live:{}};
+   assert.equal(representativeLabel(o),'TEMU FR');
+   assert.deepEqual(await documentMetadata(o,directory),{external_reference:'PO-TEST',account_representative:{id:'42'}});
+   assert.equal(o.address.country,country);
+  }
+ }finally{await rm(directory,{recursive:true,force:true});}
+});
 test('missing or ambiguous representative is an observation; exact mapped assignment and company guard remain',async()=>{
  const parent=path.resolve(os.tmpdir()),directory=await mkdtemp(path.join(parent,'v3-representative-'));
  try{
   for(const state of ['missing-file','missing','ambiguous','mapped','wrong-company']){
-   if(state!=='missing-file')await writeFile(path.join(directory,'account-representatives.json'),JSON.stringify({sourceCompany:state==='wrong-company'?99:100174,targetCompany:100174,rows:state==='missing'?[]:Array.from({length:state==='ambiguous'?2:1},(_,i)=>({label:'TEMU IT',active:true,liveId:String(i+1)}))}));
+   if(state!=='missing-file')await writeFile(path.join(directory,'account-representatives.json'),JSON.stringify({sourceCompany:state==='wrong-company'?99:100174,targetCompany:100174,rows:state==='missing'?[]:Array.from({length:state==='ambiguous'?2:1},(_,i)=>({label:'TEMU FR',active:true,liveId:String(i+1)}))}));
    const order={id:'a',reference:'REF',channel:'temu',source_payload:{temuCountry:'IT'},erp_live:{}};
    if(state==='wrong-company'){await assert.rejects(()=>documentMetadata(order,directory),/hors société/);continue;}
    const data=await documentMetadata(order,directory);assert.equal(data.external_reference,'REF');

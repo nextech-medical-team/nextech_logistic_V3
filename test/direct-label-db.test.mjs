@@ -4,7 +4,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {queueLabelFromBl} from '../src/direct-label.mjs';
 import {initializeCarrierJobs,createCarrierWorkers} from '../src/carrier-jobs.mjs';
 import {initializeAppSchema} from '../src/schema-startup.mjs';
-test('BL direct : SQL réel, création unique, PDF récupéré malgré fiscalité/hold',async()=>{
+for(const definitiveRefusal of [false,true])test('BL direct : SQL réel, création unique, PDF récupéré malgré fiscalité/hold; GOFO refusal='+definitiveRefusal,async()=>{
  const engine=new PGlite();await engine.waitReady;
  const wrap=e=>({exec:s=>e.exec(s),query:(s,p=[])=>e.query(s,p)});
  const db={...wrap(engine),transaction:fn=>engine.transaction(tx=>fn(wrap(tx))),recoverInterrupted:false};
@@ -13,17 +13,22 @@ test('BL direct : SQL réel, création unique, PDF récupéré malgré fiscalit�
  await initializeCarrierJobs(db);
  await db.query("INSERT INTO orders(id,channel,reference,carrier,address,erp_live,label_status,weight_kg,parcel_count) VALUES('o','amazon','SYNTHETIC','gofo',$1,$2,'simulated',1,1)",[JSON.stringify({name:'Synthetic',street:'1 rue Test',city:'Paris',postal:'75001',country:'FR'}),JSON.stringify({bl:{id:1902751,status:'ready_to_ship'},pricing:{status:'blocked'}})]);
  await db.query("INSERT INTO carrier_jobs(order_id,carrier,status,environment,attempts,error) VALUES('o','gofo','failed','production',1,'Préparation modifiée depuis la validation du BL : recontrôler')");
+ if(definitiveRefusal){
+  await db.query("UPDATE carrier_jobs SET error=$1,original_error=$1,creation_id='old-attempt',creation_started_at=now(),failure_phase='provider'",['GOFO 200301000 : City information is incorrect']);
+  await db.query("UPDATE orders SET carrier='gls'");
+ }
  await queueLabelFromBl(db,'o',{email:'synthetic'});
  await queueLabelFromBl(db,'o',{email:'synthetic'});
  let calls=0,pdfs=0;
- const workers=createCarrierWorkers(db,null,{clients:{async gofoCreate(){calls++;return {reference:'CREATED',tracking:['TRACK']};},async gofoLabel(){pdfs++;return Buffer.from('%PDF-1.4\nsynthetic').toString('base64');}}});
- await workers.run('gofo');await workers.run('gofo');
+ const workers=createCarrierWorkers(db,null,{clients:{async gofoCreate(){calls++;return {reference:'CREATED',tracking:['TRACK']};},async gofoLabel(){pdfs++;return Buffer.from('%PDF-1.4\nsynthetic').toString('base64');},async gls(){calls++;pdfs++;return {reference:'GLS',tracking:['TRACK'],documents:[Buffer.from('%PDF-1.4\nsynthetic').toString('base64')]};}}});
+ const carrier=definitiveRefusal?'gls':'gofo';await workers.run(carrier);await workers.run(carrier);
  const job=(await db.query("SELECT * FROM carrier_jobs WHERE order_id='o'")).rows[0];
  assert.equal(job.status,'ready',job.error);assert.equal(calls,1);assert.equal(pdfs,1);
  assert.equal((await db.query('SELECT * FROM carrier_documents')).rows.length,1);
  const order=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
  assert.equal(order.label_status,'production_ready');assert.equal(order.resolution_pending_resume,true);assert.equal(order.erp_live.pricing.status,'blocked');
- assert.equal((await db.query('SELECT * FROM audit')).rows.length,1);
+ assert.equal((await db.query('SELECT * FROM audit')).rows.length,definitiveRefusal?2:1);
+ if(definitiveRefusal){const proof=(await db.query("SELECT detail FROM audit WHERE action='carrier.definitive_refusal_retried'")).rows[0].detail;assert.equal(proof.previousAttempt.creation_id,'old-attempt');assert.equal(proof.previousAttempt.original_error,'GOFO 200301000 : City information is incorrect');assert.notEqual(proof.nextCreationId,'old-attempt');}
  }finally{await engine.close();}
 });
 
@@ -33,7 +38,7 @@ for(const carrier of ['gofo','gls'])test(`existing installation: ${carrier} labe
  const db={...wrap(engine),transaction:fn=>engine.transaction(tx=>fn(wrap(tx))),withLocks:async(_keys,fn)=>fn(),recoverInterrupted:false};
  try{
   await db.exec(`CREATE TABLE schema_migrations(version text PRIMARY KEY);
-   INSERT INTO schema_migrations VALUES('application-20261005-robustness-5');
+   INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); INSERT INTO schema_migrations VALUES('partial-erplain-retry-20261016-1'); INSERT INTO schema_migrations VALUES('partial-temu-label-20261016-1');
    CREATE TABLE orders(id text PRIMARY KEY,channel text,reference text,carrier text,address jsonb,source_payload jsonb DEFAULT '{}',erp_live jsonb DEFAULT '{}',label_status text,weight_kg numeric,parcel_count integer,tracking_status text,archived boolean DEFAULT false,partial_mode boolean DEFAULT false,resolution_pending_resume boolean DEFAULT false,suspension jsonb DEFAULT '{}',issue text);
    CREATE TABLE lines(id text,order_id text,source_line text,source_sku text,target_sku text,quantity numeric,target_quantity numeric);
    CREATE TABLE settings(key text,value jsonb);

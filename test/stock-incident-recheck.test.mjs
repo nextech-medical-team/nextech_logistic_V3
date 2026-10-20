@@ -56,3 +56,39 @@ test('later carrier decision preserves the pending human confirmation despite re
 test('available stock preserves raw ERP error used by existing automatic resume, while current display is reconciled',async()=>{const db=await fixture();try{const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];delete o.erp_live.bl;delete o.erp_live.stockDocument;await db.query("UPDATE orders SET erp_live=$1 WHERE id='o'",[JSON.stringify(o.erp_live)]);await db.query("UPDATE erp_live_jobs SET status='review',error=$1 WHERE order_id='o'",[error]);const b=bc();b.shipping_orders.data=[];b.line_items[0].available=20;b.line_items[0].on_hand=20;const result=await reconcile(db,{bc:b});assert.equal(result.preparationRequired,true);const raw=(await db.query("SELECT status,error FROM erp_live_jobs WHERE order_id='o'")).rows[0];assert.equal(raw.error,error);const fresh=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];assert.equal(fresh.issue,'Préparation à reprendre : stock disponible');assert.equal(projectCurrentDiagnostics({...fresh,erp_live_job:raw}).erp_live_job.error,null);assert.equal(fresh.resolution_pending_resume,true);assert.equal(fresh.label_status,'blocked');const expired=structuredClone(fresh);expired.erp_live.stockIncidentRecheck.checkedAt=new Date(Date.now()-16*60000).toISOString();assert.match(projectCurrentDiagnostics({...expired,erp_live_job:{...raw,error}}).erp_live_job.error,/contrôle expiré/);}finally{await db.close();}});
 
 test('independent source/validation holds do not preserve a false stock message and are never cleared',async()=>{const db=await fixture();try{await db.query("INSERT INTO resolution_jobs(id,order_id,action,status,error,result,created_at) VALUES('old','o','refresh','review',$1,'{}',now()-interval '2 days')",[error]);const holds={marketplacePendingCorrection:{pending:true},visibilityHold:true,erplainValidationHold:true};await db.query("UPDATE orders SET source_payload=$1 WHERE id='o'",[JSON.stringify(holds)]);await reconcile(db);const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];assert.equal(o.issue,null);assert.deepEqual(o.source_payload,holds);assert.equal(o.resolution_pending_resume,true);assert.equal(o.label_status,'blocked');assert.equal(o.simulation,true);}finally{await db.close();}});
+
+test('tracked failed stock check is retried even when old job errors are absent',async()=>{
+ const db=await fixture();try{
+  const failed=await reconcile(db,{readError:'Journal BL historique : date absente'});
+  assert.equal(failed.status,'unverified');
+  assert.equal((await db.query("SELECT error FROM erp_live_jobs WHERE order_id='o'")).rows[0].error,null);
+  const resolved=await reconcile(db);
+  assert.equal(resolved.status,'resolved');
+  const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0];
+  assert.equal(o.issue,null);assert.equal(o.label_status,'blocked');
+ }finally{await db.close();}
+});
+test('tracked stock failure never claims an unrelated current issue',async()=>{
+ const db=await fixture();try{
+  await reconcile(db,{readError:'Journal BL historique : date absente'});
+  await db.query("UPDATE orders SET issue='Adresse à vérifier' WHERE id='o'");
+  assert.equal((await reconcile(db)).notApplicable,true);
+  assert.equal((await db.query("SELECT issue FROM orders WHERE id='o'")).rows[0].issue,'Adresse à vérifier');
+ }finally{await db.close();}
+});
+test('fresh document reads supply BL dates for historical ledger verification on every page',async()=>{
+ const {readErplainDocuments}=await import('../src/erplain-document-read.mjs');
+ const {readInheritedBlLedger}=await import('../src/historical-stock-proof.mjs');
+ const b=bc();b.update_stock=true;const calls=[];
+ const api={request:async(q,v)=>{
+  calls.push(q);
+  if(q.includes('InventoryLogs'))return {InventoryLogs:{data:[],paginatorInfo:{hasMorePages:false}}};
+  const page=v.page||1;
+  const shipment={...b.shipping_orders.data[0],id:String(page+1),update_stock:true,...(/data\{id created_at/.test(q)?{created_at:'2026-10-13 12:00:00'}:{})};
+  return {Order:{...b,shipping_orders:{data:[shipment],paginatorInfo:{hasMorePages:page===1}}}};
+ }};
+ const actual=await readErplainDocuments(api,'1');
+ assert.equal(actual.shipping_orders.data.length,2);
+ for(const bl of actual.shipping_orders.data){const proof=await readInheritedBlLedger(api,bl);assert.equal(proof[0].complete,true);assert.deepEqual(proof[0].rows,[]);}
+ assert.equal(calls.filter(q=>q.includes('InventoryLogs')).length,2);
+});

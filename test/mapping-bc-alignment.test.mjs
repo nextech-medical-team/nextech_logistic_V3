@@ -24,3 +24,14 @@ test('additional stock requires complete data for the exact active variant and l
  const api={request:async()=>({Variant:{id:'2',active:true,track_inventory:true,product:{id:'p',active:true},...extra}})};await assert.rejects(assertAdditionalMappingStock(api,bc,[item]));
  }
 });
+
+test('a mapped increase smaller than the old epsilon still needs stock',async()=>{
+ const item=quantity=>({type:'normal',variant:{id:'2',sku:'B'},location:{id:'1'},quantity});let reads=0;
+ const api={request:async()=>{reads++;return {Variant:{id:'2',sku:'B',active:true,track_inventory:true,product:{active:true},stock_levels:{data:[{location:{id:'1'},on_hand:0,available:0}],paginatorInfo:{hasMorePages:false}}}};}};
+ await assert.rejects(()=>assertAdditionalMappingStock(api,{update_stock:true,line_items:[item(1)]},[item('1.0000001')]),/stock insuffisant/);
+ assert.equal(reads,1);
+});
+test('unchanged decimal quantities across repeated mapped lines need no new stock',async()=>{
+ const item=quantity=>({type:'normal',variant:{id:'2',sku:'B'},location:{id:'1'},quantity});
+ await assertAdditionalMappingStock({request:()=>assert.fail('No additional units')},{update_stock:true,line_items:[item(.1),item(.2)]},[item(.3)]);
+});

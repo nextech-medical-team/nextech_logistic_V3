@@ -16,6 +16,9 @@ REMOTE='https://github.com/nextech-medical-team/nextech_logistic_V3.git'
 GUARD='/usr/local/lib/nextech-cicd/runtime-guard.mjs'
 RUNUSER='/usr/sbin/runuser'
 BUILD_ROOT='/var/tmp'
+# Full isolated suite measured at 877s on production hardware (16 October).
+# Keep a finite 20-minute budget with headroom for normal load variation.
+ISOLATED_TEST_TIMEOUT=1200
 SERVICES=['nextech-web','nextech-worker']
 
 def run(args,**kwargs):
@@ -95,6 +98,9 @@ def deploy(commit,packet=None):
   git('merge-base','--is-ancestor',baseline['commit'],commit)
   old,new=tree(baseline['commit']),tree(commit)
   names=set(old)|set(new);current=read_current(names)
+  from plan import reconcile_overlay_sources
+  old,reconciled=reconcile_overlay_sources(old,new,current,baseline,lambda sha,name:git('show',sha+':'+name))
+  if reconciled:report['reconciledOverlays']=reconciled
   changed=plan(old,new,current,baseline['serverHashes']);report['files']=changed
   if packet is None:raise ValueError('Manifeste CI absent')
   proofs={name:base64.b64decode(value,validate=True) for name,value in packet['proofs'].items()}
@@ -115,7 +121,7 @@ def deploy(commit,packet=None):
    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:tar.extractall(candidate,filter='data')
    run(['chown','-R','nextech-build:nextech-build',workspace]);os.chmod(workspace,0o750)
    isolated={'PATH':'/usr/bin:/bin','HOME':'/var/lib/nextech-build','NODE_ENV':'test','CI':'true'}
-   for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],900),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
+   for command,timeout in [(['npm','ci','--ignore-scripts','--no-audit','--no-fund'],600),(['npm','run','check'],180),(['npm','test'],ISOLATED_TEST_TIMEOUT),(['python3','-m','unittest','discover','-s','deploy','-p','test_*.py'],60)]:
     run([RUNUSER,'-u','nextech-build','--',*command],cwd=candidate,env=isolated,timeout=timeout)
    report['checks']='PASS'
    if not changed:

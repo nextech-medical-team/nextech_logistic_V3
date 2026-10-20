@@ -48,7 +48,7 @@ function createCarriers(c,{fetchImpl,erplainApi,shopifyReader,gls:GLS,gofo:GOFO,
     const t=await token('gofo'),date=String(Date.now()),method=body?'POST':'GET',raw=body?JSON.stringify(body):undefined;
     const sign=createHmac('sha256',c.GOFO_APP_SECRET).update([...(raw?['body='+raw]:[]),'date='+date,'method='+method,'uri='+uri].join('&')).digest('base64');
     const j=await request(GOFO+uri,{method,headers:{token:t,date,sign,'route-country':'FR','Content-Type':'application/json;charset=utf-8'},body:raw},!!body,beforeCreate);
-    if(!(Number(j.code)===200&&(j.status===undefined||Number(j.status)===1))&&!(Number(j.code)===200305000&&(j.data?.cOrderNo||j.data?.waybillNo))){const e=new Error('GOFO '+String(j.code)+' : '+String(j.messageEn||j.message||j.msg||j.code).slice(0,350));e.rejected=true;e.zoneRejected=/this postal code is not currently in service|this postal code service is not available|unsupported area|postal code not exist in system postal code database/i.test(e.message);throw e;}return j;
+    if(!(Number(j.code)===200&&(j.status===undefined||Number(j.status)===1))&&!(Number(j.code)===200305000&&(j.data?.cOrderNo||j.data?.waybillNo))){const e=new Error('GOFO '+String(j.code)+' : '+String(j.messageEn||j.message||j.msg||j.code).slice(0,350));e.rejected=true;e.cityRejected=Number(j.code)===200301000&&!j.data?.cOrderNo&&!j.data?.waybillNo&&/city information is incorrect|city-to-postal code/i.test(e.message);e.zoneRejected=/this postal code is not currently in service|this postal code service is not available|unsupported area|postal code not exist in system postal code database/i.test(e.message);throw e;}return j;
   }
   const clients={
     async resolveParcelShop(o){
