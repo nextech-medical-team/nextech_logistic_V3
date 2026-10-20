@@ -165,21 +165,21 @@ export async function resumeTransientErplain(db,api){
 }
 
 export async function syncSupersededQuotaReviews(tx){
- // A current business refusal supersedes a past quota refusal. Keep the review
- // blocked and preserve the previous reason; this never retries provider work.
+ // A newer business refusal is authoritative even if recovery flags are stale.
+ // Update only this exact quota diagnostic; holds and jobs stay unchanged.
  const rows=(await tx.query(`SELECT r.id,r.error,e.error current_error,e.updated_at current_updated,to_jsonb(o) AS "order"
   FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
   WHERE r.status='review' AND r.stage='Erplain à compléter' AND e.status='review'
   AND r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée')
   AND e.error IS NOT NULL AND e.error<>'' AND e.updated_at>=r.updated_at
-  AND o.erp_live->'transientRecovery'->>'readRateLimited'='false'
-  AND o.erp_live->'transientRecovery'->>'lastError' IS NULL
-  AND NOT o.archived AND NOT o.partial_mode AND NOT o.resolution_pending_resume
+  AND NOT o.archived AND NOT o.partial_mode
   AND NOT EXISTS(SELECT 1 FROM resolution_jobs a WHERE a.order_id=o.id AND a.status IN ('queued','running','waiting'))
   AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
   ORDER BY r.updated_at LIMIT 100 FOR UPDATE OF r,o,e SKIP LOCKED`)).rows;
  for(const r of rows){
   const o=r.order;
+  const failed=o.erp_live?.transientRecovery?.lastFailureAt;
+  if(failed&&(!Number.isFinite(Date.parse(failed))||new Date(r.current_updated).getTime()<Date.parse(failed)))continue;
   if(cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||transientErpError(r.current_error)||/^(?:Accès Erplain en attente|Erplain temporairement limité|Incident temporaire Erplain|Lecture Erplain temporairement indisponible)/.test(r.current_error))continue;
   await tx.query("UPDATE resolution_jobs SET error=$2,result=coalesce(result,'{}'::jsonb)||$3::jsonb,updated_at=now() WHERE id=$1",[r.id,r.current_error,JSON.stringify({supersededQuotaError:r.error,currentErpErrorAt:r.current_updated,diagnosticAuthority:'current_erp_review',diagnosticSyncedAt:new Date().toISOString()})]);
  }
@@ -188,22 +188,33 @@ export async function syncSupersededQuotaReviews(tx){
 export async function closeTransientReviews(db){
  return db.transaction(async tx=>{
   await syncSupersededQuotaReviews(tx);
-  const rows=(await tx.query(`SELECT r.id,r.error,r.updated_at,r.result,to_jsonb(o) AS "order" FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
+  const rows=(await tx.query(`SELECT r.id,r.error,r.updated_at,r.result,e.updated_at AS completed_updated,to_jsonb(o) AS "order" FROM resolution_jobs r JOIN orders o ON o.id=r.order_id JOIN erp_live_jobs e ON e.order_id=o.id
    WHERE r.status='review' AND r.stage='Erplain à compléter' AND e.status='complete' AND e.error IS NULL
-   AND (r.error ~ '^Incident temporaire Erplain : rapprochement et reprise automatique en attente [()0-9/]+$' OR r.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR (r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée') AND o.erp_live->'transientRecovery'->>'readRateLimited'='true' AND o.erp_live->'transientRecovery'->>'lastError' ~* 'Erplain HTTP 429'))
-   AND NOT o.resolution_pending_resume AND NOT o.archived AND NOT o.partial_mode
+   AND (r.error ~ '^Incident temporaire Erplain : rapprochement et reprise automatique en attente [()0-9/]+$' OR r.error ~* 'deadlock|SQLSTATE.40001.|lock wait timeout|Erplain HTTP (429|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError' OR r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée'))
+   AND (NOT o.resolution_pending_resume OR r.error IN ('Erplain temporairement limité : vérification et reprise automatiques programmées','Accès Erplain en attente · reprise automatique programmée'))
+   AND NOT o.archived AND NOT o.partial_mode
    AND NOT EXISTS(SELECT 1 FROM resolution_jobs a WHERE a.order_id=o.id AND a.status IN ('queued','running','waiting'))
+   AND NOT EXISTS(SELECT 1 FROM correction_jobs c WHERE c.order_id=o.id AND c.status IN ('queued','applying','checking','waiting'))
    ORDER BY r.updated_at LIMIT 100 FOR UPDATE OF r,o,e SKIP LOCKED`)).rows;
   for(const r of rows){const o=r.order,s=o.erp_live||{};
-   const raw=pendingTransientRecovery(r.error)||['Erplain temporairement limité : vérification et reprise automatiques programmées',quotaWaitingMessage].includes(r.error)&&s.transientRecovery?.readRateLimited===true?s.transientRecovery?.lastError:r.error;
+   const quotaReview=['Erplain temporairement limité : vérification et reprise automatiques programmées',quotaWaitingMessage].includes(r.error);
+   const raw=pendingTransientRecovery(r.error)||quotaReview&&s.transientRecovery?.readRateLimited===true?s.transientRecovery?.lastError:r.error;
    // The current BC/BL reservation flow deliberately has no separate stock
    // removal. Its worker completion plus fresh bl_ready proof is authoritative;
    // never require a new document or provider write just to retire an old error.
    const stockComplete=!!s.stockDocument?.id&&s.stockDocument.status==='completed'&&s.stockDocument.update_stock===true;
    const bcFlowComplete=s.bc?.update_stock===true&&s.phase==='bl_ready';
+   // Quota flags are historical after a successful worker completion. Retire
+   // only the review, keeping holds, shipping state and recovery data intact.
+   const verified=new Date(s.verifiedAt).getTime(),reviewed=new Date(r.updated_at).getTime();
+   const lastFailure=s.transientRecovery?.lastFailureAt;
+   if(quotaReview&&(!Number.isFinite(verified)||!Number.isFinite(reviewed)
+    ||!Number.isFinite(new Date(r.completed_updated).getTime())||new Date(r.completed_updated).getTime()<verified
+    ||lastFailure&&(!Number.isFinite(Date.parse(lastFailure))||verified<=Date.parse(lastFailure))))continue;
+   const statuses=quotaReview?['ready_to_ship','make_the_shipment','shipped','delivered']:['ready_to_ship','make_the_shipment'];
    const resumedTemu=o.channel==='temu'&&r.result?.resume===true&&r.result?.erpOnly===true;
-   const confirmedStatus=['ready_to_ship','make_the_shipment'].includes(s.bl?.status)||resumedTemu&&bcFlowComplete&&['pending','in_preparation'].includes(s.bl?.status);
-   if(!transientErpError(raw)||cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||!s.bc?.id||!s.bl?.id||s.bc.status!=='active'||!confirmedStatus||(!stockComplete&&!bcFlowComplete)||!(new Date(s.verifiedAt).getTime()>new Date(r.updated_at).getTime()))continue;
+   const confirmedStatus=statuses.includes(s.bl?.status)||resumedTemu&&bcFlowComplete&&['pending','in_preparation'].includes(s.bl?.status);
+   if((!quotaReview&&!transientErpError(raw))||cancellationBlock(o)||o.source_payload?.marketplacePendingCorrection||!s.bc?.id||!s.bl?.id||s.bc.status!=='active'||!confirmedStatus||(!stockComplete&&!bcFlowComplete)||!(verified>reviewed))continue;
    await tx.query("UPDATE resolution_jobs SET status='complete',error=null,stage='Incident Erplain résolu',result=coalesce(result,'{}'::jsonb)||$2::jsonb,updated_at=now() WHERE id=$1",[r.id,JSON.stringify({resolvedPreviousError:r.error,reconciledAt:new Date().toISOString(),verifiedAt:s.verifiedAt,completionAuthority:bcFlowComplete?'completed_bc_bl_flow':'completed_stock_document'})]);
   }
  });
