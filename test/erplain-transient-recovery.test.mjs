@@ -45,6 +45,7 @@ test('database recovery reconciles drafts and customers using reads only',async(
   const draft={phase:'bc_created',bc:{id:'12',status:'unpublished'}};
   const response={Order:{id:'12',status:'unpublished',shipping_orders:{data:[],paginatorInfo:{hasMorePages:false}}}};
   assert.equal((await check(draft,response)).state.bc.id,'12');
+  await check(draft,response,{jobError:'Incident temporaire Erplain : rapprochement et reprise automatique en attente (0/3)'});
   await check({...draft,transientRecovery:{attempts:1,lastError:null}},response,{jobError:'BC/BL : rapprochement incomplet ou ambigu, contrôle nécessaire'});
   await check(draft,{Order:{...response.Order,status:'cancelled'}},{resumed:false,error:/rapprochement/});
   await check(draft,{Order:{...response.Order,id:'99'}},{resumed:false,error:/rapprochement/});
@@ -78,4 +79,13 @@ test('database recovery reconciles drafts and customers using reads only',async(
   await recordTransientFailure({query:async()=>({rows:[]})},o,'Erplain HTTP 429',error);
   assert.equal(canRetryCustomerCreation(o,'V3:o'),confirmed===true);
  }
+});
+
+test('legacy waiting incident without lastError is retried only within the bounded protected cycle',()=>{
+ const message='Incident temporaire Erplain : rapprochement et reprise automatique en attente (0/3)';
+ const o=order({phase:'bc_created',bc:{id:'12',status:'active'}});
+ assert.equal(retryDecision(o,message,old),true);
+ for(const attempts of [3,4,-1])assert.equal(retryDecision({...o,erp_live:{...o.erp_live,transientRecovery:{attempts}}},message,old),false);
+ for(const block of [{suspension:{active:true}},{archived:true},{partial_mode:true},{resolution_pending_resume:true},{tracking_status:'shipped'}])assert.equal(retryDecision({...o,...block},message,old),false);
+ assert.equal(retryDecision(o,'Incident temporaire Erplain persistant après 3 reprises : contrôle nécessaire',old),false);
 });

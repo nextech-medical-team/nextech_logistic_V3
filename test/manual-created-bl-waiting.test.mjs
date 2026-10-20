@@ -76,6 +76,17 @@ test('document-only refresh on a published BL completes without stock timestamps
  }
 });
 
+test('TEMU resume does not finish or reapply a hold while ERP is working or transiently refused',async()=>{
+ for(const status of ['pending','processing','review']){
+  const f=fixture({action:'resume',erpStatus:status,orderPatch:{channel:'temu'}});
+  f.erp.error=status==='review'?'Incident temporaire Erplain : rapprochement et reprise automatique en attente (0/3)':null;
+  await f.worker.run();assert.equal(f.queued,0);
+  assert.equal(f.job.status,status==='review'?'review':'waiting');
+  if(status==='review')assert.equal(f.job.stage,'Erplain à compléter');
+  assert.ok(!f.writes.some(q=>q.includes('UPDATE orders SET resolution_pending_resume=true')));
+ }
+});
+
 test('a fresh human carrier choice accepts exact historical mapping refusals before provider POST',async()=>{
  for(const error of ['Mapping modifié avant création : recontrôle requis','Mapping modifié depuis la validation du BL : recontrôle requis']){
   const f=fixture({carrier:{status:'failed',error,attempts:1,result:null,reference:null,tracking:[],creation_started_at:null}});
