@@ -5,6 +5,7 @@ import {hasCreatedBl} from './created-bl-label.mjs';
 import {regenerateProductionLabels} from './label-regeneration.mjs';
 
 import {canRetryFailedCarrier} from './carrier-attempt-proof.mjs';
+import {transientErpError,pendingTransientRecovery} from './erp-transient-policy.mjs';
 
 // Only local status reconciliation and native queueing; no remote API calls.
 
@@ -30,6 +31,15 @@ export function waitingResolutionWorker(db,{regenerate=regenerateProductionLabel
      const o=(await db.query('SELECT * FROM orders WHERE id=$1',[j.order_id])).rows[0],erp=(await db.query('SELECT * FROM erp_live_jobs WHERE order_id=$1',[j.order_id])).rows[0];
 
      if(!o||o.archived)throw Error('Commande archivée : aucune reprise automatique');
+
+     // A published TEMU BL does not mean the ERP resume has finished. Closing
+     // here would reapply the manual-label hold in the middle of that work.
+     if(o.channel==='temu'&&j.action==='resume'){
+      if(['pending','processing'].includes(erp?.status))return;
+      if(erp?.status==='review'&&(transientErpError(erp.error)||pendingTransientRecovery(erp.error))){
+       await update(j.id,'review','Erplain à compléter',{...j.result,erpOnly:true},erp.error);return;
+      }
+     }
 
      if(j.result?.pdfOnly){const c=(await db.query('SELECT status,error FROM carrier_jobs WHERE order_id=$1',[o.id])).rows[0];if(c?.status==='ready')await update(j.id,'complete','Terminé',{message:j.result.stockOverride?'Étiquette PROD créée par dérogation. Stock insuffisant : aucun BL ni mouvement de stock créé.':'PDF existant récupéré dans V3, sans nouvelle expédition.'});else if(['failed','review'].includes(c?.status))throw Error(c.error||'PDF non reçu');return;}
 
