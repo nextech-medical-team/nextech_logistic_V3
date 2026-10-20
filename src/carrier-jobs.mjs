@@ -1,3 +1,4 @@
+import {carrierLocalTransaction,claimCarrierJob} from './carrier-local-transaction.mjs';
 import {retiredLabelPreparationReview} from './post-bl-preparation-review.mjs';
 import {installCarrierAttemptProof,markCarrierCreationStarted,recordCarrierFailure} from './carrier-attempt-proof.mjs';
 import {hasCreatedBl} from './created-bl-label.mjs';
@@ -81,10 +82,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
  async function run(carrier){
   if(active.has(carrier))return;active.add(carrier);
   try{
-   const job=await db.transaction(async tx=>{
-    const {rows}=await tx.query(`SELECT * FROM carrier_jobs WHERE carrier=$1 AND ${carrierEligible} ORDER BY ${priorityOrder('carrier_jobs')} FOR UPDATE SKIP LOCKED LIMIT 1`,[carrier]);
-    if(!rows.length)return null;await tx.query(`UPDATE carrier_jobs SET status=$2,attempts=attempts+1,updated_at=now() WHERE order_id=$1`,[rows[0].order_id,rows[0].status==='pending'?'creating':'awaiting_pdf']);return rows[0];
-   });if(!job)return;
+   const job=await claimCarrierJob(db,carrier,{eligible:carrierEligible,priority:priorityOrder('carrier_jobs')});if(!job)return;
    let result=job.result,creationStarted=!!job.creation_started_at,orderChannel;
    try{
     const selectedClient=job.environment==='production'?productionClient:client;
@@ -128,7 +126,8 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
     if(!documents?.length)throw new Error('Expédition créée mais PDF non fourni. Création conservée, aucun nouvel envoi.');
     if(!result.tracking.length)throw new Error('Numéro de suivi non fourni ; création conservée pour vérification.');
     const buffers=documents.map(pdfBytes);
-    await db.transaction(async tx=>{
+    await carrierLocalTransaction(db,async tx=>{
+     await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[o.id]);
      for(let i=0;i<buffers.length;i++)await tx.query(`INSERT INTO carrier_documents VALUES($1,$2,$3) ON CONFLICT(order_id,document_index) DO NOTHING`,[o.id,i,buffers[i]]);
      await tx.query(`UPDATE carrier_jobs SET status='ready',error=null,result=null,updated_at=now() WHERE order_id=$1`,[o.id]);
      await tx.query(`UPDATE orders SET label_status=CASE WHEN resolution_pending_resume AND NOT $3 THEN label_status ELSE $2 END,issue=CASE WHEN resolution_pending_resume THEN issue ELSE null END,processing_priority_at=null WHERE id=$1`,[o.id,job.environment==='production'?'production_ready':'sandbox_ready',!!job.manual_bl_request&&job.manual_bl_request.creationId===job.creation_id]);
