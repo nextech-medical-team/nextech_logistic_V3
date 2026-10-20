@@ -13,6 +13,7 @@ import {rememberEquivalence} from './equivalence-catalog.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {assertWholeTemuPackage} from './temu-label-pdf.mjs';
+import {verifiedRefusedSubstitutionPackage,refusedSubstitutionNotice} from './temu-refused-substitution.mjs';
 import {resolveWeight} from './erplain-readonly.mjs';
 const fingerprint=v=>createHash('sha256').update(JSON.stringify(substitutionExecutionSnapshot(v))).digest('hex');
 const bcFields='id label created_at status total tax_type currency{label} update_stock line_items{id type quantity price discount discount_rule_amount ecotax tax_amount tax_codes{id tax_rates{rate}} reserved_quantity available on_hand location{id} variant{id sku active track_inventory weight_amount weight_unit product{id active}}} shipping_orders(first:100){data{id label status update_stock line_items{id type quantity location{id} variant{id sku}}} paginatorInfo{hasMorePages}}';
@@ -74,13 +75,16 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  const carrier=(await db.query("SELECT * FROM carrier_jobs WHERE order_id=$1 AND status='ready'",[o.id])).rows[0];
  const temu=(await db.query("SELECT * FROM temu_label_jobs WHERE reference=$1 AND (attempt_id IS NOT NULL OR jsonb_array_length(packages)>0)",[o.reference])).rows[0];
  if(carrier&&o.channel==='temu')throw Error('Étiquette transporteur directe sur une commande TEMU : rapprocher cette expédition');
+ let refusedTemu=false;
  if(temu){
-  if(o.channel!=='temu'||temu.status!=='complete'||temu.packages?.length!==1)throw Error('Achat TEMU en cours, incertain ou multi-colis : récupérer et vérifier le colis avant remplacement');
   const originals=o.erp_live.equivalentOriginalLines||(await db.query('SELECT * FROM lines WHERE order_id=$1',[o.id])).rows;
+  const documents=(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1',[o.reference])).rows;
+  refusedTemu=verifiedRefusedSubstitutionPackage(o,temu,originals,documents);
+  if(!refusedTemu&&(o.channel!=='temu'||temu.status!=='complete'||temu.packages?.length!==1))throw Error('Achat TEMU en cours, incertain ou multi-colis : récupérer et vérifier le colis avant remplacement');
   assertWholeTemuPackage(o,originals,temu.result,temu.packages[0]);
-  if(!(await db.query('SELECT package FROM temu_label_documents WHERE reference=$1 AND package=$2',[o.reference,temu.packages[0]])).rows.length)throw Error('Récupérer le PDF TEMU acheté avant remplacement');
+  if(!refusedTemu&&!documents.some(d=>d.package===temu.packages[0]))throw Error('Récupérer le PDF TEMU acheté avant remplacement');
  }
- const labelNotice=o.partial_mode?'Les livraisons, étiquettes et suivis existants sont conservés intégralement. Seul le reliquat du BC est modifié ; aucun achat ni réimpression automatique.':temu||carrier?'Même étiquette et même suivi conservés. Les mentions SKU et quantités de l’édition V3 sont actualisées automatiquement avec l’équivalent. Téléchargez cette édition pour la réimprimer ; aucun nouvel achat.':'Après validation du stock et du BL, l’étiquette sera créée automatiquement. Aucun clic supplémentaire ne sera nécessaire.';
+ const labelNotice=refusedTemu?refusedSubstitutionNotice:o.partial_mode?'Les livraisons, étiquettes et suivis existants sont conservés intégralement. Seul le reliquat du BC est modifié ; aucun achat ni réimpression automatique.':temu||carrier?'Même étiquette et même suivi conservés. Les mentions SKU et quantités de l’édition V3 sont actualisées automatiquement avec l’équivalent. Téléchargez cette édition pour la réimprimer ; aucun nouvel achat.':'Après validation du stock et du BL, l’étiquette sera créée automatiquement. Aucun clic supplémentaire ne sera nécessaire.';
  await stage('Lecture du BC et du produit équivalent');await api.verify();
  const {Order:bc}=await api.request(`query V3SubstitutionBC($id:ID!){Order(id:$id){${bcFields}}}`,{id:String(o.erp_live.bc.id)});
  if(String(bc?.id)!==String(o.erp_live.bc.id))throw Error('API Erplain · BC demandé non reçu');
@@ -125,11 +129,11 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
    if(current.length!==1||current[0].target_sku!==plan.recordedPermanent.target_sku||Number(current[0].source_qty)!==Number(plan.recordedPermanent.source_qty)||Number(current[0].target_qty)!==Number(plan.recordedPermanent.target_qty))throw Error('Mapping modifié après synchronisation : rapprochement requis');
   }else if(fingerprint(substitutionMappingSnapshot(mappingLines))!==fingerprint(substitutionMappingSnapshot((plan.recordedMappingBefore||[]).map(r=>({source_sku:r.source_sku,mapped_sku:r.target_sku,mapping_source_qty:r.source_qty,mapping_target_qty:r.target_qty})))))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');
  }
- const permanent=b.scope==='permanent'?(plan.localCommitted?plan.recordedPermanent:permanentEquivalentMapping(o,plan.attemptRecovery?plan.commercialBefore:bc,b,mappingLines)):null;if(plan.attemptRecovery&&((permanent===null)!==(plan.recordedPermanent===null)||['channel','source_sku','target_sku','source_qty','target_qty'].some(k=>permanent?.[k]!==plan.recordedPermanent?.[k])))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');plan.labelNotice=labelNotice;plan.previewFingerprint=fingerprint({plan:plan.previewFingerprint,scope:b.scope,permanent,shopifyStatusProof:plan.shopifyStatusProof||null,temu:temu?{status:temu.status,packages:temu.packages,result:temu.result?.packageInfoResultList}:null,carrier:carrier?{creation:carrier.creation_id,reference:carrier.reference,tracking:carrier.tracking}:null});if(!apply)return plan;
+ const permanent=b.scope==='permanent'?(plan.localCommitted?plan.recordedPermanent:permanentEquivalentMapping(o,plan.attemptRecovery?plan.commercialBefore:bc,b,mappingLines)):null;if(plan.attemptRecovery&&((permanent===null)!==(plan.recordedPermanent===null)||['channel','source_sku','target_sku','source_qty','target_qty'].some(k=>permanent?.[k]!==plan.recordedPermanent?.[k])))throw Error('Mapping modifié depuis le remplacement : rapprochement requis');plan.labelNotice=labelNotice;plan.temuSubstitutionState=temu?{status:temu.status,packages:temu.packages,result:temu.result?.packageInfoResultList}:null;plan.previewFingerprint=fingerprint({plan:plan.previewFingerprint,scope:b.scope,permanent,shopifyStatusProof:plan.shopifyStatusProof||null,temu:temu?{status:temu.status,packages:temu.packages,result:temu.result?.packageInfoResultList}:null,carrier:carrier?{creation:carrier.creation_id,reference:carrier.reference,tracking:carrier.tracking}:null});if(!apply)return plan;
  if(plan.previewFingerprint!==b.previewFingerprint){
   const saved=(await db.query("SELECT result,payload FROM resolution_jobs WHERE order_id=$1 AND action='equivalent-preview' AND status='complete' AND result->>'previewFingerprint'=$2 ORDER BY created_at DESC LIMIT 1",[o.id,b.previewFingerprint])).rows[0],prior=saved?.result;
   const operation=p=>({bc:substitutionBcSnapshot(p.commercialBefore),items:p.items,expected:p.expected,bcId:p.bcId,originalSku:p.originalSku,replacementSku:p.replacementSku,replaceQuantity:p.replaceQuantity,replacementQuantity:p.replacementQuantity,weightKg:p.weightKg});
-  if(b.scope!=='order'||saved?.payload?.scope!==b.scope||prior?.labelNotice!==plan.labelNotice||!prior||fingerprint(operation(prior))!==fingerprint(operation(plan)))throw Error('BC ou produit modifié depuis la vérification : contrôler de nouveau');
+  if((temu&&fingerprint(prior?.temuSubstitutionState??null)!==fingerprint(plan.temuSubstitutionState))||b.scope!=='order'||saved?.payload?.scope!==b.scope||prior?.labelNotice!==plan.labelNotice||!prior||fingerprint(operation(prior))!==fingerprint(operation(plan)))throw Error('BC ou produit modifié depuis la vérification : contrôler de nouveau');
  }
  if(plan.localCommitted){
   const attempt=await startSubstitutionAttempt(db,o,b,plan,permanent,mappingLines);
@@ -161,7 +165,8 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
 
  if(updated.update_stock===true)historicalAfter=await readHistoricalStock(api,updated,{additionalVariants:plan.commercialBefore.line_items.filter(l=>l.type==='normal').map(l=>l.variant.id)});
  let weight=0;for(const l of shippingProductLines(updated.line_items))weight+=resolveWeight([l.variant],l.variant.sku).weightKg*Number(l.quantity);
- const completionResult={importDeferred:deferResume,temuLabelPreserved:!!temu,regenerateExisting:false,erpOnly:true,preservedLabels,labelNotice,message:deferResume?'Remplacement enregistré. Préparation suspendue jusqu’aux autres lignes sélectionnées de cet import.':(plan.reconcileOnly?'BC déjà modifié : V3 synchronisé sans nouvelle écriture dans Erplain. ':'')+labelNotice+' Équivalent enregistré dans le BC Erplain LIVE et dans cette commande. Poids recalculé ; préparation remise en file pour contrôle du stock et du BL. '+(permanent?'Le mapping permanent est mis à jour pour les prochaines commandes de ce gestionnaire.':'Le mapping partagé est conservé.')};
+ const completionResult={importDeferred:deferResume,temuLabelPreserved:!!temu&&!refusedTemu,temuLabelRefused:refusedTemu,regenerateExisting:false,erpOnly:true,preservedLabels,labelNotice,message:deferResume?'Remplacement enregistré. Préparation suspendue jusqu’aux autres lignes sélectionnées de cet import.':(plan.reconcileOnly?'BC déjà modifié : V3 synchronisé sans nouvelle écriture dans Erplain. ':'')+labelNotice+' Équivalent enregistré dans le BC Erplain LIVE et dans cette commande. Poids recalculé ; préparation remise en file pour contrôle du stock et du BL. '+(permanent?'Le mapping permanent est mis à jour pour les prochaines commandes de ce gestionnaire.':'Le mapping partagé est conservé.')};
+ if(refusedTemu)completionResult.message=refusedSubstitutionNotice+' Remplacement enregistré dans le BC Erplain ; poids recalculé. Préparation suspendue jusqu’au rapprochement du colis TEMU.';
  await db.transaction(async tx=>{
   if(plan.shopifyStatusProof){
    const pending=o.source_payload.marketplacePendingCorrection;
@@ -192,6 +197,10 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   await tx.query("INSERT INTO erp_live_jobs(order_id,status) VALUES($1,$2) ON CONFLICT(order_id) DO UPDATE SET status=excluded.status,error=null,updated_at=now()",[o.id,plan.partialProof?'partial':'pending']);
   await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','order.product_substituted',$1)",[JSON.stringify({orderId:o.id,originalSku:plan.originalSku,replacementSku:plan.replacementSku,replaceQuantity:plan.replaceQuantity,replacementQuantity:plan.replacementQuantity})]);
   if(attempt)await finishSubstitutionAttempt(tx,o.id,b.requestId,attempt,completionResult);
+  if(refusedTemu){
+   await tx.query('UPDATE orders SET resolution_pending_resume=true,issue=$2 WHERE id=$1',[o.id,refusedSubstitutionNotice]);
+   await tx.query("UPDATE erp_live_jobs SET status='review',error=$2 WHERE order_id=$1",[o.id,refusedSubstitutionNotice]);
+  }
   if(deferResume){
    await tx.query("UPDATE orders SET resolution_pending_resume=true,issue='Import des équivalences : autres lignes sélectionnées en attente' WHERE id=$1",[o.id]);
    await tx.query("UPDATE erp_live_jobs SET status='review',error='Import des équivalences : autres lignes sélectionnées en attente' WHERE order_id=$1",[o.id]);

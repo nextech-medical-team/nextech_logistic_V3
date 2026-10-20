@@ -233,7 +233,7 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
     if(deferResume&&(o.partial_mode||o.erp_live?.bc?.update_stock===true))throw Error('Plusieurs remplacements sur une livraison partielle ou un BC historique : rapprochement requis avant reprise');
    }
    const result=await substitution(db,api,o,b,{apply:j.action==='replace-equivalent',stage,directory,deferResume,preserveBcAmounts:!!b.importRow});
-   if(j.action==='equivalent-preview'||result.partialRemainder||result.importDeferred)return result;
+   if(j.action==='equivalent-preview'||result.partialRemainder||result.importDeferred||result.temuLabelRefused)return result;
    await update(j.id,'waiting','Équivalent enregistré · contrôle stock et BL',{...result,equivalent:true});return null;
   }
   if(j.action==='manual-temu-pricing'){await stage('Enregistrement des prix et quantités');const result=await saveManualPricing(db,o.id,b,j.id);return {...result,manualPricing:true,erpOnly:true,checks:await recheckOrders(db,[o.id])};}

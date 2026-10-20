@@ -8,6 +8,21 @@ const lines=[{source_line:'item',source_sku:'SKU',quantity:20}];
 const job={status:'complete',packages:['PK-1'],result:{source:'temu_direct',packageInfoResultList:[{packageSn:'PK-1',orderSendInfoList:[{parentOrderSn:'PO-1-2',orderSn:'item',quantity:20}]}]}};
 const documents=[{package:'PK-1',bytes:12}];
 
+const refused={...job,status:'shipment_error',error:'Address refused',result:{...job.result,observedAt:'2026-10-20T11:00:00Z',packageInfoResultList:[{...job.result.packageInfoResultList[0],shippingLabelStatus:2,failReasonText:'The shipping address contains non-English characters.',trackingNumber:''}]}};
+
+test('confirmed address refusal permits ERP review without claiming a printable label',()=>{
+ assert.equal(verifiedSubstitutionPackage(order,refused,lines,[]),true);
+ assert.equal(verifiedSubstitutionPackage(order,refused,lines,documents),false);
+ for(const patch of [{trackingNumber:'TRACK'},{shipmentConfirmed:true},{shippingLabelStatus:1},{failReasonText:'Unknown failure'},{subPackageSnList:['PK-2']},{shippingInfoList:[{trackingNumber:'TRACK'}]},{orderSendInfoList:[{parentOrderSn:'OTHER',orderSn:'item',quantity:20}]}]){
+  const changed=structuredClone(refused);Object.assign(changed.result.packageInfoResultList[0],patch);
+  assert.equal(verifiedSubstitutionPackage(order,changed,lines,[]),false);
+ }
+ for(const patch of [{observedAt:null},{deliveryStatuses:[{code:'shipped'}]},{packageInfoResultList:[]}])assert.equal(verifiedSubstitutionPackage(order,{...refused,result:{...refused.result,...patch}},lines,[]),false);
+ assert.equal(verifiedSubstitutionPackage(order,refused,[{...lines[0],quantity:19}],[]),false);
+ for(const status of ['purchasing','uncertain','pending'])assert.equal(verifiedSubstitutionPackage(order,{...refused,status},lines,[]),false);
+ for(const patch of [{archived:true},{partial_mode:true},{tracking_status:'shipped'},{suspension:{active:true}},{source_payload:{externalLabel:{active:true}}}])assert.equal(verifiedSubstitutionPackage({...order,...patch},refused,lines,[]),false);
+});
+
 test('only a verified whole single package with its PDF permits retry',()=>{
  assert.equal(verifiedSubstitutionPackage(order,job,lines,documents),true);
  for(const status of ['pending','purchasing','uncertain','document_unavailable','shipment_error'])assert.equal(verifiedSubstitutionPackage(order,{...job,status},lines,documents),false);
@@ -18,7 +33,7 @@ test('only a verified whole single package with its PDF permits retry',()=>{
  for(const patch of [{archived:true},{partial_mode:true},{suspension:{active:true}},{tracking_status:'shipped'},{label_status:'cancelled'},{source_payload:{marketplacePendingCorrection:{}}},{erp_live:{bc:{id:'10'},bl:{id:'20'}}}])assert.equal(verifiedSubstitutionPackage({...order,...patch},job,lines,documents),false);
 });
 
-test('recovery verifies a pre-write failure once, preserves quantities and never replays a confirmation',async()=>{
+for(const recovered of [job,refused])test('recovery verifies once without replaying confirmation: '+recovered.status,async()=>{
  const pg=new PGlite();await pg.waitReady;
  const wrap=e=>({query:(...args)=>e.query(...args)}),db={...wrap(pg),transaction:f=>pg.transaction(tx=>f(wrap(tx)))};
  try{
@@ -30,9 +45,9 @@ test('recovery verifies a pre-write failure once, preserves quantities and never
    CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE erp_live_jobs(order_id text,status text);CREATE TABLE carrier_jobs(order_id text);
    CREATE TABLE audit(user_email text,action text,detail jsonb);`);
   await db.query('INSERT INTO orders VALUES($1,$2,$3,false,$4,$5,$6)',[order.id,order.reference,order.channel,JSON.stringify(order.erp_live),'{}',order.tracking_status]);
-  await db.query('INSERT INTO temu_label_jobs VALUES($1,$2,$3,$4,null)',[order.reference,job.status,JSON.stringify(job.packages),JSON.stringify(job.result)]);
+  await db.query('INSERT INTO temu_label_jobs VALUES($1,$2,$3,$4,null)',[order.reference,recovered.status,JSON.stringify(recovered.packages),JSON.stringify(recovered.result)]);
   await db.query("INSERT INTO lines VALUES('o','item','SKU',20)");
-  await db.query('INSERT INTO temu_label_documents VALUES($1,$2,$3)',[order.reference,'PK-1',Buffer.from('existing PDF')]);
+  if(recovered.status==='complete')await db.query('INSERT INTO temu_label_documents VALUES($1,$2,$3)',[order.reference,'PK-1',Buffer.from('existing PDF')]);
   const payload={id:'o',sku:'SKU',replacementSku:'OTHER',replaceQuantity:20,replacementQuantity:40,scope:'order',confirmEquivalent:true,previewFingerprint:'a'.repeat(64)};
   await db.query("INSERT INTO resolution_jobs(id,order_id,action,status,payload,error) VALUES('r','o','replace-equivalent','review',$1,$2)",[JSON.stringify(payload),temuSubstitutionRecoveryError]);
   const before={};for(const table of ['orders','lines','temu_label_jobs','temu_label_documents'])before[table]=(await db.query('SELECT * FROM '+table)).rows;
