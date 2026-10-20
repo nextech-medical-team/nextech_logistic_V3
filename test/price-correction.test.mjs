@@ -11,13 +11,19 @@ test('rejects closed, invoiced, paid, shipped, discounted and incompatible docum
  for(const patch of [{status:'closed'},{invoices_count:1},{paid_amount:1},{shipping_orders:{data:[{id:'bl'}],paginatorInfo:{hasMorePages:false}}},{currency:{label:'USD'}},{total:0}])assert.throws(()=>correctionInput({...document(),...patch},money(60)));
  const bc=document();bc.line_items[0].discount=5;assert.throws(()=>correctionInput(bc,money(60)));
 });
-function setup({changed=false,lost=false,mismatch=false,uncertain=false}={}){
+function setup({changed=false,lost=false,mismatch=false,uncertain=false,duringCheck,duringVerify,betweenTransactions,busy=false,duringMutation}={}){
  const order={id:'o',reference:'#1',channel:'shopify',address:{country:'FR'},erp_live:{bc:{id:'bc'},...(uncertain?{priceCorrection:{status:'uncertain'}}:{})}};
- const writes=[];let mutations=0;
- const db={async query(sql,args){writes.push({sql,args});return {rows:sql.startsWith('SELECT * FROM orders')?[order]:[]};}};
- const api={async verify(){},async request(query){if(query.startsWith('mutation')){mutations++;if(lost)throw Error('timeout');return {UpdateOrder:{id:'bc'}};}return {Order:{...document(),total:mutations&&!mismatch?60:120}};}};
- const verification={async check(){return {id:'o',bcId:'bc',status:'different',bc:money(120),source:money(changed?70:60)};}};
- return {correct:priceCorrection(db,null,verification,{api}),writes,mutations:()=>mutations};
+ const writes=[];let mutations=0,transactions=0,locked=false;
+ const db={async query(sql,args){writes.push({sql,args});
+  if(sql.startsWith('SELECT * FROM orders'))return {rows:[structuredClone(order)]};
+  if(sql.startsWith("SELECT 'Erplain'"))return {rows:busy?[{kind:'Erplain'}]:[]};
+  if(sql.startsWith("UPDATE orders SET erp_live=jsonb_set(erp_live,'{priceCorrection}'"))order.erp_live.priceCorrection=JSON.parse(args[1]);
+  if(sql.startsWith('UPDATE orders SET erp_live=jsonb_set(jsonb_set')){order.erp_live.bc=JSON.parse(args[1]);order.erp_live.priceCorrection=JSON.parse(args[2]);}
+  return {rows:[]};
+ },async transaction(fn){transactions++;if(transactions===2)betweenTransactions?.(order);const before=structuredClone(order);locked=true;try{return await fn(db);}catch(error){Object.assign(order,before);throw error;}finally{locked=false;}}};
+ const api={async verify(){duringVerify?.(order);},async request(query){if(query.startsWith('mutation')){assert.equal(locked,true);assert.equal(order.erp_live.priceCorrection.status,'uncertain');mutations++;duringMutation?.({locked,order});if(lost)throw Error('timeout');return {UpdateOrder:{id:'bc'}};}return {Order:{...document(),total:mutations&&!mismatch?60:120}};}};
+ const verification={async check(){duringCheck?.(order);return {id:'o',bcId:'bc',status:'different',bc:money(120),source:money(changed?70:60)};}};
+ return {correct:priceCorrection(db,null,verification,{api}),writes,order,mutations:()=>mutations};
 }
 const input={id:'o',bcId:'bc',bc:money(120),source:money(60)},user={email:'manager@example.test'};
 test('reads back Erplain and saves confirmed total, including a lost mutation response',async()=>{
@@ -28,4 +34,18 @@ test('rejects stale platform totals and uncertain previous attempts without muta
 });
 test('unconfirmed correction retains uncertain marker and never records success',async()=>{
  const s=setup({mismatch:true});await assert.rejects(s.correct(input,user),/non confirmée/);assert.equal(s.mutations(),1);assert.ok(s.writes.some(w=>w.args?.some(a=>typeof a==='string'&&a.includes('"status":"uncertain"'))));assert.ok(!s.writes.some(w=>w.args?.some(a=>typeof a==='string'&&a.includes('"status":"verified"'))));
+});
+for(const timing of ['duringCheck','duringVerify','betweenTransactions']){
+ for(const [name,change] of Object.entries({suspension:o=>o.suspension={active:true,note:'hold'},bl:o=>o.erp_live.bl={id:'bl'},partial:o=>o.partial_mode=true,bc:o=>o.erp_live.bc={id:'other'},source:o=>o.reference='#other',archived:o=>o.archived=true})){
+  test(`rejects ${name} at ${timing} before any supplier mutation`,async()=>{
+   const s=setup({[timing]:change});await assert.rejects(s.correct(input,user));assert.equal(s.mutations(),0);
+  });
+ }
+}
+test('refuses already claimed ERP work before marking or changing the price',async()=>{
+ const s=setup({busy:true});await assert.rejects(s.correct(input,user),/traitement en cours/);assert.equal(s.mutations(),0);assert.equal(s.order.erp_live.priceCorrection,undefined);
+});
+test('durable uncertainty survives rollback and prevents a second supplier mutation',async()=>{
+ const s=setup({mismatch:true});await assert.rejects(s.correct(input,user));assert.equal(s.order.erp_live.priceCorrection.status,'uncertain');
+ await assert.rejects(s.correct(input,user),/incertaine/);assert.equal(s.mutations(),1);
 });

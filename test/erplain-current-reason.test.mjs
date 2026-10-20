@@ -10,8 +10,9 @@ test('only a newer confirmed business refusal supersedes quota; no business data
  CREATE TABLE resolution_jobs(id text PRIMARY KEY,order_id text,status text,stage text,error text,updated_at timestamptz,result jsonb);
  CREATE TABLE correction_jobs(order_id text,status text);`);
  const old='Erplain temporairement limité : vérification et reprise automatiques programmées',reason='BC · Quantités réservées non confirmées · SKU TEST : commandées 50, réservées 0, expédiées 0';
- for(const id of ['current','older','quota','unknown','transient','generic','blank','suspended','cancelled','partial','held','archived','resolution','correction','stage','error','pending','source']){
+ for(const id of ['current','older','quota','unknown','transient','generic','blank','suspended','cancelled','partial','held','archived','resolution','correction','stage','error','pending','source','newer-failure','invalid-failure']){
  const recovery={readRateLimited:false,lastError:null};if(id==='quota')recovery.readRateLimited=true;if(id==='unknown')delete recovery.readRateLimited;
+ if(id==='newer-failure')recovery.lastFailureAt='2026-10-15T04:00:00Z';if(id==='invalid-failure')recovery.lastFailureAt='invalid';
  await db.query('INSERT INTO orders(id,erp_live,suspension,label_status,partial_mode,resolution_pending_resume,archived,source_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,JSON.stringify({phase:'bc_created',bc:{id:1},transientRecovery:recovery}),JSON.stringify(id==='suspended'?{active:true}:{}),id==='cancelled'?'cancelled':'pending',id==='partial',id==='held',id==='archived',JSON.stringify(id==='source'?{marketplacePendingCorrection:{active:true}}:{})]);
  await db.query('INSERT INTO erp_live_jobs VALUES($1,$2,$3,$4)',[id,id==='pending'?'pending':'review',id==='transient'?'Erplain HTTP 503':id==='generic'?'Incident temporaire Erplain : attente':id==='blank'?'':reason,id==='older'?'2026-10-15T01:00:00Z':'2026-10-15T03:00:00Z']);
  await db.query("INSERT INTO resolution_jobs VALUES($1,$1,'review',$2,$3,'2026-10-15T02:00:00Z',$4)",[id,id==='stage'?'Autre contrôle':'Erplain à compléter',id==='error'?'Stock insuffisant':old,JSON.stringify({preserved:true})]);
@@ -19,8 +20,9 @@ test('only a newer confirmed business refusal supersedes quota; no business data
  await db.exec("INSERT INTO resolution_jobs VALUES('active','resolution','queued','Attente',null,now(),null);INSERT INTO correction_jobs VALUES('correction','checking')");
  const before=(await db.query('SELECT * FROM orders ORDER BY id')).rows,erp=(await db.query('SELECT * FROM erp_live_jobs ORDER BY order_id')).rows;
  await db.transaction(tx=>syncSupersededQuotaReviews(tx));
- const rows=(await db.query('SELECT * FROM resolution_jobs ORDER BY id')).rows;assert.deepEqual(rows.filter(r=>r.result?.diagnosticAuthority).map(r=>r.id),['current']);
+ const rows=(await db.query('SELECT * FROM resolution_jobs ORDER BY id')).rows;assert.deepEqual(rows.filter(r=>r.result?.diagnosticAuthority).map(r=>r.id),['current','held','quota','unknown']);
  const current=rows.find(r=>r.id==='current');assert.equal(current.status,'review');assert.equal(current.error,reason);assert.equal(current.result.supersededQuotaError,old);assert.equal(current.result.preserved,true);
+ for(const id of ['held','quota','unknown']){const r=rows.find(r=>r.id===id);assert.equal(r.status,'review');assert.equal(r.error,reason);assert.equal(r.result.supersededQuotaError,old);}
  assert.deepEqual((await db.query('SELECT * FROM orders ORDER BY id')).rows,before);assert.deepEqual((await db.query('SELECT * FROM erp_live_jobs ORDER BY order_id')).rows,erp);
  await db.transaction(tx=>syncSupersededQuotaReviews(tx));assert.deepEqual((await db.query('SELECT * FROM resolution_jobs ORDER BY id')).rows,rows);
  }finally{await db.close();}

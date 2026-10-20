@@ -47,7 +47,7 @@ test('pre-BL stock guard rejects an empty BC, shipping-only BC and missing produ
  for(const lines of [[],[{type:'shipping_cost',quantity:1}],[{type:'normal',quantity:2}],[{quantity:1,variant:{id:1,track_inventory:false}},{type:'normal',quantity:2}]])assert.throws(()=>assertFullOrderStock(lines),/sans produit|identité produit/);
 });
 test('a real decimal shortage is never waived by an epsilon; repeated fractional lines do not create a false shortage',()=>{
- const line={quantity:1,available:'0.999999',on_hand:'0.999999',reserved_quantity:0,location:{id:1},variant:{id:1,sku:'A'}};
+ const line={quantity:1,available:'0.999999',on_hand:'0.999999',reserved_quantity:0,location:{id:1},variant:{id:1,sku:'A',track_inventory:true}};
  assert.throws(()=>assertFullOrderStock([line]),/manque 0.000001/);
  assert.throws(()=>assertFullOrderStock([{...line,quantity:'0.000001',available:0,on_hand:0}]),/stock insuffisant/);
  assert.doesNotThrow(()=>assertFullOrderStock([{...line,quantity:0.1,available:0.3,on_hand:0.3},{...line,quantity:0.2,available:0.3,on_hand:0.3}]));
@@ -142,4 +142,8 @@ test('new worker releases only interrupted read leases and leaves operational jo
  const watches=(await db.query('SELECT order_id,outcome,next_at<=now() due FROM stock_resume_watch ORDER BY order_id')).rows;
  assert.equal(watches[0].due,true);assert.equal(watches[1].due,false);assert.equal(watches[0].outcome,'waiting');
  assert.deepEqual((await db.query('SELECT * FROM orders ORDER BY id')).rows,before);assert.equal((await db.query('SELECT * FROM resolution_jobs')).rows.length,0);
+});
+
+test('missing-product discovery shares only concurrent identical reads, never a later guard',async()=>{
+ const config={url:'https://api.erplain.app/graphql',companyId:100174,apiKey:'fixture-only'},fetcher=()=>{};let calls=0,release;const query='query V3MissingProductLookup { Variants { data { id } } }';const load=async()=>{calls++;await new Promise(r=>release=r);return {Variants:{data:[]}};};const a=sharedErplainReference(config,query,{},fetcher,load),b=sharedErplainReference(config,query,{},fetcher,load);await new Promise(r=>setImmediate(r));assert.equal(calls,1);release();await Promise.all([a,b]);await sharedErplainReference(config,query,{},fetcher,async()=>{calls++;return {};});assert.equal(calls,2);
 });

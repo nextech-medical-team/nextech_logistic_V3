@@ -10,8 +10,8 @@ import {currentMappingLine} from '../src/current-mapping-line.mjs';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
-for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-drift','legacy-queued-price-drift','shared-stock-drift','legacy-shared-stock-drift','replacement-stock-lost'])test('moteur réel : '+scenario,async()=>{
- const stockReview=scenario==='stock-review',moneyDrift=scenario==='lost-response-price-drift',legacy=scenario==='legacy-queued-price-drift',preserveBcAmounts=scenario==='bc-amounts'||moneyDrift||legacy;
+for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-drift','legacy-queued-price-drift','single-action','single-action-lost-response','shared-stock-drift','legacy-shared-stock-drift','replacement-stock-lost'])test('moteur réel : '+scenario,async()=>{
+ const stockReview=scenario==='stock-review',moneyDrift=scenario==='lost-response-price-drift'||scenario==='single-action-lost-response',legacy=scenario==='legacy-queued-price-drift',preserveBcAmounts=scenario==='bc-amounts'||moneyDrift||legacy;
  const pg=new PGlite();await pg.waitReady;
  try{
  await pg.exec(`
@@ -48,8 +48,8 @@ for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-
  for(const l of bc.line_items)await db.query("INSERT INTO lines VALUES($1,'o',$1,$2,$3,$2,$3,'{}')",[l.id,l.variant.sku,l.quantity]);
  async function replace(sku,replacementSku,quantity,deferResume,replacementQuantity=quantity){
   const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],b={id:'o',requestId:randomUUID(),sku,replacementSku,replaceQuantity:quantity,replacementQuantity,scope:'order'};
-  const preview=await substitution(db,api,o,b,{preserveBcAmounts});
-  Object.assign(b,{confirmEquivalent:true,previewFingerprint:preview.previewFingerprint});
+  const preview=scenario.startsWith('single-action')?null:await substitution(db,api,o,b,{preserveBcAmounts});
+  Object.assign(b,scenario.startsWith('single-action')?{confirmEquivalent:true,verifyAndApply:true}:{confirmEquivalent:true,previewFingerprint:preview.previewFingerprint});
   if(scenario.includes('shared-stock-drift')){
    // Another order restores the shared source stock between preview and worker.
    if(scenario==='legacy-shared-stock-drift'){
@@ -79,6 +79,12 @@ for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-
    b.previewFingerprint=recovery.previewFingerprint;
    b.requestId=randomUUID();
    await db.query("INSERT INTO resolution_jobs(id,order_id,request_id,action,payload,status) VALUES($1,'o',$1,'replace-equivalent',$2,'running')",[b.requestId,JSON.stringify(b)]);
+  }
+  if(scenario==='single-action'&&writes===0){
+   variants.B.stock_levels.data[0].available=0;
+   await assert.rejects(substitution(db,api,o,b,{apply:true,deferResume,preserveBcAmounts}),/stock insuffisant/i);
+   assert.equal(writes,0,'no BC mutation when current replacement stock is insufficient');
+   variants.B.stock_levels.data[0].available=100;
   }
   return substitution(db,api,o,b,{apply:true,deferResume,preserveBcAmounts});
  }

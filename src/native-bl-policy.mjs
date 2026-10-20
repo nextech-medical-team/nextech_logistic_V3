@@ -18,7 +18,7 @@ export function assertNativeBcSnapshot(o,bc,{beforeBlPublication=false}={}){
  if(String(bc?.id)!==id||bc.status!=='active'||bc.update_stock!==true)throw Error('Cycle BL natif : BC actif non confirmé');
  if(!Array.isArray(connection?.data)||connection.paginatorInfo?.hasMorePages!==false)throw Error('Cycle BL natif : recherche des BL incomplète');
  if(connection.data.some(x=>!x?.id||String(x.id)!==String(blId)))throw Error('Cycle BL natif : autre BL existant, rapprochement requis');
- if(beforeBlPublication&&!blId)assertFullOrderStock(bc.line_items);
+ if(beforeBlPublication&&(!blId||o.erp_live.bl?.status==='unpublished'))assertFullOrderStock(bc.line_items);
  return bc;
 }
 export async function readNativeBlCycle(api,o,{beforeBlPublication=false}={}){
@@ -32,6 +32,7 @@ export async function readNativeBlCycle(api,o,{beforeBlPublication=false}={}){
   if(String(bl?.id)!==String(blId))throw Error('Brouillon BL introuvable dans Erplain : reprendre depuis le BC après rapprochement');
   if(bl.update_stock!==true||!['unpublished','pending','make_the_shipment','in_preparation','ready_to_ship'].includes(bl.status))throw Error('Cycle BL natif : statut ou politique du BL incompatible');
   if(bl.orders?.paginatorInfo?.hasMorePages!==false||bl.orders?.data?.length!==1||String(bl.orders.data[0].id)!==id)throw Error('Cycle BL natif : rattachement du BL non confirmé');
+  if(beforeBlPublication&&bl.status==='unpublished')assertFullOrderStock(bc.line_items);
  }
  // A real shortage still waits for reception. No quantity/reservation equation
  // and no historical debit comparison; once a BL exists this is not a label gate.

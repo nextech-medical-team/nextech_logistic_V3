@@ -151,3 +151,24 @@ test('apply requires a valid order and operational role',async()=>{
  const service=manualPlatformCancellation({query:async()=>({rows:[]})},'unused',{});
  await assert.rejects(()=>service.apply({id:'archived'},user),/inaccessible/);
 });
+
+test('shop clients expire after five minutes without caching order status',async t=>{
+ const order={id:'expiry',reference:'REF',channel:'temu',source_payload:{mallId:'42'}};
+ let connections=0,reads=0,now=1000;t.mock.method(Date,'now',()=>now);
+ const service=manualPlatformCancellation({query:async sql=>({rows:sql.startsWith('SELECT *')?[order]:[]})},'unused',{}, {connect:async()=>{connections++;return {clients:new Map([['42',{read:async()=>{reads++;return {parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:2}};}}]])};}});
+ await service.next({},user);now+=299999;await service.next({},user);assert.equal(connections,1);
+ now++;await service.next({},user);assert.equal(connections,2);assert.equal(reads,3);
+});
+test('a newly configured mall refreshes cached clients immediately',async()=>{
+ const order={id:'newmall',reference:'REF',channel:'temu',source_payload:{mallId:'42'}};let connections=0;
+ const api={read:async()=>({parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:2}})};
+ const service=manualPlatformCancellation({query:async sql=>({rows:sql.startsWith('SELECT *')?[order]:[]})},'unused',{}, {connect:async()=>({clients:new Map(++connections===1?[['42',api]]:[['42',api],['43',api]])})});
+ assert.equal((await service.next({},user)).result.status,'unchanged');order.source_payload.mallId='43';assert.equal((await service.next({},user)).result.status,'unchanged');assert.equal(connections,2);
+});
+test('applying cancellation still waits for the stock mutation lock',async()=>{
+ const f=fixture();let release,entered,done=false;const held=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+ const stock=withShipmentLock(async()=>{entered();await gate;},['stock-mutations']);await held;
+ const pending=f.service.apply({id:'a'},user).then(r=>{done=true;return r;});
+ try{await new Promise(resolve=>setTimeout(resolve,30));assert.equal(done,false);assert.ok(!f.calls.includes('suspend'));assert.ok(!f.calls.includes('cancel'));}finally{release();await stock;}
+ assert.equal((await pending).result.applied,true);
+});

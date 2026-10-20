@@ -15,6 +15,14 @@ function text(n,places){
  const digits=n.toString().padStart(places+1,'0');
  return sign+(digits.slice(0,-places)+'.'+digits.slice(-places)).replace(/\.?0+$/,'');
 }
+export function exactQuantitySum(values){
+ const parsed=values.map(decimal),places=Math.max(0,...parsed.map(x=>x.places));
+ return text(parsed.reduce((total,x)=>total+x.n*10n**BigInt(places-x.places),0n),places);
+}
+export function exactQuantityDifference(left,right){
+ const a=decimal(left),b=decimal(right),places=Math.max(a.places,b.places);
+ return text(a.n*10n**BigInt(places-a.places)-b.n*10n**BigInt(places-b.places),places);
+}
 export function exactStockAvailability(rows){
  const parsed=rows.map(r=>[r.quantity,r.reserved_quantity,r.available,r.on_hand].map(decimal)),places=Math.max(0,...parsed.flat().map(x=>x.places));
  const values=parsed.map(r=>r.map(x=>x.n*10n**BigInt(places-x.places)));

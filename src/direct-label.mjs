@@ -20,14 +20,15 @@ export async function queueLabelFromBl(db,id,user){
   assertBlLabelRequest(o);
   const job=(await tx.query('SELECT * FROM carrier_jobs WHERE order_id=$1 FOR UPDATE',[id])).rows[0];
   if(job&&['ready','pending','creating','awaiting_pdf'].includes(job.status))return {id,status:job.status,existing:true};
-  if(job&&!await canRetryFailedCarrier(tx,job,{manualRequest:true}))throw Error('Création existante ou incertaine : rapprocher son résultat');
+  if(job&&!await canRetryFailedCarrier(tx,job,{manualRequest:true,channel:o.channel}))throw Error('Création existante ou incertaine : rapprocher son résultat');
   for(const table of ['carrier_documents','extra_parcels']){
    if((await tx.query(`SELECT 1 FROM ${table} WHERE order_id=$1 LIMIT 1`,[id])).rows.length)throw Error('Étiquette ou colis existant à conserver');
   }
-  if(await hasUncertainCarrierHistory(tx,id,{manualRequest:true}))throw Error('Étiquette ou création incertaine dans l’historique : rapprocher son résultat');
+  if(await hasUncertainCarrierHistory(tx,id,{manualRequest:true,channel:o.channel}))throw Error('Étiquette ou création incertaine dans l’historique : rapprocher son résultat');
   if((await tx.query("SELECT 1 FROM resolution_jobs WHERE order_id=$1 AND status IN ('queued','running','waiting') LIMIT 1",[id])).rows.length)throw Error('Modification en cours : attendre sa fin');
   const request={blId:String(o.erp_live.bl.id),creationId:randomUUID(),requestedBy:user.email,at:new Date().toISOString()};
   const blPayload=await tenderBlLabelPayload(tx,o);if(blPayload){request.blPayload=blPayload;request.previousParcelCalculation={weightKg:o.weight_kg,parcels:o.parcel_count};}
+  if(job?.failure_phase==='provider')await tx.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'carrier.definitive_refusal_retried',$2)",[user.email,JSON.stringify({orderId:id,previousAttempt:job,nextCreationId:request.creationId})]);
   await tx.query("INSERT INTO carrier_jobs(order_id,carrier,status,environment,creation_id,manual_bl_request) VALUES($1,$2,'pending','production',$3,$4) ON CONFLICT(order_id) DO UPDATE SET carrier=excluded.carrier,status='pending',environment='production',creation_id=excluded.creation_id,manual_bl_request=excluded.manual_bl_request,attempts=0,error=null,failure_phase=null,creation_started_at=null,updated_at=now()",[id,o.carrier.startsWith('gls')?'gls':'gofo',request.creationId,JSON.stringify(request)]);
   await tx.query("UPDATE orders SET label_status='production_pending',processing_priority_at=now() WHERE id=$1",[id]);
   if(blPayload)await tx.query('UPDATE orders SET weight_kg=$2,parcel_count=$3 WHERE id=$1',[id,blPayload.weightKg,blPayload.parcels]);

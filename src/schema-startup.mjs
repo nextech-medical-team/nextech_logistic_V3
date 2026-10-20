@@ -1,6 +1,7 @@
 import {installCarrierAttemptProof} from './carrier-attempt-proof.mjs';
 import {initializeOperations} from './runtime.mjs';
 import {installEventTriggers} from './live-events.mjs';
+import {initializeNegativeStocks} from './negative-stocks.mjs';
 const version='application-20261005-robustness-5';
 const carrierBlRequestVersion='carrier-manual-bl-request-20261013-1';
 export async function initializeAppSchema(db,initializers,{background=false}={}){
@@ -20,6 +21,15 @@ export async function initializeAppSchema(db,initializers,{background=false}={})
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['carrier-attempt-proof-20261014-1'])).rows.length){
    await db.transaction(async tx=>{await installCarrierAttemptProof(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['carrier-attempt-proof-20261014-1']);});
   }
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['partial-erplain-retry-20261016-1'])).rows.length){
+   await db.transaction(async tx=>{await tx.exec('ALTER TABLE partial_deliveries ADD COLUMN IF NOT EXISTS erplain_retry JSONB');await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['partial-erplain-retry-20261016-1']);});
+  }
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['partial-temu-label-20261016-1'])).rows.length){
+   await db.transaction(async tx=>{await tx.exec('ALTER TABLE partial_deliveries ADD COLUMN IF NOT EXISTS temu_label JSONB');await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['partial-temu-label-20261016-1']);});
+  }
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['negative-stock-history-20261016-1'])).rows.length){
+   await db.transaction(async tx=>{await initializeNegativeStocks(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['negative-stock-history-20261016-1']);});
+  }
  });
  if(background)await recoverInterruptedJobs(db);
 }
@@ -31,7 +41,7 @@ export async function recoverInterruptedJobs(db){
    ['carrier_jobs',['creating'],'review','Traitement interrompu : vérifier la création transporteur'],
    ['extra_parcels',['creating'],'review','Création interrompue : vérifier le colis transporteur'],
    ['erp_live_jobs',['processing'],'review','Traitement interrompu : rapprocher les documents Erplain'],
-   ['partial_deliveries',['creating_bl','publishing_bl','creating_stock','creating_label'],'review','Livraison interrompue : vérifier les documents et le colis'],
+   ['partial_deliveries',['creating_bl','selecting_lines','publishing_bl','creating_stock','creating_label'],'review','Livraison interrompue : vérifier les documents et le colis'],
    ['correction_jobs',['applying'],'review','Correction interrompue : relire les données Erplain'],
    ['resolution_jobs',['running'],'review','Intervention interrompue : vérifier les dernières écritures'],
    ['purchase_jobs',['creating'],'review','Création interrompue : vérifier Erplain LIVE'],

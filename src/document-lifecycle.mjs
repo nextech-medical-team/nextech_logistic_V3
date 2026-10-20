@@ -19,7 +19,11 @@ export function documentLifecycle({gateway,store,onStatus=async()=>{}}){
    if(!['pending','unpublished'].includes(bl.status)&&!journal.readyConsumed){journal.readyConsumed=true;await save();}
    const tracking=aggregateParcels(input.expectedTracking||[],input.events||[]);
    const cancellationConfirmed=input.cancellationConfirmed===true||cancelledBC===true;
-   let target=cancellationConfirmed?'cancelled':['shipped','delivered'].includes(tracking.status)?tracking.status:input.preparationComplete?'ready_to_ship':null;
+   // Carrier tracking remains an observation. Never advance Erplain to shipped
+   // or delivered from this background lifecycle, including a requested resume.
+   // Do not replace physical progress with a preparation transition either.
+   const physicalProgress=['shipped','delivered'].includes(tracking.status);
+   const target=cancellationConfirmed?'cancelled':physicalProgress?null:input.preparationComplete?'ready_to_ship':null;
    if(target){
     const decision=shippingTransition({current:bl.status,target,readyConsumed:!!journal.readyConsumed,preparationComplete:input.preparationComplete===true,cancellationConfirmed});
     if(decision.write){

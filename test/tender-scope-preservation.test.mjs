@@ -28,13 +28,13 @@ test('excluded tender recovery keeps installed query and matching behavior',asyn
 });
 
 import {assertFullOrderStock} from '../src/stock-gate.mjs';
-test('stock scope preserves installed epsilon for excluded paths and exact arithmetic elsewhere',()=>{
+test('all stock paths including tender reject a real shortage without epsilon',()=>{
  const lines=[{variant:{id:'1',sku:'S',track_inventory:true},location:{id:'2'},quantity:1.0000005,available:1,on_hand:1,reserved_quantity:0}];
- assert.equal(assertFullOrderStock(lines,{preserveInstalled:true}),true);
+ assert.throws(()=>assertFullOrderStock(lines,{preserveInstalled:true}),/stock insuffisant/);
  assert.throws(()=>assertFullOrderStock(lines),/stock insuffisant/);
 });
-test('stock scope preserves installed empty document result only for excluded paths',()=>{
- assert.equal(assertFullOrderStock([],{preserveInstalled:true}),true);
+test('all stock paths including tender reject empty product documents',()=>{
+ assert.throws(()=>assertFullOrderStock([],{preserveInstalled:true}),/sans produit/);
  assert.throws(()=>assertFullOrderStock([]),/sans produit/);
 });
 
