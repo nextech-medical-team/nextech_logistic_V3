@@ -74,7 +74,7 @@ const unifiedOrdersBase=orders;orders=async function(){const expectedVersion=ord
 for(const link of roots){const cells=link.closest('tr').cells,raw=cells[2].textContent.trim();cells[2].title=raw;const view=orderPlacedDateView(cells[2].dataset.orderDate||'');cells[2].innerHTML=view.html;cells[2].title=view.title;for(const cell of cells)cell.title||=cell.textContent.trim();}
 if(!roots.length){lastPartialSnapshot=JSON.stringify(orderRenderData.partial.rows);return;}try{const result=orderRenderData.partial;lastPartialSnapshot=JSON.stringify(result.rows);const groups=new Map();for(const d of result.rows){if(!groups.has(d.order_id))groups.set(d.order_id,[]);groups.get(d.order_id).push(d);}
 for(const link of roots){const deliveries=groups.get(link.dataset.detail)||[];if(!deliveries.length)continue;const parent=link.closest('tr');parent.classList.add('has-deliveries');parent.cells[1].insertAdjacentHTML('beforeend','<small>Commande globale · '+deliveries.length+' livraison(s)</small>');let after=parent;
-for(const [index,d]of deliveries.entries()){if(d.status==='cancelled')selectedDeliveries.delete(d.id);const row=document.createElement('tr');row.className='delivery-row'+(d.status==='cancelled'?' order-cancelled':'');row.innerHTML=`<td><input type="checkbox" data-delivery-select="${esc(d.id)}" ${selectedDeliveries.has(d.id)&&d.status!=='cancelled'?'checked':''} ${d.status==='cancelled'?'disabled':''} aria-label="Sélectionner livraison ${index+1} de ${esc(d.reference)}"></td><td><button class="link-button" data-delivery-detail="${esc(d.order_id)}">${esc(d.reference)}</button><small>Livraison ${index+1}</small></td><td>${new Date(d.created_at).toLocaleDateString('fr-FR')}</td><td>${esc(d.erp_live?.bc?.label||'—')}<small class="erp-status" data-status="${esc(d.erp_live?.bc?.status||'unknown')}">${esc(erpStatusText(d.erp_live?.bc?.status))}</small><button class="link-button" data-erplain-document-refresh="${esc(d.order_id)}" data-erplain-document-kind="bc">Actualiser le BC Erplain</button></td><td>${esc(d.bl?.label||'En attente')}<small class="erp-status" data-status="${esc(d.bl?.status||'unknown')}">${esc(erpStatusText(d.bl?.status))}</small><button class="link-button" data-erplain-document-refresh="${esc(d.order_id)}" data-erplain-document-kind="bl">Actualiser le BL Erplain</button></td><td>${esc(d.recipient)}<small>${esc(d.address?.country)} · ${esc(d.address?.city)}</small></td><td class="total-quantity-column">${d.selection.reduce((n,l)=>n+Number(l.quantity),0)}<small>Unités Erplain</small></td><td>${d.selection.map(l=>esc(l.sku)+' ('+esc(l.quantity)+')').join('<br>')}</td><td>${esc(({gls:'GLS home',gls_pharma:'GLS PHARMA',gofo:'GOFO'})[d.carrier]||'À déterminer')}${trackingPreviewHtml(d.tracking||[])}<small>${esc(partialWeightText(d.weight_kg))} kg · ${esc(d.parcel_count||'—')} colis</small></td><td>${esc(partialStatuses[d.status]||d.status)}${d.error?'<small>'+errorDetailsHtml(d.error)+'</small>':''}${Array.from({length:d.documents},(_,i)=>`<a class="pdf-link" href="/api/partial/documents/${encodeURIComponent(d.id)}/${i}" target="_blank" rel="noopener">${d.status==='cancelled'?'Ancienne étiquette — BL annulé · ':''}▤ PDF ${d.environment==='production'?'PROD':d.environment==='test'?'TEST':'ENV. NON IDENTIFIÉ'} ${i+1}/${d.documents} ↗</a>`).join('<br>')}</td><td>${(d.tracking||[]).map(esc).join('<br>')||'En attente'}</td>`;after.after(row);after=row;for(const cell of row.cells)cell.title=cell.textContent.trim();}
+for(const [index,d]of deliveries.entries()){if(d.status==='cancelled')selectedDeliveries.delete(d.id);const row=document.createElement('tr');row.className='delivery-row'+(d.status==='cancelled'?' order-cancelled':'');row.innerHTML=`<td><input type="checkbox" data-delivery-select="${esc(d.id)}" ${selectedDeliveries.has(d.id)&&d.status!=='cancelled'?'checked':''} ${d.status==='cancelled'?'disabled':''} aria-label="Sélectionner livraison ${index+1} de ${esc(d.reference)}"></td><td><button class="link-button" data-delivery-detail="${esc(d.order_id)}">${esc(d.reference)}</button><small>Livraison ${index+1}</small></td><td>${new Date(d.created_at).toLocaleDateString('fr-FR')}</td><td>${esc(d.erp_live?.bc?.label||'—')}<small class="erp-status" data-status="${esc(d.erp_live?.bc?.status||'unknown')}">${esc(erpStatusText(d.erp_live?.bc?.status))}</small><button class="link-button" data-erplain-document-refresh="${esc(d.order_id)}" data-erplain-document-kind="bc">Actualiser le BC Erplain</button></td><td>${esc(d.bl?.label||'En attente')}<small class="erp-status" data-status="${esc(d.bl?.status||'unknown')}">${esc(erpStatusText(d.bl?.status))}</small><button class="link-button" data-erplain-document-refresh="${esc(d.order_id)}" data-erplain-document-kind="bl">Actualiser le BL Erplain</button></td><td>${esc(d.recipient)}<small>${esc(d.address?.country)} · ${esc(d.address?.city)}</small></td><td class="total-quantity-column">${d.selection.reduce((n,l)=>n+Number(l.quantity),0)}<small>Unités Erplain</small></td><td>${d.selection.map(l=>esc(l.sku)+' ('+esc(l.quantity)+')').join('<br>')}</td><td>${esc(({temu:'TEMU',gls:'GLS home',gls_pharma:'GLS PHARMA',gofo:'GOFO'})[d.carrier]||'À déterminer')}${trackingPreviewHtml(d.tracking||[])}<small>${esc(partialWeightText(d.weight_kg))} kg · ${esc(d.parcel_count||'—')} colis</small></td><td>${esc(partialStatuses[d.status]||d.status)}${typeof partialTemuActions==='function'?partialTemuActions(d):''}${d.error?'<small>'+errorDetailsHtml(d.error)+'</small>':''}${Array.from({length:d.documents},(_,i)=>`<a class="pdf-link" href="/api/partial/documents/${encodeURIComponent(d.id)}/${i}" target="_blank" rel="noopener">${d.status==='cancelled'?'Ancienne étiquette — BL annulé · ':''}▤ PDF ${d.environment==='production'?'PROD':d.environment==='test'?'TEST':'ENV. NON IDENTIFIÉ'} ${i+1}/${d.documents} ↗</a>`).join('<br>')}</td><td>${(d.tracking||[]).map(esc).join('<br>')||'En attente'}</td>`;after.after(row);after=row;for(const cell of row.cells)cell.title=cell.textContent.trim();}
 }
 $('order-rows').querySelectorAll('[data-delivery-select]').forEach(el=>el.onchange=()=>{el.checked?selectedDeliveries.add(el.dataset.deliverySelect):selectedDeliveries.delete(el.dataset.deliverySelect);selection();});$('order-rows').querySelectorAll('[data-delivery-detail]').forEach(el=>el.onclick=()=>orderDetail(el.dataset.deliveryDetail));selection();
 }catch(e){flash('Chargement des livraisons partielles : '+e.message,true);}};
@@ -111,3 +111,46 @@ filteredBatchLabels.onclick=async()=>{
   await downloadMerged(ids);
  }catch(e){flash(e,true);}finally{filteredBatchLabels.disabled=false;filteredBatchLabels.textContent='Télécharger toutes les étiquettes filtrées';}
 };
+
+// Recovered Erplain BLs are folded under their order; ordinary V3 deliveries stay visible.
+(()=>{
+ const body=document.getElementById('order-rows');if(!body)return;
+ const expanded=new Set();
+ const style=document.createElement('style');
+ style.textContent='#order-rows .delivery-row[hidden]{display:none!important}#order-rows details[data-delivery-group]>summary{cursor:pointer;color:#176b60;font-weight:600;padding:6px 0}#order-rows .delivery-row[data-recovered-bl-display]:not([hidden]){border-left:3px solid #85bcb2}';
+ document.head.append(style);
+ function reconcile(){
+  const groups=new Map();
+  const recovered=new Set((orderRenderData?.partial?.rows||[]).filter(d=>d.recovered_existing_bl===true).map(d=>String(d.id)));
+  for(const row of body.querySelectorAll('tr.delivery-row')){
+   const deliveryId=row.querySelector('[data-delivery-select]')?.dataset.deliverySelect;
+   if(!recovered.has(deliveryId)){row.hidden=false;delete row.dataset.recoveredBlDisplay;continue;}
+   row.dataset.recoveredBlDisplay='true';
+   const id=row.querySelector('[data-delivery-detail]')?.dataset.deliveryDetail;
+   if(!id)continue;if(!groups.has(id))groups.set(id,[]);groups.get(id).push(row);
+  }
+  for(const link of body.querySelectorAll('[data-detail]')){
+   const id=link.dataset.detail,parent=link.closest('tr'),rows=groups.get(id)||[];
+   let control=parent.querySelector('details[data-delivery-group]');
+   if(!rows.length){if(control?.dataset.deliveryGroupFallback==='true')control.remove();continue;}
+   if(!control){
+    control=[...parent.querySelectorAll('details')].find(d=>/BL associé/.test(d.querySelector('summary')?.textContent||''));
+    if(!control){
+     control=document.createElement('details');control.dataset.deliveryGroupFallback='true';
+     const summary=document.createElement('summary');summary.textContent='Livraisons ('+rows.length+')';control.append(summary);
+     (parent.querySelector('[data-erplain-document-kind="bl"]')?.closest('td')||link.parentElement).append(control);
+    }
+    control.dataset.deliveryGroup=id;control.open=expanded.has(id);
+    control.querySelector('summary').title='Afficher ou masquer les livraisons, leurs étiquettes et leurs suivis';
+   }
+   for(const row of rows)row.hidden=!control.open;
+  }
+ }
+ body.addEventListener('toggle',event=>{
+  const control=event.target,id=control.dataset?.deliveryGroup;if(!id||!body.contains(control))return;
+  if(control.open)expanded.add(id);else expanded.delete(id);
+  reconcile();
+ },true);
+ new MutationObserver(reconcile).observe(body,{childList:true,subtree:true});
+ reconcile();
+})();

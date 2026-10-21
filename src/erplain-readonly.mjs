@@ -4,6 +4,7 @@ import {readFile,writeFile,rename} from 'node:fs/promises';
 import path from 'node:path';
 import {erplainFetch} from './erplain-transport.mjs';
 import {businessWeight} from './weight-business-policy.mjs';
+import {cacheProviderWeight,weightVariantForCache} from './product-weight-cache.mjs';
 // The connector owns its query. No caller can submit GraphQL or a mutation.
 const QUERY=`query V3ProductWeight($where: QueryVariantsWhereWhereConditions, $first: Int, $page: Int) {
  Variants(where:$where, first:$first, page:$page) {
@@ -60,7 +61,7 @@ export function createCatalogSync(db,directory,{fetchImpl=fetch,delayMs=5000,bat
  async function run(config){
   state={...state,running:true,done:0,total:0,loaded:0,errors:[],error:null,lastRun:new Date().toISOString()};
   try{
-   const {rows}=await db.query(`SELECT DISTINCT coalesce(l.target_sku,m.target_sku,CASE WHEN o.channel IN ('tender','samples') THEN l.source_sku END) AS sku FROM lines l JOIN orders o ON o.id=l.order_id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku LEFT JOIN products p ON p.sku=coalesce(l.target_sku,m.target_sku,CASE WHEN o.channel IN ('tender','samples') THEN l.source_sku END) WHERE o.channel<>'temu' AND o.simulation=false AND o.label_status IN ('pending','blocked','waiting_catalog') AND (p.sku IS NULL OR p.updated_at<now()-interval '24 hours') ORDER BY sku`);
+   const {rows}=await db.query(`SELECT DISTINCT coalesce(l.target_sku,m.target_sku,l.source_sku) AS sku FROM lines l JOIN orders o ON o.id=l.order_id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku LEFT JOIN products p ON p.sku=coalesce(l.target_sku,m.target_sku,l.source_sku) WHERE NOT o.archived AND (p.sku IS NULL OR p.updated_at<now()-interval '24 hours') ORDER BY sku`);
    const skus=rows.map(x=>x.sku).filter(Boolean);state.total=skus.length;
    let batch=[];
    for(const [index,sku] of skus.entries()){
@@ -68,10 +69,9 @@ export function createCatalogSync(db,directory,{fetchImpl=fetch,delayMs=5000,bat
     if(index>0&&index%batchSize===0)await new Promise(r=>setTimeout(r,delayMs));
     try{
      if(index%batchSize===0){batch=[];try{batch=await fetchVariants(config,skus.slice(index,index+batchSize),{fetchImpl});}catch(e){e.fatal=true;throw e;}}
-     if((await db.query('SELECT sku FROM product_weight_overrides WHERE sku=$1 UNION SELECT sku FROM erplain_product_bindings WHERE sku=$1',[sku])).rows.length)continue;const choices=batch.filter(v=>v.sku===sku&&v.active!==false&&v.product?.active!==false);const result=resolveWeight(batch,sku,choices.length>1?{locationId:await stockChoiceLocation(directory)}:{});
+     const variant=await weightVariantForCache(db,batch,sku,()=>stockChoiceLocation(directory));
+     await cacheProviderWeight(db,variant);
      await db.transaction(async tx=>{
-      await tx.query(`INSERT INTO products(sku,weight_kg,origin,updated_at) VALUES($1,$2,'erplain_readonly',now()) ON CONFLICT(sku) DO UPDATE SET weight_kg=EXCLUDED.weight_kg,origin=EXCLUDED.origin,updated_at=now() WHERE products.origin!='erplain_live_corrected'`,[sku,result.weightKg]);
-      await tx.query(`INSERT INTO catalog_results(sku,message,checked_at) VALUES($1,null,now()) ON CONFLICT(sku) DO UPDATE SET message=null,checked_at=now()`,[sku]);
       await tx.query(`UPDATE jobs j SET status='pending',available_at=now(),error=null FROM orders o WHERE o.id=j.order_id AND j.kind='label' AND j.status='blocked' AND EXISTS(SELECT 1 FROM lines l LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku WHERE l.order_id=o.id AND coalesce(l.target_sku,m.target_sku,CASE WHEN o.channel IN ('tender','samples') THEN l.source_sku END)=$1)`,[sku]);
      });state.loaded++;
     }catch(e){

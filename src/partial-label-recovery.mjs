@@ -18,7 +18,7 @@ export async function retryPartialLabel(db,id){
   if(d.status!=='review')throw Error('Création incertaine : rapprochement requis, aucun nouvel envoi automatique');
   if(d.carrier_result!==null&&d.carrier_result!==undefined){await tx.query("UPDATE partial_deliveries SET status='awaiting_pdf',error=null WHERE id=$1",[id]);return {recoveryOnly:true,originalError:d.error,blId:d.bl?.id};}
   const docs=(await tx.query('SELECT 1 FROM partial_documents WHERE delivery_id=$1 LIMIT 1',[id])).rows;
-  if(docs.length||d.tracking?.length||d.environment!=='production'||!hasPartialCreatedBl(d)||!(['bl_ready','finalizing_bl'].includes(d.stage)||d.stage==='creating_label'&&d.error===partialPhonePreflight))throw Error('Création incertaine : rapprochement requis, aucun nouvel envoi automatique');
+  if(docs.length||d.tracking?.length||d.environment!=='production'||!hasPartialCreatedBl(d)||!(['bl_ready','finalizing_bl','recovered_bl'].includes(d.stage)||d.stage==='creating_label'&&d.error===partialPhonePreflight))throw Error('Création incertaine : rapprochement requis, aucun nouvel envoi automatique');
   const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[d.order_id])).rows[0];
   if(!o||suspensionBlock(o)||o.archived||o.erp_live?.bc?.status==='cancelled'||['cancelled','shipped','delivered','in_transit'].includes(o.tracking_status))throw Error('Expédition suspendue, annulée ou déjà expédiée');
   await tx.query("UPDATE partial_deliveries SET status='bl_ready',error=null WHERE id=$1",[id]);

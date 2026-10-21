@@ -46,10 +46,10 @@ test('persisted preflight failure survives any translated or rewritten message',
 });
 for(const patch of [{status:'review'},{creation_started_at:'now'},{failure_phase:'provider'},{result:{reference:'R'}},{reference:'R'},{tracking:['T']}])test('persisted provider evidence preserved '+JSON.stringify(patch),async()=>assert.equal(await canRetryFailedCarrier({query:()=>assert.fail('no query')},{...job,failure_phase:'preflight',...patch}),false));
 test('DB marker error prevents entering provider call',async()=>{
- let providerCalls=0;await assert.rejects(async()=>{await markCarrierCreationStarted({query:async()=>{throw Error('database failed');}},'order');providerCalls++;},/database failed/);assert.equal(providerCalls,0);
+ let providerCalls=0;await assert.rejects(async()=>{await markCarrierCreationStarted({transaction:async()=>{throw Error('database failed');}},'order');providerCalls++;},/database failed/);assert.equal(providerCalls,0);
 });
 test('preexisting marker prevents entering provider call',async()=>{
- let providerCalls=0;await assert.rejects(async()=>{await markCarrierCreationStarted({query:async()=>({rows:[]})},'order');providerCalls++;},/rapprocher/);assert.equal(providerCalls,0);
+ let providerCalls=0;await assert.rejects(async()=>{await markCarrierCreationStarted({transaction:async fn=>fn({query:async()=>({rows:[]})})},'order');providerCalls++;},/rapprocher/);assert.equal(providerCalls,0);
 });
 const config={GLS_AUTH_BASE_URL:'https://api.gls-group.net',GLS_BASE_URL:'https://api.gls-group.net/shipit-farm/v1/backend/rs',GOFO_BASE_URL:'https://api-eu.gofoexpress.com',GLS_CONTACT_ID_MONO:'synthetic',GOFO_APP_SECRET:'synthetic'};
 const shipment={id:'o',reference:'#TEST',channel:'amazon',carrier:'gofo',address:{name:'Synthetic',street:'1 rue Test',postal:'75001',city:'Paris',country:'FR'},source_payload:{},weight_kg:1,parcel_count:1};
@@ -84,4 +84,15 @@ for(const attempts of [1,2,10,99])test('proven preflight retry is independent of
  for(const patch of [{creation_started_at:'2026-10-14T00:00:00Z'},{failure_phase:'provider'},{result:{}},{tracking:['T']},{reference:'R'}])assert.equal(await canRetryFailedCarrier(db,{...job,attempts,...patch}),false);
  assert.equal(await canRetryFailedCarrier({query:async()=>({rows:[]})},{...job,attempts,error:'Timeout'}),false);
  assert.equal(provesImportedFieldsPreflight({...fieldJob,attempts,updated_at:'2026-10-14T00:00:00Z'},fieldAudit),false);
+});
+
+
+test('creation marker locks order before job and commits before provider',async()=>{
+ const events=[];
+ const db={transaction:async fn=>{events.push('begin');const r=await fn({query:async(sql,args)=>{assert.deepEqual(args,['order']);if(sql.startsWith('SELECT id FROM orders')){assert.match(sql,/FOR SHARE/);events.push('order');return {rows:[{id:'order'}]};}assert.equal(events.at(-1),'order');assert.match(sql,/creation_started_at IS NULL/);events.push('job');return {rows:[{order_id:'order'}]};}});events.push('commit');return r;}};
+ await markCarrierCreationStarted(db,'order');events.push('provider');assert.deepEqual(events,['begin','order','job','commit','provider']);
+});
+test('commit failure prevents provider creation',async()=>{
+ let calls=0;const db={transaction:async fn=>{await fn({query:async()=>({rows:[{}]})});throw Error('commit failed');}};
+ await assert.rejects(async()=>{await markCarrierCreationStarted(db,'order');calls++;},/commit failed/);assert.equal(calls,0);
 });

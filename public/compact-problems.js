@@ -21,21 +21,21 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/achat d[’']étiquette TEMU à confirmer/i.test(text))return result('temu-purchase-confirmation','Achat d’étiquette TEMU à confirmer','');
  if(/^rapprochement requis, aucune nouvelle cr[ée]ation automatique\.?$/i.test(text))return result('erp-review','Erplain · Rapprochement requis avant nouvelle création','');
  if(/^GLS · (?:Aucun numéro de suivi PROD utilisable\.|Numéro de suivi absent pour le colis principal\.)/.test(text))return {...result('uncertain','GLS · Numéro de suivi à vérifier',''),provider:'GLS'};
- if(/^Client Erplain · Création à vérifier/.test(text))return result('erp-review','Client Erplain · Création à vérifier','');
+ if(/^Client Erplain · Création à vérifier/.test(text))return result('customer','Client Erplain · Création à vérifier','');
  if(/^deadlock detected$/i.test(text))return result('erp-review','V3 · Conflit temporaire de traitement','');
  if(/^Préparation Erplain en attente ou en cours$/.test(text))return result('preparation-pending',text,'');
  if(["Échec d’étiquette antérieur, suivi d’une revalidation BC/BL. Aucune relance effectuée.","Échec d’étiquette antérieur : champs Erplain relus et validés. Aucune relance effectuée.","Appels d’offres · GLS Pharma obligatoire : actualiser la préparation selon les règles transporteurs"].includes(text))return result('preparation',text,'');
  if(/TEMU/i.test(text)&&/3000032|prix et TVA|Prix et frais de livraison|Données financières|Prix API à récupérer/i.test(text))return result('temu-pricing','TEMU · Prix à renseigner','');
  if(/^Reprendre le remplacement après correction/.test(text)||text==='Reprendre le remplacement : nouvelle vérification nécessaire')return result('equivalent-pending','Vérifier le remplacement');
- if(/^Produit équivalent vérifié/.test(text))return result('equivalent-pending','Confirmer le remplacement');
- if(/^Produit (?:équivalent|restant) \[[^\]]+\] : Poids vérifié, remplacement à confirmer$/.test(text))return result('equivalent-pending','Confirmer le remplacement');
+ if(/^Produit équivalent vérifié/.test(text))return result('equivalent-pending','Appliquer le remplacement');
+ if(/^Produit (?:équivalent|restant) \[[^\]]+\] : Poids vérifié, remplacement à confirmer$/.test(text))return result('equivalent-pending','Appliquer le remplacement');
  if(/Commande (modifiée|annulée|déjà expédiée)/i.test(text))return result('platform',/annulée/i.test(text)?'Commande annulée sur la plateforme':/déjà expédiée/i.test(text)?'Commande déjà expédiée sur la plateforme':'Commande modifiée sur la plateforme','');
  if(code==='401'||code==='403')return result('api-access','API '+apiName+' · Accès refusé ('+code+')','');
  if(code==='429'||/^\s*429\b|\b(?:status(?:\s+code)?|code|error|erreur)\s*[:=]?\s*429\b|\btoo many requests\b/i.test(text))return result('api-limit','API '+apiName+' · Limite atteinte (429)','');
  if(code&&Number(code)>=500)return result('api-server','API '+apiName+' · Erreur serveur ('+code+')','');
  if(/timeout|timed out|délai.*dépass|AbortError/i.test(text))return result('api-timeout','API '+apiName+' · Délai dépassé','');
  if(/injoignable|Connexion.*impossible|fetch failed|réseau|certificat/i.test(text))return result('api-network','API '+apiName+' · Connexion impossible','');
- if(/Stock non vérifiable|stock non reçu/i.test(text))return result('api-stock','API Erplain : stock non reçu');
+ if(/Stock non vérifiable|stock non reçu/i.test(text))return result('api-stock','Stock Erplain à vérifier');
  if(/API.*non reçue|Réponse.*incomplète/i.test(text))return result('api-incomplete','API '+apiName+' · Réponse incomplète','');
  if((!text.includes(';')&&text.startsWith("Erplain LIVE · Informations obligatoires manquantes : "))||["Erplain LIVE · Numéro de téléphone invalide : corriger avant création de l’étiquette","Erplain LIVE · Pays ou code postal invalide"].includes(text))return {...result('unknown',text,''),provider:'Erplain'};
  if(/Correspondance SKU (?:absente|introuvable)|Mapping.*(?:manquant|introuvable|absent)/i.test(text))return result('mapping','Mapping manquant');
@@ -60,8 +60,10 @@ function compactProblem(raw,sku='',provider='Erplain') {
  if(/ParcelShopID.*manquant/i.test(text))return result('relay-search','GLS · Recherche du relais','');
  if(/City information is incorrect/i.test(text))return result('city','GOFO · Ville refusée','');
  if(/Informations transport manquantes/i.test(text)){const field=text.split(':').slice(1).join(':').trim();return result('address',field?field+' manquant'+(field.includes(',')?'s':''):'Adresse manquante','');}
+ if(/^Client Erplain/.test(text)&&/cr[e\u00e9]ation/i.test(text))return result('customer','Client Erplain \u00b7 Cr\u00e9ation \u00e0 v\u00e9rifier','');
  if(/^BC Erplain · Création à vérifier/.test(text))return result('bc','BC · Création à vérifier','');
- if(/^BL Erplain · Publication à vérifier/.test(text))return result('preparation','BL · Publication à vérifier','');
+ if(/^BL Erplain · Publication à vérifier/.test(text))return result('erplain-recovery','BL · Publication à vérifier','');
+ if(/^Incident temporaire Erplain persistant après 3 reprises/.test(text))return result('erplain-recovery','Erplain · Reprise à vérifier après 3 tentatives','');
  if(/^Stock Erplain · Mouvement à vérifier/.test(text))return result('preparation','Stock · Mouvement à vérifier','');
  if(/incertaine|interrompu.*transporteur|Création.*vérifier/i.test(text))return result('uncertain',apiName+' · Création à vérifier','');
  if(/PDF.*attend|PDF.*attente/i.test(text))return result('pdf',apiName+' · PDF en attente','');
@@ -126,7 +128,8 @@ function compactProblems(order){
  if(hasCompleteOrderDocuments(order))return [];
  if(order.archived||order.suspension?.active===true||order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'||order.suspension?.erplainCancellation?.status==='complete')return [];
  const lines=order.sku_lines||[],out=[],family=order.carrier?.startsWith('gls')?'GLS':order.carrier==='gofo'?'GOFO':order.carrier==='temu'?'TEMU':'Erplain';
- const add=p=>{if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
+ const hiddenBcStockWait='En attente de stock : BC disponible, préparation du BL suspendue';
+ const add=p=>{if(p.detail===hiddenBcStockWait)return;if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock','customer'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
  const pending=order.pending_equivalent;const pendingLine=pending&&lines.find(l=>[l.sku,l.mapped_sku,l.source_sku].includes(pending.sku));
  if(pendingLine&&pending.error){const p=compactProblem(pending.error,pending.replacementSku);p.detail='Remplacement prévu : '+pending.sku+' → '+pending.replacementSku+' · '+p.detail;add(p);}
  for(const l of lines){const sku=l.sku||l.mapped_sku||l.source_sku;if(l.catalog_issue)add(compactProblem(l.catalog_issue,sku));if(!['tender','samples','temu'].includes(order.channel)&&l.mapping_exists===false&&!l.sku)add(compactProblem('Mapping manquant',l.source_sku));}

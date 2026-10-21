@@ -42,3 +42,9 @@ Les demandes CI et leurs rapports sont conservés sur le serveur et ramenés dan
 
 Le bouton conserve les tests, la file FIFO, les protections GitHub, la sauvegarde, le verrou serveur et la fin naturelle des traitements. Il ne lève pas une dépendance métier ou une divergence de sources. La surveillance Section7 peut préparer et vérifier, mais ne doit plus déclencher de publication automatiquement.
 
+
+## Budget des tests isolés serveur
+
+La suite npm test dispose de 1 800 secondes, avec échec bloquant à expiration avant sauvegarde, pause ou installation. Le diagnostic du 20 octobre 2026 sur le commit 2ed0f6cd87ae1f3ce033d5e666c6f8811272fe44 a terminé les 61 groupes en 1 261,46 secondes, sans échec, sous le compte isolé nextech-build avec une priorité nice 10. Cette mesure dépasse le plafond précédent de 1 200 secondes ; elle ne démontre pas une régression fonctionnelle. Le budget de 30 minutes garde une marge bornée pour les variations de charge, sans supprimer de tests ni transformer un dépassement ou un échec en réussite. Les autres délais restent inchangés.
+
+L’exécuteur installé ne se met pas à jour avec les fichiers applicatifs : sa mise à jour Section7 exige revue, tests, empreinte fraîche, sauvegarde et verrou intégral. Une demande échouée reste conservée ; publier un nouveau commit après correction, sans réinitialiser ni rejouer la demande échouée.

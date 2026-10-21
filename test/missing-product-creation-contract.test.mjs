@@ -1,14 +1,42 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {pathToFileURL} from 'node:url';import path from 'node:path';
 const dir=process.env.MISSING_PRODUCT_SOURCE_DIR?pathToFileURL(path.resolve(process.env.MISSING_PRODUCT_SOURCE_DIR)+path.sep):new URL('../src/',import.meta.url);
-const {assertAbsentProductPrices,minimalProductInput,ensureMissingProduct,readCreationSku,sourceProductName,productCreationBlock,createBlockedMissingProducts}=await import(new URL('missing-product-creation.mjs',dir));
-const variant=(sku='A',id=7)=>({id,sku,active:true,variant_prices:[],product:{id:9,active:true}});
+const {assertAbsentProductPrices,minimalProductInput,ensureMissingProduct,readCreationSku,sourceProductName,productCreationBlock,createBlockedMissingProducts,reconcileCreationAttempt}=await import(new URL('missing-product-creation.mjs',dir));
+const variant=(sku='A',id=7)=>({id,sku,active:true,weight_amount:5,weight_unit:'g',variant_prices:[],product:{id:9,active:true}});
 function fixture({rows=[],failure,reply={CreateProduct:{id:9}},after}={}){const state=new Map(),calls=[];let created=false;const db={exec:async()=>{},query:async(sql,args)=>{calls.push({sql,args});if(sql.startsWith('SELECT status,product_id'))return {rows:state.has(args[0])?[{status:state.get(args[0]),product_id:9}]:[]};if(sql.startsWith('INSERT')){if(state.has(args[0]))return {rows:[]};state.set(args[0],'attempted');return {rows:[{sku:args[0]}]};}if(sql.includes("status='review'"))state.set(args[0],'review');if(sql.includes("status='verified'"))state.set(args[0],'verified');return {rows:[]};}};const api={request:async(q,v)=>{calls.push({q,v});if(q.startsWith('mutation')){created=true;if(failure)throw Error(failure);return reply;}return {Variants:{data:created?(after??[variant()]):rows,paginatorInfo:{hasMorePages:false}}};}};return {db,api,state,calls};}
-test('minimal creation contains no price, cost, tax, stock or invented weight',()=>{const input=minimalProductInput(' A ',' Nom ');assert.deepEqual(input,{label:'Nom',active:true,variants:{data:[{type:'normal',sku:'A',track_inventory:true}]}});assert.doesNotMatch(JSON.stringify(input),/price|cost|amount|stock_levels|tax_codes/);});
+test('minimal creation follows the 5g rule without price, cost, tax or stock',()=>{const input=minimalProductInput(' A ',' Nom ');assert.deepEqual(input,{label:'Nom',active:true,variants:{data:[{type:'normal',sku:'A',track_inventory:true,weight_amount:5,weight_unit:'g'}]}});assert.doesNotMatch(JSON.stringify(input),/price|cost|stock_levels|tax_codes/);});
 for(const [sku,name] of [['','Nom'],['A',''],['A',' '.repeat(4)],['A','x'.repeat(251)],['x'.repeat(200),'Nom']])test('invalid identity denied '+sku.length+'/'+name.length,()=>assert.throws(()=>minimalProductInput(sku,name)));
 for(const key of ['goodsName','product_name','title','Désignation','Nom produit'])test('source name '+key,()=>assert.equal(sourceProductName({source_payload:{[key]:' Test  produit '}}),'Test produit'));
 test('no unrelated name invented',()=>assert.equal(sourceProductName({source_payload:{sku:'A',price:12}}),''));
 test('successful creation rereads and confirms product identity',async()=>{const f=fixture();const r=await ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'});assert.equal(r.created,true);assert.equal(f.state.get('A'),'verified');const mutation=f.calls.find(c=>c.q?.startsWith('mutation'));assert.deepEqual(mutation.v,{input:minimalProductInput('A','Nom')});assert.equal(f.calls.filter(c=>c.q?.startsWith('query')).length,3);});
 test('existing active SKU never mutated',async()=>{const f=fixture({rows:[variant()]});assert.equal((await ensureMissingProduct(f.db,f.api,{sku:'A',label:''})).created,false);assert.equal(f.calls.some(c=>c.q?.startsWith('mutation')),false);assert.equal(f.state.size,0);});
+
+for(const prices of [[],null,[{id:1,amount:null}],[{id:1,amount:0}],[{id:1,amount:12}]])test('BC lookup reconciles a 429 creation only with verified absent prices: '+JSON.stringify(prices),async()=>{
+ const f=fixture({failure:'Erplain HTTP 429'});
+ await assert.rejects(ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'}),/429/);
+ assert.equal(f.state.get('A'),'review');
+ // Use the deployed BC lookup selection, rather than granting the mock fields
+ // the caller did not request. This reproduces the missing-price-field failure.
+ const source=await readFile(new URL('erplain-live-workflow.mjs',dir),'utf8');
+ const query=source.match(/api\.request\('(query V3BcLookup[^']+)'/)?.[1];
+ assert.ok(query,'BC product lookup must exist');
+ f.api.request=async q=>{
+  assert.equal(q,query);assert.match(q,/^query /);
+  const v={...variant(),variant_prices:prices};
+  if(!/\bvariant_prices\s*\{\s*id\s+amount\s*\}/.test(q))delete v.variant_prices;
+  return {Variants:{data:[v],paginatorInfo:{hasMorePages:false}}};
+ };
+ const response=await f.api.request(query,{where:{column:'SKU',operator:'EQ',value:'A'}});
+ const check=()=>reconcileCreationAttempt(f.db,response.Variants.data[0]);
+ if(prices?.some(p=>p.amount!==null)){
+  await assert.rejects(check(),/Prix catalogue présent/);
+  assert.equal(f.state.get('A'),'review');
+ }else{
+  assert.equal((await check()).id,7);
+  assert.equal(f.state.get('A'),'verified');
+  assert.deepEqual(f.calls.find(c=>c.sql?.includes("status='verified'"))?.args,['A','9','7']);
+ }
+ assert.equal(f.calls.filter(c=>c.q?.startsWith('mutation')).length,1,'never replay the earlier creation');
+});
 for(const rows of [[variant(),variant('A',8)],[{...variant(),active:false}],[{...variant(),product:{id:9,active:false}}],[{...variant(),product:null}]])test('ambiguous/inactive/incomplete existing SKU rejected '+JSON.stringify(rows),async()=>{const f=fixture({rows});await assert.rejects(ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'}));assert.equal(f.calls.some(c=>c.q?.startsWith('mutation')),false);});
 for(const result of [{},{Variants:{data:[],paginatorInfo:{hasMorePages:true}}},{Variants:{data:[]}}, {Variants:{data:Array.from({length:100},()=>variant()),paginatorInfo:{hasMorePages:false}}}])test('incomplete lookup never proves absence '+JSON.stringify(result).slice(0,90),async()=>{await assert.rejects(readCreationSku({request:async()=>result},'A'),/incomplète/)});
 for(const failure of ['TimeoutError','Erplain HTTP 429','Erplain HTTP 503'])test('uncertain '+failure+' never retries creation',async()=>{const f=fixture({failure});await assert.rejects(ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'}),/aucune nouvelle création/);f.api.request=async q=>{f.calls.push({q});return {Variants:{data:[],paginatorInfo:{hasMorePages:false}}}};await assert.rejects(ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'}),/Tentative précédente/);assert.equal(f.calls.filter(c=>c.q?.startsWith('mutation')).length,1);});
@@ -16,7 +44,8 @@ test('lost response reconciled with read only on next pass',async()=>{const f=fi
 for(const options of [{reply:{}},{after:[]},{after:[variant('A',7),variant('A',8)]},{after:[{...variant(),product:{id:10,active:true}}]}])test('unconfirmed identity fails safely '+JSON.stringify(options),async()=>{const f=fixture(options);await assert.rejects(ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'}),/Résultat à vérifier/);assert.equal(f.state.get('A'),'review');});
 test('durable claim protects two concurrent orders',async()=>{const f=fixture();const results=await Promise.allSettled([ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'}),ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'})]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(f.calls.filter(c=>c.q?.startsWith('mutation')).length,1);});
 test('guard is reread just before mutation',async()=>{const f=fixture();let count=0;await assert.rejects(ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom',guard:async()=>{if(++count===2)throw Error('annulée')}}),/annulée/);assert.equal(f.calls.some(c=>c.q?.startsWith('mutation')),false);});
-test('manual explicit weight supported with prices still absent',async()=>{const f=fixture();await ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom',weightKg:0.005});const input=f.calls.find(c=>c.q?.startsWith('mutation')).v.input;assert.equal(input.variants.data[0].weight_amount,0.005);assert.doesNotMatch(JSON.stringify(input),/price|cost/);});
+test('manual explicit weight supported with prices still absent',async()=>{const f=fixture();await ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom',weightKg:0.005});const input=f.calls.find(c=>c.q?.startsWith('mutation')).v.input;assert.equal(input.variants.data[0].weight_amount,5);assert.equal(input.variants.data[0].weight_unit,'g');assert.doesNotMatch(JSON.stringify(input),/price|cost/);});
+for(const weight of [null,10])test('new product weight must be confirmed in the provider readback '+weight,async()=>{const f=fixture({after:[{...variant(),weight_amount:weight}]});await assert.rejects(ensureMissingProduct(f.db,f.api,{sku:'A',label:'Nom'}),/Poids du produit créé non confirmé/);assert.equal(f.state.get('A'),'review');assert.equal(f.calls.filter(c=>c.q?.startsWith('mutation')).length,1);});
 const protections=[{archived:true},{partial_mode:true},{resolution_pending_resume:true},{tracking_status:'shipped'},{label_status:'cancelled'},{source_payload:{selectedReimport:{mode:'hold'}}},{source_payload:{visibilityHold:true}},{source_payload:{marketplacePendingCorrection:{}}},{source_payload:{erplainValidationHold:true}},{source_payload:{erplainImported:true}},{erp_live:{phase:'creating_stock'}},{erp_live:{bc:{status:'closed'}}}];
 for(const o of protections)test('business protection '+JSON.stringify(o),()=>assert.ok(productCreationBlock(o)));
 test('eligible order permitted, explicit resolution may use own preparation hold',()=>{assert.equal(Boolean(productCreationBlock({})),false);assert.equal(Boolean(productCreationBlock({resolution_pending_resume:true},{resolution:true})),false);});

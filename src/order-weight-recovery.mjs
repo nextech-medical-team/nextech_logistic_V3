@@ -22,7 +22,7 @@ export function currentOrderWeightReason(lines,bindings,catalog,at,now=Date.now(
  }
  return genericWeightReason;
 }
-export async function reconcileGenericOrderWeights(db,onlyOrder=null){
+export async function reconcileGenericOrderWeights(db,onlyOrder=null,providerProof=null){
  const rows=(await db.query(`SELECT o.id,o.issue,coalesce(o.erp_live->'lastAudit'->>'at',(SELECT e.updated_at::text FROM erp_live_jobs e WHERE e.order_id=o.id),o.received_at::text) AS diagnostic_at FROM orders o WHERE NOT o.archived AND ($1::text IS NULL OR o.id=$1)
   AND (o.issue=$2 OR EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.error=$2) OR EXISTS(SELECT 1 FROM resolution_jobs r WHERE r.order_id=o.id AND r.status='review' AND r.error=$2))
   AND NOT EXISTS(SELECT 1 FROM erp_live_jobs e WHERE e.order_id=o.id AND e.status IN ('pending','processing'))
@@ -31,6 +31,7 @@ export async function reconcileGenericOrderWeights(db,onlyOrder=null){
   const o=(await tx.query(`SELECT o.id,o.issue,coalesce(o.erp_live->'lastAudit'->>'at',(SELECT e.updated_at::text FROM erp_live_jobs e WHERE e.order_id=o.id),o.received_at::text) AS diagnostic_at FROM orders o WHERE o.id=$1 FOR UPDATE`,[row.id])).rows[0];if(!o)return;
   const lines=(await tx.query(`SELECT coalesce(l.target_sku,m.target_sku,l.source_sku) sku,coalesce(l.target_quantity,CASE WHEN m.source_qty>0 THEN l.quantity*m.target_qty/m.source_qty ELSE l.quantity END) quantity,l.source_payload FROM lines l JOIN orders o ON o.id=l.order_id LEFT JOIN mappings m ON m.channel=o.channel AND m.source_sku=l.source_sku WHERE l.order_id=$1`,[o.id])).rows;
   const bindings=(await tx.query('SELECT * FROM erplain_product_bindings WHERE sku=ANY($1::text[]) FOR SHARE',[lines.map(l=>l.sku)])).rows;
+  if(providerProof&&verifiedWeightBinding(providerProof)&&!bindings.some(b=>b.sku===providerProof.sku))bindings.push(providerProof);
   const catalog=(await tx.query('SELECT sku,message,checked_at FROM catalog_results WHERE sku=ANY($1::text[]) FOR SHARE',[lines.map(l=>l.sku)])).rows;
   const reason=at=>currentOrderWeightReason(lines,bindings,catalog,at);
   if(o.issue===genericWeightReason&&reason(o.diagnostic_at)!==genericWeightReason)await tx.query('UPDATE orders SET issue=$3 WHERE id=$1 AND issue=$2',[o.id,genericWeightReason,reason(o.diagnostic_at)]);

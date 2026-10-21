@@ -3,7 +3,7 @@ const caches=new WeakMap();
 const inFlight=new WeakMap();
 // Read-only lookups and document display/refresh. Mutation guards, final stock
 // checks, numbering and transition-status reads are intentionally absent.
-const concurrentReads=new Set(['V3BcLookup','V3ResolveSKU','V3EquivalentCatalog','V3StockInformation','V3DocumentRead']);
+const concurrentReads=new Set(['V3MissingProductLookup','V3BcLookup','V3ResolveSKU','V3EquivalentCatalog','V3StockInformation','V3DocumentRead']);
 const canonical=x=>Array.isArray(x)?x.map(canonical):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonical(x[k])])):x;
 async function concurrentReference(config,query,variables,fetchImpl,load){
  const operation=/^query\s+(\w+)/.exec(query)?.[1];

@@ -107,7 +107,7 @@ test('startup recovers only exact unsent historical refusal, once, without reset
 
 test('existing deployment receives a versioned additive migration; web startup never recovers old jobs',async()=>{
  const {engine,db,job}=await fixture();try{
-  await db.exec("CREATE TABLE schema_migrations(version text PRIMARY KEY); INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); ALTER TABLE carrier_jobs DROP COLUMN quota_retry_at; ALTER TABLE carrier_jobs DROP COLUMN quota_retries");
+  await db.exec("CREATE TABLE schema_migrations(version text PRIMARY KEY); INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'),('partial-erplain-retry-20261016-1'),('partial-temu-label-20261016-1'),('negative-stock-history-20261016-1'); ALTER TABLE carrier_jobs DROP COLUMN quota_retry_at; ALTER TABLE carrier_jobs DROP COLUMN quota_retries");
   await db.query("UPDATE carrier_jobs SET status='failed',failure_phase='preflight',error=$1",[legacyCarrierQuotaMessage]);
   await initializeAppSchema(db,[()=>assert.fail('old initializers must not replay')]);
   await initializeAppSchema(db,[]);

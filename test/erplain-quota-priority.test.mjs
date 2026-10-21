@@ -124,5 +124,14 @@ test('completed BC/BL flow retires only older transient reviews without inventin
   assert.deepEqual(rows.filter(r=>r.status==='complete').map(r=>r.id),['good','legacy']);
   const good=rows.find(r=>r.id==='good');assert.equal(good.result.resolvedPreviousError,old);assert.equal(good.result.completionAuthority,'completed_bc_bl_flow');assert.equal(good.error,null);
   assert.equal((await engine.query("SELECT erp_live->'stockDocument' doc FROM orders WHERE id='good'")).rows[0].doc,null);
+  await engine.exec('ALTER TABLE orders ADD COLUMN channel text');
+  for(const [id,status,proof] of [['temu-pending','pending',true],['temu-preparation','in_preparation',true],['temu-no-authorization','pending',false]]){
+   await engine.query("INSERT INTO orders(id,channel,erp_live) VALUES($1,'temu',$2)",[id,JSON.stringify({...state,bl:{id:2,status},transientRecovery:{lastError:'Erplain HTTP 429'}})]);
+   await engine.query("INSERT INTO erp_live_jobs VALUES($1,'complete',null,now())",[id]);
+   await engine.query("INSERT INTO resolution_jobs VALUES($1,$1,'review','Erplain à compléter',$2,'2026-10-15T01:00:00Z',$3)",[id,'Incident temporaire Erplain : rapprochement et reprise automatique en attente (0/3)',JSON.stringify({resume:true,erpOnly:proof})]);
+  }
+  await closeTransientReviews({transaction:fn=>engine.transaction(fn)});
+  const resumed=(await engine.query("SELECT id,status FROM resolution_jobs WHERE id LIKE 'temu-%' ORDER BY id")).rows;
+  assert.deepEqual(resumed,[{id:'temu-no-authorization',status:'review'},{id:'temu-pending',status:'complete'},{id:'temu-preparation',status:'complete'}]);
  }finally{await engine.close();}
 });

@@ -1,4 +1,5 @@
 import {usesRecordedBc} from './existing-bc-execution.mjs';
+import {exactQuantitySum,exactQuantityDifference} from './stock-decimal.mjs';
 import {createHash} from 'node:crypto';
 
 import {readHistoricalStock,assertNoHistoricalStockRemoval} from './historical-stock-proof.mjs';
@@ -32,9 +33,10 @@ export function mappedDocumentQuantities(items){
 
 export async function assertAdditionalMappingStock(api,bc,items){
  if(bc.update_stock!==true)return;
- const existing=new Map(mappedDocumentQuantities(bc.line_items));
- for(const [key,quantity] of mappedDocumentQuantities(items)){
-  const additional=quantity-(existing.get(key)||0);if(additional<=1e-6)continue;
+ const exactTotals=rows=>{mappedDocumentQuantities(rows);const groups=new Map();for(const l of shippingProductLines(rows)){const k=String(l.variant.id)+':'+String(l.location.id);groups.set(k,[...(groups.get(k)||[]),l.quantity]);}return new Map([...groups].map(([k,q])=>[k,exactQuantitySum(q)]));};
+ const existing=exactTotals(bc.line_items);
+ for(const [key,quantity] of exactTotals(items)){
+  const additional=exactQuantityDifference(quantity,existing.get(key)||0);if(Number(additional)<=0)continue;
   const [id,locationId]=key.split(':');
   const {Variant:v}=await api.request('query V3MappingAdditionalStock($id:ID!){Variant(id:$id){id sku active track_inventory product{id active} stock_levels(first:100){data{location{id} available on_hand} paginatorInfo{hasMorePages}}}}',{id});
   if(String(v?.id)!==id||v.active!==true||v.product?.active!==true||typeof v.track_inventory!=='boolean')throw Error('Additional mapping stock identity not confirmed');

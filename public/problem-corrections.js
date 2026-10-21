@@ -13,6 +13,14 @@ function sharedParcelResolutionNotice(problem,order){
  return {description:'Plusieurs commandes sont associées au même colis TEMU. Ce regroupement n’est pas une erreur. Cette commande attend une reprise de ses contrôles Erplain : produits, quantités, stock et documents existants. L’étiquette et le numéro de suivi sont conservés ; aucun nouvel achat n’est demandé et les autres commandes du colis ne sont pas relancées.',button:'Reprendre les contrôles BC/BL — étiquette conservée'};
 }
 
+function temuLabelResolutionNotice(problem,order){
+ if(order?.channel!=='temu')return null;
+ const text=String(problem.detail||problem.label||'');
+ if(/shipping address contains non-English characters|Adresse\s*:\s*caractères refusés|adresse avec caractères non pris en charge/i.test(text))return 'TEMU refuse les caractères de l’adresse pour ce service de livraison. Vérifiez et corrigez les coordonnées dans TEMU Seller Center, puis relisez le résultat de l’expédition existante. Modifier uniquement l’adresse dans V3 ne corrige pas ce refus chez TEMU. Si vous disposez déjà d’une étiquette achetée à l’extérieur, vous pouvez l’enregistrer ici.';
+ if(problem.type==='temu-label-refused')return 'TEMU a refusé cette étiquette. Consultez le motif ci-dessous et corrigez le problème dans TEMU Seller Center, puis relisez l’expédition existante. Si vous disposez déjà d’une étiquette achetée à l’extérieur, vous pouvez l’enregistrer ici.';
+ return null;
+}
+
 function mappingQuantityDefaults(line={}){
 
 
@@ -89,6 +97,7 @@ const resolutionViews={
 
 
 
+ 'erplain-recovery':{title:'Vérifier Erplain et reprendre le BL',view:'erp-recovery'},
  preparation:{title:'Validation stock / BL à actualiser',view:'preparation'},
  'historical-preparation':{title:'Reprise historique · BL manquant',view:'historical'},
 
@@ -1093,11 +1102,11 @@ function renderResolution(ctx,problem){
 
 
 
- }else if(spec.view==='stock'||spec.view==='bc'||spec.view==='historical'){
+ }else if(spec.view==='stock'||spec.view==='bc'||spec.view==='historical'||spec.view==='erp-recovery'){
 
 
 
-  scope.textContent=spec.view==='historical'?'Rapprocher le BC, le débit de stock déjà effectué et le mapping courant, puis créer le BL manquant. L’étiquette et le suivi existants sont conservés. Le statut de la plateforme reste indicatif.':spec.view==='stock'?'Disponibilité lue dans Erplain LIVE. Une rupture se traite par un produit équivalent, un approvisionnement ou une livraison partielle.':'Comparer la commande au BC et à ses BL. Une livraison partielle ne doit pas être comparée à la totalité du BC.';
+  scope.textContent=spec.view==='erp-recovery'?'Relire le BC et son BL dans Erplain, vérifier le stock, puis reprendre la préparation. Un BL absent est recréé uniquement après vérification de l’absence de mouvement de stock.':spec.view==='historical'?'Rapprocher le BC, le débit de stock déjà effectué et le mapping courant, puis créer le BL manquant. L’étiquette et le suivi existants sont conservés. Le statut de la plateforme reste indicatif.':spec.view==='stock'?'Disponibilité lue dans Erplain LIVE. Une rupture se traite par un produit équivalent, un approvisionnement ou une livraison partielle.':'Comparer la commande au BC et à ses BL. Une livraison partielle ne doit pas être comparée à la totalité du BC.';
 
 
 
@@ -1113,7 +1122,7 @@ function renderResolution(ctx,problem){
 
 
 
-  if(spec.view==='stock'||spec.view==='historical')button(spec.view==='historical'?'Reprendre le BL — étiquette conservée':'Recontrôler le stock et reprendre le BL',async()=>saved(await task('resume-erp')));
+  if(spec.view==='stock'||spec.view==='historical'||spec.view==='erp-recovery')button(spec.view==='erp-recovery'?'Vérifier Erplain et reprendre le BL':spec.view==='historical'?'Reprendre le BL — étiquette conservée':'Recontrôler le stock et reprendre le BL',async()=>saved(await task('resume-erp')));
 
 
 
@@ -1173,22 +1182,44 @@ function renderResolution(ctx,problem){
 
 
 
-  const sharedParcelNotice=sharedParcelResolutionNotice(problem,ctx.order);
-  scope.textContent=sharedParcelNotice?sharedParcelNotice.description:spec.view==='api'?'Incident de connexion '+provider+' · les données métier ne doivent pas être modifiées pour masquer une erreur API.':'Motif enregistré par V3 ou renvoyé par le service. Le détail complet est affiché ci-dessous ; une actualisation ne garantit pas sa résolution.';
+  const sharedParcelNotice=sharedParcelResolutionNotice(problem,ctx.order),temuLabelNotice=temuLabelResolutionNotice(problem,ctx.order);
+  scope.textContent=temuLabelNotice|| (sharedParcelNotice?sharedParcelNotice.description:spec.view==='api'?'Incident de connexion '+provider+' · les données métier ne doivent pas être modifiées pour masquer une erreur API.':'Motif enregistré par V3 ou renvoyé par le service. Le détail complet est affiché ci-dessous ; une actualisation ne garantit pas sa résolution.');
 
 
 
   fields.innerHTML='<p class="resolution-diagnostic">'+esc(problem.detail||'Le motif détaillé n’a pas été enregistré.')+'</p>'+temuRefusalDetailsHtml(problem,ctx);
+  if(problem.type==='customer'){
+   const number=ctx.order.channel==='temu'&&ctx.order.erp_live?.customerNumber||'V3:'+ctx.order.id;
+   fields.innerHTML+='<p>Numéro client à rechercher dans Erplain : <strong>'+esc(number)+'</strong></p><p>Actualiser recherche le client existant. Si vous avez vérifié son absence dans Erplain, vous pouvez autoriser une nouvelle tentative. Une création précédente peut avoir abouti sans réponse : vérifiez avant de confirmer.</p>';
+   if(['temu','amazon'].includes(ctx.order.channel)){
+    const label=document.createElement('label'),confirmation=document.createElement('input');confirmation.type='checkbox';
+    label.append(confirmation,document.createTextNode(' J’ai vérifié dans Erplain que ce client est absent et j’autorise une nouvelle création.'));fields.append(label);
+    const retry=button('Autoriser la création du client et reprendre',async()=>{
+     if(!confirmation.checked)throw Error('Vérifiez le client dans Erplain et cochez la confirmation.');
+     await saved(await task('refresh',{provider:'Erplain',confirmCustomerAbsent:true,customerNumber:number,resumeAfter:true}));
+    });retry.disabled=true;confirmation.onchange=()=>{retry.disabled=!confirmation.checked;};
+   }
+  }
 
 
 
-  button(sharedParcelNotice?sharedParcelNotice.button:['TEMU','GLS','GOFO'].includes(provider)?'Actualiser les informations '+provider:'Actualiser et reprendre la commande',async()=>saved(await task('refresh',{...(target?{sku:target}:{}),provider,...(['TEMU','GLS','GOFO'].includes(provider)?{resumeAfter:false}:{})})));button('Ouvrir les connexions',()=>{d.modal.close();show('connections');});
+  button(sharedParcelNotice?sharedParcelNotice.button:['TEMU','GLS','GOFO'].includes(provider)?'Actualiser les informations '+provider:'Actualiser et reprendre la commande',async()=>saved(await task('refresh',{...(target?{sku:target}:{}),provider,...(['TEMU','GLS','GOFO'].includes(provider)?{resumeAfter:false}:{})})));if(temuLabelNotice)button('Enregistrer une étiquette externe déjà achetée',()=>{d.modal.close();openExternalLabel(ctx.order.id);});else button('Ouvrir les connexions',()=>{d.modal.close();show('connections');});
 
 
 
  }
 
 
+
+ if(['bc','unknown','api-incomplete'].includes(problem.type)&&/BC[^\n]*(?:introuvable|absent)|Lignes BC non reçues/i.test((problem.detail||'')+' '+problem.label)&&['temu','amazon'].includes(ctx.order.channel)&&ctx.order.erp_live?.bc?.id&&!ctx.order.erp_live?.bl?.id&&!ctx.order.partial_mode){
+  const p=document.createElement('p');p.textContent='Si le BC enregistré est réellement absent, V3 peut vérifier les documents et le stock avant d’autoriser sa recréation. L’étiquette existante sera conservée.';fields.append(p);
+  const label=document.createElement('label'),confirm=document.createElement('input');confirm.type='checkbox';
+  label.append(confirm,document.createTextNode(' J’autorise la recréation du BC pour '+ctx.order.reference+' uniquement si les contrôles confirment son absence.'));fields.append(label);
+  const recovery=button('Vérifier le BC absent et reprendre',async()=>{
+   if(!confirm.checked)throw Error('Confirmez la reprise de cette commande.');
+   await saved(await task('refresh',{provider:'Erplain',confirmMissingBc:true,missingBcId:String(ctx.order.erp_live.bc.id),orderReference:ctx.order.reference,resumeAfter:true}));
+  });recovery.disabled=true;confirm.onchange=()=>{recovery.disabled=!confirm.checked;};
+ }
 
  if(ctx.active){const p=document.createElement('p');p.textContent='Intervention enregistrée à l’ouverture : '+(ctx.active.stage||'Étape non transmise.');d.body.prepend(p);}
 
@@ -1319,17 +1350,17 @@ function openStockEquivalent(ctx,problem){
 
 
 
- d.body.innerHTML='<p>Choisissez la portée du remplacement. Une équivalence permanente met à jour le mapping pour les prochaines commandes de ce gestionnaire.</p><form><fieldset style="display:flex;flex-direction:column;gap:12px"><legend>1. Choisir l’équivalent · 2. Vérifier · 3. Confirmer l’enregistrement</legend><label style="display:flex;flex-direction:row;gap:10px;align-items:center"><input type="radio" name="scope" value="order" required style="width:18px;min-width:18px">Équivalence juste pour cette commande</label><label style="display:flex;flex-direction:row;gap:10px;align-items:center"><input type="radio" name="scope" value="permanent" required style="width:18px;min-width:18px">Équivalence permanente</label></fieldset><label>SKU Erplain en rupture<input name="original" readonly value="'+esc(sku)+'"></label><label>SKU Erplain équivalent<input name="replacementSku" required maxlength="199" list="equivalent-skus"></label><datalist id="equivalent-skus">'+(ctx.products||[]).map(p=>'<option value="'+esc(p.sku)+'">'+esc(p.label||p.sku)+'</option>').join('')+'</datalist><label>Étendue du remplacement<select name="replacementMode"><option value="full">Remplacer entièrement ce produit</option><option value="partial">Remplacer partiellement ce produit</option></select></label><div class="resolution-quantities"><label>Quantité du SKU original à remplacer<input name="replaceQuantity" type="number" min="0.000001" step="any" required value="'+esc(erplainQuantity)+'"></label><label>Quantité du produit équivalent à envoyer<input name="replacementQuantity" type="number" min="0.000001" step="any" required value="'+esc(erplainQuantity)+'"></label></div><p data-quantity-note></p><p>Les quantités sont en unités Erplain. Pour un remplacement partiel, saisissez uniquement la quantité à remplacer.</p><button type="submit">Vérifier le produit et son stock</button><div data-preview role="status" aria-live="polite" style="margin:16px 0;padding:12px;border:2px solid #b7791f;border-radius:8px">Remplacement NON enregistré.</div><label style="display:flex;align-items:center;gap:10px;margin:16px 0"><input name="confirmed" type="checkbox" style="width:18px;height:18px;flex:0 0 18px;margin:0">Je confirme que ce produit convient en remplacement.</label><button type="button" data-apply disabled>Enregistrer et reprendre la commande</button></form>';
+ d.body.innerHTML='<p>Choisissez la portée du remplacement. Une équivalence permanente met à jour le mapping pour les prochaines commandes de ce gestionnaire.</p><form><fieldset style="display:flex;flex-direction:column;gap:12px"><legend>Choisir l’équivalent et lancer le remplacement</legend><label style="display:flex;flex-direction:row;gap:10px;align-items:center"><input type="radio" name="scope" value="order" required style="width:18px;min-width:18px">Équivalence juste pour cette commande</label><label style="display:flex;flex-direction:row;gap:10px;align-items:center"><input type="radio" name="scope" value="permanent" required style="width:18px;min-width:18px">Équivalence permanente</label></fieldset><label>SKU Erplain en rupture<input name="original" readonly value="'+esc(sku)+'"></label><label>SKU Erplain équivalent<input name="replacementSku" required maxlength="199" list="equivalent-skus"></label><datalist id="equivalent-skus">'+(ctx.products||[]).map(p=>'<option value="'+esc(p.sku)+'">'+esc(p.label||p.sku)+'</option>').join('')+'</datalist><label>Étendue du remplacement<select name="replacementMode"><option value="full">Remplacer entièrement ce produit</option><option value="partial">Remplacer partiellement ce produit</option></select></label><div class="resolution-quantities"><label>Quantité du SKU original à remplacer<input name="replaceQuantity" type="number" min="0.000001" step="any" required value="'+esc(erplainQuantity)+'"></label><label>Quantité du produit équivalent à envoyer<input name="replacementQuantity" type="number" min="0.000001" step="any" required value="'+esc(erplainQuantity)+'"></label></div><p data-quantity-note></p><p>Les quantités sont en unités Erplain. Pour un remplacement partiel, saisissez uniquement la quantité à remplacer.</p><p>En lançant le remplacement, vous validez ce produit et ces quantités. V3 vérifie le stock, enregistre le remplacement et poursuit la préparation autorisée automatiquement.</p><div data-preview role="status" aria-live="polite" style="margin:16px 0;padding:12px;border:2px solid #b7791f;border-radius:8px">Choisissez le produit et les quantités, puis lancez le remplacement.</div><button type="submit" data-apply>Remplacer et poursuivre la commande</button></form>';
 
 
 
- const form=d.body.querySelector('form'),apply=form.querySelector('[data-apply]'),preview=form.querySelector('[data-preview]');let checked=null,busy=false,done=false;
- const initialValues=()=>JSON.stringify({sku:form.elements.replacementSku.value,quantity:form.elements.replacementQuantity.value,scope:form.elements.scope.value});let originalValues;
+ const form=d.body.querySelector('form'),apply=form.querySelector('[data-apply]'),preview=form.querySelector('[data-preview]');let busy=false,done=false;
+ const initialValues=()=>JSON.stringify({sku:form.elements.replacementSku.value,quantity:form.elements.replacementQuantity.value,originalQuantity:form.elements.replaceQuantity.value,mode:form.elements.replacementMode.value,scope:form.elements.scope.value});let originalValues;
 
 
 
  const pending=ctx.order.pending_equivalent;
- if(pending?.previewJobId){const abandon=document.createElement('button');abandon.type='button';abandon.textContent='Abandonner l’équivalent';abandon.onclick=async()=>{abandon.disabled=true;try{const result=await d.job(ctx,'abandon-equivalent','stock',{previewJobId:pending.previewJobId});if(result?.abandoned){d.modal.close();await orders();await openCorrection(ctx.order.id);}}catch{}finally{abandon.disabled=false;}};d.body.prepend(abandon);}
+ if(pending?.previewJobId){const abandon=document.createElement('button');abandon.type='button';abandon.dataset.abandonEquivalent='true';abandon.textContent='Abandonner l’équivalent';abandon.onclick=async()=>{abandon.disabled=true;try{const result=await d.job(ctx,'abandon-equivalent','stock',{previewJobId:pending.previewJobId});if(result?.abandoned){d.modal.close();await orders();await openCorrection(ctx.order.id);}}catch{}finally{abandon.disabled=false;}};d.body.prepend(abandon);}
  if(pending?.sku===sku){form.elements.scope.value=pending.scope;form.elements.replacementSku.value=pending.replacementSku;form.elements.replaceQuantity.value=pending.replaceQuantity;form.elements.replacementQuantity.value=pending.replacementQuantity;}
 
 
@@ -1354,42 +1385,32 @@ function openStockEquivalent(ctx,problem){
 
 
 
- const quantityNote=form.querySelector('[data-quantity-note]');const updateQuantityNote=()=>{const full=form.elements.replacementMode.value==='full';form.elements.replaceQuantity.readOnly=full;form.elements.replaceQuantity.max=erplainQuantity;if(full)form.elements.replaceQuantity.value=erplainQuantity;const remaining=Number(erplainQuantity)-Number(form.elements.replaceQuantity.value);quantityNote.textContent=partialRemainder?(full?'Remplacement de tout le reliquat : ':'Remplacement partiel du reliquat : ')+form.elements.replaceQuantity.value+' unités de '+sku+' remplacées par '+form.elements.replacementQuantity.value+' unités de '+(form.elements.replacementSku.value.trim()||'produit équivalent')+'. '+(remaining>0?remaining+' unités de '+sku+' restent à allouer':remaining===0?'Aucune autre unité de '+sku+' ne reste à allouer':'Quantité à remplacer trop élevée')+'. Les '+(selected.allocated||0)+' unités déjà allouées, leurs BL et leurs étiquettes sont conservés. Le changement reste à vérifier et à confirmer.':(full?'Remplacement complet : ':'Remplacement partiel : ')+form.elements.replaceQuantity.value+' unités de '+sku+' retirées · '+form.elements.replacementQuantity.value+' unités de '+(form.elements.replacementSku.value.trim()||'produit équivalent')+' à envoyer · '+(remaining>0?remaining+' unités de '+sku+' conservées':remaining===0?'aucune unité de '+sku+' conservée':'quantité à remplacer trop élevée')+'. Le changement reste à vérifier et à confirmer.';};updateQuantityNote();if(partialRemainder)apply.textContent='Enregistrer le remplacement du reliquat';
+ const quantityNote=form.querySelector('[data-quantity-note]');const updateQuantityNote=()=>{const full=form.elements.replacementMode.value==='full';form.elements.replaceQuantity.readOnly=full;form.elements.replaceQuantity.max=erplainQuantity;if(full)form.elements.replaceQuantity.value=erplainQuantity;const remaining=Number(erplainQuantity)-Number(form.elements.replaceQuantity.value);quantityNote.textContent=partialRemainder?(full?'Remplacement de tout le reliquat : ':'Remplacement partiel du reliquat : ')+form.elements.replaceQuantity.value+' unités de '+sku+' remplacées par '+form.elements.replacementQuantity.value+' unités de '+(form.elements.replacementSku.value.trim()||'produit équivalent')+'. '+(remaining>0?remaining+' unités de '+sku+' restent à allouer':remaining===0?'Aucune autre unité de '+sku+' ne reste à allouer':'Quantité à remplacer trop élevée')+'. Les '+(selected.allocated||0)+' unités déjà allouées, leurs BL et leurs étiquettes sont conservés. La vérification et l’enregistrement seront effectués ensemble.':(full?'Remplacement complet : ':'Remplacement partiel : ')+form.elements.replaceQuantity.value+' unités de '+sku+' retirées · '+form.elements.replacementQuantity.value+' unités de '+(form.elements.replacementSku.value.trim()||'produit équivalent')+' à envoyer · '+(remaining>0?remaining+' unités de '+sku+' conservées':remaining===0?'aucune unité de '+sku+' conservée':'quantité à remplacer trop élevée')+'. La vérification et l’enregistrement seront effectués ensemble.';};updateQuantityNote();if(partialRemainder)apply.textContent='Remplacer le reliquat et poursuivre';
 
 
 
  originalValues=initialValues();
- const consent=form.elements.confirmed;consent.parentElement.style.setProperty('flex-direction','row','important');consent.parentElement.style.setProperty('align-items','center','important');for(const prop of ['width','min-width','max-width','height'])consent.style.setProperty(prop,'18px','important');consent.style.setProperty('flex','0 0 18px','important');consent.style.setProperty('margin','0','important');
-
-
-
  const values=()=>({scope:form.elements.scope.value,sku,replacementSku:form.elements.replacementSku.value.trim(),replaceQuantity:Number(form.elements.replaceQuantity.value),replacementQuantity:Number(form.elements.replacementQuantity.value)});
 
 
 
- const enabled=()=>{if(done||d.modal.dataset.equivalentSubmitted)delete d.modal.dataset.unsavedEquivalent;else if(!busy&&!d.modal.dataset.unsavedEquivalent?.includes('tentée')&&(checked||initialValues()!==originalValues))d.modal.dataset.unsavedEquivalent=checked?.reconcileOnly?'La synchronisation V3 n’est pas confirmée. Fermer sans la confirmer ?':'Le remplacement n’est pas enregistré. La commande conserve son produit actuel et son blocage. Fermer sans enregistrer ?';apply.disabled=busy||done||!form.elements.confirmed.checked;apply.textContent=checked?.reconcileOnly?'Synchroniser V3 avec le BC vérifié':partialRemainder?'Enregistrer le remplacement du reliquat':'Enregistrer et reprendre la commande';};
-
-
-
+ const enabled=()=>{const abandon=d.body.querySelector('[data-abandon-equivalent]');if(abandon){abandon.disabled=busy||done;abandon.hidden=done;}if(done||d.modal.dataset.equivalentSubmitted)delete d.modal.dataset.unsavedEquivalent;else if(!busy&&!d.modal.dataset.unsavedEquivalent?.includes('tentée')&&initialValues()!==originalValues)d.modal.dataset.unsavedEquivalent='Le remplacement n’est pas lancé. Fermer sans enregistrer ?';apply.disabled=busy||done;apply.textContent=busy?'Vérification et remplacement en cours…':partialRemainder?'Remplacer le reliquat et poursuivre':'Remplacer et poursuivre la commande';};
  const showError=e=>{preview.setAttribute('role','alert');preview.textContent=(e.correctionRecorded?'Remplacement enregistré. ':e.saveAttempted?'Résultat de l’enregistrement à vérifier avant de relancer : ':'Remplacement non enregistré : ')+displayErrorDetail(e)+(e.message.includes('Poids non renseigné')?' · Renseignez le poids du produit '+(/Produit restant \[([^\]]+)\]/.exec(e.message)?.[1]||values().replacementSku)+' dans Erplain, puis réessayez.':'');};
 
 
 
- const verify=async()=>{updateQuantityNote();const data=values();preview.setAttribute('role','status');preview.textContent='Vérification du produit et de son stock…';const r=await d.job(ctx,'equivalent-preview','stock',data);if(!r||d.closed)return false;if(!r.previewFingerprint)throw Error('Vérification incomplète. Réessayez.');checked={data,previewFingerprint:r.previewFingerprint,reconcileOnly:!!r.reconcileOnly};d.modal.dataset.allowOrderRefresh='true';try{await orders();}catch{}finally{delete d.modal.dataset.allowOrderRefresh;}if(r.reconcileOnly){preview.textContent=r.recoverySummary;quantityNote.textContent='Remplacement déjà enregistré dans Erplain ; synchronisation V3 à confirmer.';enabled();return true;}preview.textContent=r.replacementSku+' · Stock disponible : '+(r.available==null?'non suivi dans Erplain':new Intl.NumberFormat('fr-FR').format(r.available)+' unités')+'. Remplacement NON enregistré. Cochez la confirmation puis cliquez sur « Enregistrer et reprendre la commande ».';if(partialRemainder)preview.textContent=preview.textContent.replace('Enregistrer et reprendre la commande','Enregistrer le remplacement du reliquat');consent.scrollIntoView({block:'nearest'});consent.focus();return true;};
-
-
-
- form.addEventListener('input',e=>{updateQuantityNote();if(e.target!==form.elements.confirmed){checked=null;preview.textContent='Choix modifié · remplacement NON enregistré. Vérifiez à nouveau le produit et son stock.';form.elements.confirmed.checked=false;}enabled();});
-
-
-
- form.onsubmit=async e=>{e.preventDefault();if(busy||done)return;checked=null;busy=true;enabled();try{await verify();}catch(e){showError(e);}finally{busy=false;enabled();}};
-
-
-
- apply.onclick=async()=>{if(busy||done||!form.elements.confirmed.checked||!form.reportValidity())return;busy=true;enabled();try{if(!checked&&!await verify())return;d.modal.dataset.unsavedEquivalent='Demande de remplacement en cours. Fermer laisse le traitement continuer ; vérifiez son résultat avant toute nouvelle demande. Fermer le suivi ?';preview.textContent=checked.reconcileOnly?'Synchronisation avec le BC vérifié en cours…':'Enregistrement du remplacement en cours…';const r=await d.job(ctx,'replace-equivalent','stock',{...checked.data,previewFingerprint:checked.previewFingerprint,confirmEquivalent:true});if(r){done=true;checked=null;preview.textContent=r.message;await orders();}}catch(e){checked=null;e.saveAttempted=true;if(e.correctionRecorded)done=true;else d.modal.dataset.unsavedEquivalent='Une demande de remplacement a été tentée. Son résultat reste à vérifier ; ne la relancez pas sans rapprochement. Fermer et consulter l’état de la commande ?';showError(e);}finally{busy=false;enabled();if(done)form.querySelectorAll('input,button').forEach(x=>x.disabled=true);}};
-
-
+ form.addEventListener('input',()=>{updateQuantityNote();if(!busy&&!done)preview.textContent='Choix modifié. La vérification sera effectuée lors du remplacement.';enabled();});
+ form.onsubmit=async e=>{
+  e.preventDefault();if(busy||done||!form.reportValidity())return;
+  const data=values();busy=true;enabled();
+  try{
+   d.modal.dataset.unsavedEquivalent='Demande de remplacement en cours. Fermer laisse le traitement continuer ; vérifiez son résultat avant toute nouvelle demande. Fermer le suivi ?';
+   preview.setAttribute('role','status');preview.textContent='Vérification du produit et du stock, puis enregistrement du remplacement…';
+   const r=await d.job(ctx,'replace-equivalent','stock',{...data,verifyAndApply:true,confirmEquivalent:true});
+   if(r){done=true;preview.textContent=r.message;await orders();}
+  }catch(error){error.saveAttempted=true;if(error.correctionRecorded)done=true;else d.modal.dataset.unsavedEquivalent='Une demande de remplacement a été tentée. Son résultat reste à vérifier ; ne la relancez pas sans rapprochement. Fermer et consulter l’état de la commande ?';showError(error);}
+  finally{busy=false;enabled();if(done)form.querySelectorAll('input,button,select').forEach(x=>x.disabled=true);}
+ };
 
  return d;
 

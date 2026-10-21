@@ -1,4 +1,5 @@
 import {installCarrierQuotaColumns,deferCarrierQuota} from './carrier-erplain-quota.mjs';
+import {carrierLocalTransaction,claimCarrierJob} from './carrier-local-transaction.mjs';
 import {retiredLabelPreparationReview} from './post-bl-preparation-review.mjs';
 import {installCarrierAttemptProof,markCarrierCreationStarted,recordCarrierFailure} from './carrier-attempt-proof.mjs';
 import {hasCreatedBl} from './created-bl-label.mjs';
@@ -83,15 +84,13 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
  async function run(carrier){
   if(active.has(carrier))return;active.add(carrier);
   try{
-   const job=await db.transaction(async tx=>{
-    const {rows}=await tx.query(`SELECT * FROM carrier_jobs WHERE carrier=$1 AND ${carrierEligible} ORDER BY ${priorityOrder('carrier_jobs')} FOR UPDATE SKIP LOCKED LIMIT 1`,[carrier]);
-    if(!rows.length)return null;await tx.query(`UPDATE carrier_jobs SET status=$2,attempts=attempts+1,updated_at=now() WHERE order_id=$1`,[rows[0].order_id,rows[0].status==='pending'?'creating':'awaiting_pdf']);return rows[0];
-   });if(!job)return;
-   let result=job.result,creationStarted=!!job.creation_started_at;
+   const job=await claimCarrierJob(db,carrier,{eligible:carrierEligible,priority:priorityOrder('carrier_jobs')});if(!job)return;
+   let result=job.result,creationStarted=!!job.creation_started_at,orderChannel;
    try{
     const selectedClient=job.environment==='production'?productionClient:client;
     if(!selectedClient)throw new Error('Accès transporteur production non configurés');
     let o=(await db.query('SELECT * FROM orders WHERE id=$1',[job.order_id])).rows[0];
+    orderChannel=o.channel;
     o.glsInternational={...(await loadRouting(db)).international,...o.source_payload?.glsInternationalOverride};
     o.lines=(await db.query('SELECT source_sku,target_sku,quantity,target_quantity FROM lines WHERE order_id=$1 ORDER BY source_line',[o.id])).rows;
     if(!result){
@@ -129,18 +128,20 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
     if(!documents?.length)throw new Error('Expédition créée mais PDF non fourni. Création conservée, aucun nouvel envoi.');
     if(!result.tracking.length)throw new Error('Numéro de suivi non fourni ; création conservée pour vérification.');
     const buffers=documents.map(pdfBytes);
-    await db.transaction(async tx=>{
+    await carrierLocalTransaction(db,async tx=>{
+     await tx.query('SELECT id FROM orders WHERE id=$1 FOR UPDATE',[o.id]);
      for(let i=0;i<buffers.length;i++)await tx.query(`INSERT INTO carrier_documents VALUES($1,$2,$3) ON CONFLICT(order_id,document_index) DO NOTHING`,[o.id,i,buffers[i]]);
      await tx.query(`UPDATE carrier_jobs SET status='ready',error=null,result=null,updated_at=now() WHERE order_id=$1`,[o.id]);
      await tx.query(`UPDATE orders SET label_status=CASE WHEN resolution_pending_resume AND NOT $3 THEN label_status ELSE $2 END,issue=CASE WHEN resolution_pending_resume THEN issue ELSE null END,processing_priority_at=null WHERE id=$1`,[o.id,job.environment==='production'?'production_ready':'sandbox_ready',!!job.manual_bl_request&&job.manual_bl_request.creationId===job.creation_id]);
     });
     }catch(e){
     if(!creationStarted&&!result&&!e.uncertain&&await deferCarrierQuota(db,job,e))return;
-    if(carrier==='gofo'&&!result&&e.zoneRejected){
+    if(carrier==='gofo'&&!result&&(e.zoneRejected||(orderChannel==='amazon'&&e.rejected===true&&e.cityRejected===true&&!e.uncertain&&!e.partialResult))){
+     const refusalKind=e.cityRejected?'city':'zone';
      await db.transaction(async tx=>{
-      await tx.query("UPDATE orders SET carrier='gls',parcel_count=ceil(weight_kg/30),source_payload=source_payload||$2::jsonb WHERE id=$1",[job.order_id,JSON.stringify({gofoZoneRefusal:{reason:e.message,at:new Date().toISOString(),fallback:'gls'}})]);
-      await tx.query("UPDATE carrier_jobs SET carrier='gls',status='pending',attempts=0,error=$2,failure_phase=null,creation_started_at=null,updated_at=now() WHERE order_id=$1",[job.order_id,'Bascule GLS après refus explicite de zone GOFO : '+e.message]);
-      await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','carrier.gofo_zone_fallback',$1)",[JSON.stringify({orderId:job.order_id,reason:e.message})]);
+      await tx.query("UPDATE orders SET carrier='gls',parcel_count=ceil(weight_kg/30),source_payload=source_payload||$2::jsonb WHERE id=$1",[job.order_id,JSON.stringify({gofoZoneRefusal:{reason:e.message,...(orderChannel==='amazon'?{kind:refusalKind}:{}),at:new Date().toISOString(),fallback:'gls'}})]);
+      await tx.query("UPDATE carrier_jobs SET carrier='gls',status='pending',attempts=0,error=$2,failure_phase=null,creation_started_at=null,updated_at=now() WHERE order_id=$1",[job.order_id,'Bascule GLS après refus explicite '+(refusalKind==='city'?'de ville':'de zone')+' GOFO : '+e.message]);
+      await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','carrier.gofo_zone_fallback',$1)",[JSON.stringify({orderId:job.order_id,reason:e.message,...(orderChannel==='amazon'?{kind:refusalKind,previousAttempt:{...job,creationStarted,error:e.message},addressUnchanged:true}:{})})]);
      });return;
     }
     const status=result?(carrier==='gofo'&&job.attempts+1<5?'awaiting_pdf':'review'):(e.uncertain?'review':'failed');

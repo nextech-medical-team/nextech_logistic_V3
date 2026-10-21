@@ -21,15 +21,18 @@ export async function fillMissingVariantWeight(api,expected,{checkpoint}={}){
  const read=async()=>{
   const {Variant:v}=await api.request(query,{id:String(expected.id)});
   if(!v||String(v.id)!==String(expected.id)||v.sku!==expected.sku||v.active!==true||v.product?.active!==true||expected.productId&&String(v.product.id)!==String(expected.productId))throw Error('Identité produit active différente');
+  if(!Object.hasOwn(v,'weight_amount')||!Object.hasOwn(v,'weight_unit'))throw Error('Lecture du poids Erplain incomplète : aucune écriture');
   return v;
  };
  const before=await read();
  if(!missingWeight(before.weight_amount)){await checkpoint({state:'preserved',before,after:before});return {changed:false,variant:before};}
  await checkpoint({state:'submitting',before});
+ let mutationReturned=false;
  try{
   await api.request('mutation V3BusinessMissingWeight($id:ID!,$input:VariantInput!){UpdateVariant(id:$id,input:$input){id}}',{id:String(expected.id),input:{weight_amount:DEFAULT_UNIT_WEIGHT_GRAMS,weight_unit:'g'}});
+  mutationReturned=true;
   const after=await read();
   if(after.weight_amount==null||Number(after.weight_amount)!==DEFAULT_UNIT_WEIGHT_GRAMS||after.weight_unit!=='g')throw Error('Enregistrement des 5 g non confirmé');
   await checkpoint({state:'verified',before,after});return {changed:true,variant:after};
- }catch(error){await checkpoint({state:'uncertain',before});throw error;}
+ }catch(error){await checkpoint({state:!mutationReturned&&error.code==='source_budget_deferred'?'not_sent':'uncertain',before});throw error;}
 }

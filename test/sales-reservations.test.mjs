@@ -37,6 +37,24 @@ test('legacy unpublished BC keeps false; active BC is never retroactively mutate
  await publishIncrementalBc(api,current.id,{verify:()=>{},lock:fn=>fn()});await publishIncrementalBc(api,current.id,{verify:()=>{},lock:fn=>fn()});assert.equal(writes,1);assert.equal(current.update_stock,false);
 });
 
+test('zero-stock sales order is published and retained while its BL remains forbidden',async()=>{
+ let document={...bc(),status:'unpublished',line_items:[{...line(),quantity:1,reserved_quantity:0,on_hand:0,available:0}]};
+ const writes=[];
+ const api={request:async(q,v)=>{
+  if(q.includes('DocumentNumberingContext'))return {DocumentNumberingContext:{preview:'C00014930',manual_override_allowed_effective:true}};
+  if(q.startsWith('mutation')){
+   writes.push(q);assert.match(q,/UpdateOrder/);assert.doesNotMatch(q,/ShippingOrder|StockRemoval/);
+   document={...document,status:'active',line_items:[{...document.line_items[0],reserved_quantity:1,available:-1}]};return {UpdateOrder:structuredClone(document)};
+  }
+  return {Order:structuredClone(document)};
+ }};
+ const published=await publishIncrementalBc(api,document.id,{expectedStockPolicy:true,verify:()=>{},lock:fn=>fn()});
+ assert.equal(published.status,'active');assert.equal(writes.length,1);
+ assert.throws(()=>assertFullOrderStock(published.line_items),/stock insuffisant/);
+ await publishIncrementalBc(api,document.id,{expectedStockPolicy:true,verify:()=>{},lock:fn=>fn()});
+ assert.equal(writes.length,1,'existing BC is reused without creating or publishing it twice');
+});
+
 test('unknown stock policy is rejected before any publication',async()=>{
  const api={request:async q=>{assert.ok(q.startsWith('query '));return {Order:{...bc(),status:'unpublished',update_stock:null}};}};
  await assert.rejects(publishIncrementalBc(api,'1934803',{verify:()=>{},lock:fn=>fn()}),/politique de stock.*non vérifiée/i);

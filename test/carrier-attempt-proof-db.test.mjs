@@ -6,6 +6,21 @@ import {initializeCarrierJobs,createCarrierWorkers} from '../src/carrier-jobs.mj
 import {initializeAppSchema} from '../src/schema-startup.mjs';
 import {hasUncertainCarrierHistory} from '../src/carrier-attempt-proof.mjs';
 import {synchronizeRecoveredOrder} from '../src/erplain-targeted-orders.mjs';
+test('PDF persistence deadlock retries SQL without another carrier purchase',async()=>{
+ const {e,db,job}=await fixture();try{
+  await queueLabelFromBl(db,'o',{email:'operator'});
+  const transact=db.transaction;let injected=false,posts=0;
+  db.transaction=fn=>transact(tx=>fn({...tx,query:async(sql,params)=>{
+   const r=await tx.query(sql,params);
+   if(!injected&&sql.startsWith('INSERT INTO carrier_documents')){injected=true;throw Object.assign(Error('deadlock fixture'),{code:'40P01'});}
+   return r;
+  }}));
+  const workers=createCarrierWorkers(db,null,{clients:{gofoCreate:async(_o,{beforeCreate})=>{await beforeCreate();posts++;return {reference:'R',tracking:['T']};},gofoLabel:async()=>Buffer.from('%PDF-1.4 test').toString('base64')}});
+  await workers.run('gofo');await workers.run('gofo');
+  assert.equal(injected,true);assert.equal(posts,1);assert.equal((await job()).status,'ready');
+  assert.equal((await db.query('SELECT count(*)::int n FROM carrier_documents')).rows[0].n,1);
+ }finally{await e.close();}
+});
 async function fixture(){
  const e=new PGlite();await e.waitReady;const wrap=x=>({query:(s,p=[])=>x.query(s,p),exec:s=>x.exec(s)});
  const db={...wrap(e),transaction:fn=>e.transaction(tx=>fn(wrap(tx))),withLocks:async(_,fn)=>fn(),recoverInterrupted:false};
@@ -13,7 +28,7 @@ async function fixture(){
  CREATE TABLE lines(id text,order_id text,source_line text,source_sku text,target_sku text,quantity numeric,target_quantity numeric);
  CREATE TABLE settings(key text,value jsonb);CREATE TABLE resolution_jobs(id text,order_id text,status text);CREATE TABLE extra_parcels(id text,order_id text);
  CREATE TABLE audit(user_email text,action text,detail jsonb,created_at timestamptz DEFAULT now());
- CREATE TABLE schema_migrations(version text PRIMARY KEY);INSERT INTO schema_migrations VALUES('application-20261005-robustness-5');`);
+ CREATE TABLE schema_migrations(version text PRIMARY KEY);INSERT INTO schema_migrations VALUES('application-20261005-robustness-5'); INSERT INTO schema_migrations VALUES('partial-erplain-retry-20261016-1'); INSERT INTO schema_migrations VALUES('partial-temu-label-20261016-1');`);
  await initializeCarrierJobs(db);
  const erp={bc:{id:'bc',status:'active'},bl:{id:'bl',status:'in_preparation'},pricing:{status:'blocked'},preparationAuthority:{kind:'recorded_bc',fingerprint:'wrong'}};
  await db.query("INSERT INTO orders(id,channel,reference,carrier,address,erp_live,label_status,weight_kg,parcel_count) VALUES('o','amazon','SYNTHETIC','gofo',$1,$2,'simulated',1,1)",[JSON.stringify({name:'Synthetic',street:'1 rue Test',city:'Paris',postal:'75001',country:'FR'}),JSON.stringify(erp)]);
