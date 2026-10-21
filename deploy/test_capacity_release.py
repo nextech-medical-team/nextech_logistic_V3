@@ -1,4 +1,4 @@
-import io,json,tarfile,tempfile,unittest
+import io,json,tarfile,tempfile,unittest,subprocess
 from pathlib import Path
 from contextlib import ExitStack
 from unittest.mock import patch
@@ -39,3 +39,7 @@ class CapacityReleaseTests(unittest.TestCase):
   result,events=self.exercise(static=True)
   self.assertEqual(result['status'],'deployed');self.assertNotIn('preserve',events)
   self.assertNotIn('pause',events)
+
+class PoolSelectionTests(unittest.TestCase):
+ def test_inspector_pool_selection(self):
+  subprocess.run(["node","--test",str(Path(__file__).with_name("pool-selection.test.mjs"))],check=True)
