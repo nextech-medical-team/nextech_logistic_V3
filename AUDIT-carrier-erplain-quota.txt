@@ -1,0 +1,49 @@
+Correction de la reprise transporteur après quota Erplain — 21 octobre 2026
+Branche : fix/carrier-erplain-quota-recovery-20261021
+
+Problème observé sur 2517/26073 : lecture Erplain différée avant l'appel GLS,
+tâche transporteur laissée failed, erreur affichée comme une limite GLS.
+
+Comportement corrigé
+- Une erreur 429 portant explicitement erplainReadOnly=true peut remettre la
+  tâche pending uniquement avant toute création transporteur.
+- Date de reprise et nombre de reports persistés en base ; le worker ne prend
+  pas la tâche avant cette date. Retry-After conservé, 60 secondes par défaut
+  pour un refus fournisseur sans délai, 2 secondes pour une admission locale.
+- Cinq reports maximum, puis échec explicite avec intervention manuelle.
+- L'identifiant de création reste identique pendant les reprises automatiques.
+- Marqueur de création, résultat, suivi, référence, PDF ou historique transporteur
+  interdisent la reprise automatique. Les états suspendus, annulés, livrés,
+  archivés, partiels et les protections de source restent conservés.
+- Aucun appel GLS/GOFO n'est répété après son marqueur de création. Les vrais
+  refus GLS, erreurs réseau et créations ambiguës conservent leur traitement.
+- L'interface attribue l'erreur à Erplain ; la file affiche une reprise programmée.
+- Une nouvelle demande manuelle autorisée remet le compteur de reports à zéro.
+
+Migration
+- Migration additive versionnée pour les installations déjà initialisées :
+  carrier-erplain-quota-20261021-1, quota_retry_at et quota_retries.
+- Au démarrage du worker uniquement, récupération de 100 anciens échecs maximum
+  portant exactement le message historique « aucune requête envoyée », phase
+  preflight et aucune preuve de création. Le même contrôle transactionnel est
+  appliqué ; aucune reprise d'une erreur simplement marquée 429 ou ambiguë.
+- Les autres erreurs, documents et créations restent conservés. L'historique
+  original et chaque décision de report sont enregistrés dans audit.
+
+Validation
+- Tests SQL réels via PGlite : délai persistant après redémarrage, reprise avec
+  un seul achat et un seul PDF, limite des reports, reprise manuelle, protections
+  de provenance, migration historique idempotente et refus après début d'achat.
+- Tests du formateur UI et du suivi de file : Erplain identifié même dans la
+  colonne GLS ; un véritable refus GLS reste attribué à GLS.
+- Régressions : admission automatique/manuelle, récupération PDF, migration de
+  schéma, diagnostics, commandes livrées, suspension et autres reports de quota.
+- La suite spécifique est intégrée à npm test. Aucun test n'appelle un fournisseur.
+
+Limites et déploiement
+Pas de déploiement ni de modification de la commande de production dans ce travail.
+Le gain en production et la reprise de 2517/26073 seront à vérifier après intégration
+et redémarrage du worker. Les tests de reprise utilisent PostgreSQL embarqué ; ils
+ne constituent pas un test de concurrence entre processus PostgreSQL indépendants.
+La réduction du débit Erplain et le correctif de deadlock restent des changements
+distincts. Cette correction ne supprime pas les limites du fournisseur.

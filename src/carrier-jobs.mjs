@@ -1,3 +1,4 @@
+import {installCarrierQuotaColumns,deferCarrierQuota} from './carrier-erplain-quota.mjs';
 import {carrierLocalTransaction,claimCarrierJob} from './carrier-local-transaction.mjs';
 import {retiredLabelPreparationReview} from './post-bl-preparation-review.mjs';
 import {installCarrierAttemptProof,markCarrierCreationStarted,recordCarrierFailure} from './carrier-attempt-proof.mjs';
@@ -31,6 +32,7 @@ export async function initializeCarrierJobs(db){await initializePriority(db);
  await db.exec("ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS environment TEXT NOT NULL DEFAULT 'test'; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS manual_bl_request JSONB;");
  await db.exec("ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS stock_override JSONB; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS creation_id TEXT; ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS batch_id TEXT; CREATE TABLE IF NOT EXISTS carrier_label_history(id TEXT PRIMARY KEY,order_id TEXT REFERENCES orders(id) ON DELETE CASCADE,job JSONB NOT NULL,archived_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE TABLE IF NOT EXISTS carrier_label_history_documents(history_id TEXT REFERENCES carrier_label_history(id) ON DELETE CASCADE,document_index INT NOT NULL,pdf BYTEA NOT NULL,PRIMARY KEY(history_id,document_index));");
  await installCarrierAttemptProof(db);
+ await installCarrierQuotaColumns(db);
  // A process interruption after POST is ambiguous. Never resend that POST blindly.
  if(db.recoverInterrupted!==false)await db.query(`UPDATE carrier_jobs SET status='review',error='Traitement interrompu. Vérifier la création chez le transporteur avant toute nouvelle tentative.' WHERE status='creating'`);
 }
@@ -133,6 +135,7 @@ export function createCarrierWorkers(db,config,{clients,productionConfig}={}){
      await tx.query(`UPDATE orders SET label_status=CASE WHEN resolution_pending_resume AND NOT $3 THEN label_status ELSE $2 END,issue=CASE WHEN resolution_pending_resume THEN issue ELSE null END,processing_priority_at=null WHERE id=$1`,[o.id,job.environment==='production'?'production_ready':'sandbox_ready',!!job.manual_bl_request&&job.manual_bl_request.creationId===job.creation_id]);
     });
     }catch(e){
+    if(!creationStarted&&!result&&!e.uncertain&&await deferCarrierQuota(db,job,e))return;
     if(carrier==='gofo'&&!result&&(e.zoneRejected||(orderChannel==='amazon'&&e.rejected===true&&e.cityRejected===true&&!e.uncertain&&!e.partialResult))){
      const refusalKind=e.cityRejected?'city':'zone';
      await db.transaction(async tx=>{

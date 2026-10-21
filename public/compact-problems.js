@@ -13,7 +13,8 @@ function isDeliveredOrder(order){
 function compactProblem(raw,sku='',provider='Erplain') {
  const text=String(raw||'');const explicitSku=text.match(/^(?:Produit équivalent|Produit restant|Produit de remplacement) \[([^\]]+)\] : /)?.[1];if(explicitSku)sku=explicitSku;const code=text.match(/(?:HTTP\s*|\()(\d{3})(?:\)|\b)/i)?.[1];
  const result=(type,label,s=sku)=>({type,label,sku:s,detail:text,provider:apiName});
- const apiName=/GOFO/i.test(text)?'GOFO':/GLS/i.test(text)?'GLS':/TEMU/i.test(text)?'TEMU':/Shopify/i.test(text)?'Shopify':provider;
+ const apiName=/Erplain/i.test(text)?'Erplain':/GOFO/i.test(text)?'GOFO':/GLS/i.test(text)?'GLS':/TEMU/i.test(text)?'TEMU':/Shopify/i.test(text)?'Shopify':provider;
+ if(text==='Erplain · Quota en attente — reprise programmée')return {...result('api-limit',text,''),provider:'Erplain'};
  if(/Étiquette refusée par TEMU|TEMU.*Étiquette refusée/i.test(text))return result('temu-label-refused','Étiquette refusée par TEMU','');
  if(/^(?:TEMU · )?Quota partagé : lecture différée$/.test(text))return {...result('temu-read-deferred','Lecture TEMU à reprendre',''),provider:'TEMU'};
  if(text==='TEMU · Lecture en attente')return {...result('temu-read-deferred','Lecture TEMU en attente',''),provider:'TEMU'};

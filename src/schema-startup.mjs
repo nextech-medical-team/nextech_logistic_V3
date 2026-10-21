@@ -1,4 +1,5 @@
 import {installCarrierAttemptProof} from './carrier-attempt-proof.mjs';
+import {installCarrierQuotaColumns,recoverLegacyCarrierQuota} from './carrier-erplain-quota.mjs';
 import {initializeOperations} from './runtime.mjs';
 import {installEventTriggers} from './live-events.mjs';
 import {initializeNegativeStocks} from './negative-stocks.mjs';
@@ -21,6 +22,9 @@ export async function initializeAppSchema(db,initializers,{background=false}={})
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['carrier-attempt-proof-20261014-1'])).rows.length){
    await db.transaction(async tx=>{await installCarrierAttemptProof(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['carrier-attempt-proof-20261014-1']);});
   }
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['carrier-erplain-quota-20261021-1'])).rows.length){
+   await db.transaction(async tx=>{await installCarrierQuotaColumns(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['carrier-erplain-quota-20261021-1']);});
+  }
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['partial-erplain-retry-20261016-1'])).rows.length){
    await db.transaction(async tx=>{await tx.exec('ALTER TABLE partial_deliveries ADD COLUMN IF NOT EXISTS erplain_retry JSONB');await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['partial-erplain-retry-20261016-1']);});
   }
@@ -31,7 +35,7 @@ export async function initializeAppSchema(db,initializers,{background=false}={})
    await db.transaction(async tx=>{await initializeNegativeStocks(tx);await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['negative-stock-history-20261016-1']);});
   }
  });
- if(background)await recoverInterruptedJobs(db);
+ if(background){await recoverInterruptedJobs(db);await recoverLegacyCarrierQuota(db);}
 }
 export async function recoverInterruptedJobs(db){
  // The worker leader owns recovery. Read-only work may resume; external writes

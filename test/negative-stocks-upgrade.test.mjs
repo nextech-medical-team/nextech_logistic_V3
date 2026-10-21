@@ -8,7 +8,7 @@ test('existing installations gain stock history without replaying startup recove
  const db=new PGlite();db.withLocks=async(keys,fn)=>fn();
  try{
   await db.exec('CREATE TABLE schema_migrations(version TEXT PRIMARY KEY); CREATE TABLE protected_jobs(id TEXT PRIMARY KEY,status TEXT); INSERT INTO protected_jobs VALUES(\'shipment\',\'creating\');');
-  for(const version of ['application-20261005-robustness-5','partial-temu-label-20261016-1','carrier-manual-bl-request-20261013-1','carrier-attempt-proof-20261014-1','partial-erplain-retry-20261016-1'])await db.query('INSERT INTO schema_migrations VALUES($1)',[version]);
+  for(const version of ['carrier-erplain-quota-20261021-1','application-20261005-robustness-5','partial-temu-label-20261016-1','carrier-manual-bl-request-20261013-1','carrier-attempt-proof-20261014-1','partial-erplain-retry-20261016-1'])await db.query('INSERT INTO schema_migrations VALUES($1)',[version]);
   const forbidden=()=>{throw Error('Existing initializer must not replay');};
   await initializeAppSchema(db,[forbidden]);
   const history=negativeStocksHistory(db,{page:async()=>({scope:negativeStockReportScope,page:1,lastPage:1,locationId:'7',checkedAt:new Date().toISOString(),rows:[],unverified:0})});

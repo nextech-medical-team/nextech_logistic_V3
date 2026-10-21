@@ -78,6 +78,7 @@ groups.push(['--test','test/product-weight-maintenance.test.mjs']);
 groups.push(['--test','test/customer-creation-recovery.test.mjs','test/customer-refresh.test.mjs','test/missing-bc-recovery.test.mjs','test/erplain-refresh-diagnostics.test.mjs']);
 groups.push(['--test','test/recovered-delivery-display.test.mjs']);
 groups.push(['--test','test/error-message-normalization.test.mjs']);
+groups.push(['--test','test/carrier-erplain-quota.test.mjs']);
 groups.push(['--test','test/erplain-quota-completion.test.mjs']);
 groups.push(['--test','test/transient-resume-hold.test.mjs']);
 groups.unshift(['--test','test/test-groups.test.mjs']);
