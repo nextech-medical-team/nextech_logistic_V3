@@ -61,3 +61,11 @@ Cette actualisation n’envoie aucun POST automatique et ne déclenche pas d’a
 `test/temu-messages-startup.test.mjs` démarre le vrai serveur V3 avec une base temporaire, sans accès fournisseur et sans traitements de fond. Il vérifie la page, les ressources statiques, l’authentification, le module sans configuration Temu, le refus explicite d’actualisation et l’accès aux commandes, au tableau de bord et au compte après ce refus. Résultat : réussi.
 
 Cinq tests navigateur du module réussissent sur le dernier `main`, dont deux tests confirmant le retour aux commandes après une erreur HTTP 503 des messages en ordinateur et mobile. Les 21 contrôles existants de disposition, stabilité et adaptation des commandes ont aussi été vérifiés ; seuls les chemins de sortie des captures des copies de test locales ont été adaptés à Windows. Le module conserve la CSP existante et n’installe aucun collecteur de messages ni appel fournisseur au démarrage. Les fichiers privés locaux ne font pas partie du commit.
+
+## Correction du contrôle CI des créneaux Erplain
+
+La première CI a échoué dans `test-erplain-priority-postgres.mjs`, après réussite du contrôle FIFO. Ce test mesurait l’intervalle entre les retours Node après transaction et nettoyage, et non entre les attributions SQL. Ces retours peuvent être retardés ou reçus dans un autre ordre.
+
+L’adaptateur du test collecte désormais le `next_at` exact dans le `RETURNING` de la requête d’admission, en microsecondes PostgreSQL. Il en déduit l’instant d’attribution et exige que chaque attribution respecte l’échéance précédente. L’intervalle reste 100 ms : le contrôle est plus strict que le seuil antérieur de 60 ms. La priorité 4 avant-plan / 1 arrière-plan, les dix attributions, les trois sessions et le nettoyage des tickets restent vérifiés. Un rapport volontairement retardé de 140 ms couvre la séparation entre attribution SQL et retour Node. Aucun fichier `src/` de quota n’est modifié.
+
+Validation : 27 tests ciblés réussis, dont le rejet d’un écart SQL de 99 999 µs même si les retours Node semblent espacés. Cinq exécutions complètes du contrôle FIFO puis de priorité réussissent sur un PostgreSQL 17.10 local temporaire et trois processus ; le minimum SQL observé sur ces cinq exécutions est 100 301 µs. Aucune requête fournisseur, aucune base de production ; le serveur de test est arrêté après validation.
