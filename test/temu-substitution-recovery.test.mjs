@@ -54,9 +54,24 @@ for(const recovered of [job,refused])test('recovery verifies once without replay
   await db.query("INSERT INTO erp_live_jobs VALUES('o','processing')");assert.equal(await recoverTemuSubstitutionReviews(db,order.reference),0);await db.query('DELETE FROM erp_live_jobs');
   await db.query("UPDATE resolution_jobs SET payload=payload||'{\"substitutionAttempt\":{}}'::jsonb");assert.equal(await recoverTemuSubstitutionReviews(db,order.reference),0);
   await db.query("UPDATE resolution_jobs SET payload=payload-'substitutionAttempt'");
+  // Reproduces an operator refreshing TEMU after the original parcel refusal.
+  await db.query(`INSERT INTO resolution_jobs(id,order_id,action,status,payload,result,created_at)
+   VALUES('later','o','refresh','review','{"resumeAfter":false}','{"readOnly":true}',now()+interval '1 second')`);
+  for(const [action,status,payload,result] of [
+   ['refresh','review',{}, {readOnly:true}],
+   ['refresh','review',{resumeAfter:true},{readOnly:true}],
+   ['refresh','review',{resumeAfter:false},{}],
+   ['refresh','running',{resumeAfter:false},{readOnly:true}],
+   ['choose-carrier','complete',{resumeAfter:false},{readOnly:true}],
+   ['replace-equivalent','review',{},{}]
+  ]){
+   await db.query('UPDATE resolution_jobs SET action=$1,status=$2,payload=$3,result=$4 WHERE id=$5',[action,status,JSON.stringify(payload),JSON.stringify(result),'later']);
+   assert.equal(await recoverTemuSubstitutionReviews(db,order.reference),0,action+' '+status+' must not revive an older replacement');
+  }
+  await db.query(`UPDATE resolution_jobs SET action='refresh',status='review',payload='{"resumeAfter":false}',result='{"readOnly":true}' WHERE id='later'`);
   assert.equal(await recoverTemuSubstitutionReviews(db,order.reference),1);
   assert.equal(await recoverTemuSubstitutionReviews(db,order.reference),0);
-  const retried=(await db.query("SELECT * FROM resolution_jobs WHERE id<>'r'")).rows[0];assert.equal(retried.status,'queued');assert.equal(retried.error,null);assert.equal(retried.action,'equivalent-preview');
+  const retried=(await db.query("SELECT * FROM resolution_jobs WHERE action='equivalent-preview'")).rows[0];assert.equal(retried.status,'queued');assert.equal(retried.error,null);assert.equal(retried.action,'equivalent-preview');
   assert.equal(retried.payload.replaceQuantity,20);assert.equal(retried.payload.replacementQuantity,40);assert.equal(retried.payload.confirmEquivalent,undefined);assert.equal(retried.payload.previewFingerprint,undefined);
   assert.deepEqual((await db.query("SELECT payload FROM resolution_jobs WHERE id='r'")).rows[0].payload,payload);
   for(const table of Object.keys(before))assert.deepEqual((await db.query('SELECT * FROM '+table)).rows,before[table]);

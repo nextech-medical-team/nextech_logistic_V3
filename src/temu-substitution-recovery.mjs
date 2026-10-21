@@ -33,7 +33,13 @@ export async function recoverTemuSubstitutionReviews(db,reference){
    UNION ALL SELECT 1 FROM correction_jobs WHERE order_id=$1 AND status IN ('queued','applying','checking','waiting')
    UNION ALL SELECT 1 FROM erp_live_jobs WHERE order_id=$1 AND status='processing'
    UNION ALL SELECT 1 FROM carrier_jobs WHERE order_id=$1`,[order.id])).rows.length)return 0;
-  const latest=(await tx.query('SELECT * FROM resolution_jobs WHERE order_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE',[order.id])).rows[0];
+  // A finished source read does not supersede the operator's replacement request.
+  // Uncertain reads, resumptions and every newer business action still block it.
+  const latest=(await tx.query(`SELECT * FROM resolution_jobs WHERE order_id=$1
+   AND NOT (action='refresh' AND status IN ('complete','review')
+    AND coalesce(result->>'readOnly','false')='true'
+    AND coalesce(payload->>'resumeAfter','true')='false')
+   ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`,[order.id])).rows[0];
   if(latest?.status!=='review'||latest.error!==temuSubstitutionRecoveryError||!['equivalent-preview','replace-equivalent'].includes(latest.action)||latest.payload?.importRow||latest.payload?.substitutionAttempt)return 0;
   // Quantities remain the operator's choice and are checked against the fresh BC.
   const id=randomUUID(),payload={...latest.payload,action:'equivalent-preview',requestId:randomUUID()};delete payload.previewFingerprint;delete payload.confirmEquivalent;
