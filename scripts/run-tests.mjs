@@ -82,4 +82,5 @@ groups.push(['--test','test/carrier-erplain-quota.test.mjs']);
 groups.push(['--test','test/erplain-quota-completion.test.mjs']);
 groups.push(['--test','test/transient-resume-hold.test.mjs']);
 groups.unshift(['--test','test/test-groups.test.mjs']);
+groups.push(['--test','test/tender-batch-required.test.mjs']);
 process.exitCode=runTestGroups(groups);

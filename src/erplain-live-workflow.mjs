@@ -1,3 +1,4 @@
+import {assertTenderBatchNumbers} from './tender-batch-required.mjs';
 import {withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
 import {reconcileShippingOrderReads} from './erplain-shipping-reconciliation.mjs';
 import {customerCreationStarted,customerCreationFailed,customerCreationMessage} from './customer-creation-recovery.mjs';
@@ -100,6 +101,10 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     catch(e){o.failed=true;await fail(o,e);}
    });
    return;
+  }
+  if(['CreateOrder','CreateShippingOrderFrom'].includes(operation)){
+   for(const o of orders){try{await assertTenderBatchNumbers(api,o,o.items);}catch(e){o.failed=true;await fail(o,e);}}
+   orders=orders.filter(o=>!o.failed);if(!orders.length)return;
   }
   if(operation==='CreateOrder'){
    const snapshot=await api.request('query V3LiveCapacity { Orders(first:1){paginatorInfo{total}} }');
