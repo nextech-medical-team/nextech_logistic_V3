@@ -1,3 +1,4 @@
+import {reconcileNativeBcDebit} from './native-bc-debit-recovery.mjs';
 import {withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
 import {reconcileShippingOrderReads} from './erplain-shipping-reconciliation.mjs';
 import {customerCreationStarted,customerCreationFailed,customerCreationMessage} from './customer-creation-recovery.mjs';
@@ -340,6 +341,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
      if(typeof snapshot.Order.update_stock!=='boolean')throw new Error('Politique de stock du BC non vérifiée');
      {const totals=xs=>{const sums=new Map();for(const l of shippingProductLines(xs)){const key=String(l.variant?.id)+':'+String(l.location?.id);sums.set(key,(sums.get(key)||0)+Number(l.quantity));}return JSON.stringify([...sums].sort());};if(!usesNativeBlCycle(o)&&totals(o.items)!==totals(snapshot.Order.line_items))throw new Error('BC modifié : vérifier les produits et quantités avant BL');}
      const stockOnBc=snapshot.Order.update_stock===true;
+     if(usesNativeBlCycle(o)&&await reconcileNativeBcDebit(api,o,snapshot.Order))await save(o);
      if(usesNativeBlCycle(o))assertNativeBcSnapshot(o,snapshot.Order,{beforeBlPublication:true});
      else if(stockOnBc&&!usesNativeBlCycle(o)){if(o.erp_live.bl?.status==='unpublished')o.erp_live.bl=await normalizeHistoricalDraft(api,o);o.erp_live.historicalStockProof=await historicalPreparationProof(api,o,{beforeBlPublication:true});}
      else assertFullOrderStock(snapshot.Order.line_items,{preserveInstalled:o.channel==='tender'});
