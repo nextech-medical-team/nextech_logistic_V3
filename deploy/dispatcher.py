@@ -20,6 +20,7 @@ BUILD_ROOT='/var/tmp'
 # Keep a finite 30-minute budget with headroom for normal load variation.
 ISOLATED_TEST_TIMEOUT=1800
 SERVICES=['nextech-web','nextech-worker']
+GITHUB_READ_TOKEN=None
 
 def run(args,**kwargs):
  return subprocess.run(args,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,**kwargs).stdout
@@ -50,9 +51,42 @@ def install_file(path,data):
   os.chmod(temp,0o640);os.chown(temp,0,grp.getgrnam('nextech').gr_gid);os.replace(temp,path)
  finally:
   if os.path.exists(temp):os.unlink(temp)
+def read_publication_packet(raw):
+ packet=json.loads(raw)
+ if not isinstance(packet,dict):raise ValueError('Manifeste CI invalide')
+ token=packet.pop('_githubReadToken',None)
+ if token is not None and (not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{20,4096}',token)):
+  raise ValueError('Authentification GitHub temporaire invalide')
+ return packet,token
+
+def github_fetch_environment(token):
+ # The credential exists only in the fetch subprocess, never in Git config,
+ # command arguments, proofs, build processes, or application services.
+ env={k:v for k,v in os.environ.items() if not k.startswith(('GIT_CONFIG_','GIT_TRACE','GIT_CURL_VERBOSE'))}
+ env['GIT_TERMINAL_PROMPT']='0'
+ settings=[('credential.helper',''),('http.followRedirects','false'),('http.extraHeader','')]
+ if token:
+  encoded=base64.b64encode(('x-access-token:'+token).encode()).decode()
+  settings.append(('http.'+REMOTE+'.extraHeader','Authorization: Basic '+encoded))
+ env['GIT_CONFIG_COUNT']=str(len(settings))
+ for index,(key,value) in enumerate(settings):
+  env['GIT_CONFIG_KEY_'+str(index)]=key;env['GIT_CONFIG_VALUE_'+str(index)]=value
+ return env
+
 def fetch():
- if not REPO.exists():run(['git','clone','--bare',REMOTE,str(REPO)])
- git('fetch','--prune','origin','+refs/heads/main:refs/heads/main')
+ env=github_fetch_environment(GITHUB_READ_TOKEN)
+ try:
+  if not REPO.exists():run(['git','clone','--bare',REMOTE,str(REPO)],env=env)
+  # Use the fixed trusted URL, not an origin that could redirect credentials.
+  run(['git','-c','safe.directory='+str(REPO),'-C',str(REPO),'fetch','--prune',REMOTE,'+refs/heads/main:refs/heads/main'],env=env)
+ except subprocess.CalledProcessError as error:
+  detail=(error.stderr or b'').decode(errors='replace').lower()
+  if any(x in detail for x in ['authentication','username','password','repository not found','403','401']):
+   reason='Accès GitHub refusé : vérifier le jeton temporaire du workflow et sa permission contents: read'
+  elif any(x in detail for x in ['could not resolve','failed to connect','timed out']):
+   reason='Connexion réseau du serveur vers GitHub indisponible'
+  else:reason='Lecture du dépôt GitHub impossible : contrôler la configuration Git du serveur'
+  raise RuntimeError(reason+' (code '+str(error.returncode)+')') from None
  return git('rev-parse','refs/heads/main').decode().strip()
 def guard(action,backup):
  return run([RUNUSER,'-u','nextech','--','node',GUARD,action,str(backup)])
@@ -206,7 +240,8 @@ if __name__=='__main__':
  for sig in (signal.SIGHUP,signal.SIGTERM,signal.SIGINT):signal.signal(sig,interrupted)
  packet_raw=sys.stdin.buffer.read(2*1024*1024+1)
  if len(packet_raw)>2*1024*1024:sys.exit('Preuves CI trop volumineuses')
- packet=json.loads(packet_raw);commit=sys.argv[2]
+ packet,GITHUB_READ_TOKEN=read_publication_packet(packet_raw);del packet_raw
+ commit=sys.argv[2]
  if not re.fullmatch('[a-f0-9]{40}',commit):sys.exit('Commit invalide')
  STATE.mkdir(mode=0o700,exist_ok=True);request_dir=STATE/'requests';request_dir.mkdir(mode=0o700,exist_ok=True)
  request_path=request_dir/(commit+'.json')

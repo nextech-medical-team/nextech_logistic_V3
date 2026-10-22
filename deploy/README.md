@@ -6,7 +6,11 @@ La branche principale exige une pull request, une revue et le contrôle `Vérifi
 
 Le job utilise l'environnement GitHub `production`, limité à `main`. Variables de cet environnement : `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_KNOWN_HOSTS`. Secret : `DEPLOY_SSH_KEY`. Ne jamais mettre cette clé dans Git. La vérification de l'empreinte SSH est obligatoire ; ne pas utiliser `StrictHostKeyChecking=no`.
 
-La clé ne permet qu'une commande `deploy <SHA>` ; aucun shell, transfert de fichiers, tunnel ou agent SSH. L'exécuteur Section 7 installé sur le serveur récupère lui-même le dépôt public en HTTPS et accepte uniquement le SHA courant de `main`, descendant de sa référence publiée. Une ancienne exécution dépassée par un nouveau push est signalée comme telle.
+La clé ne permet qu'une commande `deploy <SHA>` ; aucun shell, transfert de fichiers, tunnel ou agent SSH. L'exécuteur Section 7 installé sur le serveur récupère lui-même le dépôt en HTTPS et accepte uniquement le SHA courant de `main`, descendant de sa référence publiée. Une ancienne exécution dépassée par un nouveau push est signalée comme telle.
+
+Le job de publication transmet son `GITHUB_TOKEN` temporaire, limité à `contents: read`, dans le flux SSH avec les preuves. L’exécuteur retire ce jeton du paquet avant de traiter ou enregistrer les preuves et le transmet uniquement au processus Git chargé de récupérer le dépôt exact. Il ne l’enregistre ni dans la configuration Git ni dans les rapports. Aucun PAT, deploy key ou nouvelle GitHub App n’est nécessaire. Les redirections HTTP et les invites interactives sont désactivées. Les anciens paquets sans jeton restent lisibles, mais nécessitent un accès anonyme au dépôt.
+
+Cette évolution nécessite l’installation contrôlée de la nouvelle version de `dispatcher.py` sur le serveur avant la première exécution du workflow modifié ; une fusion seule ne remplace pas l’exécuteur privilégié. L’installation conserve le verrou de publication, la file commune, la sauvegarde et les empreintes serveur. Les autres fichiers de l’exécuteur, l’application et ses services ne changent pas.
 
 ## Initialisation par la Section 7
 
