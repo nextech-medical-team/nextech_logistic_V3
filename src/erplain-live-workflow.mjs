@@ -26,6 +26,7 @@ import {resumeTransientErplain,recordTransientFailure,closeTransientReviews} fro
 import {cancellationBlock,mutationBlock} from './erp-transient-policy.mjs';
 import {confirmDeliveryReady} from './bl-ready.mjs';
 import {historicalPreparationProof} from './historical-stock-proof.mjs';
+import {assertTenderBatchNumbers} from './tender-batch-required.mjs';
 import {currentMappingLine,currentMappingFingerprint,mappingSelectionFingerprint} from './current-mapping-line.mjs';
 import {alignMappedBc} from './mapping-bc-alignment.mjs';
 import {readPreservedHistoricalBc} from './historical-bc-pricing.mjs';
@@ -101,6 +102,10 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
     catch(e){o.failed=true;await fail(o,e);}
    });
    return;
+  }
+  if(['CreateOrder','CreateShippingOrderFrom'].includes(operation)){
+   for(const o of orders){try{await assertTenderBatchNumbers(api,o,o.items);}catch(e){o.failed=true;await fail(o,e);}}
+   orders=orders.filter(o=>!o.failed);if(!orders.length)return;
   }
   if(operation==='CreateOrder'){
    const snapshot=await api.request('query V3LiveCapacity { Orders(first:1){paginatorInfo{total}} }');

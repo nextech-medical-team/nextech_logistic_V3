@@ -6,7 +6,11 @@ La branche principale exige une pull request, une revue et le contrôle `Vérifi
 
 Le job utilise l'environnement GitHub `production`, limité à `main`. Variables de cet environnement : `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_KNOWN_HOSTS`. Secret : `DEPLOY_SSH_KEY`. Ne jamais mettre cette clé dans Git. La vérification de l'empreinte SSH est obligatoire ; ne pas utiliser `StrictHostKeyChecking=no`.
 
-La clé ne permet qu'une commande `deploy <SHA>` ; aucun shell, transfert de fichiers, tunnel ou agent SSH. L'exécuteur Section 7 installé sur le serveur récupère lui-même le dépôt public en HTTPS et accepte uniquement le SHA courant de `main`, descendant de sa référence publiée. Une ancienne exécution dépassée par un nouveau push est signalée comme telle.
+La clé ne permet qu'une commande `deploy <SHA>` ; aucun shell, transfert de fichiers, tunnel ou agent SSH. L'exécuteur Section 7 installé sur le serveur récupère lui-même le dépôt en HTTPS et accepte uniquement le SHA courant de `main`, descendant de sa référence publiée. Une ancienne exécution dépassée par un nouveau push est signalée comme telle.
+
+Le job de publication transmet son `GITHUB_TOKEN` temporaire, limité à `contents: read`, dans le flux SSH avec les preuves. L’exécuteur retire ce jeton du paquet avant de traiter ou enregistrer les preuves et le transmet uniquement au processus Git chargé de récupérer le dépôt exact. Il ne l’enregistre ni dans la configuration Git ni dans les rapports. Aucun PAT, deploy key ou nouvelle GitHub App n’est nécessaire. Les redirections HTTP et les invites interactives sont désactivées. Les anciens paquets sans jeton restent lisibles, mais nécessitent un accès anonyme au dépôt.
+
+Cette évolution nécessite l’installation contrôlée de la nouvelle version de `dispatcher.py` sur le serveur avant la première exécution du workflow modifié ; une fusion seule ne remplace pas l’exécuteur privilégié. L’installation conserve le verrou de publication, la file commune, la sauvegarde et les empreintes serveur. Les autres fichiers de l’exécuteur, l’application et ses services ne changent pas.
 
 ## Initialisation par la Section 7
 
@@ -48,3 +52,9 @@ Le bouton conserve les tests, la file FIFO, les protections GitHub, la sauvegard
 La suite npm test dispose de 1 800 secondes, avec échec bloquant à expiration avant sauvegarde, pause ou installation. Le diagnostic du 20 octobre 2026 sur le commit 2ed0f6cd87ae1f3ce033d5e666c6f8811272fe44 a terminé les 61 groupes en 1 261,46 secondes, sans échec, sous le compte isolé nextech-build avec une priorité nice 10. Cette mesure dépasse le plafond précédent de 1 200 secondes ; elle ne démontre pas une régression fonctionnelle. Le budget de 30 minutes garde une marge bornée pour les variations de charge, sans supprimer de tests ni transformer un dépassement ou un échec en réussite. Les autres délais restent inchangés.
 
 L’exécuteur installé ne se met pas à jour avec les fichiers applicatifs : sa mise à jour Section7 exige revue, tests, empreinte fraîche, sauvegarde et verrou intégral. Une demande échouée reste conservée ; publier un nouveau commit après correction, sans réinitialiser ni rejouer la demande échouée.
+
+## Rapprochement du correctif de débit BC installé le 23 octobre
+
+Le serveur possède un appel à `reconcileNativeBcDebit` absent du commit de référence. La branche de rapprochement conserve ce fichier exact dans le commit `417e38b`, puis intègre le contrôle des lots. Le module `src/native-bc-debit-recovery.mjs` est repris sans modification depuis le serveur. Avant publication, Section7 enregistre les deux sources Git et leurs empreintes dans `reconciliation.preservedOverlays`, après comparaison complète des empreintes serveur, sous verrou avec sauvegarde. La référence publiée reste inchangée.
+
+L’exécuteur doit recevoir la version revue de `plan.py` : un module précédemment hors Git n’est reconnu que si son contenu candidat est strictement identique au fichier serveur, à son empreinte déjà enregistrée et à sa source Git déclarée. Il n’est alors ni remplacé ni supprimé. Toute divergence reste bloquante. Le rapprochement du workflow existant doit conserver le correctif serveur par fusion à trois versions. L’échec précédent doit être certifié sans installation ni pause avant une nouvelle publication du commit corrigé.

@@ -18,13 +18,19 @@ def reconcile_overlay_sources(old,new,current,baseline,read_source):
  overlays=baseline.get('reconciliation',{}).get('preservedOverlays',{})
  for name,record in overlays.items():
   if old.get(name)==new.get(name) or current.get(name)==old.get(name):continue
-  if not safe_path(name) or name not in old or name not in new:raise ValueError('Rapprochement overlay invalide : '+name)
+  if not safe_path(name) or name not in new:raise ValueError('Rapprochement overlay invalide : '+name)
   commit=record.get('sourceCommit','');expected=record.get('sha256')
   if not re.fullmatch('[a-f0-9]{40}',commit):raise ValueError('Commit overlay invalide : '+name)
   actual=current.get(name)
   if actual is None or digest(actual)!=expected or baseline['serverHashes'].get(name)!=expected:raise ValueError('Conflit serveur overlay : '+name)
   source=read_source(commit,name)
   if digest(source)!=expected:raise ValueError('Source Git overlay divergente : '+name)
+  if name not in old:
+   # Adopt only an exact, recorded production file with verified Git provenance.
+   # Never overwrite an untracked server file or accept different candidate bytes.
+   if new[name]!=source:raise ValueError('Correctif serveur non preserve par la cible : '+name)
+   result[name]=source;verified.append({'path':name,'sourceCommit':commit,'sha256':expected,'candidatePreservesOverlay':True,'adoptedUnchanged':True})
+   continue
   with tempfile.TemporaryDirectory(prefix='nextech-overlay-') as folder:
    paths=[Path(folder)/label for label in ('candidate','base','overlay')]
    # Semicolon/braces separate changes in compact JavaScript lines. This is a

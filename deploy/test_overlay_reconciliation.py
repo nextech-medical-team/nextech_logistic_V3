@@ -38,4 +38,19 @@ class OverlayTests(unittest.TestCase):
   self.baseline['serverHashes'][self.name]=digest(self.overlay)
   self.baseline['reconciliation']['preservedOverlays'][self.name]['sha256']=digest(self.overlay)
   self.assertTrue(self.reconcile()[1])
+ def test_recorded_new_file_is_adopted_without_replacement(self):
+  old,proof=reconcile_overlay_sources({}, {self.name:self.overlay}, {self.name:self.overlay},self.baseline,lambda *args:self.overlay)
+  self.assertTrue(proof[0]['adoptedUnchanged'])
+  self.assertEqual(plan(old,{self.name:self.overlay},{self.name:self.overlay},self.baseline['serverHashes']),[])
+ def test_new_file_with_different_candidate_is_rejected(self):
+  with self.assertRaisesRegex(ValueError,'non preserve'):
+   reconcile_overlay_sources({}, {self.name:self.candidate}, {self.name:self.overlay},self.baseline,lambda *args:self.overlay)
+ def test_new_file_without_metadata_remains_protected(self):
+  old,_=reconcile_overlay_sources({}, {self.name:self.overlay}, {self.name:self.overlay},{'serverHashes':self.baseline['serverHashes']},lambda *args:self.overlay)
+  with self.assertRaisesRegex(ValueError,'non suivi'):
+   plan(old,{self.name:self.overlay},{self.name:self.overlay},self.baseline['serverHashes'])
+ def test_new_file_concurrent_edit_is_rejected(self):
+  with self.assertRaisesRegex(ValueError,'Conflit'):
+   reconcile_overlay_sources({}, {self.name:self.overlay}, {self.name:self.candidate},self.baseline,lambda *args:self.overlay)
 if __name__=='__main__':unittest.main()
+
