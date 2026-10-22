@@ -84,5 +84,6 @@ groups.push(['--test','test/transient-resume-hold.test.mjs']);
 groups.push(['--test','test/temu-messages.test.mjs']);
 groups.push(['--test','test/erplain-priority-proof.test.mjs']);
 groups.push(['--test','test/temu-messages-startup.test.mjs']);
+groups.push(['--test','test/partial-parcel-count.test.mjs']);
 groups.unshift(['--test','test/test-groups.test.mjs']);
 process.exitCode=runTestGroups(groups);

@@ -1,3 +1,5 @@
+import {initializePartialParcelCount,increasePartialParcels} from './partial-parcel-count.mjs';
+import {createProductionCarriers} from './carriers-test.mjs';
 import {initializeTemuMessages,temuMessagesService} from './temu-messages.mjs';
 import {priceCorrection} from './price-correction.mjs';
 import {partialTemuLabelService} from './partial-temu-label.mjs';
@@ -229,6 +231,7 @@ let carrierWorkers=null;try{carrierWorkers=createCarrierWorkers(db,partialConfig
 const extras=extraParcelWorker(db,{testConfig:partialConfig,productionConfig});const extraTimer=backgroundInterval(()=>extras.run(),1200,'extra-parcels');extraTimer.unref();
 const partialTemu=partialTemuLabelService(db,temuLocal,erplainAccount(directory,'live'),{enabled:()=>!runtime.stopping&&runtime.enabled('temu-logistics')&&runtime.enabled('automatic-preparation')});
 const partialWorker=partialService(db,directory,{carrierConfig:productionConfig,testConfig:partialConfig,temu:partialTemu});
+await db.withLocks(['schema'],()=>initializePartialParcelCount(db));
 const partialTimer=backgroundInterval(()=>partialWorker.run(),1500,'partials');partialTimer.unref();
 
 for(const carrier of ['gls','gofo'])backgroundInterval(async()=>{if(carrierWorkers)await carrierWorkers.run(carrier);},1000,'carrier-'+carrier);
@@ -509,6 +512,7 @@ const server=http.createServer(async(req,res)=>{
     if(p==='/api/erplain/stock/restore-cancelled'&&req.method==='POST'){permitted(user,operational);const b=await body(req);if(typeof b.id!=='string'||!/^\d+$/.test(String(b.stockId||'')))throw Error('Restitution de stock invalide');const result=await restoreCancelledDeliveryStock(db,erplainAccount(directory,'live'),b.id,b.stockId);await audit(user,'erplain.cancelled_stock_restored',{orderId:b.id,stockId:result.restoredStockId,replayed:result.replayed});json(res,200,{message:result.message,stockHolds:result.stockHolds});return;}
     if(p==='/api/erplain/documents/refresh'&&req.method==='POST'){permitted(user,operational);const b=await body(req);if(typeof b.id!=='string'||!['bc','bl'].includes(b.kind))throw Error('Actualisation BC/BL invalide');const result=await refreshErplainDocuments(db,erplainAccount(directory,'source'),b.id);await audit(user,'erplain.documents_refreshed',{orderId:b.id,kind:b.kind,notFound:!!result.notFound,stockHolds:result.stockHolds.length});json(res,200,{message:result.message,stockHolds:result.stockHolds,notFound:!!result.notFound});return;}
     if(p==='/api/partial/refresh'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialWorker.refresh(b.id);await audit(user,'partial.erplain_refreshed',{orderId:b.id,stockHolds:result.stockHolds.length});json(res,200,{message:result.message,stockHolds:result.stockHolds});return;}
+    if(p==='/api/partial/parcels'&&req.method==='POST'){permitted(user,operational);if(!productionConfig)throw Error('Transporteurs de production non configurés');const b=await body(req),live=erplainAccount(directory,'live');const result=await increasePartialParcels(db,live,createProductionCarriers(productionConfig,{erplainApi:live}),await loadRouting(db),b,user);json(res,200,result);return;}
     if(p==='/api/partial/prepare'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialWorker.prepare(b.id,b.selection,b.requestId,b.labelChoice??(b.replaceLabel===true?'replace':null));await audit(user,'partial.prepared',{orderId:b.id,deliveryId:result.id,replayed:result.replayed||false});json(res,202,result);return;}
     if(p==='/api/partial/cancel'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await cancelPartialDelivery(db,erplainAccount(directory,'live'),b);await audit(user,'partial.cancel',{orderId:b.id,deliveryId:b.deliveryId,blId:b.blId,...result});json(res,200,result);return;}
     if(p==='/api/partial/temu/refresh'&&req.method==='POST'){permitted(user,operational);const b=await body(req);const result=await partialTemu.advance(b.id);await audit(user,'partial.temu_refreshed',{deliveryId:b.id,status:result.status});json(res,200,result);return;}
