@@ -71,14 +71,17 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/v3-ssh/key"
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/v3-ssh/known_hosts"
       - name: Publication par l’exécuteur Section 7
+        env:
+          GITHUB_READ_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          python3 -c 'import json,os,sys; p=json.load(open("publication-packet.json")); p["_githubReadToken"]=os.environ["GITHUB_READ_TOKEN"]; json.dump(p,sys.stdout)' | \
           ssh -T -i "$RUNNER_TEMP/v3-ssh/key" -p "${DEPLOY_PORT:-22}" \
             -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/v3-ssh/known_hosts" \
             -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-            "$DEPLOY_USER@$DEPLOY_HOST" "deploy $TARGET_SHA" < publication-packet.json | tee deployment-report.json
+            "$DEPLOY_USER@$DEPLOY_HOST" "deploy $TARGET_SHA" | tee deployment-report.json
       - name: Conserver le rapport
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
