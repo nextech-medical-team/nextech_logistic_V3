@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {resumeTransientErplain,recordTransientFailure} from '../src/erplain-transient-recovery.mjs';
 import {customerCreationStarted,customerCreationFailed,canRetryCustomerCreation} from '../src/customer-creation-recovery.mjs';
-import {retryDecision} from '../src/erp-transient-policy.mjs';
+import {retryDecision,transientErpError} from '../src/erp-transient-policy.mjs';
 import {erplainBatchError} from '../src/erplain-accounts.mjs';
 
 const old=new Date(Date.now()-600000).toISOString();
@@ -89,3 +89,15 @@ test('legacy waiting incident without lastError is retried only within the bound
  for(const block of [{suspension:{active:true}},{archived:true},{partial_mode:true},{resolution_pending_resume:true},{tracking_status:'shipped'}])assert.equal(retryDecision({...o,...block},message,old),false);
  assert.equal(retryDecision(o,'Incident temporaire Erplain persistant après 3 reprises : contrôle nécessaire',old),false);
 });
+
+ test('connection pool timeout permits bounded reconciliation of an existing draft',()=>{
+ const error='timeout exceeded when trying to connect';
+ const state={phase:'bc_created',bc:{id:'1956050',status:'unpublished'}};
+ assert.equal(transientErpError(error),true);
+ assert.equal(retryDecision(order(state),error,old),true);
+ assert.equal(retryDecision(order(state),error,new Date().toISOString()),false);
+ assert.equal(retryDecision(order({...state,transientRecovery:{attempts:3}}),error,old),false);
+ assert.equal(retryDecision(order({...state,phase:'creating_stock'}),error,old),false);
+ assert.equal(retryDecision({...order(state),suspension:{active:true}},error,old),false);
+ assert.equal(retryDecision(order(state),'BL bloqué — stock insuffisant',old),false);
+ });
