@@ -1,4 +1,3 @@
-import {initializeTemuMessages,temuMessagesService} from './temu-messages.mjs';
 import {priceCorrection} from './price-correction.mjs';
 import {partialTemuLabelService} from './partial-temu-label.mjs';
 import {initializePlatformCancellationReports,platformCancellationReports} from './platform-cancellation-reports.mjs';
@@ -159,8 +158,6 @@ function backgroundInterval(fn,ms,name){return config.background?runtime.schedul
 const statusSync=trackingSyncService(db,process.env.CREDENTIALS_DIR||directory,{shouldStop:()=>runtime.stopping});
 backgroundInterval(()=>statusSync.run(),1000,'tracking-sync');
 const v2Followup=v2Worker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>v2Followup.run(),10000,'v2-followup');
-await db.withLocks(['schema'],()=>initializeTemuMessages(db));
-const temuMessages=temuMessagesService(db,directory);
 const temuReading=readingService(db,directory);
 const verifyPrices=priceVerification(db,directory);
 const correctPrice=priceCorrection(db,directory,verifyPrices);
@@ -298,7 +295,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/manual-platform-cancellation.js','/price-verification.css','/price-verification.js','/missing-orders-verification.js','/stock-information.js','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-messages.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/manual-platform-cancellation.js','/price-verification.css','/price-verification.js','/missing-orders-verification.js','/stock-information.js','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -347,7 +344,6 @@ const server=http.createServer(async(req,res)=>{
 
     const user=await authenticate(db,req.headers.cookie);if(!user){json(res,401,{error:'Connexion requise'});return;}
     if(p==='/api/import/receptions'&&req.method==='GET'){permitted(user,['admin','manager','operator']);json(res,200,{rows:await readImportReceptions(db,{orderId:url.searchParams.get('orderId')||'',reference:url.searchParams.get('reference')||''})});return;}
-    if(await temuMessages.routes({p,req,res,url,user,json,permitted}))return;
     if(await temuReading.routes(req,res,url,user,json))return;
     if(p==='/api/import/preview'&&req.method==='POST'){
       const b=await body(req);permitted(user,operational);
