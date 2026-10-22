@@ -112,9 +112,9 @@ const partialFilter=document.getElementById('problem-type');if(partialFilter&&!p
 
 
 
-// Refresh reads Erplain; no shipping label, purchase or stock movement is created.
+// Explicit recovery queues missing labels for eligible associated BLs.
 
-document.addEventListener('click',async e=>{const b=e.target.closest('[data-erplain-document-refresh]');if(!b)return;e.preventDefault();if(b.disabled)return;b.disabled=true;const original=b.innerHTML,originalLabel=b.getAttribute('aria-label'),originalTitle=b.getAttribute('title');b.setAttribute('aria-busy','true');b.setAttribute('aria-label','Lecture Erplain en cours');b.title='Lecture Erplain en cours';if(!b.classList.contains('order-icon-action'))b.textContent='Lecture Erplain…';try{const r=await api('/api/erplain/documents/refresh',{id:b.dataset.erplainDocumentRefresh,kind:b.dataset.erplainDocumentKind});flash(r.stockHolds?.length?r.stockHolds.map(h=>h.bl+' · '+h.message).join('; '):r.message,!!r.stockHolds?.length||!!r.notFound);window.getSelection()?.removeAllRanges();preparedOrderResponse=null;await orders();if(currentView==='shipments')await partialShipmentList();if(currentView==='temu')await temuLoad();document.dispatchEvent(new CustomEvent('erplain-documents-refreshed',{detail:{id:b.dataset.erplainDocumentRefresh}}));}catch(error){flash(error,true);}finally{b.disabled=false;b.innerHTML=original;b.removeAttribute('aria-busy');if(originalLabel===null)b.removeAttribute('aria-label');else b.setAttribute('aria-label',originalLabel);if(originalTitle===null)b.removeAttribute('title');else b.setAttribute('title',originalTitle);}});
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-erplain-document-refresh]');if(!b)return;e.preventDefault();if(b.disabled)return;b.disabled=true;const original=b.innerHTML,originalLabel=b.getAttribute('aria-label'),originalTitle=b.getAttribute('title');b.setAttribute('aria-busy','true');b.setAttribute('aria-label','Lecture Erplain en cours');b.title='Lecture Erplain en cours';if(!b.classList.contains('order-icon-action'))b.textContent='Lecture Erplain…';try{const r=await api('/api/erplain/documents/refresh',{id:b.dataset.erplainDocumentRefresh,kind:b.dataset.erplainDocumentKind});flash(r.stockHolds?.length?r.stockHolds.map(h=>h.bl+' · '+h.message).join('; '):r.message,!!r.stockHolds?.length||!!r.labelHolds?.length||!!r.notFound);window.getSelection()?.removeAllRanges();preparedOrderResponse=null;await orders();if(currentView==='shipments')await partialShipmentList();if(currentView==='temu')await temuLoad();document.dispatchEvent(new CustomEvent('erplain-documents-refreshed',{detail:{id:b.dataset.erplainDocumentRefresh}}));}catch(error){flash(error,true);}finally{b.disabled=false;b.innerHTML=original;b.removeAttribute('aria-busy');if(originalLabel===null)b.removeAttribute('aria-label');else b.setAttribute('aria-label',originalLabel);if(originalTitle===null)b.removeAttribute('title');else b.setAttribute('title',originalTitle);}});
 
 
 
@@ -140,4 +140,14 @@ document.addEventListener('click',async e=>{
  const purchase=!!b.dataset.partialTemuBuy,id=b.dataset.partialTemuBuy||b.dataset.partialTemuRefresh;
  if(purchase&&!confirm('Acheter cette étiquette TEMU pour '+b.dataset.amount+' '+b.dataset.currency+' ?'))return;
  b.disabled=true;try{await api(purchase?'/api/partial/temu/buy':'/api/partial/temu/refresh',{id,...(purchase?{planId:b.dataset.planId,amount:Number(b.dataset.amount),confirmPurchase:true}:{})});if(partialDialog.open)await partialHistory(partialDialog.dataset.orderId);if(currentView==='shipments')await partialShipmentList();if(currentView==='orders')await orders();}catch(error){flash(error,true);}finally{b.disabled=false;}
+});
+
+// The associated BL gets its own shipment; the original label stays available.
+document.addEventListener('click',async event=>{
+ const button=event.target.closest('[data-existing-bl-label]');if(!button)return;event.preventDefault();
+ if(button.disabled)return;button.disabled=true;const original=button.textContent;button.textContent='Vérification du BL…';
+ button.dataset.requestId ||= crypto.randomUUID();
+ try{const result=await api('/api/partial/existing-bl-label',{id:button.dataset.existingBlOrder,blId:button.dataset.existingBlLabel,requestId:button.dataset.requestId});flash(result.existing?(result.error||'Une demande existe déjà pour ce BL. Consultez sa ligne de livraison.'):'Étiquette du BL '+button.dataset.existingBlName+' mise en génération. Une ligne séparée affichera son suivi et son PDF.',!!result.error);await orders();}
+ catch(error){flash(error.message,true);}
+ finally{button.disabled=false;button.textContent=original;}
 });
