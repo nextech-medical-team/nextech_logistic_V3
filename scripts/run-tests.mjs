@@ -85,4 +85,5 @@ groups.push(['--test','test/temu-messages.test.mjs']);
 groups.push(['--test','test/erplain-priority-proof.test.mjs']);
 groups.push(['--test','test/temu-messages-startup.test.mjs']);
 groups.unshift(['--test','test/test-groups.test.mjs']);
+groups.push(['--test','test/tender-batch-required.test.mjs']);
 process.exitCode=runTestGroups(groups);
