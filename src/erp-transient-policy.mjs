@@ -8,7 +8,7 @@ export function cancellationBlock(o){
  if(o.label_status==='cancelled'||o.tracking_status==='cancelled')return 'Commande annulée dans V3 : préparation suspendue';
  return null;
 }
-export function transientErpError(message){return /SQLSTATE\[40001\]|\bdeadlock\b|lock wait timeout|Erplain HTTP (429|502|503|504)\b|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError/i.test(message||'')}
+export function transientErpError(message){return /SQLSTATE\[40001\]|\bdeadlock\b|lock wait timeout|^timeout exceeded when trying to connect$|Erplain HTTP (429|502|503|504)\b|fetch failed|ECONNRESET|ETIMEDOUT|timed out|TimeoutError|AbortError/i.test(message||'')}
 export function mutationBlock(o,{allowHeldBc=false}={}){return !o||o.archived?'Commande indisponible':cancellationBlock(o)||(o.resolution_pending_resume&&!allowHeldBc?'Préparation suspendue : validation requise':null);}
 export function reconciliationError(o,error){
  return o.channel!=='tender'&&!!o.erp_live?.bc?.id&&/^(?:BC\/BL : rapprochement incomplet ou ambigu|Brouillon BL introuvable|BL Erplain · Brouillon.*introuvable)/.test(error||'');
