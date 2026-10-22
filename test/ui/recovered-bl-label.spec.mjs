@@ -12,7 +12,15 @@ for(const width of [1440,390])test('recovered BL label targets the pending deliv
  await page.goto('/');
  const button=page.locator('[data-existing-bl-label="102"]');
  await expect(page.locator('[data-existing-bl-label="101"]')).toHaveCount(0);
- await page.getByText('2 BL associé(s)',{exact:true}).click();
+ const row=page.locator('#order-rows tr').filter({has:page.locator('[data-detail="recovered-order"]')});
+ const summary=row.getByText('2 BL associé(s)',{exact:true});
+ if(width<=900){
+  await expect(summary).toBeHidden();
+  const expand=row.locator('[data-order-more-info]');
+  await expect(expand).toBeVisible();await expand.click();
+  await expect(expand).toHaveAttribute('aria-expanded','true');
+ }
+ await expect(summary).toBeVisible();await summary.click();
  await expect(button).toBeVisible();await button.click();
  await expect.poll(()=>requests.length).toBe(1);
  expect(requests[0]).toEqual({id:order.id,blId:'102',requestId:expect.stringMatching(/^[a-f0-9-]{36}$/i)});
