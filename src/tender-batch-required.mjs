@@ -1,4 +1,4 @@
-// Read-only creation gate. Stock availability and allocation are checked by
+// Read-only shipping-order creation gate. Stock availability and allocation are checked by
 // the stock workflow; this check never creates a batch or reserves stock.
 export async function assertTenderBatchNumbers(api,order,lines){
  if(order.channel!=='tender')return;
@@ -13,7 +13,7 @@ export async function assertTenderBatchNumbers(api,order,lines){
  }
  if(!variants.size)throw Error(prefix+' : aucun produit à contrôler');
  for(const [id,sku] of variants){
-  const fail=reason=>Error(prefix+' · '+sku+' : '+reason+' ; création BC/BL bloquée');
+  const fail=reason=>Error(prefix+' · '+sku+' : '+reason+' ; création du BL bloquée');
   const v=(await api.request('query V3TenderBatchVariant($id:ID!){Variant(id:$id){id sku has_batch_numbers}}',{id})).Variant;
   if(String(v?.id)!==id||typeof v.has_batch_numbers!=='boolean')throw fail('traçabilité non vérifiable');
   if(!v.has_batch_numbers)throw fail('activer la gestion des lots et renseigner un numéro de lot dans Erplain');

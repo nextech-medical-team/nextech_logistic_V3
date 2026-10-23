@@ -103,7 +103,7 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    });
    return;
   }
-  if(['CreateOrder','CreateShippingOrderFrom'].includes(operation)){
+  if(operation==='CreateShippingOrderFrom'){
    for(const o of orders){try{await assertTenderBatchNumbers(api,o,o.items);}catch(e){o.failed=true;await fail(o,e);}}
    orders=orders.filter(o=>!o.failed);if(!orders.length)return;
   }

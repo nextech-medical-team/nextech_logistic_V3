@@ -21,7 +21,7 @@ test('each distinct product has a named Erplain batch, using read-only calls',as
 });
 test('a missing batch on the second product blocks the order with its SKU',async()=>{
  const api=fixture({pages:v=>({data:v.where.value==='10'?[batch()]:[],paginatorInfo:{hasMorePages:false}})});
- await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line(),line('20')]),/SKU-20.*numéro de lot absent.*BC\/BL bloquée/);
+ await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line(),line('20')]),/SKU-20.*numéro de lot absent.*du BL bloquée/);
 });
 test('a product without batch tracking is blocked',async()=>{
  const api=fixture({tracked:false});await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line()]),/activer la gestion des lots/);
@@ -60,10 +60,10 @@ test('missing products block; non-product lines do not require batches',async()=
  for(const lines of [undefined,[],[{}],[{type:'shipping'}]])await assert.rejects(()=>assertTenderBatchNumbers(fixture(),order,lines));
  const api=fixture();await assertTenderBatchNumbers(api,order,[line(),{type:'shipping'}]);assert.equal(api.calls.length,2);
 });
-test('both full-document creation operations are guarded before a mutation',async()=>{
+test('only full shipping-order creation is guarded before a mutation',async()=>{
  const source=await readFile(new URL('../src/erplain-live-workflow.mjs',import.meta.url),'utf8');
  const start=source.indexOf('async function batchMutation('),end=source.indexOf('async function run(',start),body=source.slice(start,end);
- assert.match(body,/\['CreateOrder','CreateShippingOrderFrom'\]\.includes\(operation\)/);
+ assert.match(body,/if\(operation==='CreateShippingOrderFrom'\)\{/);
  assert.ok(body.indexOf('await assertTenderBatchNumbers(api,o,o.items)')<body.indexOf("const q='mutation"));
  assert.match(body,/o\.failed=true;await fail\(o,e\)/);
  assert.match(body,/orders=orders\.filter\(o=>!o\.failed\);if\(!orders\.length\)return/);
@@ -72,4 +72,29 @@ test('partial delivery checks only selected products before creating its draft',
  const source=await readFile(new URL('../src/partial-deliveries-tender-preserved.mjs',import.meta.url),'utf8');
  const check=source.indexOf('await assertTenderBatchNumbers(api,o,chosen.map(');
  assert.ok(check>0&&check<source.indexOf('mutation V3CreatePartialDraft'));
+});
+
+async function documentFixture(){
+ const source=await readFile(new URL('../src/erplain-live-workflow.mjs',import.meta.url),'utf8');
+ const start=source.indexOf('async function batchMutation('),end=source.indexOf('async function run(',start);
+ const calls=[],errors=[],o={id:'tender-test',channel:'tender',items:[line()],erp_live:{}};
+ const api={request:async(q,v)=>{calls.push(q);
+  if(q.includes('V3LiveCapacity'))return {Orders:{paginatorInfo:{total:0}}};
+  if(q.includes('V3TenderBatchVariant'))return {Variant:{id:v.id,has_batch_numbers:true}};
+  if(q.includes('V3TenderBatchNumbers'))return {BatchNumbers:{data:[],paginatorInfo:{hasMorePages:false}}};
+  assert.match(q,/^mutation V3Batch/);return {p0:{id:'created-document'}};
+ }};
+ const db={query:async()=>({rows:[o]})};
+ const create=new Function('api','db','assertTenderBatchNumbers','withShipmentLock','assertLiveCapacity','mutationBlock','save','fail','activeBcOnlyOrderId','return ('+source.slice(start,end)+');')(api,db,assertTenderBatchNumbers,fn=>fn(),()=>({limit:100}),()=>null,async()=>{},async(o,e)=>errors.push(e.message),null);
+ return {o,calls,errors,create};
+}
+test('tender BC is created without any lot lookup, even when the product has no lot',async()=>{
+ const f=await documentFixture();await f.create([f.o],'creating_bc','bc','OrderInput','CreateOrder',()=>({}),'id');
+ assert.equal(f.o.erp_live.bc.id,'created-document');assert.deepEqual(f.errors,[]);
+ assert.ok(f.calls.some(q=>q.startsWith('mutation V3Batch')));assert.ok(!f.calls.some(q=>q.includes('V3TenderBatch')));
+});
+test('tender BL without a lot is blocked before any provider mutation',async()=>{
+ const f=await documentFixture();await f.create([f.o],'creating_bl','bl','ShippingOrderFromInput','CreateShippingOrderFrom',()=>({}),'id');
+ assert.equal(f.o.erp_live.bl,undefined);assert.match(f.errors[0],/numéro de lot absent.*création du BL bloquée/);
+ assert.ok(f.calls.length>0);assert.ok(f.calls.every(q=>q.startsWith('query ')));
 });
