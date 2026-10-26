@@ -149,10 +149,11 @@ test('a label admission failure preserves successful recovery and returns a visi
  assert.match(result.labelRecovery.labelHolds[0].message,/Erplain indisponible/);
 });
 
-test('recovery reports stock and suspension holds without hiding the successful document refresh',async()=>fixture(async(db,api)=>{
+test('stock diagnostics remain visible without vetoing an existing BL label; suspension still blocks',async()=>fixture(async(db,api)=>{
  let refresh=async()=>({bc,stockHolds:[{message:'Stock à rapprocher'}],message:'Documents récupérés.'});
  let r=await recoverDocumentsAndLabels(db,api,'o',{email:'operator'},{refresh});
- assert.equal(r.labels.length,0);assert.match(r.message,/Stock à rapprocher/);
+ assert.equal(r.labels.length,1);assert.deepEqual(r.stockHolds,[{message:'Stock à rapprocher'}]);
+ await db.query('DELETE FROM partial_deliveries');
  await db.query("UPDATE orders SET suspension=$1",[JSON.stringify({active:true,note:'Test'})]);
  refresh=async()=>({bc,stockHolds:[],message:'Documents récupérés.'});
  r=await recoverDocumentsAndLabels(db,api,'o',{email:'operator'},{refresh});

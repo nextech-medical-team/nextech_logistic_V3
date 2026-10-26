@@ -28,7 +28,6 @@ export async function recoverDocumentsAndLabels(db,api,id,user,{refresh=refreshE
    for(const bl of result.bc.shipping_orders?.data||[]){
     if(!['pending','make_the_shipment','in_preparation','ready_to_ship'].includes(bl.status))continue;
     try{
-     if(result.stockHolds?.length)throw Error('Rapprochement de stock requis avant génération : '+result.stockHolds.map(h=>h.message).join('; '));
      const queued=String(bl.id)===String(o?.erp_live?.bl?.id)
       ?await queuePrimary(db,id,user)
       :await queue(db,api,{id,blId:String(bl.id),requestId:randomUUID()},user);
