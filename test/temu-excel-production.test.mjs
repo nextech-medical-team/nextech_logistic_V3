@@ -84,7 +84,7 @@ test('same TEMU shipping engine uses published BL without ERP revalidation, quot
  await f.db.query("UPDATE resolution_jobs SET error=null WHERE order_id='o'");
  // A successful BL retry is newer than the original Excel import job.
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,result,created_at) VALUES('bl-retry','o','resume-erp','complete','{\"erpOnly\":true}',now()+interval '1 second')");
- const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'5');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
+ const plan=await shipping.prepare(reference),parcel=plan.request.sendRequestList[0];assert.equal(parcel.weight,'5.00');assert.equal(parcel.length,'10.00');assert.equal(parcel.width,'8.00');assert.equal(parcel.height,'0.50');assert.equal(parcel.pickupStartTime,f.now+172800);assert.equal(f.bought,0);
  assert.equal((await f.read()).resolution_pending_resume,true);
  assert.equal(automaticPreparationHold(await f.read()),null);
  await f.db.query("INSERT INTO resolution_jobs(id,order_id,action,status,created_at) VALUES('later','o','refresh','queued',now()+interval '1 minute')");

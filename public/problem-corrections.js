@@ -1188,6 +1188,7 @@ function renderResolution(ctx,problem){
 
 
   fields.innerHTML='<p class="resolution-diagnostic">'+esc(problem.detail||'Le motif détaillé n’a pas été enregistré.')+'</p>'+temuRefusalDetailsHtml(problem,ctx);
+  if(provider==='Erplain'&&ctx.order.pending_equivalent)button('Vérifier le remplacement interrompu',()=>{d.modal.close();openStockEquivalent(ctx,{type:'stock',sku:ctx.order.pending_equivalent.sku});});
   if(problem.type==='customer'){
    const number=ctx.order.channel==='temu'&&ctx.order.erp_live?.customerNumber||'V3:'+ctx.order.id;
    fields.innerHTML+='<p>Numéro client à rechercher dans Erplain : <strong>'+esc(number)+'</strong></p><p>Actualiser recherche le client existant. Si vous avez vérifié son absence dans Erplain, vous pouvez autoriser une nouvelle tentative. Une création précédente peut avoir abouti sans réponse : vérifiez avant de confirmer.</p>';

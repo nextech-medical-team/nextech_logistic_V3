@@ -17,9 +17,12 @@ export async function initializeTemuShipping(db){await db.exec(`CREATE TABLE IF 
 export function canonicalTemuValue(value){if(Array.isArray(value))return value.map(canonicalTemuValue);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalTemuValue(value[key])]));return value;}
 export const hash=v=>createHash('sha256').update(JSON.stringify(canonicalTemuValue(v))).digest('hex');
 export function temuParcelWeight(order,fixedWeight){
- if(fixedWeight!=null)return fixedWeight;
  const known=Number(order?.weight_kg);
- return Number.isFinite(known)&&known>0.25?String(Math.ceil(known*1000)/1000):'0.25';
+ const weight=Number(fixedWeight??(Number.isFinite(known)&&known>0.25?known:0.25));
+ if(!Number.isFinite(weight)||weight<=0)throw Error('TEMU · Poids du colis invalide');
+ // TEMU requires two decimal places in kg; round upward, ignoring binary noise.
+ const hundredths=weight*100;
+ return (Math.ceil(hundredths-Number.EPSILON*Math.max(1,hundredths))/100).toFixed(2);
 }
 export async function readTemuShipments(api,reference,detail){
  if(detail?.parentOrderMap?.parentOrderSn!==reference||!detail.orderList?.length)throw Error('TEMU · Articles absents pour lire les expéditions');

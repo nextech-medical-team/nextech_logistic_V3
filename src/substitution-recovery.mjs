@@ -9,6 +9,9 @@ const signature=lines=>JSON.stringify([...lines.reduce((m,l)=>{
  m.set(l.sku,(m.get(l.sku)||0)+q);return m;
 },new Map())].sort());
 const sameRequest=(a,b)=>a&&a.scope===b.scope&&a.sku===b.sku&&a.replacementSku===b.replacementSku&&Number(a.replaceQuantity)===Number(b.replaceQuantity)&&Number(a.replacementQuantity)===Number(b.replacementQuantity);
+const taxes=l=>Array.isArray(l.tax_codes)&&l.tax_codes.every(t=>t.id!=null)?JSON.stringify(l.tax_codes.map(t=>String(t.id)).sort()):null;
+const commercialSnapshot=c=>JSON.stringify({id:String(c.id),status:c.status,update_stock:c.update_stock,total:c.total,tax_type:c.tax_type,currency:c.currency?.label,
+ lines:c.line_items?.map(l=>({id:String(l.id),type:l.type,quantity:l.quantity,price:l.price,discount:l.discount,discount_rule_amount:l.discount_rule_amount,ecotax:l.ecotax,tax_amount:l.tax_amount,taxes:taxes(l),variant:l.variant?.id,sku:l.variant?.sku,location:l.location?.id})).sort((a,b)=>a.id.localeCompare(b.id))});
 export function recordedSubstitutionPlan(bc,b,failed,preview,order={},historicalStock=null){
  if(failed?.status!=='review'||failed.payload?.confirmEquivalent!==true||!sameRequest(failed.payload,b)||preview?.status!=='complete'||!sameRequest(preview.payload,b)||preview.result?.previewFingerprint!==failed.payload.previewFingerprint)return null;
  const historical=String(failed.error||'').startsWith('Remplacement historique à rapprocher : ');
@@ -28,6 +31,11 @@ export function recordedSubstitutionPlan(bc,b,failed,preview,order={},historical
  if(historical){
   if(!plan.commercialBefore||plan.commercialBefore.update_stock!==true||plan.historicalStockProof?.stockOnBc!==true||String(plan.historicalStockProof.bcId)!==String(bc?.id))return blocked();
   verifyHistoricalStock(bc,historicalStock?.evidence);
+  // A throttled historical replacement may have left the BC unchanged.
+  // Only a fresh, exact commercial snapshot AND a reconciled stock ledger
+  // permit a new preview. Applying it still requires its new fingerprint and
+  // explicit confirmation; an already applied replacement uses recovery below.
+  if(failed.error==='Remplacement historique à rapprocher : Erplain HTTP 429'&&commercialSnapshot(plan.commercialBefore)===commercialSnapshot(bc))return null;
  }
  if(b.scope!=='order'||String(plan.bcId)!==String(bc?.id)||bc.update_stock!==(historical?true:false)||!['active','pending','unpublished'].includes(bc.status)||!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.data.length&&!partial||!Array.isArray(lines)||!Array.isArray(plan.items)||!Array.isArray(plan.expected))return blocked();
  if(lines.some(l=>!['normal','shipping_cost'].includes(l.type)||!l.id)||new Set(lines.map(l=>String(l.id))).size!==lines.length||lines.length!==plan.items.length)return blocked();
@@ -48,7 +56,7 @@ export function recordedSubstitutionPlan(bc,b,failed,preview,order={},historical
   previewFingerprint:createHash('sha256').update(JSON.stringify(substitutionExecutionSnapshot({bc,failedId:failed.id,plan}))).digest('hex')};
 }
 export async function findRecordedSubstitution(db,o,b,bc,api){
- const failed=(await db.query("SELECT id,payload,status,error,created_at FROM resolution_jobs WHERE order_id=$1 AND action='replace-equivalent' AND (request_id<>$2 OR payload ? 'substitutionAttempt') AND (payload ? 'substitutionAttempt' OR status='complete' OR error='Frais de livraison modifiés : rapprochement requis' OR error LIKE 'Remplacement historique à rapprocher : %' OR error LIKE 'Remplacement partiel à rapprocher : %') ORDER BY created_at DESC LIMIT 1",[o.id,b.requestId||''])).rows[0];
+ const failed=(await db.query("SELECT id,payload,status,coalesce(result->'technicalIncident'->>'detail',error) AS error,created_at FROM resolution_jobs WHERE order_id=$1 AND action='replace-equivalent' AND (request_id<>$2 OR payload ? 'substitutionAttempt') AND (payload ? 'substitutionAttempt' OR status='complete' OR error='Frais de livraison modifiés : rapprochement requis' OR error LIKE 'Remplacement historique à rapprocher : %' OR error LIKE 'Remplacement partiel à rapprocher : %' OR result->'technicalIncident'->>'detail' LIKE 'Remplacement historique à rapprocher : %' OR result->'technicalIncident'->>'detail' LIKE 'Remplacement partiel à rapprocher : %') ORDER BY created_at DESC LIMIT 1",[o.id,b.requestId||''])).rows[0];
  const attempt=readSubstitutionAttempt(failed,o);
  if(attempt){
   // A committed replacement can enter review when subsequent stock/BL checks
@@ -74,7 +82,7 @@ export async function findRecordedSubstitution(db,o,b,bc,api){
  if(failed?.status==='review'&&(historical||partial||failed.error==='Frais de livraison modifiés : rapprochement requis')&&!sameRequest(failed.payload,b))throw Error('Rapprocher d’abord le remplacement déjà demandé sur ce BC, avant de choisir un autre produit.');
  if(failed?.status!=='review'||!sameRequest(failed.payload,b))return null;
  const preview=(await db.query("SELECT payload,status,result FROM resolution_jobs WHERE order_id=$1 AND action='equivalent-preview' AND status='complete' AND result->>'previewFingerprint'=$2 AND created_at<=$3 ORDER BY created_at DESC LIMIT 1",[o.id,failed.payload.previewFingerprint,failed.created_at])).rows[0];
- if(partial&&(!preview||preview.status!=='complete'||preview.result?.previewFingerprint!==failed.payload.previewFingerprint))throw Error('Aperçu du remplacement partiel absent : rapprochement requis avant toute nouvelle écriture.');
+ if((partial||historical)&&(!preview||preview.status!=='complete'||preview.result?.previewFingerprint!==failed.payload.previewFingerprint))throw Error('Aperçu du remplacement '+(partial?'partiel':'historique')+' absent : rapprochement requis avant toute nouvelle écriture.');
  const historicalStock=historical?await readHistoricalStock(api,bc,{additionalVariants:(preview?.result?.commercialBefore?.line_items||[]).filter(l=>l.type==='normal').map(l=>l.variant.id)}):null;
  return recordedSubstitutionPlan(bc,b,failed,preview,o,historicalStock);
 }
