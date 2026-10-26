@@ -21,10 +21,11 @@ export function equivalentReceipts(amounts,detail,reference){
 }
 
 export function applyEquivalentReceipts(result,totals){
+ if(![totals?.revenue,totals?.credit].every(v=>Number.isFinite(v)&&v>=0))throw Error('TEMU · Recettes rapprochées absentes ou invalides');
  result.revenue=totals.revenue;result.credit=totals.credit;
  result.totalReceipts=totals.revenue+totals.credit;
  result.creditSource='API TEMU · contribution livraison HT des lignes originales';
- result.issues=(result.issues||[]).filter(m=>m!=='Montant de vente absent ou invalide');
+ result.issues=(result.issues||[]).filter(m=>!['Montant de vente absent ou invalide','Contribution invalide'].includes(m));
  for(const l of result.lines||[]){l.issues=(l.issues||[]).filter(m=>m!=='Montant de vente absent ou invalide');l.revenue=null;l.profit=null;}
  result.warnings=(result.warnings||[]).filter(m=>!m.includes('Contribution absente du rapport'));
  result.warnings.push('Produits remplacés dans Erplain : recettes TEMU rapprochées au niveau de la commande, coûts des produits préparés. Bénéfice non ventilé par ligne.');
