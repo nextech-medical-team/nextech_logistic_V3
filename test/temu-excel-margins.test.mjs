@@ -66,3 +66,27 @@ test('identical seller amounts from API and Excel give the same margin through t
  assert.deepEqual(b.issues,[]);
  for(const key of ['status','profit','revenue','purchase','supplierShipping','shipping','credit','totalCosts','margin','markup'])assert.equal(a[key],b[key],key);
 });
+
+test('shipping a BL retains its prepared-unit margin without making it eligible for another label',async()=>{
+ const {hasCreatedBl}=await import('../src/created-bl-label.mjs');
+ const f=fixture();f.order.erp_live={bl:{id:'bl',status:'ready_to_ship'}};f.line.target_quantity=20;f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ const service=await createMarginsService(f.db,f.options),before=(await service.get({fresh:true})).rows[0];
+ f.order.erp_live.bl.status='shipped';const after=(await service.get({fresh:true})).rows[0];
+ assert.equal(JSON.stringify(after),JSON.stringify(before));assert.equal(after.purchase,60);assert.equal(after.status,'negative');assert.equal(hasCreatedBl(f.order),false);
+ f.line.target_sku='UNKNOWN';assert.equal((await service.get({fresh:true})).rows[0].status,'incomplete');
+});
+test('verified replacement receipts retire only stale revenue/contribution issues',async()=>{
+ const {applyEquivalentReceipts}=await import('../src/temu-equivalent-margin.mjs');
+ const fixture=()=>({issues:['Montant de vente absent ou invalide','Contribution invalide'],lines:[],purchase:5,supplierShipping:1,shipping:2,fees:0,other:0});
+ const r=fixture();applyEquivalentReceipts(r,{revenue:10,credit:2});assert.equal(r.complete,true);assert.equal(r.profit,4);assert.deepEqual(r.issues,[]);
+ const blocked=fixture();blocked.issues.push('Prix unitaire ou mapping manquant');applyEquivalentReceipts(blocked,{revenue:10,credit:2});assert.equal(blocked.complete,false);assert.deepEqual(blocked.issues,['Prix unitaire ou mapping manquant']);
+ for(const totals of [{revenue:NaN,credit:2},{revenue:10,credit:NaN},{revenue:10,credit:-1},{revenue:undefined,credit:0}]){const r=fixture(),before=JSON.stringify(r);assert.throws(()=>applyEquivalentReceipts(r,totals),/invalides/);assert.equal(JSON.stringify(r),before);}
+});
+
+test('legacy shipped import without prepared quantities retains catalogue checks',async()=>{
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';f.line.target_quantity=null;
+ const service=await createMarginsService(f.db,f.options),before=(await service.get({fresh:true})).rows[0];
+ f.order.erp_live={bl:{id:'legacy',status:'shipped'}};const after=(await service.get({fresh:true})).rows[0];
+ assert.equal(JSON.stringify(after),JSON.stringify(before));assert.equal(after.status,'positive');
+ f.line.target_sku='UNKNOWN';assert.equal((await service.get({fresh:true})).rows[0].status,'incomplete');
+});

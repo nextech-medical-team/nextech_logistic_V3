@@ -1,4 +1,3 @@
-import {hasCreatedBl} from './created-bl-label.mjs';
 import {preparedTemuMarginCost} from './post-bl-margin-cost.mjs';
 import {temuCommercialSource} from './temu-commercial-source.mjs';
 import {excelAmounts} from './temu-excel-commercial.mjs';
@@ -95,7 +94,12 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
    transportSource=name+' retenu dans V3 ('+carrier+') · poids calculateur '+weight+' kg · tarif publié '+price.toLocaleString('fr-FR',{maximumFractionDigits:5})+' € HT';
    return price;
   },find(l){const found=adapters[o.channel].find(l);const v3=sourceLines.find(x=>x.id===l.id);
-   if(o.channel==='temu'&&hasCreatedBl(o))return preparedTemuMarginCost({profiles:snapshot.temu,line:v3,orderLine:l,adapter:adapters.temu});
+   if(o.channel==='temu'&&o.erp_live?.bl?.id&&['pending','make_the_shipment','in_preparation','ready_to_ship','shipped'].includes(o.erp_live.bl.status)){
+    const prepared=preparedTemuMarginCost({profiles:snapshot.temu,line:v3,orderLine:l,adapter:adapters.temu});
+    // Legacy shipped imports can lack preparation metadata; retain their existing
+    // catalogue checks instead of replacing an otherwise valid estimate.
+    if(o.erp_live.bl.status!=='shipped'||!prepared.error)return prepared;
+   }
    if(o.source_payload?.origin==='temu_excel'&&v3?.target_sku){
     const byId=snapshot.temu.filter(r=>String(r.sku_id||'')===String(l.skuId||'')&&l.skuId);
     const matches=byId.length?byId:snapshot.temu.filter(r=>String(r.sku_temu)===String(l.sku));
