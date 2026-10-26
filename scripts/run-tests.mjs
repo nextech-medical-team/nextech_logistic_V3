@@ -84,4 +84,5 @@ groups.push(['--test','test/transient-resume-hold.test.mjs']);
 groups.unshift(['--test','test/test-groups.test.mjs']);
 groups.push(['--test','test/tender-batch-required.test.mjs']);
 groups.push(['--test','test/temu-weight-format.test.mjs','test/historical-substitution-quota.test.mjs']);
+groups.push(['--test','test/existing-bl-label.test.mjs']);
 process.exitCode=runTestGroups(groups);

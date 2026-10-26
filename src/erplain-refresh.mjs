@@ -1,3 +1,4 @@
+import {recoveredErplainRoute} from './recovered-erplain-routes.mjs';
 import {preserveImportedPostalAddress} from './imported-postal-authority.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {targetedOrderService} from './erplain-targeted-orders.mjs';
@@ -170,6 +171,7 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
   permitted(user,['admin','manager','operator']);
   const manualReview=manualReviewService(db,apiFactory('live'));
   const targeted=targetedOrderService(db,apiFactory('live'));
+  if(await recoveredErplainRoute({p,url,req,res,user,body,json},{db,api:apiFactory('live'),targeted,manualReview}))return true;
   if(p==='/api/erplain-refresh/targeted-lookup'&&req.method==='POST'){json(res,200,await targeted.lookup(await body(req)));return true;}
   if(p==='/api/erplain-refresh/targeted-reactivate'&&req.method==='POST'){json(res,200,await targeted.reactivate(await body(req),user));return true;}
   if(p==='/api/erplain-refresh/targeted-reconcile'&&req.method==='POST'){json(res,200,await targeted.reconcile(await body(req),user));return true;}
