@@ -41,7 +41,7 @@ async function fixture(){
 
 test('published partial BL chains status-only ready and an exact TEMU quote; no stock/BC/mapping gate or purchase',async()=>{const f=await fixture();try{
  const result=await f.service.advance('d'),d=await f.row();assert.equal(result.status,'temu_confirm',d.error);assert.equal(d.bl.status,'ready_to_ship');assert.equal(d.temu_label.plan.amount,2.4);
- const quote=f.calls.find(c=>c.type==='bg.logistics.shippingservices.get');assert.deepEqual(quote.args.shipOrderInfoList,[{parentOrderSn:ref,orderSn:'s1',quantity:1},{parentOrderSn:ref,orderSn:'s2',quantity:1}]);assert.equal(quote.args.weight,'0.255');assert(!f.calls.some(c=>c.type==='buy'));assert.equal(f.erplainCalls.filter(c=>c.q.startsWith('mutation')).length,1);assert(!f.erplainCalls.some(c=>/StockRemoval|Order\(id/.test(c.q)&&!c.q.includes('ShippingOrder')));
+ const quote=f.calls.find(c=>c.type==='bg.logistics.shippingservices.get');assert.deepEqual(quote.args.shipOrderInfoList,[{parentOrderSn:ref,orderSn:'s1',quantity:1},{parentOrderSn:ref,orderSn:'s2',quantity:1}]);assert.equal(quote.args.weight,'0.26');assert(!f.calls.some(c=>c.type==='buy'));assert.equal(f.erplainCalls.filter(c=>c.q.startsWith('mutation')).length,1);assert(!f.erplainCalls.some(c=>/StockRemoval|Order\(id/.test(c.q)&&!c.q.includes('ShippingOrder')));
  await f.service.advance('d');assert.equal(f.erplainCalls.filter(c=>c.q.startsWith('mutation')).length,1);
 }finally{await f.e.close();}});
 

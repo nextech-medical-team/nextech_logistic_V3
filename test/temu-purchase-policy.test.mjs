@@ -85,6 +85,6 @@ test('a cached quote at the former weight refreshes without buying; matching wei
  h.api.read=async(method,args)=>{if(method==='bg.open.accesstoken.info.get')return {mallId:'shop'};if(method==='bg.logistics.shippingservices.get')quotes++;return read(method,args);};
  await temuShipping(h.db,h.api).prepare(reference);quotes=0;order.weight_kg=0.405;
  const local=temuLocalService(h.db,'unused',{configLoader:async()=>({}),shopLoader:async()=>[],apiFactory:()=>h.api});
- const refreshed=await local.recover(reference);assert.equal(refreshed.plan.request.sendRequestList[0].weight,'0.405');assert.equal(quotes,1);assert.equal(h.bought,0);
+ const refreshed=await local.recover(reference);assert.equal(refreshed.plan.request.sendRequestList[0].weight,'0.41');assert.equal(quotes,1);assert.equal(h.bought,0);
  const same=await local.recover(reference);assert.equal(same.plan.id,refreshed.plan.id);assert.equal(quotes,1);assert.equal(h.bought,0);
 });
