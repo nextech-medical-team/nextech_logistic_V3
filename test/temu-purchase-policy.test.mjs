@@ -66,11 +66,11 @@ test('atomic order guard refuses a changed command without provider purchase',as
 test('quote never understates the known order weight when recomputing transport and margin',async()=>{
  const h=harness([offer(1,'GLS',2)]),read=h.db.query;
  h.db.query=async(sql,args)=>sql.startsWith('SELECT * FROM orders WHERE reference=')?{rows:[{suspension:{},weight_kg:'1.2345'}]}:read(sql,args);
- const p=await temuShipping(h.db,h.api).prepare(reference);assert.equal(p.request.sendRequestList[0].weight,'1.235');
+ const p=await temuShipping(h.db,h.api).prepare(reference);assert.equal(p.request.sendRequestList[0].weight,'1.24');
 });
 
 test('Excel and direct orders share kilogram rounding while explicit sandbox weights remain explicit',()=>{
- for(const origin of ['temu_excel','temu_direct_receipt',undefined])for(const [weight,expected] of [[0.405,'0.405'],[1.2345,'1.235'],['0.755','0.755'],[25,'25'],[0.1,'0.25'],[null,'0.25'],[undefined,'0.25']])assert.equal(temuParcelWeight({weight_kg:weight,source_payload:{origin}}),expected);
+ for(const origin of ['temu_excel','temu_direct_receipt',undefined])for(const [weight,expected] of [[0.405,'0.41'],[1.2345,'1.24'],['0.755','0.76'],[25,'25.00'],[0.1,'0.25'],[null,'0.25'],[undefined,'0.25']])assert.equal(temuParcelWeight({weight_kg:weight,source_payload:{origin}}),expected);
  assert.equal(temuParcelWeight({weight_kg:5},'0.25'),'0.25');
 });
 
