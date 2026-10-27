@@ -47,7 +47,7 @@ export async function assertOrderIdle(db,order){
 }
 const idle=assertOrderIdle;
 function physicalBlock(order){
- if(['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status)||['shipped','delivered'].includes(order.erp_live?.bl?.status))throw Error('Commande déjà expédiée ou livrée : annulation ERPLAIN impossible');
+ if(['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status)||['shipped','delivered'].includes(order.erp_live?.bl?.status))throw Error('Annulation non appliquée : le BL est déjà expédié ou livré.');
 }
 function version(state){return state.version||'';}
 async function event(tx,order,action,note,state,user){
@@ -142,7 +142,8 @@ export function orderSuspensionService(db,api,{onTiming=event=>console.info(JSON
     const raw=(await api.request('query V3SuspensionBLGuard($id:ID!){ShippingOrder(id:$id){id status invoices_count orders(first:100){data{id status} paginatorInfo{hasMorePages}} invoices(first:100){data{id status} paginatorInfo{hasMorePages}}}}',{id:String(item.id)})).ShippingOrder;
     if(String(raw?.id)!==String(item.id)||raw.orders?.paginatorInfo?.hasMorePages!==false||raw.invoices?.paginatorInfo?.hasMorePages!==false||raw.invoices_count==null)throw Error('BL ou documents liés incomplets : annulation refusée');
     const bl={...raw,invoicesCount:Number(raw.invoices_count),invoices:raw.invoices.data};
-    if(!['unpublished','pending','make_the_shipment','in_preparation','ready_to_ship','cancelled'].includes(bl.status))throw Error('BL expédié, livré ou statut inconnu : annulation refusée');
+    if(['shipped','delivered'].includes(bl.status))throw Error('Annulation non appliquée : le BL est déjà expédié ou livré.');
+    if(!['unpublished','pending','make_the_shipment','in_preparation','ready_to_ship','cancelled'].includes(bl.status))throw Error('BL de statut inconnu : annulation refusée');
     if(!Array.isArray(bl.orders?.data)||bl.orders.data.length!==1||String(bl.orders.data[0].id)!==bcId)throw Error('BL partagé ou association BC incertaine : annulation refusée');
     if(!Number.isInteger(bl.invoicesCount)||bl.invoicesCount!==0||!Array.isArray(bl.invoices)||bl.invoices.length)throw Error('BL facturé ou facturation non vérifiable : annulation refusée');
     bls.push(bl);
