@@ -12,7 +12,7 @@ export function convertedQuantity(quantity,source,target){
 export function route(channel,weight){
   if(channel==='temu')return {carrier:'temu',weight:0.25,parcels:1};
   if(!Number.isFinite(weight)||weight<=0)throw new Error('Poids produit Erplain manquant');
-  const fixed={tender:'gls_pharma',samples:'gls',relay:'gls_shop'};
+  const fixed={tender:'gls',samples:'gls',relay:'gls_shop'};
   const carrier=fixed[channel]||(['amazon','shopify'].includes(channel)?(weight<=3?'gofo':'gls'):null);
   if(!carrier)throw new Error('Gestionnaire transport à configurer');
   return {carrier,weight,parcels:carrier.startsWith('gls')?Math.ceil(weight/30):1};

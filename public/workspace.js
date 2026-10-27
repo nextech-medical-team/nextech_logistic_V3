@@ -63,7 +63,7 @@ const coverage=[
  ['Expéditions GOFO','Création TEST et PROD et récupération PDF intégrées ; les refus réels restent visibles par commande. Aucun PDF fictif présenté comme une étiquette GOFO.'],
  ['Mapping SKU','Import Excel, recherche, ajout/modification des ratios et notes, suppression. Export Excel complet et pagination disponibles.'],
  ['Poids produits','Cache des poids et onglet stocks réels Erplain (lecture seule), recherche et date de récupération.'],
- ['CSV Appels d’offres','Import Excel en unités Erplain : SKU directs, quantités conservées, contrôle du produit et du poids ; routage GLS PHARMA.'],
+ ['CSV Appels d’offres','Import Excel en unités Erplain : SKU directs, quantités conservées, contrôle du produit et du poids ; routage GLS par défaut, téléphone facultatif.'],
  ['CSV commandes échantillons','Import Excel / CSV avec le format des appels d’offres, routage GLS et SKU Erplain directs.'],
  ['Achats fournisseurs','Module retrouvé : catalogue, besoins, modèles Excel, analyse, plans, groupes et historique. Reprise restante.'],
  ['Métachamps Shopify','Module d’import retrouvé ; reprise restante.'],

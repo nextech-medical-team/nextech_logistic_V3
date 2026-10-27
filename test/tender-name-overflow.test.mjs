@@ -11,14 +11,13 @@ test('already fitting name fields retain the established exact layout',()=>{
 test('each parcel preserves the complete text and its own index, including address complement',()=>{
  for(const n of [1,9,24]){const o=order();o.parcel_index=n;o.address.street2='BAT A';const a=tenderGlsAddress(o);assert.equal([a.Name1,a.Name2,a.Name3].filter(Boolean).join(' '),o.erplain_label_customer.label+' '+o.address.name+' BAT A ('+n+'/24)');}
 });
-test('a true overflow, overlong word, invalid telephone or street remains a provider payload error',()=>{
+test('a true overflow, overlong word or street remains a provider payload error',()=>{
  const long=order();long.address.name='SERVICE PHARMACIE '.repeat(12);assert.throws(()=>tenderGlsAddress(long),/trop longs/);
  const word=order();word.erplain_label_customer.label='A'.repeat(41);assert.throws(()=>tenderGlsAddress(word),/Nom trop long/);
- const phone=order();phone.address.phone='420937';assert.throws(()=>tenderGlsAddress(phone),/téléphone absent ou invalide/);
  const street=order();street.address.street='RUE '.repeat(12);assert.throws(()=>tenderGlsAddress(street),/dépasse 40/);
 });
-test('a published BL does not require an optional full phone; a provided extension remains printed and no number is invented',()=>{
- const o=order();o.label_bl_id='bl';o.address.phone='420937';const before=JSON.stringify(o),a=tenderGlsAddress(o);assert.equal(a.ContactPerson,'Tél : 420937');assert.equal(a.FixedLinePhonenumber,undefined);assert.equal(a.MobilePhoneNumber,undefined);assert.equal(JSON.stringify(o),before);
+test('a tender does not require an optional full phone; a provided extension remains printed and no number is invented',()=>{
+ const o=order();o.address.phone='420937';const before=JSON.stringify(o),a=tenderGlsAddress(o);assert.equal(a.ContactPerson,'Tél : 420937');assert.equal(a.FixedLinePhonenumber,undefined);assert.equal(a.MobilePhoneNumber,undefined);assert.equal(JSON.stringify(o),before);
  o.address.phone='';const empty=tenderGlsAddress(o);assert.equal(empty.ContactPerson,undefined);assert.equal(empty.FixedLinePhonenumber,undefined);
 });
 test('a real 36-to-40-character word may use the documented ShipIT capacity without truncation',()=>{
