@@ -64,7 +64,7 @@ await check('suspension locale expédiée/livrée : documents conservés, annula
   const before=bcMutationCount;await change('suspend','one','Commande livrée : retirer des problèmes actifs.');
   const suspended=(await service.context('one')).order;assert.equal(suspended.suspension.active,true);assert.equal(suspended.tracking_status,scenario.tracking);assert.deepEqual(suspended.erp_live,erp);
   assert.equal((await db.query('SELECT id FROM orders WHERE id=$1 AND '+activeProblemOrderSql,['one'])).rows.length,0);
-  await assert.rejects(()=>service.cancelErplain({id:'one',expectedVersion:(suspended.suspension.version),confirm:true},user),/annulation ERPLAIN impossible/);assert.equal(bcMutationCount,before);
+  await assert.rejects(()=>service.cancelErplain({id:'one',expectedVersion:(suspended.suspension.version),confirm:true},user),/Annulation non appliqu\u00e9e : le BL est d\u00e9j\u00e0 exp\u00e9di\u00e9 ou livr\u00e9\./);assert.equal(bcMutationCount,before);
   await change('reactivate','one','Réafficher dans V3 sans reprise.');assert.equal((await service.context('one')).order.tracking_status,scenario.tracking);assert.deepEqual((await service.context('one')).order.erp_live,erp);
  }
  await db.query('UPDATE orders SET tracking_status=$2,erp_live=$3 WHERE id=$1',['one',initial.tracking_status,JSON.stringify(initial.erp_live)]);
@@ -73,10 +73,19 @@ await change('suspend');
 const cancel=async()=>service.cancelErplain({id:'one',expectedVersion:(await fresh()).version,confirm:true},user);
 await check('annulation ERP exige confirmation',async()=>{await assert.rejects(async()=>service.cancelErplain({id:'one',expectedVersion:(await fresh()).version},user),/Confirmer/);assert.equal(bcMutationCount,0);});
 await check('BC facturé refusé sans mutation',async()=>{billingCount=1;await assert.rejects(cancel,/facturé/);billingCount=0;assert.equal(bcMutationCount,0);});
-await check('BL expédié refusé sans mutation',async()=>{bls=[{id:'456',status:'shipped',update_stock:false}];await assert.rejects(cancel,/BL expédié/);bls=[];assert.equal(bcMutationCount,0);});
+await check('BL expédié refusé sans mutation',async()=>{bls=[{id:'456',status:'shipped',update_stock:false}];await assert.rejects(cancel,/Annulation non appliqu\u00e9e/);bls=[];assert.equal(bcMutationCount,0);});
 await check('mouvement de stock à rapprocher refusé',async()=>{await db.query("UPDATE orders SET erp_live=erp_live||'{\"stockDocument\":{\"id\":\"789\"}}'::jsonb WHERE id='one'");await assert.rejects(cancel,/Mouvement de stock/);await db.query("UPDATE orders SET erp_live=erp_live-'stockDocument' WHERE id='one'");});
 await check('résultat externe incertain conservé, réactivation interdite',async()=>{failAfterMutation=true;await assert.rejects(cancel,/à vérifier/);assert.equal((await fresh()).erplainCancellation.status,'review');assert.equal(bcMutationCount,1);await assert.rejects(()=>change('reactivate'),/rapprocher/);});
 await check('rapprochement relit ERP sans répéter l’annulation confirmée',async()=>{await cancel();assert.equal(bcMutationCount,1);assert.equal((await fresh()).erplainCancellation.status,'complete');assert.equal((await fresh()).active,true);assert.equal((await service.context('one')).order.tracking_status,'not_shipped');});
 await check('réactivation après annulation ERP garde la protection contre recréation',async()=>{await change('reactivate','one','Client à recontacter, aucun nouveau BC autorisé.');const o=(await service.context('one')).order;assert.equal(o.suspension.active,false);assert.match(suspensionBlock(o),/recréation/);await assert.rejects(()=>db.query("UPDATE erp_live_jobs SET status='processing' WHERE order_id='one'"),/traitement interdit/);});
 await check('vérification seule après réponse incertaine sans nouvelle mutation',async()=>{await change('suspend');await db.query("UPDATE orders SET suspension=suspension || $1::jsonb WHERE id='one'",[JSON.stringify({erplainCancellation:{status:'review',bcId:'123'}})]);bcStatus='active';const before=bcMutationCount;await service.cancelErplain({id:'one',expectedVersion:(await fresh()).version,verifyOnly:true},user);assert.equal(bcMutationCount,before);assert.equal((await fresh()).erplainCancellation.status,'review');await service.cancelErplain({id:'one',expectedVersion:(await fresh()).version,confirm:true},user);assert.equal(bcMutationCount,before);});
+await check('confirmed cancellation updates local BC and BL statuses',async()=>{
+ await db.query("UPDATE orders SET suspension=suspension-'erplainCancellation' WHERE id='one'");
+ bls=[{id:'456',status:'pending',update_stock:false}];const before=bcMutationCount;
+ await db.query("UPDATE orders SET erp_live=erp_live||$1::jsonb WHERE id='one'",[JSON.stringify({bl:{id:'456',label:'TEST-BL',status:'pending'}})]);
+ await cancel();assert.equal(bcMutationCount,before+1);assert.equal(bls[0].status,'cancelled');assert.equal((await fresh()).erplainCancellation.status,'complete');
+ const order=(await service.context('one')).order;
+ assert.equal(order.erp_live.bc.status,'cancelled');
+ assert.deepEqual(order.erp_live.bl,{id:'456',label:'TEST-BL',status:'cancelled'});
+});
 await pg.close();console.log(JSON.stringify({checks,passed:checks,failed:0,businessCalls:'MOCK ONLY'}));

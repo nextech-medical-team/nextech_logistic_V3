@@ -119,6 +119,16 @@ test('failed fresh read cannot reuse an old cancellation proof',async()=>{const 
 test('Erplain refusal retains local suspension and reports review',async()=>{const f=fixture({documentError:'Stock à rapprocher'});assert.equal((await f.service.apply({id:'a'},user)).result.status,'review');assert.equal(f.order.suspension.active,true);assert.ok(!f.calls.some(s=>s.includes("label_status='cancelled'")));});
 test('shipped order is held for physical reconciliation',async()=>{const f=fixture({shipped:true,bc:false});assert.equal((await f.service.apply({id:'a'},user)).result.status,'review');assert.ok(!f.calls.includes('cancel'));});
 test('no Erplain BC still cancels the local order',async()=>{const f=fixture({bc:false});assert.equal((await f.service.apply({id:'a'},user)).result.status,'cancelled');assert.ok(!f.calls.includes('cancel'));});
+
+test('shipped or delivered BL prevents local cancellation even without a BC',async()=>{
+ for(const bc of [true,false])for(const status of ['shipped','delivered']){
+  const f=fixture({bc});f.order.erp_live.bl={id:'456',status};
+  const {result}=await f.service.apply({id:'a'},user);
+  assert.equal(result.status,'review');
+  assert.ok(!f.calls.includes('cancel'));
+  assert.ok(!f.calls.some(sql=>sql.includes("label_status='cancelled'")));
+ }
+});
 test('repeated click verifies previous Erplain attempt without retrying writes',async()=>{const f=fixture();f.order.suspension={active:true,erplainCancellation:{status:'review'}};await f.service.apply({id:'a'},user);assert.ok(f.calls.includes('verify'));assert.ok(!f.calls.includes('cancel'));});
 test('viewer rejected before source reads',async()=>{const f=fixture();await assert.rejects(()=>f.service.next({},{role:'viewer'}),/Droits/);assert.equal(f.calls.length,0);});
 test('empty scan terminates',async()=>{const service=manualPlatformCancellation({query:async()=>({rows:[]})},'unused',{});assert.deepEqual(await service.next({},user),{done:true});});

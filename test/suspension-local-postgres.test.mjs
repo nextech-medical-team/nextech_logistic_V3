@@ -44,7 +44,7 @@ test('PostgreSQL concurrency: unrelated global lock, target locks, active jobs a
   const suspension=service.suspend(await input(),user);await Promise.race([enteredPromise,suspension.then(()=>{throw Error('Missing pause');})]);
   const claim=db.query("UPDATE jobs SET status='processing' WHERE id='claim'");const rejected=assert.rejects(claim,/traitement interdit/);finish();await suspension;await rejected;
   assert.equal((await db.query("SELECT status FROM jobs WHERE id='claim'")).rows[0].status,'blocked');assert.equal(providerCalls,0);
-  await db.query("UPDATE orders SET tracking_status='delivered' WHERE id='target'");await assert.rejects(async()=>service.cancelErplain({...await input(),confirm:true},user),/annulation ERPLAIN impossible/);assert.ok(keys.at(-1).includes('stock-mutations'));assert.equal(providerCalls,0);
+  await db.query("UPDATE orders SET tracking_status='delivered' WHERE id='target'");await assert.rejects(async()=>service.cancelErplain({...await input(),confirm:true},user),{message:'Annulation non appliquée : le BL est déjà expédié ou livré.'});assert.ok(keys.at(-1).includes('stock-mutations'));assert.equal(providerCalls,0);
   assert.ok(metrics.some(m=>m.outcome==='saved'&&m.transactionMs>=0));
   await db.exec("ALTER TABLE orders ADD COLUMN channel TEXT, ADD COLUMN address JSONB, ADD COLUMN partial_mode BOOLEAN DEFAULT false; INSERT INTO orders(id,reference,channel,address,erp_live) VALUES('price','PRICE','shopify','{\"country\":\"FR\"}','{\"bc\":{\"id\":\"price-bc\"}}');");
   const money=amount=>({amount,currency:'EUR'}),priceInput={id:'price',bcId:'price-bc',bc:money(120),source:money(60)};

@@ -47,7 +47,7 @@ export async function assertOrderIdle(db,order){
 }
 const idle=assertOrderIdle;
 function physicalBlock(order){
- if(['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status)||['shipped','delivered'].includes(order.erp_live?.bl?.status))throw Error('Commande déjà expédiée ou livrée : annulation ERPLAIN impossible');
+ if(['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status)||['shipped','delivered'].includes(order.erp_live?.bl?.status))throw Error('Annulation non appliquée : le BL est déjà expédié ou livré.');
 }
 function version(state){return state.version||'';}
 async function event(tx,order,action,note,state,user){
@@ -105,6 +105,12 @@ export function orderSuspensionService(db,api,{onTiming=event=>console.info(JSON
   });recordTiming({requestId,action:active?'suspend':'reactivate',outcome:'saved',...timings});return {...result,requestId,timings};
   }catch(error){recordTiming({requestId,action:active?'suspend':'reactivate',outcome:error.code==='LOCAL_ORDER_UNCERTAIN'?'uncertain':'refused',totalMs:Math.round(performance.now()-began),code:error.code||'business_guard',phase:error.phase||'transaction',...error.timings});if(error.code==='55P03'||error.code==='57014')throw localOrderBusy(error);throw error;}
  }
+ async function saveCancelledDocuments(tx,order,state,bc){
+  const documents={bc:{...order.erp_live.bc,status:bc.status}};
+  const bl=order.erp_live?.bl;
+  if(bl?.id&&bc.shipping_orders.data.some(item=>String(item.id)===String(bl.id)&&item.status==='cancelled'))documents.bl={...bl,status:'cancelled'};
+  await tx.query('UPDATE orders SET suspension=$2,erp_live=erp_live||$3::jsonb WHERE id=$1',[order.id,JSON.stringify(state),JSON.stringify(documents)]);
+ }
  async function cancelErplain(input,user){
   authorized(user);
   if(typeof input?.id!=='string'||typeof input.expectedVersion!=='string'||(input.confirm!==true&&input.verifyOnly!==true))throw Error('Confirmer explicitement l’annulation ERPLAIN');
@@ -127,7 +133,7 @@ export function orderSuspensionService(db,api,{onTiming=event=>console.info(JSON
     if(previous?.bcId&&previous.bcId!==bcId)throw Error('BC différent de la tentative enregistrée : rapprochement requis');
     if(bc.status!=='cancelled'||bc.shipping_orders.data.some(b=>b.status!=='cancelled'))return {ok:true,message:'Vérification ERPLAIN : annulation non entièrement confirmée. Aucun nouvel essai effectué ; rapprochement nécessaire.'};
     const state={...order.suspension,version:randomUUID(),erplainCancellation:{...previous,bcId,bcLabel:bc.label,status:'complete',confirmedAt:new Date().toISOString()}};
-    await db.transaction(async tx=>{await tx.query("UPDATE orders SET suspension=$2,erp_live=jsonb_set(erp_live,'{bc,status}','\"cancelled\"'::jsonb) WHERE id=$1",[order.id,JSON.stringify(state)]);await event(tx,order,'erplain_cancelled',state.note,state,user);});
+    await db.transaction(async tx=>{await saveCancelledDocuments(tx,order,state,bc);await event(tx,order,'erplain_cancelled',state.note,state,user);});
     return {ok:true,message:'Annulation ERPLAIN vérifiée. La commande reste suspendue dans V3.',suspension:state};
    }
    // Read all related documents before the first write; never cancel another order's BL.
@@ -136,7 +142,8 @@ export function orderSuspensionService(db,api,{onTiming=event=>console.info(JSON
     const raw=(await api.request('query V3SuspensionBLGuard($id:ID!){ShippingOrder(id:$id){id status invoices_count orders(first:100){data{id status} paginatorInfo{hasMorePages}} invoices(first:100){data{id status} paginatorInfo{hasMorePages}}}}',{id:String(item.id)})).ShippingOrder;
     if(String(raw?.id)!==String(item.id)||raw.orders?.paginatorInfo?.hasMorePages!==false||raw.invoices?.paginatorInfo?.hasMorePages!==false||raw.invoices_count==null)throw Error('BL ou documents liés incomplets : annulation refusée');
     const bl={...raw,invoicesCount:Number(raw.invoices_count),invoices:raw.invoices.data};
-    if(!['unpublished','pending','make_the_shipment','in_preparation','ready_to_ship','cancelled'].includes(bl.status))throw Error('BL expédié, livré ou statut inconnu : annulation refusée');
+    if(['shipped','delivered'].includes(bl.status))throw Error('Annulation non appliquée : le BL est déjà expédié ou livré.');
+    if(!['unpublished','pending','make_the_shipment','in_preparation','ready_to_ship','cancelled'].includes(bl.status))throw Error('BL de statut inconnu : annulation refusée');
     if(!Array.isArray(bl.orders?.data)||bl.orders.data.length!==1||String(bl.orders.data[0].id)!==bcId)throw Error('BL partagé ou association BC incertaine : annulation refusée');
     if(!Number.isInteger(bl.invoicesCount)||bl.invoicesCount!==0||!Array.isArray(bl.invoices)||bl.invoices.length)throw Error('BL facturé ou facturation non vérifiable : annulation refusée');
     bls.push(bl);
@@ -152,7 +159,7 @@ export function orderSuspensionService(db,api,{onTiming=event=>console.info(JSON
     const verified=await readErplainDocuments(api,bcId);
     if(verified.status!=='cancelled'||verified.shipping_orders.data.some(b=>b.status!=='cancelled'))throw Error('Annulation ERPLAIN non entièrement confirmée : rapprochement requis');
     state.version=randomUUID();state.erplainCancellation={...state.erplainCancellation,status:'complete',confirmedAt:new Date().toISOString()};
-    await db.transaction(async tx=>{await tx.query('UPDATE orders SET suspension=$2,erp_live=jsonb_set(erp_live,\'{bc,status}\',\'"cancelled"\'::jsonb) WHERE id=$1',[order.id,JSON.stringify(state)]);await event(tx,order,'erplain_cancelled',state.note,state,user);});
+    await db.transaction(async tx=>{await saveCancelledDocuments(tx,order,state,verified);await event(tx,order,'erplain_cancelled',state.note,state,user);});
     return {ok:true,message:'Annulation ERPLAIN confirmée. La commande reste suspendue dans V3, en attente du client.',suspension:state};
    }catch(error){
     state.version=randomUUID();state.erplainCancellation={...state.erplainCancellation,status:'review',error:String(error.message).slice(0,1000)};
