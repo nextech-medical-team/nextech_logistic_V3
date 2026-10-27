@@ -79,4 +79,13 @@ await check('résultat externe incertain conservé, réactivation interdite',asy
 await check('rapprochement relit ERP sans répéter l’annulation confirmée',async()=>{await cancel();assert.equal(bcMutationCount,1);assert.equal((await fresh()).erplainCancellation.status,'complete');assert.equal((await fresh()).active,true);assert.equal((await service.context('one')).order.tracking_status,'not_shipped');});
 await check('réactivation après annulation ERP garde la protection contre recréation',async()=>{await change('reactivate','one','Client à recontacter, aucun nouveau BC autorisé.');const o=(await service.context('one')).order;assert.equal(o.suspension.active,false);assert.match(suspensionBlock(o),/recréation/);await assert.rejects(()=>db.query("UPDATE erp_live_jobs SET status='processing' WHERE order_id='one'"),/traitement interdit/);});
 await check('vérification seule après réponse incertaine sans nouvelle mutation',async()=>{await change('suspend');await db.query("UPDATE orders SET suspension=suspension || $1::jsonb WHERE id='one'",[JSON.stringify({erplainCancellation:{status:'review',bcId:'123'}})]);bcStatus='active';const before=bcMutationCount;await service.cancelErplain({id:'one',expectedVersion:(await fresh()).version,verifyOnly:true},user);assert.equal(bcMutationCount,before);assert.equal((await fresh()).erplainCancellation.status,'review');await service.cancelErplain({id:'one',expectedVersion:(await fresh()).version,confirm:true},user);assert.equal(bcMutationCount,before);});
+await check('confirmed cancellation updates local BC and BL statuses',async()=>{
+ await db.query("UPDATE orders SET suspension=suspension-'erplainCancellation' WHERE id='one'");
+ bls=[{id:'456',status:'pending',update_stock:false}];const before=bcMutationCount;
+ await db.query("UPDATE orders SET erp_live=erp_live||$1::jsonb WHERE id='one'",[JSON.stringify({bl:{id:'456',label:'TEST-BL',status:'pending'}})]);
+ await cancel();assert.equal(bcMutationCount,before+1);assert.equal(bls[0].status,'cancelled');assert.equal((await fresh()).erplainCancellation.status,'complete');
+ const order=(await service.context('one')).order;
+ assert.equal(order.erp_live.bc.status,'cancelled');
+ assert.deepEqual(order.erp_live.bl,{id:'456',label:'TEST-BL',status:'cancelled'});
+});
 await pg.close();console.log(JSON.stringify({checks,passed:checks,failed:0,businessCalls:'MOCK ONLY'}));

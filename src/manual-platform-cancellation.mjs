@@ -78,7 +78,7 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
      let current=(await suspension.context(order.id)).order;
      if(current.archived)throw Error('Commande archivée pendant la vérification');
      if(!current.suspension?.active){await suspension.suspend({id:order.id,expectedVersion:current.suspension?.version||'',note:'Annulation confirmée dans '+order.channel+' par actualisation manuelle'},user);current=(await suspension.context(order.id)).order;}
-     if(['shipped','delivered','in_transit','delivered_simulated'].includes(current.tracking_status))throw Error('Commande expédiée ou livrée : rapprochement physique requis');
+     if(['shipped','delivered','in_transit','delivered_simulated'].includes(current.tracking_status)||['shipped','delivered'].includes(current.erp_live?.bl?.status))throw Error('Commande expédiée ou livrée : rapprochement physique requis');
      if(current.erp_live?.bc?.id){
       await suspension.cancelErplain({id:order.id,expectedVersion:current.suspension?.version||'',confirm:true,verifyOnly:!!current.suspension?.erplainCancellation},user);
       current=(await suspension.context(order.id)).order;
