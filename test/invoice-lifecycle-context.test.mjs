@@ -1,5 +1,31 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {documentLifecycle} from '../src/document-lifecycle.mjs';
+import {shippingTransition} from '../src/status-policy.mjs';
+
+for(const physical of ['shipped','delivered']){
+ test(`cancellation policy refuses ${physical}`,()=>{
+  assert.throws(()=>shippingTransition({current:physical,target:'cancelled',cancellationConfirmed:true}),{message:'Annulation non appliquée : le BL est déjà expédié ou livré.'});
+ });
+ for(const proof of ['explicit','cancelled_bc'])for(const evidence of ['erplain','tracking']){
+  test(`automatic cancellation refuses ${physical} from ${evidence} with ${proof} before any write`,async()=>{
+   const writes=[],journal={};
+   const bl={id:'12',status:evidence==='erplain'?physical:'pending',orders:{data:[{id:'10',status:proof==='cancelled_bc'?'cancelled':'active'}]}};
+   const forbidden=async()=>{writes.push('mutation');throw Error('Unexpected mutation');};
+   const gateway={verifyLive:async()=>{},readBL:async()=>bl,cancelOrder:forbidden,setBLStatus:forbidden,createInvoiceFromBL:forbidden,createPayment:forbidden};
+   const engine=documentLifecycle({gateway,store:{withLock:async(id,fn)=>fn(),read:async()=>journal,save:forbidden},onStatus:forbidden});
+   await assert.rejects(()=>engine.resume({blId:'12',bcId:'10',channel:'temu',cancellationConfirmed:proof==='explicit',expectedTracking:evidence==='tracking'?['parcel']:[],events:evidence==='tracking'?[{tracking:'parcel',carrier:'temu',code:physical==='delivered'?'DELIVERED':'IN TRANSIT',at:'2026-10-27T10:00:00Z'}]:[]}),{message:'Annulation non appliquée : le BL est déjà expédié ou livré.'});
+   assert.deepEqual(writes,[]);assert.deepEqual(journal,{});
+  });
+ }
+}
+
+test('automatic confirmed cancellation still cancels an unshipped BC and BL in order',async()=>{
+ const writes=[],bl={id:'12',status:'pending',orders:{data:[{id:'10',status:'active'}]}};
+ const gateway={verifyLive:async()=>{},readBL:async()=>bl,cancelOrder:async id=>writes.push(['bc',id]),setBLStatus:async(id,status)=>{writes.push(['bl',id,status]);bl.status=status;}};
+ const engine=documentLifecycle({gateway,store:{withLock:async(id,fn)=>fn(),read:async()=>({}),save:async()=>{}}});
+ const result=await engine.resume({blId:'12',bcId:'10',channel:'temu',cancellationConfirmed:true});
+ assert.deepEqual(writes,[['bc','10'],['bl','12','cancelled']]);assert.equal(result.bl.status,'cancelled');
+});
 for(const current of ['pending','ready_to_ship','shipped']){
  for(const observed of ['shipped','delivered']){
   test(`background lifecycle keeps Erplain ${current} when carrier reports ${observed}`,async()=>{

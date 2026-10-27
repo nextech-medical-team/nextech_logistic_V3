@@ -43,6 +43,9 @@ export function aggregateParcels(expectedTracking,events){
  // Cancellation is not removed from the denominator: it needs reconciliation.
  return {status:states.every(s=>s==='delivered')?'delivered':states.some(s=>s==='shipped'||s==='delivered')?'shipped':states.includes('exception')?'exception':states.includes('cancelled')?'cancelled':states.includes('unknown')?'unknown':'not_shipped',complete,states};
 }
+export function assertCancellationBeforeShipment(...statuses){
+ if(statuses.some(status=>['shipped','delivered'].includes(status)))throw Error('Annulation non appliquée : le BL est déjà expédié ou livré.');
+}
 export function shippingTransition({current,target,readyConsumed=false,preparationComplete=false,cancellationConfirmed=false}){
  if(!BL_STATUSES.has(current))throw Error('Erplain · Statut BL inconnu');
  if(!['ready_to_ship','shipped','delivered','cancelled'].includes(target))throw Error('Erplain · Modification du statut intermédiaire interdite');
@@ -50,6 +53,7 @@ export function shippingTransition({current,target,readyConsumed=false,preparati
  if(current==='in_preparation'&&target==='ready_to_ship')return {write:false,reason:'preparation_ready_forbidden'};
  if(current==='cancelled')return {write:false,reason:'cancelled_terminal'};
  if(target==='cancelled'){
+  assertCancellationBeforeShipment(current);
   if(!cancellationConfirmed)throw Error('Annulation commerciale non confirmée');
   return {write:true,reason:'confirmed_cancellation'};
  }

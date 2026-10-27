@@ -1,4 +1,4 @@
-import {aggregateParcels,shippingTransition,automaticBilling,paymentAmount} from './status-policy.mjs';
+import {aggregateParcels,shippingTransition,automaticBilling,paymentAmount,assertCancellationBeforeShipment} from './status-policy.mjs';
 
 // Store must persist checkpoints before mutations and lock by company + BL.
 // Gateway must be an Erplain LIVE gateway. An uncertain creation is never retried blindly.
@@ -12,13 +12,14 @@ export function documentLifecycle({gateway,store,onStatus=async()=>{}}){
    let bl=await gateway.readBL(input.blId);
    if(!bl||String(bl.id)!==String(input.blId))throw Error('Erplain · BL non confirmé');
    const cancelledBC=bl.orders?.data?.some(o=>o.status==='cancelled');
+   const tracking=aggregateParcels(input.expectedTracking||[],input.events||[]);
+   const cancellationConfirmed=input.cancellationConfirmed===true||cancelledBC===true;
+   if(cancellationConfirmed)assertCancellationBeforeShipment(bl.status,tracking.status);
    if(input.cancellationConfirmed&&input.bcId){
     if(!bl.orders?.data?.some(o=>String(o.id)===String(input.bcId)))throw Error('Erplain · BC à annuler non rattaché au BL');
     if(!bl.orders.data.find(o=>String(o.id)===String(input.bcId))?.status?.includes('cancelled'))await gateway.cancelOrder(input.bcId);
    }
    if(!['pending','unpublished'].includes(bl.status)&&!journal.readyConsumed){journal.readyConsumed=true;await save();}
-   const tracking=aggregateParcels(input.expectedTracking||[],input.events||[]);
-   const cancellationConfirmed=input.cancellationConfirmed===true||cancelledBC===true;
    // Carrier tracking remains an observation. Never advance Erplain to shipped
    // or delivered from this background lifecycle, including a requested resume.
    // Do not replace physical progress with a preparation transition either.
