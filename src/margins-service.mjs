@@ -3,7 +3,7 @@ import {temuCommercialSource} from './temu-commercial-source.mjs';
 import {excelAmounts} from './temu-excel-commercial.mjs';
 import {temuDestinationVat} from './temu-destination-vat.mjs';
 import {temuCountryAmounts,temuFixedVat} from './temu-country-vat.mjs';
-import {equivalentReceipts,applyEquivalentReceipts} from './temu-equivalent-margin.mjs';
+import {equivalentReceipts,excelEquivalentReceipts,applyEquivalentReceipts} from './temu-equivalent-margin.mjs';
 import {amountFields,quoteCost} from './temu-margin-data.mjs';
 import vm from 'node:vm';import {readFile} from 'node:fs/promises';
 const canonical=s=>String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -108,7 +108,7 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
    if(found.cost&&v3?.target_quantity!=null&&Math.abs(Number(v3.target_quantity)/Number(v3.quantity)-found.cost.mapping)>1e-9)return {error:'Mapping V3 différent du calculateur publié'};return found;}};
   let result;try{result=context.marginEngine.analyze(raw,o.channel,checkedAdapter,{},{}).orders[0];}catch(e){result={complete:false,issues:['Diagnostic du calculateur indisponible : '+e.message],lines:[]};}
   const r=result||{complete:false,issues:['Aucune ligne à calculer'],lines:[]};
-  if(equivalentOrder){try{applyEquivalentReceipts(r,equivalentReceipts(temuCommercialSource(o,temuCountryAmounts(o)),o.source_payload?.temuOrderDetail,o.reference));}catch(e){amountIssues.push(e.message);r.complete=false;}}
+  if(equivalentOrder){try{applyEquivalentReceipts(r,o.source_payload?.origin==='temu_excel'?excelEquivalentReceipts(o,sourceLines,snapshot.countries[o.address?.country]):equivalentReceipts(temuCommercialSource(o,temuCountryAmounts(o)),o.source_payload?.temuOrderDetail,o.reference,snapshot.countries[o.address?.country]));}catch(e){amountIssues.push(e.message);r.complete=false;}}
   if(transportSource)r.shippingSource=transportSource;
   if(o.source_payload?.origin==='temu_excel')r.warnings=[...(r.warnings||[]),'Ventes et contribution issues du rapport Excel TEMU ; coûts du calculateur publié.'];
   if(o.channel==='temu'&&sourceLines.some(l=>l.source_payload?.puht!=null))r.warnings=[...(r.warnings||[]),'Ventes API : prix unitaire HT importé × quantité de la ligne, dans la devise d’origine.'];
