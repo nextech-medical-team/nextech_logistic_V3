@@ -90,3 +90,38 @@ test('legacy shipped import without prepared quantities retains catalogue checks
  assert.equal(JSON.stringify(after),JSON.stringify(before));assert.equal(after.status,'positive');
  f.line.target_sku='UNKNOWN';assert.equal((await service.get({fresh:true})).rows[0].status,'incomplete');
 });
+
+test('replacement margins retain validated original Excel receipts and prepared product costs',async()=>{
+ const {excelCommercialSource}=await import('../src/temu-excel-commercial.mjs');
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ f.order.source_payload.temuExcelCommercial=excelCommercialSource(f.order,[f.line]);
+ f.order.erp_live={bl:{id:'bl',status:'shipped'},equivalentOriginalLines:[structuredClone(f.line)]};
+ f.line.source_payload.origin='erplain_live_equivalent';
+ f.line.target_quantity=20;
+ const row=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];
+ assert.deepEqual(row.issues,[]);assert.equal(row.revenue,18);assert.equal(row.credit,2);
+ assert.equal(row.purchase,60);assert.equal(row.profit,-55);assert.equal(row.status,'negative');
+ assert.match(row.creditSource,/Rapport Excel TEMU/);
+});
+
+test('equivalent API receipts convert only with the matching published currency rate',async()=>{
+ const {equivalentReceipts}=await import('../src/temu-equivalent-margin.mjs');
+ const money=(amount,currency='PLN')=>({amount,currency});
+ const amounts={parentOrderMap:{parentOrderSn:'REF',basePriceTotal:money(4000)},orderList:[{orderSn:'L',quantity:2,basePrice:money(4000),shipAmountTotalTaxIncl:money(600),shipTaxAmount:money(100)}]};
+ const detail={orderList:[{orderSn:'L',quantity:2}]};
+ const converted=equivalentReceipts(amounts,detail,'REF',{c:'PLN',fx:4});
+ assert.equal(converted.revenue,10);assert.equal(converted.credit,1.25);assert.match(converted.conversionWarning,/estimation/);
+ for(const profile of [null,{c:'EUR',fx:4},{c:'PLN',fx:0},{c:'PLN',fx:NaN}])assert.throws(()=>equivalentReceipts(amounts,detail,'REF',profile),/conversion/);
+ amounts.parentOrderMap.basePriceTotal=money(5000);assert.throws(()=>equivalentReceipts(amounts,detail,'REF',{c:'PLN',fx:4}),/Total commande/);
+});
+
+test('equivalent Excel receipts reject edited source rows and use the published exchange rate',async()=>{
+ const {excelCommercialSource}=await import('../src/temu-excel-commercial.mjs');
+ const {excelEquivalentReceipts}=await import('../src/temu-equivalent-margin.mjs');
+ const f=fixture();f.order.address.country='PL';f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ for(const key of Object.keys(f.line.source_payload.excel))if(typeof f.line.source_payload.excel[key]==='string')f.line.source_payload.excel[key]=f.line.source_payload.excel[key].replace(/EUR/g,'PLN');
+ f.order.source_payload.temuExcelCommercial=excelCommercialSource(f.order,[f.line]);
+ const totals=excelEquivalentReceipts(f.order,[f.line],{c:'PLN',fx:4});
+ assert.equal(totals.revenue,17.56/4);assert.equal(totals.credit,1.95/4);
+ f.line.quantity=3;assert.throws(()=>excelEquivalentReceipts(f.order,[f.line],{c:'PLN',fx:4}),/modifiés/);
+});
