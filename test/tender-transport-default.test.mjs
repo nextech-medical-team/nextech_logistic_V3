@@ -30,3 +30,22 @@ test('phone remains required for other imported account managers',async()=>{
  assert(importedLabelMissingFields(document,bl).some(x=>x.includes('téléphone')));
  await assert.rejects(resolveImportedLabelOrder(order(),{verify:async()=>{},request:async()=>({Order:document,ShippingOrder:bl})}),/téléphone/);
 });
+
+test('associated BL label keeps its delivery address and optional tender phone',async()=>{
+ const document=bc(),delivery={...structuredClone(bl),shipping_address:{label:'BL DEST',address_1:'2 RUE BL',postal_code:'69001',city:'Lyon',country:'FR',phone:null}};
+ const input={...order(),associated_bl_label:true};let query;
+ const result=await resolveImportedLabelOrder(input,{verify:async()=>{},request:async q=>{query=q;return {Order:document,ShippingOrder:delivery};}});
+ assert.match(query,/ShippingOrder\(id:\$bl\).*shipping_address/);
+ assert.equal(result.address.name,'BL DEST');assert.equal(result.address.street1,'2 RUE BL');
+ assert.equal(result.address.city,'Lyon');assert.equal(result.address.postal,'69001');assert.equal(result.address.phone,'');
+ assert.equal(result.carrier,'gls');
+ delivery.shipping_address.city='';await assert.rejects(()=>resolveImportedLabelOrder(input,{verify:async()=>{},request:async()=>({Order:document,ShippingOrder:delivery})}),/Ville/);
+});
+
+test('associated BL falls back to the order address only when BL address is absent',async()=>{
+ const document=bc(),delivery=structuredClone(bl),input={...order(),associated_bl_label:true,address:{phone:'0144556677'}};
+ const result=await resolveImportedLabelOrder(input,{verify:async()=>{},request:async()=>({Order:document,ShippingOrder:delivery})});
+ assert.equal(result.address.street1,'1 RUE TEST');assert.equal(result.address.phone,'0144556677');
+ input.associated_bl_label=false;const ordinary=await resolveImportedLabelOrder(input,{verify:async()=>{},request:async()=>({Order:document,ShippingOrder:{...delivery,shipping_address:{label:'OTHER',city:'Lyon'}}})});
+ assert.equal(ordinary.address.city,'Paris');assert.equal(ordinary.address.phone,'');
+});
