@@ -1,8 +1,6 @@
 // Read-only creation gate. Stock availability and allocation are checked by
 // the stock workflow; this check never creates a batch or reserves stock.
 export async function assertBlBatchNumbers(api,order,lines){
- const manager=String(order.erp_live?.bc?.account_representative?.label||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
- if(manager?['appelsdoffres','appeldoffres'].includes(manager):order.channel==='tender')return;
  const prefix='BL · Lot de traçabilité Erplain';
  if(!Array.isArray(lines)||!lines.length)throw Error(prefix+' : produits non vérifiables');
  const variants=new Map();

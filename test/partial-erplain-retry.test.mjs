@@ -63,3 +63,12 @@ test('tender keeps installed quota behavior and only processes the selected deli
  assert.equal(d.status,'review');assert.equal(d.erplain_retry,null);assert.equal(d.error,'read quota');assert.equal(f.calls.length,0);
  assert(seen.some(x=>x.sql.includes('WHERE partial_deliveries.id=$1 AND NOT EXISTS')&&x.args[0]==='ao'));
  }finally{await f.e.close();}});
+
+test('Appels d’offres partial BL without a product batch is blocked before mutation',async()=>{const f=await fixture();try{
+ await f.e.query("UPDATE orders SET channel='tender'");
+ await f.e.query("INSERT INTO partial_deliveries(id,order_id,request_id,status,selection,label_choice,environment) VALUES('ao-lot','o','ao-lot','queued',$1,'new','production')",[JSON.stringify([{lineId:'20',variantId:'60',locationId:'70',sku:'B',quantity:1,price:1}])]);
+ const request=f.api.request;f.api.request=async(q,v)=>q.includes('V3BlBatchNumbers')?{BatchNumbers:{data:[],paginatorInfo:{hasMorePages:false}}}:request(q,v);
+ await f.worker.run();const d=(await f.e.query("SELECT * FROM partial_deliveries WHERE id='ao-lot'")).rows[0];
+ assert.equal(d.status,'review');assert.match(d.error,/numéro de lot absent/);assert.equal(d.bl,null);
+ assert.ok(!f.calls.some(c=>c.q.startsWith('mutation ')));
+ }finally{await f.e.close();}});

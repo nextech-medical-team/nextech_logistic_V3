@@ -52,20 +52,17 @@ test('API failure blocks and a later attempt rereads Erplain',async()=>{
  fail=false;await assertBlBatchNumbers(api,order,[line()]);
  await assertBlBatchNumbers(api,order,[line()]);assert.equal(api.calls.length,4);
 });
-test('all non-tender channels require batches',async()=>{
- for(const channel of ['amazon','temu','shopify','samples','erplain',undefined]){
+test('all channels including tenders require batches',async()=>{
+ for(const channel of ['amazon','temu','shopify','samples','erplain','tender',undefined]){
   const api=fixture({tracked:false});
   await assert.rejects(()=>assertBlBatchNumbers(api,{channel},[line()]),/activer la gestion des lots/);
  }
 });
-test('Appels d’offres is exempt by channel or account manager',async()=>{
- for(const o of [{channel:'tender'},...['Appel d’offres',"Appels d'offres",' APPELS D’OFFRES '].map(label=>({channel:'erplain',erp_live:{bc:{account_representative:{label}}}}))]){
-  const api=fixture();await assertBlBatchNumbers(api,o,undefined);assert.equal(api.calls.length,0);
- }
-});
-test('the recorded account manager takes precedence over the channel',async()=>{
- const api=fixture({tracked:false});
- await assert.rejects(()=>assertBlBatchNumbers(api,{channel:'tender',erp_live:{bc:{account_representative:{label:'Amazon'}}}},[line()]),/activer la gestion des lots/);
+for(const o of [{channel:'tender'},...['Appel d’offres',"Appels d'offres",' APPELS D’OFFRES '].map(label=>({channel:'erplain',erp_live:{bc:{account_representative:{label}}}}))])test('Appels d’offres requires a named batch: '+JSON.stringify(o),async()=>{
+ const missing=fixture({pages:()=>({data:[],paginatorInfo:{hasMorePages:false}})});
+ await assert.rejects(()=>assertBlBatchNumbers(missing,o,[line()]),/numéro de lot absent.*création BL bloquée/);
+ const valid=fixture();await assertBlBatchNumbers(valid,o,[line()]);assert.equal(valid.calls.length,2);
+ await assert.rejects(()=>assertBlBatchNumbers(fixture(),o,undefined),/produits non vérifiables/);
 });
 test('missing products block; non-product lines do not require batches',async()=>{
  for(const lines of [undefined,[],[{}],[{type:'shipping'}]])await assert.rejects(()=>assertBlBatchNumbers(fixture(),order,lines));
