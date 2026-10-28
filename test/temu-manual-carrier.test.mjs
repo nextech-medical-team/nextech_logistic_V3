@@ -11,29 +11,27 @@ import {reconcileTemuRouting} from '../src/temu-routing-reconciliation.mjs';
 import {currentProblemClassifier} from '../src/problem-typology-reader.mjs';
 import {processingView} from '../src/order-priority.mjs';
 const order=(choice,country='FR')=>({channel:'temu',transport_choice:choice,address:{country},erp_live:{},source_payload:{}});
-test('TEMU stays automatic; only an explicit valid manual choice routes to a partner',()=>{
+test('TEMU creation remains exclusive even with a legacy or explicit partner choice',()=>{
  for(const country of ['FR','CZ','DE','IT','ES','PL']){
   assert.equal(chosenRoute(order(null,country),1).carrier,'temu');
-  assert.equal(chosenRoute(order('gls',country),1).carrier,'gls');
-  assert.throws(()=>assertDirectCarrierAllowed(order(null,country),'gls'),/explicitement/);
-  assert.doesNotThrow(()=>assertManualLabelOrder(order(null,country),'gls',{manualChoice:true}));
-  assert.doesNotThrow(()=>assertDirectCarrierAllowed(order('gls',country),'gls'));
-  assert.throws(()=>assertDirectCarrierAllowed(order('gls',country),'gofo'));
+  for(const carrier of ['gls','gofo','gls_pharma','gls_shop']){
+   assert.throws(()=>chosenRoute(order(carrier,country),1),/parcours TEMU/);
+   assert.throws(()=>assertDirectCarrierAllowed(order(null,country),carrier,{manualChoice:true}),/parcours TEMU/);
+   assert.throws(()=>assertDirectCarrierAllowed(order(carrier,country),carrier),/parcours TEMU/);
+   assert.throws(()=>assertManualLabelOrder(order(null,country),carrier,{manualChoice:true}),/parcours TEMU/);
+  }
  }
- assert.equal(chosenRoute(order('gofo'),1).carrier,'gofo');
- assert.throws(()=>chosenRoute(order('gofo','CZ'),1),/France/);
- assert.throws(()=>assertDirectCarrierAllowed(order('gofo','CZ'),'gofo'),/France/);
- assert.throws(()=>chosenRoute(order('invalid'),1),/non autorisé/);
- assert.throws(()=>chosenRoute(order('gls'),0),/Poids/);
  assert.equal(chosenRoute(order(null),0).weight,0.25);
  assert.equal(defaultRouting.rules.find(r=>r.channel==='temu').fixed,'temu');
+ for(const channel of ['amazon','shopify','tender'])assert.doesNotThrow(()=>assertDirectCarrierAllowed({channel},'gls'));
 });
+
 test('manual choice retains suspension, cancellation, shipment and uncertain purchase protection',()=>{
  for(const status of ['purchasing','uncertain'])assert.throws(()=>assertTemuManualLabel({status}));
  for(const status of ['shipment_error','ready','complete','cancelled','cancellation_requested','not_to_ship'])assert.doesNotThrow(()=>assertTemuManualLabel({status}));
  for(const extra of [{archived:true},{tracking_status:'cancelled'},{erp_live:{bc:{status:'cancelled'}}},{tracking_status:'delivered'},{tracking_status:'in_transit'},{partial_mode:true},{suspension:{active:true}}])assert.throws(()=>assertManualLabelOrder({...order('gls'),...extra},'gls'));
 });
-test('manual production queue preserves TEMU package, PDF and tracking; no-choice and uncertain requests cannot queue',async()=>{
+test('manual production queue refuses all new TEMU partner labels and preserves existing documents',async()=>{
  const db=await openDatabase();try{
  // Only disposable in-memory state. No credentials, provider, or network operation.
  await db.exec(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS erp_live jsonb DEFAULT '{}'; ALTER TABLE orders ADD COLUMN IF NOT EXISTS transport_choice text; ALTER TABLE orders ADD COLUMN IF NOT EXISTS suspension jsonb DEFAULT '{}';
@@ -62,8 +60,8 @@ test('manual production queue preserves TEMU package, PDF and tracking; no-choic
  const before=(await db.query('SELECT * FROM temu_label_jobs ORDER BY reference')).rows;
  const documents=(await db.query('SELECT * FROM temu_label_documents ORDER BY reference')).rows;
  const r=await regenerateProductionLabels(db,{ids:['manual','automatic','uncertain']});
- assert.equal(r.queued,1,JSON.stringify(r));assert.equal(r.skipped.length,2);
- assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows[0].order_id,'manual');
+ assert.equal(r.queued,0,JSON.stringify(r));assert.equal(r.skipped.length,3);
+ assert.equal((await db.query('SELECT * FROM carrier_jobs')).rows.length,0);
  assert.deepEqual((await db.query('SELECT * FROM temu_label_jobs ORDER BY reference')).rows,before);
  assert.deepEqual((await db.query('SELECT * FROM temu_label_documents ORDER BY reference')).rows,documents);
  // A routing reconciliation must leave the explicitly chosen partner unchanged.

@@ -1,3 +1,4 @@
+import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {erplainTransportChannel} from './erplain-label-required.mjs';
 import {defaultShopifyServices,configuredShopifyMode} from './shopify-delivery.mjs';
 import {parcelWeightKg} from './weight-arithmetic.mjs';
@@ -43,7 +44,10 @@ export async function loadRouting(db){
 }
 
 export function chosenRoute(order,weight,config=defaultRouting){
- if(order.channel==='temu'&&!order.transport_choice)return configuredRoute('temu',weight,config,order.address?.country);
+ if(order.channel==='temu'){
+  if(order.transport_choice)assertDirectCarrierAllowed(order,order.transport_choice);
+  return configuredRoute('temu',weight,config,order.address?.country);
+ }
  const channel=erplainTransportChannel(order);
  if(order.channel==='shopify'){
   const mode=configuredShopifyMode(order.source_payload,config);
