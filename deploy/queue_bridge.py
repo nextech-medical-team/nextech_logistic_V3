@@ -18,10 +18,37 @@ def later_baseline_allowed(record,baseline,is_ancestor):
  if report.get('manualIntervention') or report.get('rollback')=='FAILED' or report.get('taskControlsRestored') is False:return False
  return bool(baseline.get('serverHashes')) and is_ancestor(previous,current)
 
+def installed_release_certificate(record):
+ # Explicit recovery only: preserve the failed report and prove the installed
+ # release, rather than pretending that the pre-install files were restored.
+ from dispatcher import read_current,verify_environment,health,guard,digest
+ report=record.get('report',{})
+ baseline=json.loads((STATE/'baseline.json').read_text())
+ commit=record.get('commit','')
+ if not re.fullmatch('[a-f0-9]{40}',commit) or baseline.get('commit')!=commit or report.get('commit')!=commit:raise ValueError('Commit installé non confirmé')
+ if report.get('status')!='failed' or report.get('installed') is not True or report.get('paused') is not True or report.get('taskControlsRestored') is not False:raise ValueError('Échec de clôture installé non confirmé')
+ verification=report.get('verification',{})
+ if report.get('checks')!='PASS' or verification.get('status')!='PASS' or verification.get('commit')!=commit:raise ValueError('Vérifications de publication absentes')
+ if report.get('error') or report.get('rollback') or report.get('rollbackHealth'):raise ValueError('Échec ou restauration distincts à rapprocher')
+ expected=baseline.get('serverHashes',{})
+ files=report.get('files',[])
+ if not expected or not files or any(f.get('path') not in expected or f.get('after')!=expected[f['path']] for f in files):raise ValueError('Inventaire installé non confirmé')
+ actual=read_current(expected.keys())
+ for name,sha in expected.items():
+  if (digest(actual[name]) if name in actual else None)!=sha:raise ValueError('Installation non conforme : '+name)
+ environment=report.get('environmentHashBefore')
+ if not environment or baseline.get('environmentHash')!=environment or verify_environment()!=environment:raise ValueError('Environnement installé non conforme')
+ backup=Path(report.get('backup',''))
+ if backup.parent!=Path('/var/backups/nextech') or not re.fullmatch('cicd-'+commit+'-[0-9]+',backup.name):raise ValueError('Sauvegarde de publication invalide')
+ health()
+ guard('verify-restored',backup)
+ return {'verified':True,'type':'verified-installed-release','previousCommit':commit,'installedCommit':commit,'fileHashes':expected,'services':['active','active'],'http':200,'environmentPreserved':True,'controlsRestored':True,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+
 def restoration_certificate(record):
  # The local caller cannot assert a successful rollback: recheck it on the server.
  from dispatcher import read_current,verify_environment,health,guard,digest,git
  report=record.get('report',{})
+ if report.get('installed') is True:return installed_release_certificate(record)
  baseline=json.loads((STATE/'baseline.json').read_text())
  expected_commit=report.get('baselineCommitBefore') or baseline['commit']
  later=False
