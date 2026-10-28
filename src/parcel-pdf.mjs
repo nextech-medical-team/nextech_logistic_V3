@@ -7,7 +7,7 @@ export async function currentParcelPdf(db,bytes,orderId,index=0,extraId=null){
  const o=(await db.query('SELECT * FROM orders WHERE id=$1',[orderId])).rows[0];if(!o)return Buffer.from(bytes);
  o.lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line',[orderId])).rows;
  const base=(await db.query('SELECT count(*)::int n FROM carrier_documents WHERE order_id=$1',[orderId])).rows[0].n;
- const extras=(await db.query("SELECT id,carrier FROM extra_parcels WHERE order_id=$1 AND status='ready' ORDER BY created_at,id",[orderId])).rows;
+ const extras=(await db.query("SELECT id,carrier FROM extra_parcels WHERE order_id=$1 AND delivery_id IS NULL AND status='ready' ORDER BY created_at,id",[orderId])).rows;
  const position=extraId?base+extras.findIndex(x=>x.id===extraId)+1:index+1;
  const carrier=extraId?extras.find(x=>x.id===extraId)?.carrier:o.carrier;
  return displayParcelPdf(bytes,o,carrier,position,base+extras.length);
