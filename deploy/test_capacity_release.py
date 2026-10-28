@@ -35,6 +35,7 @@ class CapacityReleaseTests(unittest.TestCase):
   result,events=self.exercise(fail=True)
   self.assertEqual(result['status'],'failed');self.assertTrue(result['manualIntervention'])
   self.assertFalse(result['taskControlsRestored']);self.assertNotIn('resume',events)
+  self.assertEqual(result['taskControlsRestoreError'],{'phase':'preserve-worker-capacity','type':'RuntimeError'})
  def test_static_release_does_not_touch_worker_capacity(self):
   result,events=self.exercise(static=True)
   self.assertEqual(result['status'],'deployed');self.assertNotIn('preserve',events)

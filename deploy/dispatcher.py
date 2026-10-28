@@ -224,12 +224,18 @@ def deploy(commit,packet=None):
  finally:
   report['installed']=installed;report['paused']=paused
   if paused:
+   finalization_phase='preserve-worker-capacity'
    try:
     # Retain the authorized worker capacity before restoring scheduling for every release.
     from preserve_worker_capacity import preserve
     report['workerCapacity']=preserve(worker_pid_before,backup)
-    guard('resume',backup);guard('verify-restored',backup);report['taskControlsRestored']=True
-   except Exception:report['taskControlsRestored']=False;report['manualIntervention']=True;report['status']='failed'
+    finalization_phase='resume-task-controls';guard('resume',backup)
+    finalization_phase='verify-task-controls';guard('verify-restored',backup);report['taskControlsRestored']=True
+   except Exception as error:
+    report['taskControlsRestored']=False;report['manualIntervention']=True;report['status']='failed'
+    # Do not expose command arguments or stderr, which can contain credentials.
+    report['taskControlsRestoreError']={'phase':finalization_phase,'type':type(error).__name__}
+    if isinstance(error,subprocess.CalledProcessError):report['taskControlsRestoreError']['exitCode']=error.returncode
   report['finishedAt']=time.time();atomic_json(journal,report)
  return report
 
