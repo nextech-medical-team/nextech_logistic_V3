@@ -1,5 +1,5 @@
 import {maskedTemuAddressFields,usableFrozenAddress} from './temu-address-observation.mjs';
-import {relayComparisonAddress,sameRelayAddress} from './shopify-relay-source.mjs';
+import {relayComparisonAddress,sameRelayAddress,normalizeRelayAddress} from './shopify-relay-source.mjs';
 // Marketplace receipts describe what was ordered, not the replacement sent.
 export function sourceFingerprint(rows) {
  if (!Array.isArray(rows) || !rows.length) return null;
@@ -20,6 +20,10 @@ export function marketplaceChangeFields(existing,prior,incoming){
  if(masked.length&&!usable)fields.push('adresse initiale complète manquante');
  const relay=incoming.source_payload?.shopifyRelay,address=relay?relayComparisonAddress(existing,relay):existing.address;
  const labels={name:'nom du destinataire',street:'rue',postal:'code postal',city:'ville',country:'pays'};
+ if(existing.channel==='shopify'){
+  const before=existing.source_payload?.billing_address,after=incoming.source_payload?.billing_address;
+  if((before||after)&&!sameRelayAddress(normalizeRelayAddress(before||{}),normalizeRelayAddress(after||{})))fields.push('adresse de facturation');
+ }
  if(relay&&sameRelayAddress(address,incoming.address))return fields;
  for(const k of Object.keys(labels))if(!(masked.includes(k)&&usable)&&String(address?.[k]||'')!==String(incoming.address?.[k]||''))fields.push('adresse : '+labels[k]);
  return [...new Set(fields)];
