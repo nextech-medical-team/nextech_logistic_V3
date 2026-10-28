@@ -17,7 +17,7 @@ export function createMarketplaceReader(config,{fetchImpl=fetch}={}){
    const url=new URL(`https://${domain}/admin/api/2026-04/orders.json`);
    url.searchParams.set('status','any');url.searchParams.set('limit','5');
    if(ids.length){if(ids.length>5||ids.some(id=>!/^\d+$/.test(String(id))))throw new Error('Un à cinq identifiants Shopify requis');url.searchParams.set('ids',ids.join(','));}
-   url.searchParams.set('fields','id,name,created_at,currency,total_price,financial_status,fulfillment_status,shipping_address,line_items,email,contact_email,shipping_lines,note_attributes');
+   url.searchParams.set('fields','id,name,created_at,currency,total_price,financial_status,fulfillment_status,shipping_address,billing_address,line_items,email,contact_email,shipping_lines,note_attributes');
    const result=await json(url,{method:'GET',headers:{'X-Shopify-Access-Token':accessToken,Accept:'application/json'}});
    if(!Array.isArray(result.orders))throw new Error('Shopify : liste de commandes absente');
    return result.orders.slice(0,5);

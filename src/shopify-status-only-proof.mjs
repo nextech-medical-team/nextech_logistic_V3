@@ -10,7 +10,7 @@ function commercial(payload){
   return {id,sku:l.sku,quantity:l.quantity,price:String(l.price),tax_lines:l.tax_lines,discount_allocations:l.discount_allocations};
  }).sort((a,b)=>a.id.localeCompare(b.id));
  if(!Array.isArray(payload.shipping_lines))fail('frais de livraison incomplets');
- return {id:String(payload.id),currency:payload.currency,total_price:String(payload.total_price),taxes_included:payload.taxes_included,shipping_address:payload.shipping_address,shipping_lines:payload.shipping_lines,lines};
+ return {id:String(payload.id),currency:payload.currency,total_price:String(payload.total_price),taxes_included:payload.taxes_included,shipping_address:payload.shipping_address,billing_address:payload.billing_address||null,shipping_lines:payload.shipping_lines,lines};
 }
 // This proof authorizes no write on its own. The caller must also prove complete
 // Erplain/V3 allocations, preserve labels, and revalidate immediately before apply.

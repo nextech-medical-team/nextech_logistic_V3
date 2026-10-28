@@ -40,6 +40,7 @@ export function parseShopifyRows(rows){
   r.currency=r.currency||'';
   r.total_price=r.total||null;
   r.shipping_address={name:order.address.name,address1:r.shippingaddress1||r.shippingstreet||'',address2:r.shippingaddress2||'',zip:order.address.postal,city:order.address.city,country_code:order.address.country,phone:order.address.phone};
+  if(r.billingname||r.billingaddress1||r.billingstreet)r.billing_address={name:r.billingname||'',address1:r.billingaddress1||r.billingstreet||'',address2:r.billingaddress2||'',zip:importPostalCode(String(r.billingzip||'').replace(/^'/,''),r.billingcountry),city:r.billingcity||'',country_code:r.billingcountry||'',phone:r.billingphone||''};
   r.line_items=order.lines.map(l=>({id:'file:'+l.source_line,sku:l.source_sku,quantity:l.quantity,name:l.source_payload.lineitemname||'',price:l.source_payload.lineitemprice||null}));
   r.importNeedsApiDetails=true;
   if(!order.visibilityHold&&/^\d+$/.test(r.id||'')){

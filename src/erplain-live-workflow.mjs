@@ -45,6 +45,7 @@ import {loadShopifyConfig,shopifyCollector} from './marketplace-collection.mjs';
 import {buildBcPricing,verifyBcPricing,verifySourceCommercialTotals,sourceCurrency} from './bc-pricing.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
 import {assertBcLines,bcAddresses,preparationBlock,uncertainBc} from './bc-authorization.mjs';
+import {shopifyDocumentAddresses} from './shopify-document-addresses.mjs';
 import {initializePriority,erplainEligible,priorityOrder} from './order-priority.mjs';
 import {shipmentFingerprint} from './label-stock-gate.mjs';
 import {documentMetadata,technicalMarker,recoverOrder} from './erplain-document-metadata.mjs';
@@ -74,7 +75,8 @@ function orderDate(value){if(/^\d{2}\/\d{2}\/\d{4}$/.test(value||'')){const [d,m
 // ERPLAIN reserves at activation and debits physical stock on the inherited BL.
 // Every sales channel uses this input; persisted documents keep their own policy.
 export function newSalesBcInput(o,priceLevelId){
- const addresses=bcAddresses(o.address);
+ const documentAddresses=o.channel==='shopify'?shopifyDocumentAddresses(o):{shipping:o.address,billing:o.address};
+ const addresses=bcAddresses(documentAddresses.shipping,documentAddresses.billing);
  return {...o.documentMetadata,status:'unpublished',update_stock:true,customer:{id:String(o.erp_live.customer.id)},currency:o.currency,price_level:{id:String(priceLevelId)},dated_at:orderDate(o.source_date),...addresses,tax_type:o.pricing.tax_type,line_items:o.pricing.items,notes:o.channel==='tender'?String(o.source_payload?.notes??''):'Commande '+o.reference,internal_notes:technicalMarker(o)+(o.channel==='tender'?' Prix source contrôlés avant publication. [V3-PRICING:1]':' Origine V3 : '+o.channel+'. Montants calculés par Erplain. [V3-PRICING:1]')};
 }
 export function assertNewBcStockPolicy(o,bc){if(o.erp_live.bcReservationPolicy==='erplain_bc_bl'&&bc.update_stock!==true)throw Error('BC · Politique de réservation différente de la création : rapprochement requis');}
@@ -175,11 +177,11 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
  await ensureTemuBcPricing(db,o,lines,refreshTemuPricing);
  const currencyCode=sourceCurrency(o);const currency=currencies.rows.find(c=>c.label.toUpperCase()===currencyCode&&c.liveId);if(!currency)throw new Error('Devise non disponible dans Erplain LIVE : '+currencyCode);o.currency={id:String(currency.liveId),label:currency.label};
 
-   if(o.channel==='shopify'&&!o.erp_live.bc&&(typeof o.source_payload?.taxes_included!=='boolean'||lines.some(l=>!Array.isArray(l.source_payload?.discount_allocations)||!Array.isArray(l.source_payload?.tax_lines)))){
+   if(o.channel==='shopify'&&!o.erp_live.bc&&(!Object.hasOwn(o.source_payload||{},'billing_address')||typeof o.source_payload?.taxes_included!=='boolean'||lines.some(l=>!Array.isArray(l.source_payload?.discount_allocations)||!Array.isArray(l.source_payload?.tax_lines)))){
     const fresh=await shopifyCollector(await loadShopifyConfig(directory)).order(o.source_payload?.id);
     if(fresh.cancelled_at||fresh.currency!==currencyCode||fresh.line_items.length!==lines.length)throw Error('Shopify · Commande modifiée : rapprocher les prix et quantités');
     const updates=lines.map(l=>{const hits=fresh.line_items.filter(x=>String(x.id)===String(l.source_payload?.id));if(hits.length!==1||hits[0].sku!==l.source_sku||Number(hits[0].quantity)!==Number(l.quantity))throw Error('Shopify · Ligne modifiée : '+l.source_sku);return {...l.source_payload,...hits[0]};});
-    o.source_payload={...o.source_payload,taxes_included:fresh.taxes_included,total_price:fresh.total_price,shipping_lines:fresh.shipping_lines,pricingRefreshedAt:new Date().toISOString()};
+    o.source_payload={...o.source_payload,taxes_included:fresh.taxes_included,total_price:fresh.total_price,shipping_lines:fresh.shipping_lines,billing_address:fresh.billing_address,pricingRefreshedAt:new Date().toISOString()};
     await db.transaction(async tx=>{await tx.query('UPDATE orders SET source_payload=$2 WHERE id=$1',[o.id,JSON.stringify(o.source_payload)]);for(let i=0;i<lines.length;i++){lines[i].source_payload=updates[i];await tx.query('UPDATE lines SET source_payload=$2 WHERE id=$1',[lines[i].id,JSON.stringify(updates[i])]);}});
    }
    let choiceDocument=null;
