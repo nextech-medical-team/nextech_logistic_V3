@@ -13,6 +13,9 @@ export async function initializeAppSchema(db,initializers,{background=false}={})
   // Existing installations keep the application marker when new initializers
   // gain columns. Apply this additive migration without replaying initializers
   // or changing any queued/creating shipment or external-operation state.
+  if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',['partial-extra-parcels-20261028-1'])).rows.length){
+   await db.transaction(async tx=>{await tx.exec('ALTER TABLE extra_parcels ADD COLUMN IF NOT EXISTS delivery_id TEXT; CREATE INDEX IF NOT EXISTS extra_parcels_delivery_idx ON extra_parcels(delivery_id)');await tx.query('INSERT INTO schema_migrations(version) VALUES($1)',['partial-extra-parcels-20261028-1']);});
+  }
   if(!(await db.query('SELECT version FROM schema_migrations WHERE version=$1',[carrierBlRequestVersion])).rows.length){
    await db.transaction(async tx=>{
     await tx.exec('ALTER TABLE carrier_jobs ADD COLUMN IF NOT EXISTS manual_bl_request JSONB');
