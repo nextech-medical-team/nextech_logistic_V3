@@ -1,7 +1,5 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {readErplainDocuments,assertDocumentIdle} from './erplain-document-read.mjs';
-import {historicalPendingLines} from './historical-stock-proof.mjs';
-import {syncedSelection} from './partial-erplain-sync.mjs';
 import {suspensionBlock} from './order-suspension.mjs';
 import {withShipmentLock} from './shipment-lock.mjs';
 
@@ -14,13 +12,23 @@ export function existingBlShipment(o,bc,blId){
  const matches=(bc.shipping_orders?.data||[]).filter(b=>String(b.id)===String(blId));
  if(matches.length!==1||!['pending','make_the_shipment','in_preparation','ready_to_ship'].includes(matches[0].status))throw Error('BL absent, annulé ou déjà expédié');
  const bl=matches[0];if(!bl.label)throw Error('Numéro du BL absent');
- historicalPendingLines(bc,bl,{allowPendingSiblings:true});
- const selection=syncedSelection(bc,bl);
+ // An existing BL supplies the shipment contents; BC allocation is not a label prerequisite.
+ if(!Array.isArray(bl.line_items))throw Error('Lignes du BL non reçues');
+ const selection=bl.line_items.filter(item=>item.variant).map(item=>({lineId:String(item.parent_id||item.id||''),variantId:String(item.variant.id),locationId:String(item.location?.id||''),sku:item.variant.sku||'',quantity:Number(item.quantity),price:Number(item.price),tracked:item.variant.track_inventory!==false}));
  const a=bl.shipping_address||bc.shipping_address;
  if(!a||!['label','address_1','postal_code','city','country'].every(k=>String(a[k]||'').trim()))throw Error('Adresse du BL à compléter dans Erplain');
  const address={name:a.label,street:[a.address_1,a.address_2].filter(Boolean).join(' '),street1:a.address_1,street2:a.address_2||'',city:a.city,postal:a.postal_code,country:a.country,phone:a.phone||o.address?.phone||'',email:o.address?.email||''};
  const fingerprint=createHash('sha256').update(JSON.stringify({bcId:String(bc.id),blId:String(bl.id),label:bl.label,selection,address})).digest('hex');
  return {bl,selection,address,fingerprint};
+}
+
+// Validate the saved shipment identity/destination with its original selection shape.
+// BC allocation changes and JSONB key ordering must not invalidate queued labels.
+export function matchesExistingBlRequest(o,d,shipment){
+ if(!d.bl?.labelRequest?.fingerprint||String(d.bl.id)!==String(shipment.bl.id)||d.bl.label!==shipment.bl.label||!Array.isArray(d.selection))return false;
+ const selection=d.selection.map(l=>({lineId:l.lineId,variantId:l.variantId,locationId:l.locationId,sku:l.sku,quantity:l.quantity,price:l.price,...(Object.hasOwn(l,'ordered')?{ordered:l.ordered}:{}),tracked:l.tracked}));
+ const expected=createHash('sha256').update(JSON.stringify({bcId:String(o.erp_live?.bc?.id),blId:String(d.bl.id),label:d.bl.label,selection,address:shipment.address})).digest('hex');
+ return expected===d.bl.labelRequest.fingerprint;
 }
 
 export async function readExistingBlShipment(db,api,o,blId){
