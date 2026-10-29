@@ -5,6 +5,7 @@ const positive=v=>Number.isFinite(Number(v))&&Number(v)>0;
 export function partialLabelWeight(d,o,weights){
  let weight=0,missing='';for(const l of d.selection){const w=weights.find(p=>p.sku===l.sku);if(!positive(w?.weight_kg)||!positive(l.quantity)){missing=l.sku;break;}weight+=Number(w.weight_kg)*Number(l.quantity);}
  if(!missing&&positive(weight))return {weight,source:'selected_products'};
+ if(d.label_choice==='existing_bl')throw Error('Poids absent pour la livraison du BL récupéré : '+missing);
  if(hasPartialCreatedBl(d)){
   if(positive(d.weight_kg))return {weight:Number(d.weight_kg),source:'saved_delivery'};
   if(positive(o.weight_kg))return {weight:Number(o.weight_kg),source:'saved_order_estimate'};
@@ -20,7 +21,7 @@ export async function retryPartialLabel(db,id){
   const docs=(await tx.query('SELECT 1 FROM partial_documents WHERE delivery_id=$1 LIMIT 1',[id])).rows;
   if(docs.length||d.tracking?.length||d.environment!=='production'||!hasPartialCreatedBl(d)||!(['bl_ready','finalizing_bl','recovered_bl'].includes(d.stage)||d.stage==='creating_label'&&d.error===partialPhonePreflight))throw Error('Création incertaine : rapprochement requis, aucun nouvel envoi automatique');
   const o=(await tx.query('SELECT * FROM orders WHERE id=$1 FOR UPDATE',[d.order_id])).rows[0];
-  if(!o||suspensionBlock(o)||o.archived||o.erp_live?.bc?.status==='cancelled'||['cancelled','shipped','delivered','in_transit'].includes(o.tracking_status))throw Error('Expédition suspendue, annulée ou déjà expédiée');
+  if(!o||suspensionBlock(o)||o.archived||o.erp_live?.bc?.status==='cancelled'||(o.tracking_status==='cancelled'||d.label_choice!=='existing_bl'&&['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status)))throw Error('Expédition suspendue, annulée ou déjà expédiée');
   await tx.query("UPDATE partial_deliveries SET status='bl_ready',error=null WHERE id=$1",[id]);
   return {originalError:d.error,blId:d.bl.id,labelOnly:true};
  });

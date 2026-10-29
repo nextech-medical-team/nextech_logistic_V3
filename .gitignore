@@ -25,3 +25,6 @@ temu-authorized-reimport-scope.json
 # Local TEMU exports contain customer data.
 /order_export-*.xlsx
 /.~lock.*#
+
+# Private order/receipt scope loaded from DATA_DIR; never publish identifiers.
+cancelled-import-reimport-scope.json

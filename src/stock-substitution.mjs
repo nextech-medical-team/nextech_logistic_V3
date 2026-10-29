@@ -1,3 +1,4 @@
+import {historicalSubstitutionItems,verifyHistoricalSubstitutionLots} from './historical-substitution-lots.mjs';
 import {substitutionExecutionSnapshot,substitutionBcSnapshot} from './substitution-execution-snapshot.mjs';
 import {exactStockAvailability,exactQuantitySum,exactQuantityDifference} from './stock-decimal.mjs';
 import {startSubstitutionAttempt,finishSubstitutionAttempt,substitutionMappingSnapshot} from './substitution-attempt.mjs';
@@ -17,7 +18,7 @@ import {assertWholeTemuPackage} from './temu-label-pdf.mjs';
 import {verifiedRefusedSubstitutionPackage,refusedSubstitutionNotice} from './temu-refused-substitution.mjs';
 import {resolveWeight} from './erplain-readonly.mjs';
 const fingerprint=v=>createHash('sha256').update(JSON.stringify(substitutionExecutionSnapshot(v))).digest('hex');
-const bcFields='id label created_at status total tax_type currency{label} update_stock line_items{id type quantity price discount discount_rule_amount ecotax tax_amount tax_codes{id tax_rates{rate}} reserved_quantity available on_hand location{id} variant{id sku active track_inventory weight_amount weight_unit product{id active}}} shipping_orders(first:100){data{id label status update_stock line_items{id type quantity location{id} variant{id sku}}} paginatorInfo{hasMorePages}}';
+const bcFields='id label created_at status total tax_type currency{label} update_stock line_items{id type quantity price discount discount_rule_amount ecotax tax_amount tax_codes{id tax_rates{rate}} reserved_quantity available on_hand batch_numbers{quantity batch_number{id}} location{id} variant{id sku active track_inventory weight_amount weight_unit product{id active}}} shipping_orders(first:100){data{id label status update_stock line_items{id type quantity location{id} variant{id sku}}} paginatorInfo{hasMorePages}}';
 export function validateSubstitution(b,apply=false){
  if(typeof b.sku!=='string'||!b.sku.trim()||typeof b.replacementSku!=='string'||!b.replacementSku.trim()||b.replacementSku.length>199)throw Error('SKU original et SKU équivalent requis');
  if(b.sku.trim()===b.replacementSku.trim())throw Error('Choisir un SKU différent du produit en rupture');
@@ -113,6 +114,10 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  if(partialProof)plan.partialProof=partialProof;
  if(historicalStock)plan.historicalStockProof=historicalStock.proof;
  }
+ if(bc.update_stock===true&&!plan.reconcileOnly){
+  plan.items=await historicalSubstitutionItems(api,bc,plan);
+  plan.previewFingerprint=fingerprint({preview:plan.previewFingerprint,lots:plan.items.filter(l=>!l.id).map(l=>({variant:l.variant,location:l.location,quantity:l.quantity,batch_numbers:l.batch_numbers||[]}))});
+ }
  const mappingLines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty AS mapping_source_qty,m.target_qty AS mapping_target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1',[o.id,o.channel])).rows;
  if(o.source_payload?.marketplacePendingCorrection||(o.channel==='shopify'&&o.partial_mode&&o.source_payload?.id)){
   if(!plan.partialProof)throw Error('Modification marketplace : rapprochement requis');
@@ -170,6 +175,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
   recordedSubstitutionPlan(updated,request,{id:b.requestId,status:'review',error:'Frais de livraison modifiés : rapprochement requis',payload:request},{status:'complete',payload:request,result:plan},o);
  }
 
+ if(updated.update_stock===true)verifyHistoricalSubstitutionLots(updated,plan);
  if(updated.update_stock===true)historicalAfter=await readHistoricalStock(api,updated,{additionalVariants:plan.commercialBefore.line_items.filter(l=>l.type==='normal').map(l=>l.variant.id)});
  let weight=0;for(const l of shippingProductLines(updated.line_items))weight+=resolveWeight([l.variant],l.variant.sku).weightKg*Number(l.quantity);
  const completionResult={importDeferred:deferResume,temuLabelPreserved:!!temu&&!refusedTemu,temuLabelRefused:refusedTemu,regenerateExisting:false,erpOnly:true,preservedLabels,labelNotice,message:deferResume?'Remplacement enregistré. Préparation suspendue jusqu’aux autres lignes sélectionnées de cet import.':(plan.reconcileOnly?'BC déjà modifié : V3 synchronisé sans nouvelle écriture dans Erplain. ':'')+labelNotice+' Équivalent enregistré dans le BC Erplain LIVE et dans cette commande. Poids recalculé ; préparation remise en file pour contrôle du stock et du BL. '+(permanent?'Le mapping permanent est mis à jour pour les prochaines commandes de ce gestionnaire.':'Le mapping partagé est conservé.')};

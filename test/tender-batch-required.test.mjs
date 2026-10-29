@@ -72,6 +72,12 @@ test('the batch gate protects BL creation and does not block sales order creatio
 });
 test('partial delivery checks only selected products before creating its draft',async()=>{
  const source=await readFile(new URL('../src/partial-deliveries-tender-preserved.mjs',import.meta.url),'utf8');
- const check=source.indexOf('await assertTenderBatchNumbers(api,o,chosen.map(');
+ const check=source.indexOf('await assertBlBatchNumbers(api,o,chosen.map(');
  assert.ok(check>0&&check<source.indexOf('mutation V3CreatePartialDraft'));
+});
+
+test('batch validation reports every blocked SKU in one read-only check',async()=>{
+ const api=fixture({tracked:false});
+ await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line('10'),line('20')]),error=>error.message.includes('SKU-10')&&error.message.includes('SKU-20'));
+ assert.equal(api.calls.length,2);
 });

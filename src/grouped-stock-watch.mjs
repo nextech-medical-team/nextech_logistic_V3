@@ -88,7 +88,7 @@ export async function groupedStockPass(db,api,{candidateSql,allowed,fingerprint,
    // when quantity availability is expected to fail.
    if(String(snapshot?.id)!==String(o.erp_live.bc.id)||snapshot.status!=='active'||snapshot.update_stock!==true||!variants.length||!Array.isArray(snapshot.shipping_orders?.data)||snapshot.shipping_orders.paginatorInfo?.hasMorePages!==false||snapshot.shipping_orders.data.length)throw Error('Surveillance stock : BC ou BL à rapprocher');
    await db.query(`INSERT INTO stock_resume_requirements(order_id,fingerprint,bc_id,variant_ids,stock_signature,checked_at) VALUES($1,$2,$3,$4,$5,now()) ON CONFLICT(order_id) DO UPDATE SET fingerprint=excluded.fingerprint,bc_id=excluded.bc_id,variant_ids=excluded.variant_ids,stock_signature=excluded.stock_signature,checked_at=excluded.checked_at`,[o.id,fp,String(snapshot.id),JSON.stringify(variants),stockSignature(variants,resources)]);
-   verified(snapshot,o);
+   await verified(snapshot,o);
    const queued=await enqueue(o,fp);
    await record(o.id,queued?null:'Commande modifiée ou déjà traitée : relecture différée');
   }catch(error){await record(o.id,error);}
