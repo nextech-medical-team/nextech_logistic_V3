@@ -51,3 +51,18 @@ for(const [name,change] of Object.entries({
  f.api.request=async()=>({InventoryLogs:{data:[...rows,f.debit],paginatorInfo:{hasMorePages:false}}});await assert.rejects(()=>readHistoricalStock(f.api,f.bc));
 });
 test('pair before the BC is accepted without losing its negative half',async()=>{const f=fixture();const pair={...f.initial,id:f.initial.id+1,on_hand_diff:-300,available_diff:-300};f.api.request=async()=>({InventoryLogs:{data:[f.initial,pair,f.debit],paginatorInfo:{hasMorePages:false}}});assert.equal((await readHistoricalStock(f.api,f.bc)).proof.stockOnBc,true);});
+
+import {readInheritedBlLedger} from '../src/historical-stock-proof.mjs';
+test('BL reader uses the same balanced-pair check and preserves its exact debit',async()=>{
+ const f=fixture(),bl={id:'900',created_at:'2026-10-29 12:00:00',line_items:f.bc.line_items};
+ const minus={...f.initial,id:1,created_at:'2026-10-29 13:10:09',on_hand_diff:-14100,available_diff:-14100},plus={...minus,id:2,on_hand_diff:14100,available_diff:14100};
+ const debit={...f.debit,document_id:'900',order_type:'ShippingOrder',on_hand_diff:-100,available_diff:0};
+ const api={request:async q=>{assert.match(q,/source order_type/);assert.match(q,/created_at/);return {InventoryLogs:{data:[minus,plus,debit],paginatorInfo:{hasMorePages:false}}};}};
+ assert.deepEqual((await readInheritedBlLedger(api,bl))[0].rows,[debit]);
+ plus.on_hand_diff=14099;plus.available_diff=14099;await assert.rejects(()=>readInheritedBlLedger(api,bl),/mouvement non identifié/);
+});
+test('unrelated lot pairs cannot cover a missing or duplicate debit of the BC',async()=>{
+ const f=fixture();const minus={...f.initial,id:1,created_at:'2026-10-29 13:10:09',on_hand_diff:-14100,available_diff:-14100},plus={...minus,id:2,on_hand_diff:14100,available_diff:14100};
+ let rows=[minus,plus];f.api.request=async()=>({InventoryLogs:{data:rows,paginatorInfo:{hasMorePages:false}}});await assert.rejects(()=>readHistoricalStock(f.api,f.bc),/quantités déjà déduites/);
+ rows.push(f.debit,{...f.debit,id:f.debit.id+1});await assert.rejects(()=>readHistoricalStock(f.api,f.bc),/quantités déjà déduites/);
+});
