@@ -38,4 +38,17 @@ class OverlayTests(unittest.TestCase):
   self.baseline['serverHashes'][self.name]=digest(self.overlay)
   self.baseline['reconciliation']['preservedOverlays'][self.name]['sha256']=digest(self.overlay)
   self.assertTrue(self.reconcile()[1])
+ def test_adopts_verified_server_only_file_without_installing_or_mutating_baseline(self):
+  original=repr(self.baseline)
+  old,proof=reconcile_overlay_sources({},{self.name:self.overlay},{self.name:self.overlay},self.baseline,lambda *args:self.overlay)
+  self.assertEqual(old[self.name],self.overlay);self.assertTrue(proof[0]['candidatePreservesOverlay'])
+  self.assertEqual(plan(old,{self.name:self.overlay},{self.name:self.overlay},self.baseline['serverHashes']),[])
+  self.assertEqual(original,repr(self.baseline))
+ def test_server_only_file_with_changed_candidate_is_rejected(self):
+  with self.assertRaisesRegex(ValueError,'non preserve'):
+   reconcile_overlay_sources({},{self.name:self.candidate},{self.name:self.overlay},self.baseline,lambda *args:self.overlay)
+ def test_server_only_file_requires_current_and_git_provenance(self):
+  for current,source in [(b'changed',self.overlay),(self.overlay,b'changed')]:
+   with self.assertRaises(ValueError):
+    reconcile_overlay_sources({},{self.name:self.overlay},{self.name:current},self.baseline,lambda *args:source)
 if __name__=='__main__':unittest.main()
