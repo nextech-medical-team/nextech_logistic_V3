@@ -10,18 +10,18 @@ function fixture({tracked=true,pages,variant}={}){
  const calls=[];
  return {calls,async request(q,v){
   calls.push({q,v});assert.match(q,/^query /);
-  if(q.includes('V3TenderBatchVariant'))return {Variant:variant??{id:v.id,has_batch_numbers:tracked}};
+  if(q.includes('V3BlBatchVariant'))return {Variant:variant??{id:v.id,has_batch_numbers:tracked}};
   assert.equal(v.where.column,'VARIANT_ID');assert.equal(v.where.operator,'EQ');
   return {BatchNumbers:pages?pages(v):{data:[batch(v.where.value)],paginatorInfo:{hasMorePages:false}}};
  }};
 }
 test('each distinct product has a named Erplain batch, using read-only calls',async()=>{
  const api=fixture();await assertTenderBatchNumbers(api,order,[line(),line(),line('20')]);
- assert.deepEqual(api.calls.filter(c=>c.q.includes('V3TenderBatchVariant')).map(c=>c.v.id),['10','20']);
+ assert.deepEqual(api.calls.filter(c=>c.q.includes('V3BlBatchVariant')).map(c=>c.v.id),['10','20']);
 });
 test('a missing batch on the second product blocks the order with its SKU',async()=>{
  const api=fixture({pages:v=>({data:v.where.value==='10'?[batch()]:[],paginatorInfo:{hasMorePages:false}})});
- await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line(),line('20')]),/SKU-20.*numéro de lot absent.*BC\/BL bloquée/);
+ await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line(),line('20')]),/SKU-20.*numéro de lot absent.*BL bloquée/);
 });
 test('a product without batch tracking is blocked',async()=>{
  const api=fixture({tracked:false});await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line()]),/activer la gestion des lots/);
@@ -52,19 +52,21 @@ test('API failure blocks and a later attempt rereads Erplain',async()=>{
  fail=false;await assertTenderBatchNumbers(api,order,[line()]);
  await assertTenderBatchNumbers(api,order,[line()]);assert.equal(api.calls.length,4);
 });
-test('other import channels do not query Erplain for this condition',async()=>{
- const api=fixture();for(const channel of ['amazon','temu','shopify','samples','erplain'])await assertTenderBatchNumbers(api,{channel},undefined);
- assert.equal(api.calls.length,0);
+test('all channels require named batches before BL creation',async()=>{
+ for(const channel of ['amazon','temu','shopify','samples','erplain','tender']){
+  const api=fixture();await assertTenderBatchNumbers(api,{channel},[line()]);assert.equal(api.calls.length,2);
+  await assert.rejects(()=>assertTenderBatchNumbers(fixture({tracked:false}),{channel},[line()]),/activer la gestion des lots/);
+ }
 });
 test('missing products block; non-product lines do not require batches',async()=>{
  for(const lines of [undefined,[],[{}],[{type:'shipping'}]])await assert.rejects(()=>assertTenderBatchNumbers(fixture(),order,lines));
  const api=fixture();await assertTenderBatchNumbers(api,order,[line(),{type:'shipping'}]);assert.equal(api.calls.length,2);
 });
-test('both full-document creation operations are guarded before a mutation',async()=>{
+test('the batch gate protects BL creation and does not block sales order creation',async()=>{
  const source=await readFile(new URL('../src/erplain-live-workflow.mjs',import.meta.url),'utf8');
  const start=source.indexOf('async function batchMutation('),end=source.indexOf('async function run(',start),body=source.slice(start,end);
- assert.match(body,/\['CreateOrder','CreateShippingOrderFrom'\]\.includes\(operation\)/);
- assert.ok(body.indexOf('await assertTenderBatchNumbers(api,o,o.items)')<body.indexOf("const q='mutation"));
+ assert.match(body,/operation==='CreateShippingOrderFrom'/);
+ assert.ok(body.indexOf('await assertBlBatchNumbers(api,o,o.items)')<body.indexOf("const q='mutation"));
  assert.match(body,/o\.failed=true;await fail\(o,e\)/);
  assert.match(body,/orders=orders\.filter\(o=>!o\.failed\);if\(!orders\.length\)return/);
 });
