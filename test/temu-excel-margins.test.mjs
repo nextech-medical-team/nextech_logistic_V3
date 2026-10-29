@@ -179,3 +179,13 @@ test('old FedEx zones are updated to the calculator country rates without removi
  assert.equal(calculatorServices(custom).filter(s=>s[0].startsWith('FedEx')&&s[1]==='IE').length,1);
  assert.equal(calculatorServices(custom).find(s=>s[1]==='IE')[3][0][1],11);
 });
+
+test('TEMU filters and positive selection use the provider margin, not a profitable calculator alternative',async()=>{
+ const fs=await import('node:fs/promises'),vm=await import('node:vm');const source=await fs.readFile(new URL('../public/temu.js',import.meta.url),'utf8');
+ const records=[{id:'negative',status:'positive',profit:10,calculatorMargin:{status:'positive',profit:10},temuMargin:{status:'negative',profit:-1}},{id:'unknown',status:'positive',profit:10,temuMargin:{status:'incomplete',profit:null}},{id:'positive',status:'negative',profit:-1,temuMargin:{status:'positive',profit:2}}];
+ const ctx=vm.createContext({window:{V3Margins:{row:id=>records.find(r=>r.id===id)}}});
+ for(const name of ['temuMarginRow','temuMarginCategory','temuPositiveReferences'])vm.runInContext(source.split('\n').find(line=>line.startsWith('function '+name+'(')),ctx);
+ ctx.rows=records.map(r=>({id:r.id,reference:r.id}));ctx.records=records;
+ assert.equal(vm.runInContext('temuMarginCategory(rows[0])',ctx),'negative');assert.equal(vm.runInContext('temuMarginCategory(rows[1])',ctx),'incomplete');
+ assert.equal(JSON.stringify(vm.runInContext('temuPositiveReferences(rows,records)',ctx)),JSON.stringify(['positive']));
+});
