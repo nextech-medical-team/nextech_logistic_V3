@@ -23,7 +23,7 @@ test('only the selected pending BL supplies quantities and address',()=>{
  for(const status of ['delivered','shipped','completed','cancelled','unpublished'])assert.throws(()=>existingBlShipment(order,{...bc,shipping_orders:{...bc.shipping_orders,data:[first,{...second,status}]}},'102'),/BL absent/);
  assert.throws(()=>existingBlShipment(order,bc,'999'),/BL absent/);
  assert.throws(()=>existingBlShipment({...order,suspension:{active:true,note:'Test'}},bc,'102'),/suspendue/);
- assert.throws(()=>existingBlShipment(order,{...bc,line_items:[{...line,quantity:1}]},'102'),/reliquat/);
+ assert.equal(existingBlShipment(order,{...bc,line_items:[{...line,quantity:1}]},'102').selection[0].quantity,1);
 });
 
 async function fixture(fn){
@@ -48,11 +48,13 @@ async function fixture(fn){
  }finally{await engine.close();}
 }
 
-for(const [name,service] of [['standard',partialService],['preserved',preservedPartialService]])test(name+' worker: second BL label is unique; original shipment and PDF survive',async()=>fixture(async(db,api)=>{
+for(const [name,service] of [['standard',partialService],['preserved',preservedPartialService]])test(name+' worker: second BL label is unique; original shipment and PDF survive',async()=>fixture(async(db,api,setDocument)=>{
  const before=(await db.query('SELECT * FROM orders')).rows;
  const request={id:'o',blId:'102',requestId:randomUUID()};
  const results=await Promise.all([queueExistingBlLabel(db,api,request,{email:'operator'}),queueExistingBlLabel(db,api,{...request,requestId:randomUUID()},{email:'operator'})]);
  assert.equal(results[0].id,results[1].id);assert.equal(results[1].existing,true);
+ // A later BC mapping change must not hold the already identified BL label.
+ setDocument({...bc,line_items:[]});
  let creates=0,pdfReads=0;
  const worker=service(db,'/tmp',{api,clients:{gofoCreate:async shipment=>{creates++;assert.equal(shipment.label_bl,'SHO00745173');assert.equal(shipment.erp_live.bl.id,'102');assert.equal(shipment.lines[0].target_quantity,1);assert.equal(shipment.weight_kg,0.5);assert.equal(shipment.address.postal,'75001');return {reference:'NEW',tracking:['NEW-TRACK']};},gofoLabel:async()=>{pdfReads++;return Buffer.from('%PDF-1.4\nNEW').toString('base64');}}});
  await worker.run();await worker.run();assert.equal(creates,1);assert.equal(pdfReads,1);
@@ -161,13 +163,13 @@ test('stock diagnostics remain visible without vetoing an existing BL label; sus
  assert.equal((await db.query('SELECT * FROM partial_deliveries')).rows.length,0);
 }));
 
-test('multiple pending associated BLs validate total allocations and get distinct requests',async()=>fixture(async(db,api,setDocument)=>{
+test('multiple pending associated BLs get distinct requests despite BC allocation observations',async()=>fixture(async(db,api,setDocument)=>{
  const extra={...second,id:'103',label:'SHO00745174'};
  const document={...bc,line_items:[{...line,quantity:3}],shipping_orders:{data:[first,second,extra],paginatorInfo:{hasMorePages:false}}};
  setDocument(document);
  const r=await recoverDocumentsAndLabels(db,api,'o',{email:'operator'},{refresh:async()=>({bc:document,stockHolds:[],message:'OK'})});
  assert.equal(r.labels.length,2,JSON.stringify(r.labelHolds));assert.equal((await db.query('SELECT * FROM partial_deliveries')).rows.length,2);
- assert.throws(()=>existingBlShipment(order,{...document,line_items:[line]},'102'),/reliquat/);
+ assert.equal(existingBlShipment(order,{...document,line_items:[line]},'102').selection[0].quantity,1);
 }));
 
 test('recovered archived delivery is promoted once without creating another row',async()=>fixture(async(db,api)=>{
@@ -213,4 +215,15 @@ test('recovered BL weight uses only its selected products, never the delivered o
  const d={label_choice:'existing_bl',bl:second,selection:[{sku:'SECOND',quantity:2}]};
  assert.deepEqual(partialLabelWeight(d,{weight_kg:10},[{sku:'SECOND',weight_kg:0.5}]),{weight:1,source:'selected_products'});
  assert.throws(()=>partialLabelWeight(d,{weight_kg:10},[]),/Poids absent/);
+});
+
+// Human rule: BC quantities/mapping after BL creation are observations, not label gates.
+test('existing BL label and fingerprint survive unrelated BC quantity and mapping changes',()=>{
+ const expected=existingBlShipment(order,bc,'102');
+ for(const lines of [[],[{...line,quantity:0}],[{...line,id:'changed',variant:{id:'other'},price:999}]]){
+  const result=existingBlShipment(order,{...bc,line_items:lines},'102');
+  assert.deepEqual(result.selection,expected.selection);assert.equal(result.fingerprint,expected.fingerprint);
+ }
+ assert.throws(()=>existingBlShipment(order,{...bc,id:'other'},'102'),/BC actif/);
+ assert.throws(()=>existingBlShipment({...order,channel:'temu'},bc,'102'),/indisponible/);
 });
