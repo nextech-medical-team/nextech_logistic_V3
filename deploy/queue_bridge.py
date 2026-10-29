@@ -18,6 +18,23 @@ def later_baseline_allowed(record,baseline,is_ancestor):
  if report.get('manualIntervention') or report.get('rollback')=='FAILED' or report.get('taskControlsRestored') is False:return False
  return bool(baseline.get('serverHashes')) and is_ancestor(previous,current)
 
+def worker_capacity_certificate(report,backup):
+ # Read-only recovery evidence. Never reopen the inspector or restore capacity
+ # as a side effect of certifying a failed publication.
+ from preserve_worker_capacity import run,port_open,worker_identity
+ capacity=report.get('workerCapacity',{})
+ if capacity.get('status')!='preserved' or capacity.get('inspectorClosed') is not True:raise ValueError('Preuve de capacité worker absente')
+ pid=capacity.get('pid');receipt=capacity.get('receipt')
+ if type(pid) is not int or pid<=1 or not isinstance(receipt,dict):raise ValueError('Identité worker non confirmée')
+ if receipt.get('after',{}).get('max')!=20 or receipt.get('businessRequestsIssued')!=0:raise ValueError('Capacité worker non confirmée')
+ identity=receipt.get('workerIdentity')
+ if not isinstance(identity,dict) or identity.get('pid')!=pid or worker_identity(pid)!=identity:raise ValueError('Identité du reçu worker non confirmée')
+ saved=Path(backup)/'pool-preserved.json'
+ if saved.is_symlink() or not saved.is_file() or json.loads(saved.read_text())!=receipt:raise ValueError('Reçu de capacité non confirmé')
+ def current_pid():return int(run(['systemctl','show','nextech-worker','-p','MainPID','--value'],timeout=10).strip())
+ if current_pid()!=pid or port_open() or current_pid()!=pid or worker_identity(pid)!=identity:raise ValueError('Worker modifié ou inspecteur ouvert')
+ return {'pid':pid,'identity':identity,'capacity':20,'inspectorClosed':True}
+
 def installed_release_certificate(record):
  # Explicit recovery only: preserve the failed report and prove the installed
  # release, rather than pretending that the pre-install files were restored.
@@ -42,7 +59,8 @@ def installed_release_certificate(record):
  if backup.parent!=Path('/var/backups/nextech') or not re.fullmatch('cicd-'+commit+'-[0-9]+',backup.name):raise ValueError('Sauvegarde de publication invalide')
  health()
  guard('verify-restored',backup)
- return {'verified':True,'type':'verified-installed-release','previousCommit':commit,'installedCommit':commit,'fileHashes':expected,'services':['active','active'],'http':200,'environmentPreserved':True,'controlsRestored':True,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+ capacity=worker_capacity_certificate(report,backup)
+ return {'verified':True,'type':'verified-installed-release','previousCommit':commit,'installedCommit':commit,'fileHashes':expected,'services':['active','active'],'http':200,'environmentPreserved':True,'controlsRestored':True,'workerCapacity':capacity,'at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
 
 def restoration_certificate(record):
  # The local caller cannot assert a successful rollback: recheck it on the server.
