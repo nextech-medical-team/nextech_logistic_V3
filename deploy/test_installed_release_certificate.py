@@ -18,6 +18,7 @@ class InstalledReleaseTests(unittest.TestCase):
   self.env=self.stack.enter_context(patch.object(dispatcher,'verify_environment',return_value='env'))
   self.health=self.stack.enter_context(patch.object(dispatcher,'health'))
   self.guard=self.stack.enter_context(patch.object(dispatcher,'guard'))
+  self.capacity=self.stack.enter_context(patch.object(bridge,'worker_capacity_certificate',return_value={'pid':123,'capacity':20,'inspectorClosed':True}))
   self.save()
  def save(self):
   (self.state/'baseline.json').write_text(json.dumps(self.baseline))
@@ -52,7 +53,7 @@ class InstalledReleaseTests(unittest.TestCase):
   self.env.return_value='different'
   with self.assertRaises(ValueError):bridge.restoration_certificate(self.record)
   self.env.return_value='env'
-  for mock in [self.health,self.guard]:
+  for mock in [self.health,self.guard,self.capacity]:
    mock.side_effect=subprocess.CalledProcessError(43,['guard'])
    with self.assertRaises(subprocess.CalledProcessError):bridge.restoration_certificate(self.record)
    mock.side_effect=None

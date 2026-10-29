@@ -1,6 +1,15 @@
 """Retain the explicitly authorized temporary capacity before resuming scheduling."""
 from pathlib import Path
-import subprocess,time,socket,os,signal,json
+import subprocess,time,socket,os,signal,json,re
+
+def worker_identity(pid):
+ if type(pid) is not int or pid<=1:raise RuntimeError('Invalid worker PID')
+ boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+ stat=Path('/proc')/str(pid)/'stat'
+ raw=stat.read_text();fields=raw[raw.rfind(')')+2:].split()
+ # /proc stat field 22, after pid and parenthesized comm (which may contain spaces).
+ if not re.fullmatch('[a-f0-9-]{36}',boot) or not raw.startswith(str(pid)+' (') or len(fields)<20 or not fields[19].isdigit():raise RuntimeError('Worker identity unavailable')
+ return {'pid':pid,'bootId':boot,'startTicks':fields[19]}
 
 def run(args,**kwargs):
  return subprocess.run(args,check=True,capture_output=True,**kwargs).stdout
@@ -20,15 +29,19 @@ def preserve(previous_pid,backup):
  else:raise RuntimeError('Worker initialization not verified')
  if port_open():raise RuntimeError('Inspector already open')
  if int(run(['systemctl','show','nextech-worker','-p','MainPID','--value']).strip())!=pid:raise RuntimeError('Worker changed')
+ identity=worker_identity(pid)
  helper=Path(__file__).parent
  os.kill(pid,signal.SIGUSR1)
  try:
   receipt=json.loads(run(['node',str(helper/'preserve-pool.mjs'),str(pid)],timeout=25))
   if receipt['after']['max']!=20:raise RuntimeError('Capacity not retained')
+  if worker_identity(pid)!=identity:raise RuntimeError('Worker identity changed')
+  receipt['workerIdentity']=identity
   (Path(backup)/'pool-preserved.json').write_text(json.dumps(receipt))
  finally:
   time.sleep(3)
   if port_open():
    run(['node',str(helper/'close-inspector.mjs'),str(pid)],timeout=15);time.sleep(3)
   if port_open():raise RuntimeError('Inspector did not close; scheduling remains paused')
+ if worker_identity(pid)!=identity:raise RuntimeError('Worker identity changed')
  return {'status':'preserved','pid':pid,'receipt':receipt,'inspectorClosed':True}
