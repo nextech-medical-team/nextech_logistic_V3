@@ -2,7 +2,7 @@ import {temuCommercialSource} from './temu-commercial-source.mjs';
 import {excelAmounts} from './temu-excel-commercial.mjs';
 import {temuDestinationVat} from './temu-destination-vat.mjs';
 import {temuCountryAmounts,temuFixedVat} from './temu-country-vat.mjs';
-import {equivalentReceipts,applyEquivalentReceipts} from './temu-equivalent-margin.mjs';
+import {equivalentReceipts,excelEquivalentReceipts,applyEquivalentReceipts} from './temu-equivalent-margin.mjs';
 import {amountFields,quoteCost} from './temu-margin-data.mjs';
 import vm from 'node:vm';import {readFile} from 'node:fs/promises';
 const canonical=s=>String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -35,7 +35,7 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
  let cache=null,last=0,inflight=null;
  async function calculate(){
  const supplied=loadData?await loadData():null;
- const orders=supplied?.orders||(await db.query('SELECT id,reference,channel,carrier,address,source_payload,source_date FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
+ const orders=supplied?.orders||(await db.query('SELECT id,reference,channel,carrier,address,source_payload,source_date,erp_live FROM orders WHERE archived=false ORDER BY received_at DESC')).rows;
  const lines=supplied?.lines||(await db.query('SELECT l.id,l.order_id,l.source_line,l.source_sku,l.quantity,l.target_sku,l.target_quantity,l.source_payload FROM lines l JOIN orders o ON o.id=l.order_id WHERE o.archived=false')).rows;
  const grouped=new Map();for(const l of lines){if(!grouped.has(l.order_id))grouped.set(l.order_id,[]);grouped.get(l.order_id).push(l);}
  const labelJobs=new Map((await db.query('SELECT reference,plan,result FROM temu_label_jobs')).rows.map(j=>[j.reference,j]));
@@ -101,7 +101,7 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
    if(found.cost&&v3?.target_quantity!=null&&Math.abs(Number(v3.target_quantity)/Number(v3.quantity)-found.cost.mapping)>1e-9)return {error:'Mapping V3 différent du calculateur publié'};return found;}};
   let result;try{result=context.marginEngine.analyze(raw,o.channel,checkedAdapter,{},{}).orders[0];}catch(e){result={complete:false,issues:['Diagnostic du calculateur indisponible : '+e.message],lines:[]};}
   const r=result||{complete:false,issues:['Aucune ligne à calculer'],lines:[]};
-  if(equivalentOrder){try{applyEquivalentReceipts(r,equivalentReceipts(temuCommercialSource(o,temuCountryAmounts(o)),o.source_payload?.temuOrderDetail,o.reference));}catch(e){amountIssues.push(e.message);r.complete=false;}}
+  if(equivalentOrder){try{applyEquivalentReceipts(r,o.source_payload?.origin==='temu_excel'?excelEquivalentReceipts(o,sourceLines,snapshot.countries[o.address?.country]):equivalentReceipts(temuCommercialSource(o,temuCountryAmounts(o)),o.source_payload?.temuOrderDetail,o.reference,snapshot.countries[o.address?.country]));}catch(e){amountIssues.push(e.message);r.complete=false;}}
   if(transportSource)r.shippingSource=transportSource;
   if(o.source_payload?.origin==='temu_excel')r.warnings=[...(r.warnings||[]),'Ventes et contribution issues du rapport Excel TEMU ; coûts du calculateur publié.'];
   if(o.channel==='temu'&&sourceLines.some(l=>l.source_payload?.puht!=null))r.warnings=[...(r.warnings||[]),'Ventes API : prix unitaire HT importé × quantité de la ligne, dans la devise d’origine.'];

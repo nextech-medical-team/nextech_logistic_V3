@@ -27,6 +27,8 @@ export function bcComparisonDiagnostic(order,bc,lines){
   for(const l of shippingProductLines(bl.line_items)){
    if(!identified(l.variant?.id))throw Error('API Erplain · Identité produit BL non confirmée');
    if(!numeric(l.quantity)||Number(l.quantity)<0)throw Error('API Erplain · Quantité BL non confirmée');
+   // Cancelled history may refer to a BC line removed after cancellation.
+   if(bl.status==='cancelled')continue;
    if(l.parent_id!=null&&(!identified(l.parent_id)||!physical.some(p=>String(p.id)===String(l.parent_id)&&String(p.variant.id)===String(l.variant.id))))throw Error('API Erplain · Lien BL et ligne BC non confirmé');
    if(l.parent_id==null&&physical.filter(p=>String(p.variant.id)===String(l.variant.id)).length!==1)throw Error('API Erplain · Ligne BL sans parent identifiable de manière unique');
    const parent=physical.find(p=>l.parent_id!=null?String(p.id)===String(l.parent_id):String(p.variant.id)===String(l.variant.id));

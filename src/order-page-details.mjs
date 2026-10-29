@@ -23,7 +23,7 @@ export async function orderPageDetails(db,rows,mode='all'){
  }
  if(mode!=='diagnostics'){
   await attachSkuSubstitutions(db,rows);
-  const extras=(await db.query('SELECT order_id,id,carrier,environment,parcel_index,parcel_total,status,tracking,error FROM extra_parcels WHERE order_id=ANY($1::text[]) ORDER BY created_at,id',[rows.map(r=>r.id)])).rows;
+  const extras=(await db.query('SELECT order_id,id,carrier,environment,parcel_index,parcel_total,status,tracking,error FROM extra_parcels WHERE delivery_id IS NULL AND order_id=ANY($1::text[]) ORDER BY created_at,id',[rows.map(r=>r.id)])).rows;
   const byOrder=new Map();for(const {order_id,...item} of extras){const list=byOrder.get(order_id)||[];list.push(item);byOrder.set(order_id,list);}for(const row of rows)row.extra_parcels=byOrder.get(row.id)||[];
   await attachLogisticsObservations(db,rows);
  }

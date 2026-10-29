@@ -1,5 +1,5 @@
 // Match only the existing preparable BL, while keeping the full BC for its stock ledger.
-export function historicalPendingLines(bc,bl){
+export function historicalPendingLines(bc,bl,{allowPendingSiblings=false}={}){
  const all=bc?.line_items,connection=bc?.shipping_orders;
  if(!bl?.id||!['pending','make_the_shipment','in_preparation','ready_to_ship'].includes(bl.status)||!Array.isArray(all)||!Array.isArray(connection?.data)||connection.paginatorInfo?.hasMorePages!==false)throw Error('BL historique en attente non vérifiable');
  const chosen=connection.data.filter(x=>String(x.id)===String(bl.id));
@@ -18,7 +18,7 @@ export function historicalPendingLines(bc,bl){
  }
  for(const other of connection.data){
   if(String(other.id)===String(bl.id)||other.status==='cancelled')continue;
-  if(!['shipped','delivered','completed'].includes(other.status))throw Error('Autre BL encore en préparation : choisir la livraison à rapprocher');
+  if(!(allowPendingSiblings?['pending','make_the_shipment','in_preparation','ready_to_ship','shipped','delivered','completed']:['shipped','delivered','completed']).includes(other.status))throw Error('Autre BL encore en préparation : choisir la livraison à rapprocher');
   allocations(other,fulfilled);
  }
  allocations(chosen[0],selected);

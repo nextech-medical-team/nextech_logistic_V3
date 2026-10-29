@@ -1,6 +1,6 @@
 (()=>{
 const panel=document.createElement('section');panel.id='view-erplain-refresh';panel.className='view';panel.hidden=true;
-panel.innerHTML=`<div class="panel padded"><h2>Commandes Erplain LIVE</h2><p>Récupérez un BC existant, vérifiez ses données, puis validez son entrée dans V3. La préparation est une action séparée.</p>
+panel.innerHTML=`<div class="panel padded"><h2>Commandes Erplain LIVE</h2><p>Récupérez un BC existant, vérifiez ses données, puis validez son entrée dans V3. Les BL en attente déclenchent automatiquement leur étiquette après récupération ou validation. Sans BL, la préparation reste à lancer.</p>
 <form id="erplain-one-form"><label>Numéro du BC ou référence externe<input id="erplain-one-reference" maxlength="200" required placeholder="Exemple : O00000288"></label><button type="submit" class="primary" id="erplain-one-fetch">Récupérer cette commande depuis Erplain</button></form>
 <p id="erplain-one-note" role="status" aria-live="polite"></p><div id="erplain-one-preview"></div>
 <h3>Commandes récupérées dans V3</h3><form id="erplain-recovered-form"><label>Rechercher dans les commandes récupérées<input id="erplain-recovered-search" maxlength="200" placeholder="BC, référence ou client"></label><button type="submit">Rechercher dans les commandes récupérées</button></form>
@@ -29,6 +29,7 @@ function renderPreview(r){
  const labels={label:'Numéro BC',external_reference:'Référence externe',dated_at:'Date',status:'Statut',total:'Montant',tax_type:'TVA',update_stock:'Politique de stock',currency:'Devise',customer:'Client',shipping_address:'Adresse',account_representative:'Gestionnaire',line_items:'Produits, quantités, prix ou stock',shipping_orders:'BL associés'};
  const changed=r.previousDocument?Object.keys({...r.previousDocument,...r.document}).filter(k=>JSON.stringify(r.previousDocument[k])!==JSON.stringify(r.document[k])):[];
  box.innerHTML=`<h3>${r.alreadyRecovered?'Commande déjà récupérée':'Vérifier le BC avant son entrée dans V3'}</h3><p>Dernière lecture Erplain : ${esc(date(r.readAt))}</p>${r.changed?`<p role="alert"><strong>Le BC a changé. Relisez les nouvelles données avant une nouvelle validation.</strong></p><p>Informations modifiées : ${esc(changed.map(k=>labels[k]||k).join(', '))}</p><details><summary>Données consultées précédemment</summary>${documentHtml(r.previousDocument)}</details>`:''}${documentHtml(r.document)}
+ ${r.labelRecovery?`<p role="status">${esc(r.labelRecovery.message)}</p>`:''}
  ${admission.length?`<h4>Admission bloquée</h4><ul>${admission.map(i=>`<li>${esc(i)}</li>`).join('')}</ul>`:''}
  ${preparation.length?`<h4>Points à résoudre avant préparation</h4><ul>${preparation.map(i=>`<li>${esc(i)}</li>`).join('')}</ul><p>La validation de l’entrée dans V3 ne résout pas ces blocages logistiques.</p>`:''}
  <div class="actions">${r.alreadyRecovered?`<button data-erplain-open="${esc(r.orderId)}">Voir la commande</button>${r.archived?'<span>Commande archivée : aucune réactivation automatique.</span>':''}`:`<button class="primary" data-erplain-approve ${admission.length?'disabled':''}>Valider l’entrée dans V3</button><button data-erplain-reread>Relire ce BC dans Erplain</button>`}<button data-erplain-abandon>Abandonner</button></div><p>Abandonner ne modifie pas le BC dans Erplain.</p>`;
@@ -36,7 +37,7 @@ function renderPreview(r){
 async function lookup(reference,bcId){
  if(busy)return;reference=String(reference||'').trim();if(!reference){note('Saisissez un numéro de BC ou une référence externe.',true);return;}
  setBusy(true);note('Lecture du BC dans Erplain LIVE…');
- try{const r=await post('targeted-lookup',{reference,...(bcId?{bcId}: {})});renderPreview(r);if(!r.notFound)note(r.selectionRequired?'Sélectionnez le BC à vérifier.':'Lecture terminée.');}
+ try{const r=await post('targeted-lookup',{reference,...(bcId?{bcId}: {})});renderPreview(r);if(!r.notFound)note(r.labelRecovery?.message||(r.selectionRequired?'Sélectionnez le BC à vérifier.':'Lecture terminée.'),!!r.labelRecovery?.labelHolds?.length);if(r.labelRecovery){await loadRecovered();await orders();}}
  catch(e){preview=null;el('erplain-one-preview').replaceChildren();note(e.message,true);}finally{setBusy(false);if(preview?.admissionIssues?.length){const b=panel.querySelector('[data-erplain-approve]');if(b)b.disabled=true;}}
 }
 async function loadRecovered(){
@@ -64,11 +65,11 @@ panel.addEventListener('click',async event=>{
   if(b.dataset.erplainCorrect)return await openCorrection(b.dataset.erplainCorrect);
   if(b.dataset.erplainPartial)return await openPartial(b.dataset.erplainPartial);
   if(b.dataset.erplainPrepare){b.disabled=true;try{await refreshAndResumeOrder(b.dataset.erplainPrepare);}finally{await loadRecovered();}return;}
-  if(b.hasAttribute('data-erplain-reread')){setBusy(true);renderPreview(await post('targeted-reread',{bcId:String(preview.document.id)}));note('BC relu. Vérifiez les données avant validation.');}
+  if(b.hasAttribute('data-erplain-reread')){setBusy(true);const r=await post('targeted-reread',{bcId:String(preview.document.id)});renderPreview(r);note(r.labelRecovery?.message||'BC relu. Vérifiez les données avant validation.',!!r.labelRecovery?.labelHolds?.length);if(r.labelRecovery){await loadRecovered();await orders();}}
   if(b.hasAttribute('data-erplain-approve')){
    setBusy(true);const r=await post('manual-review/approve',{bcId:String(preview.document.id),reviewHash:preview.reviewHash,confirmed:true});
    if(r.changed){renderPreview(r);note('Le BC a changé : une nouvelle validation est nécessaire.',true);}
-   else{preview={...preview,alreadyRecovered:true,orderId:r.orderId,archived:r.archived};renderPreview(preview);note(r.alreadyRecovered?'Commande déjà récupérée.':'Entrée dans V3 validée. La préparation reste à lancer.');page=1;await loadRecovered();await orders();}
+   else{preview={...preview,alreadyRecovered:true,orderId:r.orderId,archived:r.archived,labelRecovery:r.labelRecovery};renderPreview(preview);note(r.labelRecovery?.message||(r.alreadyRecovered?'Commande déjà récupérée.':'Entrée dans V3 validée. La préparation reste à lancer.'),!!r.labelRecovery?.labelHolds?.length);page=1;await loadRecovered();await orders();}
   }
  }catch(e){note(e.message,true);}finally{setBusy(false);if(preview?.admissionIssues?.length){const approve=panel.querySelector('[data-erplain-approve]');if(approve)approve.disabled=true;}}
 });

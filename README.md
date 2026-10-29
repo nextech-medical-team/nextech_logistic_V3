@@ -2,6 +2,12 @@
 
 Sources Node.js24 de l'application. `npm ci --ignore-scripts`, `npm run check` et `npm test` exécutent les contrôles isolés. Données, documents, étiquettes, coffres et identifiants de production sont exclus du dépôt.
 
+### Lots obligatoires à la création de tous les BL
+
+Avant la création d’un BL pour tous les gestionnaires, y compris Appels d’offres, V3 vérifie dans Erplain que chaque produit concerné utilise la gestion des lots et possède au moins un numéro de lot renseigné. Un lot absent, une gestion des lots désactivée ou une réponse API non vérifiable bloque la création et laisse la commande à vérifier. La création du BC seule ne dépend pas de cette condition. Pour un BL partiel, le contrôle porte sur les produits sélectionnés pour cette livraison. La vérification est refaite à chaque tentative de création ; après correction dans Erplain, relancer la préparation.
+
+Ce contrôle vérifie l’existence des lots, sans en créer ni modifier les documents déjà présents. La disponibilité des quantités et l’affectation FIFO restent contrôlées par le parcours de stock existant. Référence API : [Batch numbers — Queries](https://erplain.readme.io/reference/batches-queries).
+
 Après initialisation de l'exécuteur Section7, chaque push sur `main` déclenche tests puis publication automatique, sous contrôle de la file commune et du verrou serveur. Configuration et retour arrière : [deploy/README.md](deploy/README.md).
 
 La copie publique contient des sources épurées. Ne jamais écraser une différence privée ni les développements serveur concurrents. Ne pas connecter le développement aux services métier réels sans autorisation spécifique.

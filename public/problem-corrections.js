@@ -1179,6 +1179,7 @@ function renderResolution(ctx,problem){
 
 
   fields.innerHTML='<p class="resolution-diagnostic">'+esc(problem.detail||'Le motif détaillé n’a pas été enregistré.')+'</p>';
+  if(provider==='Erplain'&&ctx.order.pending_equivalent)button('Vérifier le remplacement interrompu',()=>{d.modal.close();openStockEquivalent(ctx,{type:'stock',sku:ctx.order.pending_equivalent.sku});});
 
 
 

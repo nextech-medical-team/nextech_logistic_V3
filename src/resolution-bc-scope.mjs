@@ -14,6 +14,7 @@ export function resolutionBcLines(order,bc){
   if(!identified(bl.id)||blIds.has(String(bl.id)))throw Error('Identité BL absente ou ambiguë');blIds.add(String(bl.id));
   for(const l of shippingProductLines(bl.line_items||[])){
    if(!identified(l.variant?.id))throw Error('Identité produit BL absente');
+   if(bl.status==='cancelled')continue;
    if(l.parent_id!=null&&(!identified(l.parent_id)||!lines.some(p=>String(p.id)===String(l.parent_id)&&String(p.variant.id)===String(l.variant.id))))throw Error('Lien BL et ligne BC non confirmé');
   }
  }

@@ -12,6 +12,14 @@ import {randomUUID,createHash} from 'node:crypto';
 export async function initializeTemuShipping(db){await db.exec(`CREATE TABLE IF NOT EXISTS temu_label_jobs(reference TEXT PRIMARY KEY,status TEXT NOT NULL,plan JSONB,attempt_id TEXT,packages JSONB NOT NULL DEFAULT '[]',result JSONB,error TEXT,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());CREATE TABLE IF NOT EXISTS temu_label_documents(reference TEXT REFERENCES temu_label_jobs(reference) ON DELETE CASCADE,package TEXT,pdf BYTEA,PRIMARY KEY(reference,package));`);if(db.recoverInterrupted!==false)await db.query("UPDATE temu_label_jobs SET status='uncertain',error='Achat interrompu : récupération obligatoire, aucun nouvel achat automatique' WHERE status='purchasing'");}
 export function canonicalTemuValue(value){if(Array.isArray(value))return value.map(canonicalTemuValue);if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonicalTemuValue(value[key])]));return value;}
 export const hash=v=>createHash('sha256').update(JSON.stringify(canonicalTemuValue(v))).digest('hex');
+// TEMU expects two decimal places for kg. Round upward without turning a
+// binary floating-point artefact (e.g. 6.72 * 1000) into extra precision.
+export function temuParcelWeight(value){
+ const weight=Number(value);
+ if(!Number.isFinite(weight)||weight<=0)throw Error('TEMU · Poids du colis invalide');
+ const hundredths=weight*100;
+ return (Math.ceil(hundredths-Number.EPSILON*Math.max(1,hundredths))/100).toFixed(2);
+}
 export async function readTemuShipments(api,reference,detail){
  if(detail?.parentOrderMap?.parentOrderSn!==reference||!detail.orderList?.length)throw Error('TEMU · Articles absents pour lire les expéditions');
  const orderSns=[...new Set(detail.orderList.map(l=>l.orderSn))];
@@ -66,7 +74,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
    const lines=(await db.query('SELECT * FROM lines WHERE order_id=$1 ORDER BY source_line,id',[excelOrder.id])).rows;if(!usesRecordedBc(excelOrder))verifiedExcelCommercial(excelOrder,lines);
    excelProof={order:excelOrder,lines};
   }
-  const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=fixedWeight??(excelOrder?'0.25':Number.isFinite(knownWeight)&&knownWeight>0.25?String(Math.ceil(knownWeight*1000)/1000):'0.25');
+  const knownWeight=Number(localOrders[0]?.weight_kg);const parcelWeight=temuParcelWeight(fixedWeight??(excelOrder?0.25:Number.isFinite(knownWeight)&&knownWeight>0.25?knownWeight:0.25));
   const detail=fresh.detail||await api.read('bg.order.detail.v2.get',{parentOrderSn:reference}),info=inspectTemu(detail,reference);
   if(excelProof)verifyExcelTemuDetail(excelProof.order,excelProof.lines,detail);
   const existing=fresh.shipments||await readTemuShipments(api,reference,detail);

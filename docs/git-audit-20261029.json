@@ -1,0 +1,355 @@
+{
+  "date": "2026-10-29",
+  "purpose": "Sauvegarde du code local sans publication en production",
+  "local_base": "e96c1012a88ebb695bfef70b3b5fe83671e1cb2e",
+  "remote_main": "6f000415be04ea4239e0c9bf5de009d649228f93",
+  "server_comparison": {
+    "status": "blocked",
+    "reason": "SSH authentication rejected for available local key; no server source inventory obtained"
+  },
+  "excluded": "Business exports, reports, private data and configuration; non-source deployment artifacts",
+  "files": [
+    {
+      "path": "README.md",
+      "identical_main": false,
+      "identical_remote_branches": [
+        "origin/fix/bl-batches-except-tender"
+      ]
+    },
+    {
+      "path": "public/app.js",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "public/compact-problems.js",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "public/erplain-refresh.js",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "public/improvements.js",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "public/partial.js",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "public/problem-corrections.js",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "scripts/run-tests.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/comments-2005.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/erplain-label-required.mjs",
+      "identical_main": false,
+      "identical_remote_branches": [
+        "origin/fix/recovered-bl-auto-deploy-20261026",
+        "origin/fix/recovered-bl-labels"
+      ]
+    },
+    {
+      "path": "src/erplain-live-workflow.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/erplain-refresh.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/historical-stock-proof.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/margins-service.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/order-page-details.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/parcel-pdf.mjs",
+      "identical_main": false,
+      "identical_remote_branches": [
+        "origin/fix/partial-label-count-20261028"
+      ]
+    },
+    {
+      "path": "src/partial-deliveries.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/partial-erplain-sync.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/resolution-bc-diagnostic.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/resolution-bc-scope.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/schema-startup.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/server.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/substitution-recovery.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/temu-equivalent-margin.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/temu-shipping.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/temu-excel-margins.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/ui/orders-responsive-stability.spec.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "scripts/build-temu-analysis.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "scripts/export-temu-catalogue.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "scripts/export-temu-equivalences-excel.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "scripts/finalize-temu-catalogue.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/bl-batch-required.mjs",
+      "identical_main": false,
+      "identical_remote_branches": [
+        "origin/fix/bl-batches-except-tender"
+      ]
+    },
+    {
+      "path": "src/existing-bl-label.mjs",
+      "identical_main": false,
+      "identical_remote_branches": [
+        "origin/fix/recovered-bl-auto-deploy-20261026",
+        "origin/fix/recovered-bl-labels"
+      ]
+    },
+    {
+      "path": "src/partial-extra-parcels.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/recovered-bl-label.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "src/recovered-erplain-routes.mjs",
+      "identical_main": false,
+      "identical_remote_branches": [
+        "origin/fix/recovered-bl-auto-deploy-20261026"
+      ]
+    },
+    {
+      "path": "test/cancelled-bl-parent-diagnostic.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/equivalent-margin-currency.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/existing-bl-label.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/export-temu-catalogue.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/finalize-temu-catalogue.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/historical-substitution-quota.test.mjs",
+      "identical_main": true,
+      "identical_remote_branches": [
+        "origin/HEAD",
+        "origin/codex/section7-temu-exclusive-20261028",
+        "origin/fix/annulation-bc-bl",
+        "origin/fix/appels-offres-gls-telephone",
+        "origin/fix/bl-batches-except-tender",
+        "origin/fix/certify-installed-deployment-finalization",
+        "origin/fix/incomplete-margins-shipped-20261026",
+        "origin/fix/partial-label-count-20261028",
+        "origin/fix/preserve-associated-bl-label-address",
+        "origin/fix/preserve-server-temu-margins",
+        "origin/fix/recovered-bl-auto-deploy-20261026",
+        "origin/fix/shopify-separate-document-addresses",
+        "origin/fix/temu-weight-erplain-recovery-20261026",
+        "origin/main"
+      ]
+    },
+    {
+      "path": "test/partial-extra-parcels.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/partial-parcel-migration.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": [
+        "origin/fix/partial-label-count-20261028"
+      ]
+    },
+    {
+      "path": "test/recovered-delivery-display.test.mjs",
+      "identical_main": true,
+      "identical_remote_branches": [
+        "origin/HEAD",
+        "origin/codex/carrier-marker-lock-order-20261019",
+        "origin/codex/group-recovered-erplain-deliveries",
+        "origin/codex/pr278-server-test-budget",
+        "origin/codex/section7-temu-exclusive-20261028",
+        "origin/codex/temu-message",
+        "origin/feat/import-temu-excel-multipays",
+        "origin/fix/annulation-bc-bl",
+        "origin/fix/appels-offres-gls-telephone",
+        "origin/fix/audit-carrier-deadlock-20261020",
+        "origin/fix/auto-bl-publication-20261019",
+        "origin/fix/auto-customer-reconcile-20261019",
+        "origin/fix/auto-deadlock-erplain-20261019",
+        "origin/fix/auto-incomplete-erplain-20261019",
+        "origin/fix/auto-missing-draft-20261019",
+        "origin/fix/auto-stock-recheck-20261019",
+        "origin/fix/auto-transient-erplain-20261019",
+        "origin/fix/bl-batches-except-tender",
+        "origin/fix/carrier-erplain-quota-recovery-20261021",
+        "origin/fix/certify-installed-deployment-finalization",
+        "origin/fix/closed-preparation-display",
+        "origin/fix/customer-confirmed-recovery",
+        "origin/fix/customer-refresh-action",
+        "origin/fix/deploy-private-repository-auth",
+        "origin/fix/deployment-compact-baseline",
+        "origin/fix/deployment-reconciliation-20261019",
+        "origin/fix/deployment-stock-diagnostic-reconciliation",
+        "origin/fix/deployment-test-timeout",
+        "origin/fix/disable-automatic-bl-tracking-status",
+        "origin/fix/erplain-quota-review-20261020",
+        "origin/fix/erplain-refresh-diagnostics",
+        "origin/fix/group-recovered-erplain-deliveries",
+        "origin/fix/import-connection-timeout",
+        "origin/fix/import-equivalences-stock-partage",
+        "origin/fix/incomplete-margins-shipped-20261026",
+        "origin/fix/missing-bc-recovery",
+        "origin/fix/partial-error-details-ci",
+        "origin/fix/partial-label-count-20261028",
+        "origin/fix/partial-parcel-count",
+        "origin/fix/partial-stock-reconciliation",
+        "origin/fix/preserve-associated-bl-label-address",
+        "origin/fix/preserve-native-bc-server-overlay",
+        "origin/fix/preserve-server-temu-margins",
+        "origin/fix/recovered-bl-auto-deploy-20261026",
+        "origin/fix/recovered-bl-labels",
+        "origin/fix/reprise-produit-prix-catalogue",
+        "origin/fix/shopify-separate-document-addresses",
+        "origin/fix/temu-equivalent-recovery-after-refresh",
+        "origin/fix/temu-refused-label-substitution",
+        "origin/fix/temu-weight-erplain-recovery-20261026",
+        "origin/fix/tender-batches-bl-only",
+        "origin/fix/tender-required-batch-numbers",
+        "origin/fix/tracking-sync-test-formatter",
+        "origin/main",
+        "origin/revert-284-codex/worker-dual-pool-capacity",
+        "origin/revert-285-codex/temu-message",
+        "origin/revert-287-revert-284-codex/worker-dual-pool-capacity"
+      ]
+    },
+    {
+      "path": "test/temu-weight-format.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/tender-batch-required.test.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/ui/recovered-auto-label.spec.mjs",
+      "identical_main": false,
+      "identical_remote_branches": []
+    },
+    {
+      "path": "test/ui/recovered-bl-label.spec.mjs",
+      "identical_main": false,
+      "identical_remote_branches": [
+        "origin/fix/recovered-bl-labels"
+      ]
+    }
+  ],
+  "validation": {
+    "syntax": "npm run check passed: 995 JavaScript files; changed-source syntax also passed in snapshot",
+    "full_suite": "npm test failed at test/carrier-schema-upgrade.test.mjs; standalone reproduction: relation extra_parcels does not exist in migration fixture",
+    "targeted_tests": "12 changed/new unit test files passed; UI browser tests not run",
+    "release_status": "Source backup only; not validated for deployment"
+  }
+}

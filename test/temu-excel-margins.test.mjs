@@ -48,3 +48,21 @@ test('identical seller amounts from API and Excel give the same margin through t
  assert.deepEqual(b.issues,[]);
  for(const key of ['status','profit','revenue','purchase','supplierShipping','shipping','credit','totalCosts','margin','markup'])assert.equal(a[key],b[key],key);
 });
+
+test('Excel equivalents keep validated original receipts without an API response or allocation to replacement lines',async()=>{
+ const {excelCommercialSource}=await import('../src/temu-excel-commercial.mjs');
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ const original=structuredClone(f.line);original.source_sku='ORIGINAL';
+ f.order.source_payload.temuExcelCommercial=excelCommercialSource(f.order,[original]);
+ f.order.erp_live={equivalentOriginalLines:[original]};
+ f.line.source_payload={origin:'erplain_live_equivalent'};
+ const row=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];
+ assert.deepEqual(row.issues,[]);assert.equal(row.status,'positive');
+ assert.equal(row.revenue,18);assert.equal(row.credit,2);assert.equal(row.purchase,12);assert.equal(row.profit,1);
+ assert.match(row.creditSource,/Excel/);assert.equal(row.lines[0].revenue,null);assert.equal(row.lines[0].profit,null);
+ for(const mutate of [x=>delete x.order.erp_live.equivalentOriginalLines,x=>x.order.erp_live.equivalentOriginalLines[0].source_payload.excel['Total du prix de base après réduction']='19 EUR']){
+  const old=structuredClone(f.order);mutate(f);
+  const bad=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];assert.equal(bad.status,'incomplete');assert.ok(bad.issues.some(x=>x.includes('Excel')));
+  Object.assign(f.order,old);
+ }
+});

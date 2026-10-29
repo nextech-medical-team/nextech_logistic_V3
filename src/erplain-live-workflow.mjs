@@ -1,3 +1,4 @@
+import {assertBlBatchNumbers} from './bl-batch-required.mjs';
 import {reconcileShippingOrderReads} from './erplain-shipping-reconciliation.mjs';
 import {restoreImportBcAmounts} from './import-bc-commercial.mjs';
 import {retirePostBcCommercialControls} from './post-bc-control-recovery.mjs';
@@ -69,6 +70,10 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
  const fail=async(o,e)=>{let message=stockFailureMessage(o,e.message);message=await stockCheckFailure(db,o,e,message);if(o.erp_live?.phase==='creating_stock'&&!/sortie non confirmée, aucune nouvelle déduction automatique/.test(message)){o.erp_live.stockLastFailure={at:new Date().toISOString(),message};await save(o);}e=new Error(await recordTransientFailure(db,o,message,e));await db.query("UPDATE erp_live_jobs SET status='review',error=$2,updated_at=now() WHERE order_id=$1",[o.id,e.message]);await db.query("UPDATE orders SET erp_status='live_review' WHERE id=$1",[o.id]);};
  async function batchMutation(orders,phase,field,type,operation,input,selection){
   if(!orders.length)return;
+  if(operation==='CreateShippingOrderFrom'){
+   for(const o of orders){try{await assertBlBatchNumbers(api,o,o.items);}catch(e){o.failed=true;await fail(o,e);}}
+   orders=orders.filter(o=>!o.failed);if(!orders.length)return;
+  }
   if(operation==='CreateOrder'){
    const snapshot=await api.request('query V3LiveCapacity { Orders(first:1){paginatorInfo{total}} }');
    const current=Number(snapshot.Orders?.paginatorInfo?.total);

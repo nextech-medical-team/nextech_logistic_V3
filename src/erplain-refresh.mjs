@@ -1,5 +1,6 @@
 import {usesRecordedBc} from './existing-bc-execution.mjs';
 import {targetedOrderService} from './erplain-targeted-orders.mjs';
+import {recoveredErplainRoute} from './recovered-erplain-routes.mjs';
 import {initializeManualReview,queueManualReview,manualReviewService} from './erplain-manual-validation.mjs';
 import {manualOrderFields,listManualOrders,manualImportIssue} from './manual-erplain-orders.mjs';
 import {shippingProductLines} from './erplain-shipping-lines.mjs';
@@ -169,11 +170,9 @@ export function erplainRefreshService(db,directory,{apiFactory=account=>erplainA
   permitted(user,['admin','manager','operator']);
   const manualReview=manualReviewService(db,apiFactory('live'));
   const targeted=targetedOrderService(db,apiFactory('live'));
-  if(p==='/api/erplain-refresh/targeted-lookup'&&req.method==='POST'){json(res,200,await targeted.lookup(await body(req)));return true;}
-  if(p==='/api/erplain-refresh/targeted-reread'&&req.method==='POST'){json(res,200,await targeted.reread(await body(req)));return true;}
+  if(await recoveredErplainRoute({p,url,req,res,user,body,json},{db,api:apiFactory('live'),targeted,manualReview}))return true;
   if(p==='/api/erplain-refresh/recovered-orders'&&req.method==='GET'){json(res,200,await targeted.list({search:url.searchParams.get('search')||'',page:url.searchParams.get('page')}));return true;}
   if(p==='/api/erplain-refresh/manual-review'&&req.method==='GET'){json(res,200,await manualReview.list());return true;}
-  if(p==='/api/erplain-refresh/manual-review/approve'&&req.method==='POST'){json(res,200,await manualReview.approve(await body(req),user));return true;}
   if(p==='/api/erplain-refresh/manual-review/reject'&&req.method==='POST'){json(res,200,await manualReview.reject(await body(req),user));return true;}
   if(p==='/api/erplain-refresh/manual-orders'&&req.method==='GET'){json(res,200,await listManualOrders(db,{account:url.searchParams.get('account')||'live',search:url.searchParams.get('search')||'',page:url.searchParams.get('page')}));return true;}
   if(p==='/api/erplain-refresh/status'&&req.method==='GET'){json(res,200,await status(url.searchParams.get('account')||'live'));return true;}
