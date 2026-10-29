@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {PGlite} from '@electric-sql/pglite';
 import {recoverDocumentsAndLabels,recoverOrderLabels} from '../src/recovered-bl-label.mjs';
 import {recoveredErplainRoute} from '../src/recovered-erplain-routes.mjs';
@@ -53,6 +53,10 @@ for(const [name,service] of [['standard',partialService],['preserved',preservedP
  const request={id:'o',blId:'102',requestId:randomUUID()};
  const results=await Promise.all([queueExistingBlLabel(db,api,request,{email:'operator'}),queueExistingBlLabel(db,api,{...request,requestId:randomUUID()},{email:'operator'})]);
  assert.equal(results[0].id,results[1].id);assert.equal(results[1].existing,true);
+ const legacySelection=[{lineId:String(line.id),variantId:String(blLine.variant.id),locationId:String(blLine.location.id),sku:blLine.variant.sku||line.variant.sku,quantity:Number(blLine.quantity),price:Number(blLine.price??line.price),ordered:Number(line.quantity),tracked:line.variant.track_inventory!==false}];
+ const originalShipment=existingBlShipment(order,bc,'102');
+ const legacyFingerprint=createHash('sha256').update(JSON.stringify({bcId:String(bc.id),blId:String(second.id),label:second.label,selection:legacySelection,address:originalShipment.address})).digest('hex');
+ await db.query("UPDATE partial_deliveries SET selection=$1,bl=jsonb_set(bl,'{labelRequest,fingerprint}',$2::jsonb)",[JSON.stringify(legacySelection),JSON.stringify(legacyFingerprint)]);
  // A later BC mapping change must not hold the already identified BL label.
  setDocument({...bc,line_items:[]});
  let creates=0,pdfReads=0;

@@ -22,6 +22,15 @@ export function existingBlShipment(o,bc,blId){
  return {bl,selection,address,fingerprint};
 }
 
+// Validate the saved shipment identity/destination with its original selection shape.
+// BC allocation changes and JSONB key ordering must not invalidate queued labels.
+export function matchesExistingBlRequest(o,d,shipment){
+ if(!d.bl?.labelRequest?.fingerprint||String(d.bl.id)!==String(shipment.bl.id)||d.bl.label!==shipment.bl.label||!Array.isArray(d.selection))return false;
+ const selection=d.selection.map(l=>({lineId:l.lineId,variantId:l.variantId,locationId:l.locationId,sku:l.sku,quantity:l.quantity,price:l.price,...(Object.hasOwn(l,'ordered')?{ordered:l.ordered}:{}),tracked:l.tracked}));
+ const expected=createHash('sha256').update(JSON.stringify({bcId:String(o.erp_live?.bc?.id),blId:String(d.bl.id),label:d.bl.label,selection,address:shipment.address})).digest('hex');
+ return expected===d.bl.labelRequest.fingerprint;
+}
+
 export async function readExistingBlShipment(db,api,o,blId){
  await assertDocumentIdle(db,o.id);
  await api.verify();return existingBlShipment(o,await readErplainDocuments(api,o.erp_live?.bc?.id),blId);
