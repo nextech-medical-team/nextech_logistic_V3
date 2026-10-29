@@ -1,3 +1,5 @@
+import {marginScenario,temuMarginScenario} from './temu-margin-comparison.mjs';
+import {calculatorServices} from './temu-calculator-services.mjs';
 import {preparedTemuMarginCost} from './post-bl-margin-cost.mjs';
 import {temuCommercialSource} from './temu-commercial-source.mjs';
 import {excelAmounts} from './temu-excel-commercial.mjs';
@@ -25,7 +27,7 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
    return {available:false,reason,source:{url:null,version:'indisponible',capturedAt:null},calculatedAt:new Date().toISOString(),rows:orders.map(o=>({...o,status:'incomplete',profit:null,markup:null,margin:null,issues:[reason],lines:[]}))};
   }};
  }
- const context=vm.createContext({window:{},Intl,console,countries:snapshot.countries,services:snapshot.services,transportGrids:snapshot.transportGrids,amazonRows:snapshot.amazon,rows:snapshot.temu,amazonEffective:r=>r,effective:r=>r,esc:s=>String(s??'')});
+ const context=vm.createContext({window:{},Intl,console,countries:snapshot.countries,services:calculatorServices(snapshot.services),transportGrids:snapshot.transportGrids,amazonRows:snapshot.amazon,rows:snapshot.temu,amazonEffective:r=>r,effective:r=>r,esc:s=>String(s??'')});
  context.window=context;
  for(const name of ['margin-math.js','amazon-calculation.js'])vm.runInContext(sources[name],context,{timeout:5000});
  context.AmazonCostRules=context.AmazonCalculation.create(snapshot.context);
@@ -80,7 +82,7 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
     if(included.some(l=>l.country!==country))return fail('Pays contradictoires pour l’estimation TEMU');
     const quote=context.transport(country,weight,{});
     if(!Number.isFinite(quote?.price)||quote.price<0)return fail('Tarif estimé TEMU indisponible dans le calculateur pour '+country+' / '+weight+' kg');
-    transportSource='Estimation TEMU · calculateur publié · '+country+' · '+quote.name+' · '+weight+' kg · '+quote.price.toLocaleString('fr-FR',{maximumFractionDigits:5})+' € HT (coût d’étiquette non rapproché)';
+    transportSource='Estimation TEMU · calculateur publié · '+country+' · '+quote.name+' · '+weight.toLocaleString('fr-FR',{maximumFractionDigits:3})+' kg · '+quote.price.toLocaleString('fr-FR',{maximumFractionDigits:5})+' € HT (coût d’étiquette non rapproché)';
     return quote.price;
    }
    if(!name)return fail(carrier?'Tarif du transporteur V3 indisponible : '+carrier:'Transporteur V3 à déterminer');
@@ -117,7 +119,27 @@ export async function createMarginsService(db,{confirmedAmazonIds=[],confirmedAm
   const missingFulfillment=o.channel==='amazon'&&raw.some(l=>!String(l['fulfillment-channel']||'').trim());
   r.issues=(r.issues||[]).map(message=>missingFulfillment&&message==='Coûts disponibles uniquement pour Amazon France expédié par le vendeur'?'Mode d’expédition Amazon absent du fichier : confirmer FBM ou FBA':message.startsWith('Coût de livraison HT manquant')?(transportIssue||'Livraison HT non calculable avec le profil disponible'):message);
   if(o.channel==='temu'){r.issues=[...new Set([...(r.issues||[]).map(m=>m==='Montant de vente absent ou invalide'?(o.source_payload?.temuAmountsError?.message||'TEMU · Prix de vente à récupérer par API'):m),...amountIssues])];if(r.issues.length)r.complete=false;}
-  output.push({id:o.id,reference:o.reference,channel:o.channel,status:r.complete?(r.profit<0?'negative':r.profit>0?'positive':'zero'):'incomplete',profit:r.profit??null,markup:r.markup??null,margin:r.marginTotalReceipts??null,revenue:r.revenue??null,credit:r.credit??null,totalReceipts:r.totalReceipts??null,purchase:r.purchase??null,supplierShipping:r.supplierShipping??null,shipping:r.shipping??null,fees:r.fees??null,other:r.other??null,totalCosts:r.totalCosts??null,shippingSource:r.shippingSource,creditSource:r.creditSource,issues:r.issues||[],warnings:r.warnings||[],lines:(r.lines||[]).map(l=>({sku:l.sku,product:l.product,quantity:l.q,profit:l.profit??null,revenue:l.revenue??null,purchase:l.purchase??null,shipping:l.shipping??null,fees:l.allocatedFees??null,issues:l.issues||[]}))});
+  let comparison;
+  if(o.channel==='temu'){
+   let calculatorSource=null;
+   const calculatorAdapter={...checkedAdapter,shipping(included,weight){
+    if(!included.length||!(weight>0)||!Number.isFinite(weight)||included.some(l=>l.country!==included[0].country))return null;
+    const quote=context.transport(included[0].country,weight,{});
+    if(!quote||!Number.isFinite(quote.price)||quote.price<0)return null;
+    calculatorSource='Calculateur publié · '+quote.name+' · '+weight.toLocaleString('fr-FR',{maximumFractionDigits:3})+' kg · '+quote.price.toLocaleString('fr-FR',{maximumFractionDigits:5})+' € HT';
+    return quote.price;
+   }};
+   let forecast;
+   try{forecast=context.marginEngine.analyze(raw,o.channel,calculatorAdapter,{},{}).orders[0];}
+   catch(e){forecast={complete:false,issues:['Estimation calculateur indisponible : '+e.message]};}
+   forecast=forecast||{complete:false,issues:['Aucune ligne à calculer']};
+   if(equivalentOrder){try{applyEquivalentReceipts(forecast,o.source_payload?.origin==='temu_excel'?excelEquivalentReceipts(o,sourceLines,snapshot.countries[o.address?.country]):equivalentReceipts(temuCommercialSource(o,temuCountryAmounts(o)),o.source_payload?.temuOrderDetail,o.reference,snapshot.countries[o.address?.country]));}catch(e){forecast.complete=false;forecast.issues=[...(forecast.issues||[]),e.message];}}
+   forecast.issues=[...new Set([...(forecast.issues||[]),...amountIssues])];
+   if(forecast.issues.length)forecast.complete=false;
+   forecast.shippingSource=calculatorSource;
+   comparison={calculatorMargin:marginScenario(forecast,{basis:'calculator',estimated:true}),temuMargin:temuMarginScenario(r,labelJobs.get(o.reference))};
+  }
+  output.push({id:o.id,reference:o.reference,channel:o.channel,status:r.complete?(r.profit<0?'negative':r.profit>0?'positive':'zero'):'incomplete',profit:r.profit??null,markup:r.markup??null,margin:r.marginTotalReceipts??null,revenue:r.revenue??null,credit:r.credit??null,totalReceipts:r.totalReceipts??null,purchase:r.purchase??null,supplierShipping:r.supplierShipping??null,shipping:r.shipping??null,fees:r.fees??null,other:r.other??null,totalCosts:r.totalCosts??null,shippingSource:r.shippingSource,creditSource:r.creditSource,issues:r.issues||[],warnings:r.warnings||[],...comparison,lines:(r.lines||[]).map(l=>({sku:l.sku,product:l.product,quantity:l.q,profit:l.profit??null,revenue:l.revenue??null,purchase:l.purchase??null,shipping:l.shipping??null,fees:l.allocatedFees??null,issues:l.issues||[]}))});
  }
  return {source:{url:snapshot.url,version:snapshot.version,capturedAt:snapshot.capturedAt},calculatedAt:new Date().toISOString(),rows:output};
  }

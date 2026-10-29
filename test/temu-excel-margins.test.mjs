@@ -125,3 +125,57 @@ test('equivalent Excel receipts reject edited source rows and use the published 
  assert.equal(totals.revenue,17.56/4);assert.equal(totals.credit,1.95/4);
  f.line.quantity=3;assert.throws(()=>excelEquivalentReceipts(f.order,[f.line],{c:'PLN',fx:4}),/modifiés/);
 });
+
+test('TEMU exposes a positive calculator forecast alongside a negative provider quote without changing purchase figures',async()=>{
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';f.job.plan={amount:12,currency:'EUR',expiresAt:Date.now()+600000};
+ const row=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];
+ assert.equal(row.status,'negative');assert.equal(row.profit,-4);assert.equal(row.shipping,10);
+ assert.equal(row.calculatorMargin.status,'positive');assert.equal(row.calculatorMargin.shipping,5);assert.equal(row.calculatorMargin.profit,1);
+ assert.equal(row.temuMargin.status,'negative');assert.equal(row.temuMargin.profit,-4);assert.equal(row.temuMargin.stale,false);
+ for(const field of ['revenue','credit','totalReceipts','purchase','supplierShipping','fees','other'])assert.equal(row.calculatorMargin[field],row.temuMargin[field],field);
+ assert.match(row.calculatorMargin.shippingSource,/Calculateur publié.*fixture/);assert.match(row.temuMargin.shippingSource,/Devis TEMU/);
+ const {automaticTemuMarginDecision}=await import('../src/temu-purchase-policy.mjs');
+ const plan={...f.job.plan,id:'p',selected:1,offers:[{channelId:1,shipCompanyName:'FedEx'}]};
+ assert.equal(automaticTemuMarginDecision({calculatedAt:new Date().toISOString(),rows:[row]},f.order.reference,plan).allowed,false);
+});
+test('expired quotes are identified as stale while purchased-label costs remain separate from the calculator',async()=>{
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';f.job.plan.expiresAt=1;
+ const service=await createMarginsService(f.db,f.options),stale=(await service.get({fresh:true})).rows[0];
+ assert.equal(stale.temuMargin.basis,'quote');assert.equal(stale.temuMargin.stale,true);assert.equal(stale.calculatorMargin.estimated,true);
+ f.job.result={packageInfoResultList:[{packageSn:'PK-1',estimatedAmount:3,estimatedCurrencyCode:'EUR',orderSendInfoList:[{parentOrderSn:f.order.reference}]}]};
+ const paid=(await service.get({fresh:true})).rows[0];assert.equal(paid.temuMargin.basis,'label');assert.equal(paid.temuMargin.stale,false);
+ assert.equal(paid.temuMargin.shipping,2.5);assert.equal(paid.calculatorMargin.shipping,5);assert.equal(paid.shipping,2.5);
+});
+test('a calculator tariff is never presented as a TEMU offer when the supplier has not quoted',async()=>{
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';delete f.job.plan;
+ const row=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];
+ assert.equal(row.calculatorMargin.status,'positive');assert.equal(row.temuMargin.basis,'unavailable');assert.equal(row.temuMargin.status,'incomplete');assert.equal(row.temuMargin.profit,null);assert.equal(row.temuMargin.shipping,null);
+});
+test('missing calculator tariffs do not invalidate a valid supplier margin',async()=>{
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';
+ f.options.snapshotLoader=async()=>({...structuredClone(snapshot),transportSource:'function transport(){return null;}'});
+ const row=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];
+ assert.equal(row.status,'positive');assert.equal(row.profit,1);assert.equal(row.temuMargin.profit,1);assert.equal(row.calculatorMargin.status,'incomplete');assert.equal(row.calculatorMargin.profit,null);
+});
+test('replacement products keep the same prepared costs and original receipts in both scenarios',async()=>{
+ const {excelCommercialSource}=await import('../src/temu-excel-commercial.mjs');
+ const f=fixture();f.line.source_payload.excel["Taxe d'expédition"]='0.40 EUR';f.order.source_payload.temuExcelCommercial=excelCommercialSource(f.order,[f.line]);
+ f.order.erp_live={bl:{id:'bl',status:'ready_to_ship'},equivalentOriginalLines:[structuredClone(f.line)]};f.line.source_payload.origin='erplain_live_equivalent';f.line.target_quantity=20;f.job.plan.amount=12;
+ const row=(await (await createMarginsService(f.db,f.options)).get({fresh:true})).rows[0];
+ assert.equal(row.calculatorMargin.purchase,60);assert.equal(row.temuMargin.purchase,60);assert.equal(row.calculatorMargin.totalReceipts,row.temuMargin.totalReceipts);
+ assert.equal(row.calculatorMargin.profit-row.temuMargin.profit,5);
+});
+
+test('old FedEx zones are updated to the calculator country rates without removing Chronopost or changing refreshed/custom rates',async()=>{
+ const {calculatorServices,publishedFedexRates20261022}=await import('../src/temu-calculator-services.mjs');
+ const original=[['Chronopost Warehouse Z2','IE DK ES IT',30,[[.25,5.2],[1,5.28]]],['FedEx Zone 2','DK IE',25,[[.01,5.5],[25,13.9]]],['FedEx Zone 3','GR',25,[[.01,6.05],[25,16.6]]]];
+ const before=JSON.stringify(original),upgraded=calculatorServices(original);
+ for(const [country,price] of Object.entries({IE:12.95,BE:6.34,DK:9.97,ES:5.49,GR:7.75,IT:7.04,NL:6.34})){
+  const service=upgraded.find(s=>s[0].startsWith('FedEx '+country+' '));assert.equal(service[3][0][1],price);assert.equal(service[2],25);assert.equal(publishedFedexRates20261022[country],price);
+ }
+ assert.equal(JSON.stringify(original),before);assert.deepEqual(upgraded[0],original[0]);assert.equal(upgraded.some(s=>/^FedEx Zone/.test(s[0])),false);
+ assert.deepEqual(calculatorServices(upgraded),upgraded);
+ const custom=[...original,['FedEx IE — tarif 30/10/2026','IE',25,[[.01,11],[25,11]]]];
+ assert.equal(calculatorServices(custom).filter(s=>s[0].startsWith('FedEx')&&s[1]==='IE').length,1);
+ assert.equal(calculatorServices(custom).find(s=>s[1]==='IE')[3][0][1],11);
+});
