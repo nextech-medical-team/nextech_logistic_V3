@@ -4,8 +4,40 @@
   "local_base": "e96c1012a88ebb695bfef70b3b5fe83671e1cb2e",
   "remote_main": "6f000415be04ea4239e0c9bf5de009d649228f93",
   "server_comparison": {
-    "status": "blocked",
-    "reason": "SSH authentication rejected for available local key; no server source inventory obtained"
+    "status": "completed_read_only",
+    "date": "2026-10-29",
+    "path": "/opt/nextech/current",
+    "resolved_path": "/opt/nextech/releases/live-preparation-20261006",
+    "baseline_commit": "affaec80ee60e45c9fbfa8012b6f4b5da6b147c6",
+    "main_commit": "6f000415be04ea4239e0c9bf5de009d649228f93",
+    "scope": "SHA-256 of src/public JavaScript sources and package manifests; no environment files, secrets or business data collected",
+    "server_files_compared": 437,
+    "identical_main": 381,
+    "different_or_absent_main": 56,
+    "absent_main": [
+      "src/bl-batch-required.mjs",
+      "src/existing-bl-label.mjs",
+      "src/native-bc-debit-recovery.mjs",
+      "src/partial-extra-parcels.mjs",
+      "src/pg-advisory-locks.mjs",
+      "src/recovered-bl-label.mjs",
+      "src/recovered-erplain-routes.mjs"
+    ],
+    "different_server_files_matching_remote_branch_tips": 22,
+    "different_server_files_without_matching_remote_branch_tip": 34,
+    "main_app_files_absent_server": [
+      "src/shopify-document-addresses.mjs"
+    ],
+    "identical_backup": 170,
+    "different_or_absent_backup": 267,
+    "batch_gate": {
+      "identical_backup": true,
+      "full_bl_call": "src/erplain-live-workflow.mjs:107",
+      "partial_bl_call": "src/partial-deliveries.mjs:100",
+      "rule": "All normal product lines require active batch tracking and at least one nonempty named Erplain batch; partial BL checks selected products"
+    },
+    "limitations": "File inventory is a point-in-time read, not a runtime business test. Matching remote branch tips does not search historical commits. No deployment, service restart or business mutation performed. Server-only differences require reconciliation before deployment.",
+    "details_file": "docs/server-git-comparison-20261029.json"
   },
   "excluded": "Business exports, reports, private data and configuration; non-source deployment artifacts",
   "files": [
