@@ -1,5 +1,5 @@
 import {usesNativeBlCycle,readNativeBlCycle} from './native-bl-policy.mjs';
-import {assertNoHistoricalStockRemoval,assertHistoricalLogIdentity} from './historical-stock-proof.mjs';
+import {assertNoHistoricalStockRemoval,readInheritedBlLedger} from './historical-stock-proof.mjs';
 
 const fail=reason=>{throw Error('BL historique brouillon : '+reason);};
 function quantities(rows,requireType=false){
@@ -14,22 +14,8 @@ function quantities(rows,requireType=false){
  return JSON.stringify([...totals].sort());
 }
 async function noBlMovement(api,bl){
- const created=String(bl.created_at||'');
- if(!/^\d{4}-\d{2}-\d{2}[ T]/.test(created)||!Number.isFinite(Date.parse(created.replace(' ','T'))))return fail('date non vérifiée');
- for(const variant of new Set(bl.line_items.filter(l=>l.type==='normal').map(l=>String(l.variant.id)))){
-  if(!/^\d+$/.test(variant))return fail('variante invalide');
-  let complete=false;const allLogs=[];
-  for(let page=1;page<=100;page++){
-   const {InventoryLogs:logs}=await api.request('query V3HistoricalDraftLedger($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id source order_type on_hand_diff available_diff location{id} variant{id} created_at} paginatorInfo{hasMorePages}}}',{page,where:{AND:[{column:'VARIANT_ID',operator:'EQ',value:variant},{column:'CREATED_AT',operator:'GTE',value:created.slice(0,10)+' 00:00:00'}]}});
-   if(!Array.isArray(logs?.data)||typeof logs.paginatorInfo?.hasMorePages!=='boolean')return fail('journal incomplet');
-   allLogs.push(...logs.data);
-   if(logs.data.some(l=>String(l.document_id)===String(bl.id)))return fail('mouvement de stock déjà présent, rapprochement requis');
-   if(!logs.paginatorInfo.hasMorePages){complete=true;break;}
-  }
-  if(!complete)return fail('journal trop volumineux');
-  const stamp=/(Z|[+-]\d{2}:\d{2})$/.test(created)?created:created.replace(' ','T')+'Z';
-  assertHistoricalLogIdentity(allLogs,variant,Date.parse(stamp));
- }
+ const evidence=await readInheritedBlLedger(api,bl);
+ if(evidence.some(pack=>pack.rows.length))return fail('mouvement de stock déjà présent, rapprochement requis');
 }
 
 // Called under the worker shipment lock. Erplain stock flags are immutable.

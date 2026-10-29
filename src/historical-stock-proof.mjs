@@ -149,7 +149,7 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
 
 // Erplain emits initial stock without a document and balanced pairs when
 // reallocating stock to lots. Neither may hide an unbalanced BC/BL movement.
-export function assertHistoricalLogIdentity(logs,variant,created){
+function assertHistoricalLogIdentity(logs,variant,created){
  const fail=()=>{throw Error('Journal de stock historique incomplet : mouvement non identifié');};
  const ids=new Set(),groups=new Map();
  for(const row of logs){
