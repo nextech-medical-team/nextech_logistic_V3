@@ -86,6 +86,7 @@ function sourceProductName(line){
 
 
 const resolutionViews={
+ batch:{title:'Lots de traçabilité Erplain',view:'batch'},
 
 
 
@@ -1102,6 +1103,10 @@ function renderResolution(ctx,problem){
 
 
 
+ }else if(spec.view==='batch'){
+  scope.textContent='Dans Erplain, activez la gestion des lots et enregistrez le numéro de lot réel sur le produit indiqué. Le type « avec numéros de lot » confirme l’activation ; un numéro doit aussi être enregistré. La reprise contrôle tous les produits de la commande avant de préparer le BL.';
+  if(problem.detail){const diagnostic=document.createElement('p');diagnostic.className='resolution-diagnostic';diagnostic.textContent=problem.detail;fields.append(diagnostic);}
+  button('Vérifier les lots et reprendre le BL',async()=>saved(await task('resume-erp')));
  }else if(spec.view==='stock'||spec.view==='bc'||spec.view==='historical'||spec.view==='erp-recovery'){
 
 

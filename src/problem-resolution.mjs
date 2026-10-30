@@ -75,8 +75,8 @@ const actionTypes={
  'accept-source-change':['platform'],
  'create-product':['mapping','missing'],'activate-product':['inactive'],
  'weight':['weight','weight-unit'],'address':['address','city'],
- 'relay':['relay','relay-search'],'compare-bc':['bc','stock','api-stock','historical-preparation','erplain-recovery'],'resume-erp':['stock','api-stock','historical-preparation','erplain-recovery'],'force-stock-label':['stock'],
- 'refresh':['customer','preparation','unknown','routing','stock','bc',...productTypes,'api-access','api-limit','api-server','api-timeout','api-network','api-stock','api-incomplete','api-http','uncertain','pdf'],
+ 'relay':['relay','relay-search'],'compare-bc':['bc','stock','api-stock','historical-preparation','erplain-recovery'],'resume-erp':['stock','api-stock','historical-preparation','erplain-recovery','batch'],'force-stock-label':['stock'],
+ 'refresh':['customer','preparation','unknown','routing','stock','bc',...productTypes,'api-access','api-limit','api-server','api-timeout','api-network','api-stock','api-incomplete','api-http','uncertain','pdf','batch'],
  'recover-pdf':['pdf','uncertain'],'resume':['resolved']
 };
 export async function initializeResolutions(db){await initializePriority(db);
