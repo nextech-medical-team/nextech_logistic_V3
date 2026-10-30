@@ -123,6 +123,11 @@ function hasCompleteOrderDocuments(order){
   (identified(order.erp_live?.bl)||(Array.isArray(order.erplain_tracking_bls)&&order.erplain_tracking_bls.some(identified)))&&
   (Number(order.document_count)>0||(Array.isArray(order.temu_documents)&&order.temu_documents.length>0));
 }
+function hasOrderBlForBatchDiagnosis(order){
+ if(order.partial_mode)return false;
+ const documents=[order.erp_live?.bl,...(Array.isArray(order.erplain_tracking_bls)?order.erplain_tracking_bls:[])];
+ return documents.some(bl=>String(bl?.id??'').trim()!==''&&!['cancelled','canceled'].includes(bl.status));
+}
 function compactProblems(order){
  if(isDeliveredOrder(order))return [];
  // Human instruction 2026-10-12: BC + BL + existing label closes blocking messages only.
@@ -130,7 +135,8 @@ function compactProblems(order){
  if(order.archived||order.suspension?.active===true||order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'||order.suspension?.erplainCancellation?.status==='complete')return [];
  const lines=order.sku_lines||[],out=[],family=order.carrier?.startsWith('gls')?'GLS':order.carrier==='gofo'?'GOFO':order.carrier==='temu'?'TEMU':'Erplain';
  const hiddenBcStockWait='En attente de stock : BC disponible, préparation du BL suspendue';
- const add=p=>{if(p.detail===hiddenBcStockWait)return;if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock','customer'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
+ const existingBl=hasOrderBlForBatchDiagnosis(order);
+ const add=p=>{if(existingBl&&p.type==='batch')return;if(p.detail===hiddenBcStockWait)return;if(order.erp_live?.phase==='historical_review'&&order.erp_live.bc?.id&&!order.erp_live.bl?.id&&p.detail==='BC · Prix, remises ou écotaxes des lignes Erplain différents de la source')p={...p,type:'historical-preparation'};const same=out.find(x=>x.sku===p.sku&&x.type===p.type&&x.provider===p.provider&&(x.detail===p.detail||['mapping','missing','inactive','duplicate','weight','weight-unit','stock','customer'].includes(p.type)));if(!same)out.push(p);else if(same.detail!==p.detail&&!same.detail.includes(p.detail)){if(p.detail.includes(same.detail))same.detail=p.detail;else same.detail+='\n'+p.detail;}};
  const pending=order.pending_equivalent;const pendingLine=pending&&lines.find(l=>[l.sku,l.mapped_sku,l.source_sku].includes(pending.sku));
  if(pendingLine&&pending.error){const p=compactProblem(pending.error,pending.replacementSku);p.detail='Remplacement prévu : '+pending.sku+' → '+pending.replacementSku+' · '+p.detail;add(p);}
  for(const l of lines){const sku=l.sku||l.mapped_sku||l.source_sku;if(l.catalog_issue)add(compactProblem(l.catalog_issue,sku));if(!['tender','samples','temu'].includes(order.channel)&&l.mapping_exists===false&&!l.sku)add(compactProblem('Mapping manquant',l.source_sku));}
