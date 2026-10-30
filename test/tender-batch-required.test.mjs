@@ -52,10 +52,10 @@ test('API failure blocks and a later attempt rereads Erplain',async()=>{
  fail=false;await assertTenderBatchNumbers(api,order,[line()]);
  await assertTenderBatchNumbers(api,order,[line()]);assert.equal(api.calls.length,4);
 });
-test('all channels require named batches before BL creation',async()=>{
- for(const channel of ['amazon','temu','shopify','samples','erplain','tender']){
-  const api=fixture();await assertTenderBatchNumbers(api,{channel},[line()]);assert.equal(api.calls.length,2);
-  await assert.rejects(()=>assertTenderBatchNumbers(fixture({tracked:false}),{channel},[line()]),/activer la gestion des lots/);
+test('every tender product requires named batches before BL creation',async()=>{
+ for(const o of [{channel:'tender'},...['Appel d’offres',"Appels d'offres",' APPELS D’OFFRES '].map(label=>({channel:'erplain',erp_live:{bc:{account_representative:{label}}}}))]){
+  const api=fixture();await assertTenderBatchNumbers(api,o,[line()]);assert.equal(api.calls.length,2);
+  await assert.rejects(()=>assertTenderBatchNumbers(fixture({tracked:false}),o,[line()]),/activer la gestion des lots/);
  }
 });
 test('missing products block; non-product lines do not require batches',async()=>{

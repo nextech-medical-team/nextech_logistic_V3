@@ -82,7 +82,7 @@ groups.push(['--test','test/carrier-erplain-quota.test.mjs']);
 groups.push(['--test','test/erplain-quota-completion.test.mjs']);
 groups.push(['--test','test/transient-resume-hold.test.mjs']);
 groups.unshift(['--test','test/test-groups.test.mjs']);
-groups.push(['--test','test/tender-batch-required.test.mjs']);
+groups.push(['--test','test/tender-batch-required.test.mjs','test/tender-product-lot-scope.test.mjs']);
 groups.push(['--test','test/temu-weight-format.test.mjs','test/historical-substitution-quota.test.mjs']);
 groups.push(['--test','test/tender-transport-default.test.mjs']);
 groups.push(['--test','test/native-bc-debit-recovery.test.mjs','test/shopify-document-addresses.test.mjs']);
