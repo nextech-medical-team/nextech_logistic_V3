@@ -88,6 +88,7 @@ function displayErrorMessage(error,provider='Erplain'){
  if(error?.code==='API_NETWORK_ERROR')return 'API '+apiName+' · Connexion impossible';
  if(error?.code==='API_READ_TIMEOUT')return 'API '+apiName+' · Délai dépassé';
  const status=Number(error?.httpStatus??error?.status);
+ if(status===400&&!/\bHTTP\s*400\b/i.test(raw))return displayErrorMessage(raw,apiName);
  const input=status>=400&&status<=599?'HTTP '+status+' · '+raw:raw;
  const problem=compactProblem(input,'',apiName);
  return problem.type==='unknown'?raw:problem.label;
