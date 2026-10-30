@@ -32,6 +32,6 @@ export async function resolveImportedLabelOrder(o,api=erplainAccount(process.env
  if(!validPhone&&erplainTransportChannel({source_payload:o.source_payload,erp_live:{bc}})!=='tender')throw Error('Erplain LIVE · Numéro de téléphone invalide : corriger avant création de l’étiquette');
  if(!/^[A-Z]{2}$/.test(country)||country==='FR'&&!/^\d{5}$/.test(postal))throw Error('Erplain LIVE · Pays ou code postal invalide');
  const result={...o,erp_live:{...o.erp_live,bc:{...o.erp_live.bc,account_representative:bc.account_representative}},erplain_label_customer:bc.customer,external_reference:clean(bc.external_reference),source_reference:clean(bc.external_reference),label_bl:clean(bl.label),label_bl_id:String(bl.id),source_payload:{...o.source_payload,referenceexterne:clean(bc.external_reference)},address:{...o.address,name:clean(a.label)||clean(bc.customer?.label),street:clean(a.address_1),street1:clean(a.address_1),street2:clean(a.address_2),postal,city:clean(a.city),country,phone}};
- if(erplainTransportChannel(result)==='tender'&&!['gls','gls_pharma'].includes(o.carrier))throw Error('Appels d’offres · GLS obligatoire : actualiser la préparation selon les règles transporteurs');
+ if(erplainTransportChannel(result)==='tender'&&(o.carrier!=='gls_pharma'||country!=='FR'))throw Error('Appels d’offres · GLS Pharma obligatoire : actualiser la préparation selon les règles transporteurs');
  return result;
 }

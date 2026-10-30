@@ -147,6 +147,35 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
  return {bcId:String(bc.id),stockOnBc:true,quantities:[...expected].map(([key,quantity])=>({key,quantity})),logIds:[...ids].sort()};
 }
 
+// Erplain emits initial stock without a document and balanced pairs when
+// reallocating stock to lots. Neither may hide an unbalanced BC/BL movement.
+function assertHistoricalLogIdentity(logs,variant,created){
+ const fail=()=>{throw Error('Journal de stock historique incomplet : mouvement non identifié');};
+ const ids=new Set(),groups=new Map();
+ for(const row of logs){
+  if(!row?.id||String(row.variant?.id)!==variant||ids.has(String(row.id)))fail();
+  ids.add(String(row.id));
+  if(row.document_id!=null&&String(row.document_id).trim()!==''&&row.order_type)continue;
+  const raw=String(row.created_at||'');
+  const date=Date.parse(/(Z|[+-]\d{2}:\d{2})$/.test(raw)?raw:raw.replace(' ','T')+'Z');
+  if(row.source!=='erplain'||row.document_id!=null||row.order_type!=null||!row.location?.id||
+   !/^\d{4}-\d{2}-\d{2}[ T]/.test(raw)||!Number.isFinite(date)||
+   typeof row.on_hand_diff!=='number'||!Number.isFinite(row.on_hand_diff)||row.on_hand_diff===0||
+   row.available_diff!==row.on_hand_diff)fail();
+  const key=String(row.location.id)+':'+date;
+  if(!groups.has(key))groups.set(key,[]);
+  groups.get(key).push(row);
+ }
+ for(const [key,rows] of groups){
+  const date=Number(key.slice(key.lastIndexOf(':')+1));
+  if(date<created&&rows.every(r=>r.on_hand_diff>0))continue;
+  // A lot reassignment is one consecutive, simultaneous reversal/reapplication.
+  // Missing counterparts, extra rows and any net debit remain blocked.
+  if(rows.length!==2||rows[0].on_hand_diff+rows[1].on_hand_diff!==0||
+   !rows.every(r=>Number.isSafeInteger(Number(r.id)))||Math.abs(Number(rows[0].id)-Number(rows[1].id))!==1)fail();
+ }
+}
+
 export async function readHistoricalStock(api,bc,{additionalVariants=[],bl=null,pendingBlScope=false,beforeBlPublication=false,allowPendingSiblings=false,reservationOnly=false}={}){
  const created=String(bc?.created_at||'');
  const stamp=/(Z|[+-]\d{2}:\d{2})$/.test(created)?created:created.replace(' ','T')+'Z';
@@ -156,18 +185,17 @@ export async function readHistoricalStock(api,bc,{additionalVariants=[],bl=null,
  const evidence=[];
  for(const variant of variants){
   if(!/^\d+$/.test(variant))throw Error('Variante historique invalide');
-  const rows=[],shipping=[];let complete=false;
+  const rows=[],shipping=[],allLogs=[];let complete=false;
   for(let page=1;page<=100;page++){
    const r=await api.request('query V3HistoricalStockLogs($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id source order_type on_hand_diff available_diff variant{id sku} location{id} created_at} paginatorInfo{hasMorePages}}}',{page,where:{AND:[{column:'VARIANT_ID',operator:'EQ',value:variant},{column:'CREATED_AT',operator:'GTE',value:since}]}});
    const logs=r.InventoryLogs;if(!Array.isArray(logs?.data)||typeof logs.paginatorInfo?.hasMorePages!=='boolean')throw Error('Journal de stock historique incomplet');
-   // Validate before filtering: an unidentified row may belong to this BC.
-   // A missing document/type must never be treated as an unrelated movement.
-   if(logs.data.some(l=>!l?.id||l.document_id==null||String(l.document_id).trim()===''||!l.order_type||String(l.variant?.id)!==variant))throw Error('Journal de stock historique incomplet : mouvement non identifié');
+   allLogs.push(...logs.data);
    rows.push(...logs.data.filter(l=>String(l.document_id)===String(bc.id)&&l.order_type==='Order'));
    shipping.push(...logs.data.filter(l=>l.order_type==='ShippingOrder'&&bc.shipping_orders.data.some(b=>String(b.id)===String(l.document_id))));
    if(!logs.paginatorInfo.hasMorePages){complete=true;break;}
   }
   if(!complete)throw Error('Journal de stock historique trop volumineux : contrôle requis');
+  assertHistoricalLogIdentity(allLogs,variant,Date.parse(stamp));
   evidence.push({bc:String(bc.id),variant,complete,order:rows,shipping,since});
  }
  const blEvidence=bl?.update_stock===true?await readInheritedBlLedger(api,bl):[];
@@ -235,14 +263,17 @@ export async function readInheritedBlLedger(api,bl){
  const evidence=[];
  for(const variant of new Set(bl.line_items.filter(l=>l.type==='normal').map(l=>String(l.variant.id)))){
   if(!/^\d+$/.test(variant))throw Error('Journal BL historique : variante invalide');
-  const rows=[];let complete=false;
+  const rows=[],allLogs=[];let complete=false;
   for(let page=1;page<=100;page++){
-   const {InventoryLogs:logs}=await api.request('query V3InheritedBlLedger($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id order_type on_hand_diff available_diff location{id} variant{id}} paginatorInfo{hasMorePages}}}',{page,where:{AND:[{column:'VARIANT_ID',operator:'EQ',value:variant},{column:'CREATED_AT',operator:'GTE',value:created.slice(0,10)+' 00:00:00'}]}});
-   if(!Array.isArray(logs?.data)||typeof logs.paginatorInfo?.hasMorePages!=='boolean'||logs.data.some(l=>!l?.id||l.document_id==null||String(l.document_id).trim()===''||!l.order_type||String(l.order_type).trim()===''||String(l.variant?.id)!==variant))throw Error('Journal BL historique incomplet');
+   const {InventoryLogs:logs}=await api.request('query V3InheritedBlLedger($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id source order_type on_hand_diff available_diff location{id} variant{id} created_at} paginatorInfo{hasMorePages}}}',{page,where:{AND:[{column:'VARIANT_ID',operator:'EQ',value:variant},{column:'CREATED_AT',operator:'GTE',value:created.slice(0,10)+' 00:00:00'}]}});
+   if(!Array.isArray(logs?.data)||typeof logs.paginatorInfo?.hasMorePages!=='boolean')throw Error('Journal BL historique incomplet');
+   allLogs.push(...logs.data);
    rows.push(...logs.data.filter(l=>String(l.document_id)===String(bl.id)&&l.order_type==='ShippingOrder'));
    if(!logs.paginatorInfo.hasMorePages){complete=true;break;}
   }
   if(!complete)throw Error('Journal BL historique trop volumineux');
+  const stamp=/(Z|[+-]\d{2}:\d{2})$/.test(created)?created:created.replace(' ','T')+'Z';
+  assertHistoricalLogIdentity(allLogs,variant,Date.parse(stamp));
   evidence.push({bl:String(bl.id),variant,complete,rows});
  }
  return evidence;
