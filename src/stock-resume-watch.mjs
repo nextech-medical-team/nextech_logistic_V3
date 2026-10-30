@@ -1,3 +1,4 @@
+import {reconcileNativeBcDebit} from './native-bc-debit-recovery.mjs';
 import {initializeGroupedStockWatch,groupedStockPass} from './grouped-stock-watch.mjs';
 import {groupedStockEnabled} from './erplain-efficiency-policy.mjs';
 import {usesNativeBlCycle,assertNativeBlOrder} from './native-bl-policy.mjs';
@@ -34,7 +35,18 @@ export function verifiedStock(snapshot,bcId,{native=false,preserveInstalled=fals
  if(!Array.isArray(snapshot.line_items)||!snapshot.line_items.some(l=>l.variant))throw Error('Lignes produit absentes');
  assertFullOrderStock(snapshot.line_items,{preserveInstalled});
 }
-const fields='id status update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id} paginatorInfo{hasMorePages}}';
+export async function verifiedStockForResume(api,snapshot,o){
+ try{return verifiedStock(snapshot,o.erp_live.bc.id,{native:usesNativeBlCycle(o),preserveInstalled:o.channel==='tender'});}
+ catch(error){if(!usesNativeBlCycle(o)||!/^BL bloqué [—-] stock insuffisant :/.test(error.message))throw error;
+ // A historical debit requires an identifiable document date. Missing
+ // metadata remains a normal shortage; do not turn it into a failed poll.
+ const created=snapshot?.created_at||o.erp_live?.bc?.created_at;
+ if(typeof created!=='string'||!/^\d{4}-\d{2}-\d{2}[ T]/.test(created)||!Number.isFinite(Date.parse(created)))throw error;
+ const candidate=structuredClone(o);candidate.items=snapshot.line_items;
+ if(!await reconcileNativeBcDebit(api,candidate,snapshot))throw error;
+ }
+}
+const fields='id status created_at update_stock line_items{type quantity reserved_quantity available on_hand location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id} paginatorInfo{hasMorePages}}';
 export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'source'),enabled=()=>true,grouped=groupedStockEnabled,observe=async()=>{},now=()=>Date.now()}={}){
  let running=false;
  async function record(id,problem,preserveInstalled=false){const error=typeof problem==='string'?problem:problem?.message||null,lock=isStockLockMessage(error),quota=problem?.httpStatus===429||problem?.erplainRequestNotSent===true,retrySeconds=preserveInstalled?null:quota?Math.max(2,Number(problem.retryAfter)||30):transientErpError(error)?30:null;await db.query(`INSERT INTO stock_resume_watch(order_id,checked_at,next_at,failures,outcome,last_error) VALUES($1,now(),now()+coalesce($5::double precision,300)*interval '1 second',$3,$4,$2) ON CONFLICT(order_id) DO UPDATE SET checked_at=now(),next_at=now()+CASE WHEN $5::double precision IS NOT NULL THEN $5::double precision*interval '1 second' ELSE make_interval(mins=>CASE WHEN $3=0 THEN 5 ELSE least(60,5*power(2,least(4,stock_resume_watch.failures))::int) END) END,failures=CASE WHEN $3=0 THEN 0 ELSE stock_resume_watch.failures+1 END,outcome=$4,last_error=$2`,[id,error||null,error&&!lock&&!/stock insuffisant/i.test(error)?1:0,lock?'waiting_reconciliation':error?'waiting':'queued',retrySeconds]);
@@ -58,7 +70,7 @@ export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'so
    if(grouped()){
     const pass=()=>groupedStockPass(db,api,{candidateSql:stockCandidateSql,allowed:candidateAllowed,fingerprint:o=>shipmentFingerprint(db,o),enabled,observe,now,enqueue,record,
      readOrder:async o=>{assertNativeBlOrder(o);await api.verify();return (await api.request('query V3StockResume($b0:ID!){b0:Order(id:$b0){'+fields+'}}',{b0:String(o.erp_live.bc.id)})).b0;},
-     verified:(snapshot,o)=>{assertNativeBlOrder(o);verifiedStock(snapshot,o.erp_live.bc.id,{native:true});}});
+     verified:async(snapshot,o)=>{assertNativeBlOrder(o);await verifiedStockForResume(api,snapshot,o);}});
     // The worker already owns the background leader and this instance's
     // running guard. Do not hold a pooled SQL connection across provider reads.
     // Admission itself rechecks/locks the live order in its short transaction.
@@ -76,7 +88,7 @@ export function stockResumeWorker(db,directory,{api=erplainAccount(directory,'so
     for(let i=0;i<batch.length;i++){const o=batch[i];try{
      if(!enabled())break;
      if(usesNativeBlCycle(o))assertNativeBlOrder(o);
-     verifiedStock(result['b'+i],o.erp_live.bc.id,{native:usesNativeBlCycle(o),preserveInstalled:o.channel==='tender'});
+     await verifiedStockForResume(api,result['b'+i],o);
      if(!usesNativeBlCycle(o))await assertStockResolved(db,result['b'+i].line_items.filter(l=>l.variant).map(l=>l.variant.id),{orderId:o.id});
      if(o.resolution_pending_resume&&o.stock_override.fingerprint!==fingerprints[i])throw Error('Préparation modifiée depuis l’étiquette forcée : validation manuelle requise');
      const queued=await enqueue(o,fingerprints[i]);await record(o.id,queued?null:'Commande modifiée ou déjà traitée : relecture différée',o.channel==='tender');

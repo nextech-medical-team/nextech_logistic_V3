@@ -1,3 +1,4 @@
+import {postgresAdvisoryLocks} from './pg-advisory-locks.mjs';
 import {orderLocalTransaction} from './order-local-transaction.mjs';
 import {installTemuParcelRule} from './temu-parcel-count.mjs';
 import {orderReadTransaction} from './order-read-transaction.mjs';
@@ -9,13 +10,15 @@ import { PGlite } from '@electric-sql/pglite';
 
 export async function openDatabase({directory, url} = {}) {
 
-  let engine, pool;
+  let engine, pool, lockPool;
 
   if (url) {
 
     const {Pool} = await import('pg');
 
     pool = new Pool({connectionString:url, max:10});
+
+    lockPool = new Pool({connectionString:url, max:4, connectionTimeoutMillis:10000});
 
     engine = {query:(...a)=>pool.query(...a), exec:s=>pool.query(s)};
 
@@ -50,21 +53,16 @@ export async function openDatabase({directory, url} = {}) {
 
   db.kind=pool?'postgres':'pglite';
   db.recoverInterrupted=true;
-  db.withLocks=async (keys,fn)=>{
-    if(!pool)return fn();
-    const c=await pool.connect(),held=[];
-    try{for(const key of [...new Set(keys)].sort()){await c.query("SELECT pg_advisory_lock(hashtextextended($1,0))",['nextech:'+key]);held.push(key);}return await fn();}
-    finally{for(const key of held.reverse())await c.query("SELECT pg_advisory_unlock(hashtextextended($1,0))",['nextech:'+key]).catch(()=>{});c.release();}
-  };
+  db.withLocks=pool?postgresAdvisoryLocks(lockPool):async(keys,fn)=>fn();
   db.acquireLeader=async()=>{
     if(!pool)return ()=>{};
-    const c=await pool.connect();
+    const c=await lockPool.connect();
     const ok=(await c.query("SELECT pg_try_advisory_lock(hashtextextended('nextech:background-leader',0)) AS ok")).rows[0].ok;
     if(!ok){c.release();throw Error('Un autre processus de traitement est déjà actif');}
     c.on('error',()=>{console.error('Connexion du responsable des traitements perdue : arrêt sécurisé');process.kill(process.pid,'SIGTERM');});
     return async()=>{await c.query("SELECT pg_advisory_unlock(hashtextextended('nextech:background-leader',0))").catch(()=>{});c.release();};
   };
-  db.close=()=>pool?pool.end():engine.close();
+  db.close=()=>pool?Promise.all([pool.end(),lockPool.end()]):engine.close();
 
   await db.withLocks(['schema'],async()=>{await db.exec('CREATE TABLE IF NOT EXISTS schema_migrations(version TEXT PRIMARY KEY,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())');if((await db.query("SELECT version FROM schema_migrations WHERE version='core-20261005-1'")).rows.length)return;await db.exec(`
 

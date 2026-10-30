@@ -59,7 +59,7 @@ export async function refreshPartialFromErplain(db,api,id,{document=null,identit
 
   if(d.stock_document?.id)stock=(await api.request('query V3RefreshPartialStock($id:ID!){StockRemoval(id:$id){id label status update_stock line_items{quantity variant{id} location{id}}}}',{id:String(d.stock_document.id)})).StockRemoval;
 
-  const update={...d,bl,status:cancelled?'cancelled':d.status==='cancelled'?'review':d.status,selection,stock_document:stock?{...d.stock_document,id:stock.id,label:stock.label,status:stock.status,update_stock:stock.update_stock}:d.stock_document};
+  const update={...d,bl:{...bl,...(d.bl.labelRequest?{labelRequest:d.bl.labelRequest}:{})},status:cancelled?'cancelled':d.status==='cancelled'?'review':d.status,selection,stock_document:stock?{...d.stock_document,id:stock.id,label:stock.label,status:stock.status,update_stock:stock.update_stock}:d.stock_document};
 
   let reconciliationError=null;
   if(!cancelled&&!d.stock_document){

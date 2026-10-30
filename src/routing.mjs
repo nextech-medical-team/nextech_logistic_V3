@@ -7,7 +7,7 @@ export const defaultRouting={maxParcelKg:30,shopifyServices:defaultShopifyServic
  {channel:'amazon',type:'threshold',threshold:3,below:'gofo',above:'gls'},
  {channel:'shopify',type:'threshold',threshold:3,below:'gofo',above:'gls'},
  {channel:'temu',type:'fixed',fixed:'temu'},
- {channel:'tender',type:'fixed',fixed:'gls'},
+ {channel:'tender',type:'fixed',fixed:'gls_pharma'},
  {channel:'samples',type:'fixed',fixed:'gls'},
  {channel:'relay',type:'fixed',fixed:'gls_shop'},
  {channel:'rakuten',type:'threshold',threshold:3,below:'gofo',above:'gls'}]};
@@ -23,6 +23,11 @@ export function validateRouting(c){
 export function configuredRoute(channel,weight,config=defaultRouting,country='FR'){
  if(channel==='temu')return {carrier:'temu',weight:0.25,parcels:1};
  if(Number.isFinite(weight)&&weight>0)weight=parcelWeightKg(weight);
+ if(channel==='tender'){
+  if(String(country).trim().toUpperCase()!=='FR')throw Error('Appels d’offres · GLS Pharma : pays hors France à vérifier avant préparation');
+  if(!Number.isFinite(weight)||weight<=0)throw Error('Poids produit Erplain manquant');
+  return {carrier:'gls_pharma',weight,parcels:Math.ceil(weight/config.maxParcelKg)};
+ }
  if(channel==='relay'){
   const rule=config.rules.find(r=>r.channel==='relay');
   if(rule?.type!=='fixed'||rule.fixed!=='gls_shop')throw Error('Relais · Règle fixe GLS ShopDelivery requise');
@@ -40,7 +45,7 @@ export function configuredRoute(channel,weight,config=defaultRouting,country='FR
 export async function loadRouting(db){
  const config=(await db.query("SELECT value FROM settings WHERE key='routing'")).rows[0]?.value||defaultRouting;
  // Upgrade the previous tender default without changing other routing rules.
- return {...config,rules:config.rules.map(r=>r.channel==='tender'&&r.type==='fixed'&&r.fixed==='gls_pharma'?{...r,fixed:'gls'}:r)};
+ return {...config,rules:config.rules.map(r=>r.channel==='tender'?{channel:'tender',type:'fixed',fixed:'gls_pharma'}:r)};
 }
 
 export function chosenRoute(order,weight,config=defaultRouting){
@@ -49,6 +54,7 @@ export function chosenRoute(order,weight,config=defaultRouting){
   return configuredRoute('temu',weight,config,order.address?.country);
  }
  const channel=erplainTransportChannel(order);
+ if(channel==='tender')return configuredRoute('tender',weight,config,order.address?.country);
  if(order.channel==='shopify'){
   const mode=configuredShopifyMode(order.source_payload,config);
   if(mode==='unknown')throw Error('Shopify · Mode de livraison à identifier avant préparation');

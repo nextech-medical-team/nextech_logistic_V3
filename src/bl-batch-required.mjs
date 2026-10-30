@@ -11,8 +11,10 @@ export async function assertBlBatchNumbers(api,order,lines){
   variants.set(id,line.variant?.sku||line.description||id);
  }
  if(!variants.size)throw Error(prefix+' : aucun produit à contrôler');
+ const failures=[];
  for(const [id,sku] of variants){
-  const fail=reason=>Error(prefix+' · '+sku+' : '+reason+' ; création BL bloquée');
+  try{
+  const fail=reason=>Error(prefix+' · '+sku+' : '+reason+' — création BL bloquée');
   const v=(await api.request('query V3BlBatchVariant($id:ID!){Variant(id:$id){id sku has_batch_numbers}}',{id})).Variant;
   if(String(v?.id)!==id||typeof v.has_batch_numbers!=='boolean')throw fail('traçabilité non vérifiable');
   if(!v.has_batch_numbers)throw fail('activer la gestion des lots et renseigner un numéro de lot dans Erplain');
@@ -26,5 +28,10 @@ export async function assertBlBatchNumbers(api,order,lines){
    if(!batches.data.length)throw fail('lecture des lots incomplète');
   }
   if(!found)throw fail('lecture des lots incomplète');
+  }catch(error){
+   const message=String(error?.message||error);
+   failures.push(message.startsWith(prefix+' · ')?message:prefix+' · '+sku+' : '+message+' — création BL bloquée');
+  }
  }
+ if(failures.length)throw Error(failures.join(' ; '));
 }

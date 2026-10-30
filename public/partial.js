@@ -141,3 +141,23 @@ document.addEventListener('click',async e=>{
  if(purchase&&!confirm('Acheter cette étiquette TEMU pour '+b.dataset.amount+' '+b.dataset.currency+' ?'))return;
  b.disabled=true;try{await api(purchase?'/api/partial/temu/buy':'/api/partial/temu/refresh',{id,...(purchase?{planId:b.dataset.planId,amount:Number(b.dataset.amount),confirmPurchase:true}:{})});if(partialDialog.open)await partialHistory(partialDialog.dataset.orderId);if(currentView==='shipments')await partialShipmentList();if(currentView==='orders')await orders();}catch(error){flash(error,true);}finally{b.disabled=false;}
 });
+
+const partialLabelDrafts=new Map(),partialLabelRows=new Map();
+function partialLabelTotal(d){return Math.max(d.documents||0,(d.tracking||[]).length)+(d.extra_parcels||[]).filter(p=>!['failed','cancelled'].includes(p.status)).length;}
+function partialExtraLabels(d){return (d.extra_parcels||[]).map(p=>p.status==='ready'?'<a class="pdf-link" href="/api/parcels/'+encodeURIComponent(p.id)+'/document" target="_blank" rel="noopener">▤ PDF PROD '+esc(p.parcel_index)+'/'+partialLabelTotal(d)+' ↗</a>':'<small>Colis '+esc(p.parcel_index)+' : '+esc(p.error||p.status)+'</small>').join('');}
+function partialLabelCountControl(d){
+ partialLabelRows.set(d.id,d);
+ if(d.status!=='ready'||d.environment!=='production'||!d.documents)return '';
+ const pending=(d.extra_parcels||[]).some(p=>!['ready','failed','cancelled'].includes(p.status));
+ return '<div data-partial-label-count="'+esc(d.id)+'"><span>'+partialLabelTotal(d)+' étiquettes</span> <button type="button" data-partial-count-edit '+(pending?'disabled':'')+'>Modifier le nombre d’étiquettes</button>'+(pending?'<small>Création en cours ou à vérifier</small>':'')+'</div>';
+}
+document.addEventListener('click',e=>{
+ const button=e.target.closest('[data-partial-count-edit]');if(!button||button.disabled)return;e.preventDefault();e.stopPropagation();
+ const host=button.closest('[data-partial-label-count]'),d=partialLabelRows.get(host.dataset.partialLabelCount);if(!d)return;
+ const current=partialLabelTotal(d);
+ inlineEditor2005(host,{value:current,type:'number',min:current,max:current+100,label:'Nombre total d’étiquettes pour le BL '+d.bl.label,save:async value=>{
+ const total=Number(value);if(!Number.isInteger(total)||total<current||total>current+100)throw Error('Saisir un total entre '+current+' et '+(current+100)+'. Les étiquettes existantes sont conservées.');if(total===current)return;
+ const key=d.id+':'+current+':'+total;if(!partialLabelDrafts.has(key))partialLabelDrafts.set(key,crypto.randomUUID());
+ await api('/api/partial/parcels/add',{deliveryId:d.id,expectedTotal:current,total,requestId:partialLabelDrafts.get(key)});flash((total-current)+' étiquette(s) complémentaire(s) en création pour '+d.bl.label);
+ }});
+});
