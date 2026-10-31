@@ -8,6 +8,8 @@ Avant la création d’un BC ou d’un BL du canal Appels d’offres, V3 vérifi
 
 Ce contrôle vérifie l’existence des lots, sans en créer ni modifier les documents déjà présents. La disponibilité des quantités et l’affectation FIFO restent contrôlées par le parcours de stock existant. Référence API : [Batch numbers — Queries](https://erplain.readme.io/reference/batches-queries).
 
+Exception BL demandée le 31 octobre 2026 : les SKU Erplain `2311859-02`, `2311860-02`, `2311858-02`, `2311861-02`, `27817-02`, `27818-02`, `27819-02`, `270123`, `271602`, `271603` et `2318021` sont dispensés du contrôle V3 de gestion et d’existence des lots avant création du BL. Les autres lignes de la commande restent contrôlées. Cette exception ne modifie pas les contrôles de stock, l’affectation FIFO ni les validations imposées par Erplain.
+
 Après initialisation de l'exécuteur Section7, chaque push sur `main` déclenche tests puis publication automatique, sous contrôle de la file commune et du verrou serveur. Configuration et retour arrière : [deploy/README.md](deploy/README.md).
 
 La copie publique contient des sources épurées. Ne jamais écraser une différence privée ni les développements serveur concurrents. Ne pas connecter le développement aux services métier réels sans autorisation spécifique.

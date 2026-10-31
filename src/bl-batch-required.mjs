@@ -1,6 +1,9 @@
 // Read-only creation gate. Stock availability and allocation are checked by
 // the stock workflow; this check never creates a batch or reserves stock.
 const marketplaceChannels=new Set(['amazon','temu','shopify']);
+// Explicit BL-only exceptions requested on 2026-10-31. Match the effective
+// Erplain SKU exactly; stock and Erplain document validation still apply.
+const batchExemptSkus=new Set(['2311859-02','2311860-02','2311858-02','2311861-02','27817-02','27818-02','27819-02','270123','271602','271603','2318021']);
 function tenderManager(label){
  const name=String(label??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
  return name==='appeldoffres'||name==='appelsdoffres';
@@ -39,11 +42,12 @@ export async function assertBlBatchNumbers(api,order,lines){
   if(line.type&&line.type!=='normal')continue;
   const id=String(line.variant?.id||'');
   if(!id)throw Error(prefix+' : produit non identifié');
-  variants.set(id,line.variant?.sku||line.description||id);
+  variants.set(id,{sku:line.variant?.sku||line.description||id,exempt:batchExemptSkus.has(String(line.variant?.sku??'').trim())});
  }
  if(!variants.size)throw Error(prefix+' : aucun produit à contrôler');
  const failures=[];
- for(const [id,sku] of variants){
+ for(const [id,{sku,exempt}] of variants){
+  if(exempt)continue;
   try{
   const fail=reason=>Error(prefix+' · '+sku+' : '+reason+' — création BL bloquée');
   if(!tender&&!await usedInTenderOrder(api,id))continue;
