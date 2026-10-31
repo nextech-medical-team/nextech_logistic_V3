@@ -6,6 +6,25 @@ import {assertTenderBatchNumbers} from '../src/tender-batch-required.mjs';
 const order={channel:'tender'};
 const line=(id='10')=>({variant:{id,sku:'SKU-'+id},quantity:2});
 const batch=(id='10')=>({id:'100',label:'LOT-2026',variant_id:id});
+const exemptSkus=['2311859-02','2311860-02','2311858-02','2311861-02','27817-02','27818-02','27819-02','270123','271602','271603','2318021'];
+test('explicit SKU exceptions bypass only the BL lot gate across supported channels',async()=>{
+ for(const channel of ['tender','amazon','temu','shopify']){
+  const api={async request(){throw Error('Exempt products must not request lots or tender history');}};
+  await assertTenderBatchNumbers(api,{channel},exemptSkus.map((sku,i)=>({variant:{id:String(i+1),sku},quantity:1})));
+ }
+});
+test('an exempt product does not exempt other lines or similar SKU names',async()=>{
+ for(const sku of ['OTHER','2311859-020','X2311859-02','2311859']){
+  const api=fixture({tracked:false});
+  await assert.rejects(()=>assertTenderBatchNumbers(api,order,[{variant:{id:'1',sku:'2311859-02'}},{variant:{id:'2',sku}}]),/activer la gestion des lots/);
+  assert.deepEqual(api.calls.map(c=>c.v.id),['2']);
+ }
+});
+test('description cannot grant an exemption and unidentified products still block',async()=>{
+ const api=fixture({tracked:false});
+ await assert.rejects(()=>assertTenderBatchNumbers(api,order,[{variant:{id:'2'},description:'2311859-02'}]),/activer la gestion des lots/);
+ await assert.rejects(()=>assertTenderBatchNumbers(api,order,[{variant:{sku:'2311859-02'}}]),/produit non identifié/);
+});
 function fixture({tracked=true,pages,variant}={}){
  const calls=[];
  return {calls,async request(q,v){
