@@ -1,3 +1,4 @@
+import {failedTemuGlsApproval} from './temu-failed-label-gls.mjs';
 import {recoverMissingBc} from './missing-bc-recovery.mjs';
 import {refreshErplainDocuments} from './erplain-documents-sync.mjs';
 import {checkedResumeBc} from './resume-bc-read.mjs';
@@ -246,6 +247,20 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
   }
   if(j.action==='manual-temu-pricing'){await stage('Enregistrement des prix et quantités');const result=await saveManualPricing(db,o.id,b,j.id);return {...result,manualPricing:true,erpOnly:true,checks:await recheckOrders(db,[o.id])};}
   if(j.action==='choose-carrier'){
+   let glsApproval=null;
+   if(o.channel==='temu'&&b.carrier==='gls'){
+    if(b.confirmReplace!==true)throw Error('Confirmer la création GLS après refus TEMU ; aucun remboursement TEMU automatique');
+    if(typeof refreshTemuDiagnostic!=='function')throw Error('Lecture TEMU indisponible : aucune création GLS');
+    await assertOrderEditable(o);
+    const existing=(await db.query('SELECT packages,status FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0];
+    assertTemuManualLabel(existing);
+    if((await db.query('SELECT 1 FROM carrier_documents WHERE order_id=$1 UNION ALL SELECT 1 FROM temu_label_documents WHERE reference=$2',[o.id,o.reference])).rows.length)throw Error('Étiquette déjà disponible : aucune nouvelle création GLS');
+    await stage('Vérification du refus TEMU avant choix GLS');
+    const diagnostic=await refreshTemuDiagnostic(o.reference);
+    const actor=(await db.query("SELECT user_email FROM audit WHERE action='resolution.requested' AND detail->>'id'=$1 ORDER BY id DESC LIMIT 1",[j.id])).rows[0]?.user_email;
+    glsApproval=failedTemuGlsApproval(o,diagnostic,existing?.packages,{actor,resolutionId:j.id});
+    o.source_payload={...o.source_payload,temuFailedLabelGlsApproval:glsApproval};
+   }
    assertManualLabelOrder(o,b.carrier,{manualChoice:true});
    await assertOrderEditable(o,true);
    const previous=(await db.query('SELECT status,carrier FROM carrier_jobs WHERE order_id=$1',[o.id])).rows[0];
@@ -257,9 +272,15 @@ export function resolutionService(db,directory,{api=erplainAccount(directory,'li
    }
    if(b.carrier==='gofo'&&String(o.address?.country).trim().toUpperCase()!=='FR')throw Error('GOFO : livraison en France uniquement ; choisir GLS pour ce pays');
    await stage('Enregistrement du transporteur pour cette commande');
-   await db.query('UPDATE orders SET transport_choice=$2 WHERE id=$1',[o.id,b.carrier]);
+   await db.query('UPDATE orders SET transport_choice=$2,source_payload=source_payload||$3::jsonb WHERE id=$1',[o.id,b.carrier,JSON.stringify(glsApproval?{temuFailedLabelGlsApproval:glsApproval}:{})]);
+   if(glsApproval)await db.query("INSERT INTO audit(user_email,action,detail) VALUES($1,'temu.failed_label_gls_approved',$2)",[glsApproval.actor,JSON.stringify(glsApproval)]);
    const fresh=(await db.query('SELECT * FROM orders WHERE id=$1',[o.id])).rows[0];
    await db.transaction(async tx=>{await tx.query('UPDATE orders SET resolution_pending_resume=true WHERE id=$1',[o.id]);await prepareLabel(tx,fresh);});
+   if(glsApproval){
+    const queued=await regenerateProductionLabels(db,{ids:[o.id],batchId:'failed-temu-gls-'+j.id,manualRequest:true});
+    if(queued.skipped.length)throw Error(queued.skipped[0].reason);
+    await update(j.id,'waiting','Création GLS après refus TEMU',{pdfOnly:true,labelRequested:true});return null;
+   }
    return {regenerateExisting:previous?.status==='ready',message:'Choix '+b.carrier.toUpperCase()+' enregistré pour cette commande. Les règles partagées restent inchangées.',checks:[{id:o.id,prepared:true}]};
   }
   if(j.action==='accept-source-change')return {...await acceptMarketplaceChange(db,o.id,'system'),checks:await recheckOrders(db,[o.id])};
