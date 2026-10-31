@@ -50,7 +50,7 @@ export async function loadRouting(db){
 
 export function chosenRoute(order,weight,config=defaultRouting){
  if(order.channel==='temu'){
-  if(order.transport_choice)assertDirectCarrierAllowed(order,order.transport_choice);
+  if(order.transport_choice){assertDirectCarrierAllowed(order,order.transport_choice);return configuredRoute('manual',weight,{...config,rules:[{channel:'manual',type:'fixed',fixed:order.transport_choice}]},order.address?.country);}
   return configuredRoute('temu',weight,config,order.address?.country);
  }
  const channel=erplainTransportChannel(order);
