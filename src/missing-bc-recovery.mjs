@@ -1,3 +1,4 @@
+import {assertHistoricalLogIdentity} from './historical-stock-proof.mjs';
 import {isDeepStrictEqual} from 'node:util';
 import {recoverOrder,technicalMarker,externalReference} from './erplain-document-metadata.mjs';
 import {erplainCustomerInput} from './erplain-customer-input.mjs';
@@ -35,7 +36,10 @@ async function pages(api,query,key,variables,inspect,stage){
 // preparation worker creates the replacement after revalidating source and stock.
 export async function recoverMissingBc(db,api,o,{bcId,reference,confirmed,resolutionId,stage=async()=>{}}={}){
  if(confirmed!==true||reference!==o.reference||!resolutionId)throw Error('Confirmation de la commande et du BC absent requise');
- scope(o,bcId);await idle(db,o.id,resolutionId);await api.verify();
+ scope(o,bcId);await idle(db,o.id,resolutionId);
+ const products=o.erp_live.bc.line_items?.filter(l=>l.type==='normal');
+ if(!products?.length||products.some(l=>!/^\d+$/.test(String(l.variant?.id))))throw Error('BC absent : produits historiques non confirmés');
+ const ledgerVariants=products.map(l=>String(l.variant.id));await api.verify();
  const originalApi=api;api={request:async(...args)=>{const result=await originalApi.request(...args);if(result?._v3Errors?.length)throw Error('BC absent : réponse API partielle, aucune reprise');return result;}};
  const read=()=>api.request('query V3MissingBcIdentity($id:ID!){Order(id:$id){id label status external_reference}}',{id:bcId});
  const absent=r=>{if(r?._v3Errors?.length||r?.Order!==null)throw Error('BC encore présent ou réponse incomplète : aucune recréation autorisée');};
@@ -52,10 +56,12 @@ export async function recoverMissingBc(db,api,o,{bcId,reference,confirmed,resolu
  for(const label of ['V3FS-'+o.id,'V3FS-'+o.id+'-BC'+bcId])await pages(api,'query V3MissingBcStock($where:QueryStockRemovalsWhereWhereConditions!,$page:Int!){StockRemovals(first:100,page:$page,where:$where){data{id} paginatorInfo{hasMorePages}}}','StockRemovals',{where:{column:'LABEL',operator:'EQ',value:label}},()=>{throw Error('BC absent : sortie de stock existante, rapprochement requis');},stage);
  // These non-imported drafts were created by V3 after the order was received.
  const since=new Date(Math.min(Date.parse(o.received_at),Date.parse(o.erp_live.bc.created_at)||Infinity)-86400000).toISOString().slice(0,10)+' 00:00:00';
- const ledgerCount=await pages(api,'query V3MissingBcLedger($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id order_type} paginatorInfo{hasMorePages}}}','InventoryLogs',{where:{column:'CREATED_AT',operator:'GTE',value:since}},row=>{
-  if(row.document_id==null||!row.order_type)throw Error('BC absent : journal stock incomplet');
+ const ledgerRows=[];
+ const ledgerCount=await pages(api,'query V3MissingBcLedger($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id source order_type on_hand_diff available_diff variant{id} location{id} created_at} paginatorInfo{hasMorePages}}}','InventoryLogs',{where:{column:'CREATED_AT',operator:'GTE',value:since}},row=>{
   if(String(row.document_id)===bcId&&row.order_type==='Order')throw Error('BC absent : mouvement ou réservation du BC retrouvé, rapprochement requis');
+  ledgerRows.push(row);
  },stage);
+ assertMissingBcLedger(ledgerRows,bcId,ledgerVariants);
  // Repeat identity reads after the potentially long paginated history scan.
  absent(await read());if(await recoverOrder(api,o,{db}))throw Error('BC réapparu pendant la vérification : actualiser la commande');
  return db.transaction(async tx=>{
@@ -69,4 +75,24 @@ export async function recoverMissingBc(db,api,o,{bcId,reference,confirmed,resolu
   await tx.query("INSERT INTO audit(user_email,action,detail) VALUES('system','erplain.missing_bc_retry_authorized',$1)",[JSON.stringify({orderId:o.id,...recovery,externalWrites:0,labelsPreserved:true})]);
   return {erpOnly:true,existingLabelsPreserved:true,message:'Ancien BC absent et contrôles terminés. Reprise de la préparation avec conservation de l’étiquette existante.',missingBcRecovery:{oldBcId:bcId,resolutionId}};
  });
+}
+
+export function assertMissingBcLedger(rows,bcId,variantIds=null){
+ if(variantIds!==null&&(!Array.isArray(variantIds)||!variantIds.length||variantIds.some(id=>!/^\d+$/.test(String(id)))))throw Error('BC absent : produits historiques non confirmés');
+ const unlinked=new Map();
+ for(const row of rows){
+  if(String(row.document_id)===bcId&&row.order_type==='Order')throw Error('BC absent : mouvement ou réservation du BC retrouvé, rapprochement requis');
+  if(row.document_id!=null&&row.order_type)continue;
+  if(!row.variant?.id)throw Error('BC absent : journal stock incomplet');
+  const id=String(row.variant.id);
+  // Keep checking every explicitly linked BC movement, irrespective of SKU.
+  // Unlinked movements of products absent from this draft are unrelated.
+  if(variantIds!==null&&!variantIds.map(String).includes(id))continue;
+  if(!unlinked.has(id))unlinked.set(id,[]);
+  unlinked.get(id).push(row);
+ }
+ // A standalone positive receipt cannot debit or reserve the missing BC.
+ // Neutral lot transfers are verified in full, including one-second pairs.
+ // Unpaired negative movements and partially identified documents still block.
+ for(const [id,logs] of unlinked)assertHistoricalLogIdentity(logs,id,Infinity);
 }

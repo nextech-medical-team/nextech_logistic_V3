@@ -1,3 +1,4 @@
+import {readParentAllocatedLots} from './partial-parent-lots.mjs';
 import {readExistingBlShipment,matchesExistingBlRequest} from './existing-bl-label.mjs';
 import {assertBlBatchNumbers} from './bl-batch-required.mjs';
 import {validatePartialStock,partialStockNumeric} from './partial-stock-validation.mjs';
@@ -91,7 +92,7 @@ export function partialService(db,directory,{api=erplainAccount(directory,'live'
  await save(d,'creating_bl');const result=await api.request('mutation V3CreatePartialDraft($input:ShippingOrderFromInput!){CreateShippingOrderFrom(input:$input){id label status update_stock line_items{id quantity parent_id variant{id}} orders(first:10){data{id}}}}',{input:{Order:[String(o.erp_live.bc.id)]}});
  const b=result.CreateShippingOrderFrom;if(!b?.id)throw new Error('BL partiel non confirmé');await save(d,'draft_ready',{bl:b});
  if(b.status!=='unpublished'||b.update_stock!==s.bc.update_stock)throw new Error('BL brouillon avec politique de stock inattendue : ne pas publier');
- const fifo=s.bc.update_stock?await prepareFifoStockLines(api,chosen.map(l=>({variant:{id:l.variantId},location:{id:l.locationId},quantity:l.quantity}))):null;
+ const fifo=s.bc.update_stock?await readParentAllocatedLots(api,s.bc.id,chosen,{excludeBlId:b.id}):null;
  const selected=chosen.map((l,index)=>{const matches=b.line_items.filter(x=>String(x.parent_id)===l.lineId&&String(x.variant.id)===l.variantId);if(matches.length!==1)throw new Error('Ligne BL introuvable ou ambiguë : '+l.sku);return {id:String(matches[0].id),parent_id:Number(l.lineId),variant:{id:l.variantId},location:{id:l.locationId},customer:{id:String(s.bc.customer.id)},quantity:l.quantity,price:l.price,...(fifo?.[index].batch_numbers?{batch_numbers:fifo[index].batch_numbers}:{})};});
  const edited=await api.request('mutation V3SelectPartialLines($id:ID!,$input:ShippingOrderInput!){UpdateShippingOrder(id:$id,input:$input){id label status update_stock line_items{id quantity parent_id variant{id} location{id} batch_numbers{quantity batch_number{id}}} orders(first:10){data{id}}}}',{id:String(b.id),input:{label:'V3P-'+d.id,status:'unpublished',...(blOnly?{external_reference:s.bc.external_reference||o.reference}:await metadata(o,directory)),notes:partialDocumentNotes(o),line_items:selected}});
  const check=edited.UpdateShippingOrder;await save(d,'draft_ready',{bl:check});

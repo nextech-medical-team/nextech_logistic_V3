@@ -4,7 +4,7 @@ import {catalogProblemSql,pendingEquivalentProblemSql,persistedRecheckProblemSql
 import {awaitingPurchaseSql,currentReasonSql,currentReasonEmptySql} from './current-order-diagnostics.mjs';
 import {partiallyAllocatedSql} from './partial-allocation.mjs';
 import {searchTerms} from './group-search.mjs';
-import {managerSql} from './account-manager.mjs';
+import {managerSql,managerChannelSql} from './account-manager.mjs';
 // Sort by the source date displayed in the order table, never by import time.
 // Use a calendar-day key: ISO and French imports can coexist without unsafe casts.
 export const orderDateSql=`CASE
@@ -55,7 +55,7 @@ export function orderQuery(params,orderIds=null){
    const ordinary=values.filter(v=>!v.startsWith('amazon_')&&!v.startsWith('shopify_')),amazon=values.filter(v=>['amazon_standard','amazon_prime','amazon_priority','shopify_boutique','shopify_relay'].includes(v)),clauses=[];
    // Erplain AOs belong to the displayed tender manager, not the broad Erplain bucket.
    // Keep this read-only classification shared by lists, counts and filtered exports.
-   const managerChannel="CASE WHEN orders.channel='erplain' AND regexp_replace(lower(coalesce(orders.erp_live->'bc'->'account_representative'->>'label','')),'[^a-z]','','g') IN ('appelsdoffres','appeldoffres') THEN 'tender' ELSE orders.channel END";
+   const managerChannel=managerChannelSql;
    if(ordinary.length){args.push(ordinary);clauses.push('('+managerChannel+')=ANY($'+args.length+'::text[])');}
    if(amazon.length){args.push(amazon);clauses.push('('+managerSql+')=ANY($'+args.length+'::text[])');}
    if(clauses.length)parts.push('('+clauses.join(' OR ')+')');else parts.push('false');

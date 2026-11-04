@@ -11,7 +11,15 @@ export function tenderGlsAddress(o){const s=o.source_payload||{},a=o.address||{}
  // Preserve an extension as printed contact text, never invent a dialable number.
  if(street.length>40||reference.length>40)throw Error('Appels d’offres · Adresse 1 ou référence externe dépasse 40 caractères GLS : vérifier avant création');
  const total=Number(o.parcel_total||o.parcel_count||1),suffix=total>1?' ('+Number(o.parcel_index||1)+'/'+total+')':'',destination=[delivery,clean(a.street2||s.adressedelivraisonadresse2)].filter(Boolean).join(' ')+suffix;
- let names;try{names=[...wrapNames(client,35,Infinity),...wrapNames(destination,35,Infinity)];if(names.length>3)names=wrapNames(client+' '+destination);}catch{names=wrapNames(client+' '+destination,40);}
+ let names;try{names=[...wrapNames(client,35,Infinity),...wrapNames(destination,35,Infinity)];if(names.length>3)names=wrapNames(client+' '+destination);}catch{
+  try{names=wrapNames(client+' '+destination,40);}
+  catch{
+   // Abbreviate only explicit legal-name terms when the complete layout exceeds
+   // GLS capacity. Delivery name, address, parcel suffix and country stay intact.
+   const compactClient=client.replace(/\bETABLISSEMENTS\b/gi,'ETAB.').replace(/\bSANITAIRES\b/gi,'SAN.').replace(/\bMEDICO-SOCIAUX\b/gi,'MED.-SOC.').replace(/\bPHARMACIE\b/gi,'PHARM.');
+   names=wrapNames(compactClient+' '+destination,40);
+  }
+ }
  // Keep established layouts when they fit. Pack the same complete text only
  // when separate wrapping wastes a fourth line; never truncate any name.
  const frenchMobile=/^(?:0[67]|\+33[67]|0033[67])/.test(phone);return {Name1:names[0],Name2:names[1]||'',Name3:names[2]||'',Street:street,ZIPCode:postal,...(phone?{ContactPerson:'Tél : '+phone}:{}),...(phoneValid?(frenchMobile?{MobilePhoneNumber:phone}:{FixedLinePhonenumber:phone}):{})};

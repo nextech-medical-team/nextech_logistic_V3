@@ -1,7 +1,7 @@
 Object.assign(labels,{erplain:'Erplain LIVE',live_created:'BC et BL vérifiés dans LIVE',live_review:'Erplain LIVE à contrôler'});
 function multi(id){const el=$(id);el.multiple=true;el.size=3;el.title='Plusieurs choix possibles (Ctrl + clic). Aucun choix = tous.';for(const o of [...el.options])if(!o.value)o.remove();el.selectedIndex=-1;}
 for(const id of ['channel','status'])multi(id);
-$('channel').append(new Option('Erplain LIVE','erplain'));
+// Account-manager filters use the real BC representative; Erplain is the import source.
 const amazonOption=$('channel').querySelector('option[value="amazon"]');if(amazonOption){amazonOption.textContent='Amazon · Tous';for(const [value,label] of [['amazon_standard','Amazon Standard'],['amazon_prime','Amazon Prime'],['amazon_priority','Amazon Priority']])amazonOption.before(new Option(label,value));}
 const filters=document.querySelector('#view-orders .filters');
 filters.insertAdjacentHTML('beforeend',`<label>Transporteurs<select multiple size="3" id="carrier">${['gofo','gls','gls_pharma','gls_shop','temu'].map(c=>`<option value="${c}">${c}</option>`).join('')}</select></label><label>Pays<select multiple size="3" id="country">${['FR','BE','DE','ES','IT','CH','GB','NL','PT','AT','LU','IE','PL','SE','DK','FI','CZ','SK','SI','HR','HU','RO','BG','GR','CY','LT','LV','EE'].map(c=>`<option value="${c}">${c}</option>`).join('')}</select></label><label>Suivi<select multiple size="3" id="tracking-filter"><option value="not_shipped">Non expédiée</option><option value="delivered_simulated">Livraison simulée</option></select></label><label>Reçue depuis<input type="date" id="from"></label><label>Jusqu’au<input type="date" id="to"></label><button id="clear-filters">Effacer les filtres</button>`);
