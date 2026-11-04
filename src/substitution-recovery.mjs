@@ -35,7 +35,7 @@ export function recordedSubstitutionPlan(bc,b,failed,preview,order={},historical
   // Only a fresh, exact commercial snapshot AND a reconciled stock ledger
   // permit a new preview. Applying it still requires its new fingerprint and
   // explicit confirmation; an already applied replacement uses recovery below.
-  if(failed.error==='Remplacement historique à rapprocher : Erplain HTTP 429'&&commercialSnapshot(plan.commercialBefore)===commercialSnapshot(bc))return null;
+  if((failed.error==='Remplacement historique à rapprocher : Erplain HTTP 429'||failed.error.startsWith('Remplacement historique à rapprocher : Batch numbers have not been defined for all line items in this document.'))&&commercialSnapshot(plan.commercialBefore)===commercialSnapshot(bc))return null;
  }
  if(b.scope!=='order'||String(plan.bcId)!==String(bc?.id)||bc.update_stock!==(historical?true:false)||!['active','pending','unpublished'].includes(bc.status)||!Array.isArray(bc.shipping_orders?.data)||bc.shipping_orders.data.length&&!partial||!Array.isArray(lines)||!Array.isArray(plan.items)||!Array.isArray(plan.expected))return blocked();
  if(lines.some(l=>!['normal','shipping_cost'].includes(l.type)||!l.id)||new Set(lines.map(l=>String(l.id))).size!==lines.length||lines.length!==plan.items.length)return blocked();
@@ -81,8 +81,15 @@ export async function findRecordedSubstitution(db,o,b,bc,api){
  const partial=String(failed?.error||'').startsWith('Remplacement partiel à rapprocher : ');
  if(failed?.status==='review'&&(historical||partial||failed.error==='Frais de livraison modifiés : rapprochement requis')&&!sameRequest(failed.payload,b))throw Error('Rapprocher d’abord le remplacement déjà demandé sur ce BC, avant de choisir un autre produit.');
  if(failed?.status!=='review'||!sameRequest(failed.payload,b))return null;
- const preview=(await db.query("SELECT payload,status,result FROM resolution_jobs WHERE order_id=$1 AND action='equivalent-preview' AND status='complete' AND result->>'previewFingerprint'=$2 AND created_at<=$3 ORDER BY created_at DESC LIMIT 1",[o.id,failed.payload.previewFingerprint,failed.created_at])).rows[0];
+ const preview=failed.payload.historicalPreview?{payload:failed.payload,status:'complete',result:failed.payload.historicalPreview}:(await db.query("SELECT payload,status,result FROM resolution_jobs WHERE order_id=$1 AND action='equivalent-preview' AND status='complete' AND result->>'previewFingerprint'=$2 AND created_at<=$3 ORDER BY created_at DESC LIMIT 1",[o.id,failed.payload.previewFingerprint,failed.created_at])).rows[0];
  if((partial||historical)&&(!preview||preview.status!=='complete'||preview.result?.previewFingerprint!==failed.payload.previewFingerprint))throw Error('Aperçu du remplacement '+(partial?'partiel':'historique')+' absent : rapprochement requis avant toute nouvelle écriture.');
  const historicalStock=historical?await readHistoricalStock(api,bc,{additionalVariants:(preview?.result?.commercialBefore?.line_items||[]).filter(l=>l.type==='normal').map(l=>l.variant.id)}):null;
  return recordedSubstitutionPlan(bc,b,failed,preview,o,historicalStock);
+}
+
+export async function persistHistoricalPreview(db,o,b,plan){
+ if(b.verifyAndApply!==true||plan.reconcileOnly||plan.commercialBefore?.update_stock!==true)return;
+ if(b.id!==o.id||String(plan.bcId)!==String(o.erp_live?.bc?.id)||plan.previewFingerprint!==b.previewFingerprint||plan.originalSku!==b.sku||plan.replacementSku!==b.replacementSku||Number(plan.replaceQuantity)!==Number(b.replaceQuantity)||Number(plan.replacementQuantity)!==Number(b.replacementQuantity))throw Error('Aperçu historique différent de la demande');
+ const saved=await db.query("UPDATE resolution_jobs SET payload=payload||jsonb_build_object('historicalPreview',$3::jsonb,'previewFingerprint',$4::text),updated_at=now() WHERE order_id=$1 AND request_id=$2 AND action='replace-equivalent' AND status='running' AND payload->>'verifyAndApply'='true' AND payload->>'confirmEquivalent'='true' AND payload->>'sku'=$5 AND payload->>'replacementSku'=$6 AND (payload->>'replaceQuantity')::numeric=$7 AND (payload->>'replacementQuantity')::numeric=$8 AND payload->>'scope'=$9 AND NOT payload ? 'historicalPreview' RETURNING id",[o.id,b.requestId,JSON.stringify(plan),plan.previewFingerprint,b.sku,b.replacementSku,b.replaceQuantity,b.replacementQuantity,b.scope]);
+ if(saved.rows.length!==1)throw Error('Aperçu historique non enregistré : aucune modification Erplain effectuée');
 }
