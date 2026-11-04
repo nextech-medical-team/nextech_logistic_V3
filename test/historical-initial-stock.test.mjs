@@ -40,7 +40,7 @@ test('balanced lot reassignment is accepted across pages without changing the BC
 });
 for(const [name,change] of Object.entries({
  unbalanced:rows=>rows[1].available_diff=299,
- mismatchedDate:rows=>rows[1].created_at='2026-10-29 13:10:10',
+ mismatchedDate:rows=>rows[1].created_at='2026-10-29 13:10:11',
  mismatchedLocation:rows=>rows[1].location={id:'999'},
  nonConsecutive:rows=>rows[1].id+=1,
  missingCounterpart:rows=>rows.pop(),
@@ -51,6 +51,15 @@ for(const [name,change] of Object.entries({
  f.api.request=async()=>({InventoryLogs:{data:[...rows,f.debit],paginatorInfo:{hasMorePages:false}}});await assert.rejects(()=>readHistoricalStock(f.api,f.bc));
 });
 test('pair before the BC is accepted without losing its negative half',async()=>{const f=fixture();const pair={...f.initial,id:f.initial.id+1,on_hand_diff:-300,available_diff:-300};f.api.request=async()=>({InventoryLogs:{data:[f.initial,pair,f.debit],paginatorInfo:{hasMorePages:false}}});assert.equal((await readHistoricalStock(f.api,f.bc)).proof.stockOnBc,true);});
+
+test('exact consecutive balanced lot pair one second apart is accepted, independent of read order',async()=>{
+ for(const reversed of [false,true]){
+  const f=fixture();const pair=[{...f.initial,created_at:'2026-10-29 13:10:09',on_hand_diff:-300,available_diff:-300},{...f.initial,id:f.initial.id+1,created_at:'2026-10-29 13:10:10'}];
+  if(reversed)pair.reverse();
+  f.api.request=async()=>({InventoryLogs:{data:[...pair,f.debit],paginatorInfo:{hasMorePages:false}}});
+  assert.deepEqual((await readHistoricalStock(f.api,f.bc)).proof.logIds,['21071791']);
+ }
+});
 
 import {readInheritedBlLedger} from '../src/historical-stock-proof.mjs';
 test('BL reader uses the same balanced-pair check and preserves its exact debit',async()=>{

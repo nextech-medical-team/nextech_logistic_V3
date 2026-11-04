@@ -7,7 +7,7 @@ import {chooseDocumentStockVariant} from './document-stock-choice.mjs';
 import {proveShopifyStatusOnly} from './shopify-status-only-proof.mjs';
 import {loadShopifyConfig,shopifyCollector} from './marketplace-collection.mjs';
 import {provePartialRemainder,assertPartialShippingPreserved} from './partial-substitution-proof.mjs';
-import {findRecordedSubstitution,recordedSubstitutionPlan} from './substitution-recovery.mjs';
+import {findRecordedSubstitution,recordedSubstitutionPlan,persistHistoricalPreview} from './substitution-recovery.mjs';
 import {readHistoricalStock,verifyHistoricalStock,assertNoHistoricalStockRemoval} from './historical-stock-proof.mjs';
 import {verifySubstitutionShipping} from './substitution-shipping-check.mjs';
 import {preserveSubstitutionLabels} from './preserve-substitution-labels.mjs';
@@ -166,6 +166,7 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  await stage('Préservation des étiquettes existantes');
  const preservedLabels=await preserveSubstitutionLabels(db,o.id);
  await stage('Enregistrement du remplacement dans le BC Erplain LIVE');
+ await persistHistoricalPreview(db,o,b,plan);
  const attempt=bc.update_stock===false&&!o.partial_mode&&plan.commercialBefore?await startSubstitutionAttempt(db,o,b,plan,permanent,mappingLines):null;
  let changed;
  try{changed=plan.reconcileOnly?{UpdateOrder:bc}:await api.request(`mutation V3SubstituteOrder($id:ID!,$input:OrderInput!){UpdateOrder(id:$id,input:$input){${bcFields}}}`,{id:plan.bcId,input:{tax_type:'exclusive',line_items:plan.items}});}catch(e){if(o.partial_mode)throw Error('Remplacement partiel à rapprocher : '+e.message);if(bc.update_stock===true)throw Error('Remplacement historique à rapprocher : '+e.message);throw e;}

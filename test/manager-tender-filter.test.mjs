@@ -11,11 +11,12 @@ test('AO manager filter includes native and Erplain AOs and excludes both when u
   for(const [id,channel,label] of fixtures)await db.query('INSERT INTO orders(id,reference,channel,erp_live,source_payload) VALUES($1,$1,$2,$3,$4)',[id,channel,JSON.stringify({bc:{account_representative:{label}}}),'{}']);
   const read=async values=>{const q=orderQuery(new URLSearchParams(values.map(v=>['channel',v])));return (await db.query('SELECT id FROM orders '+q.where+' ORDER BY id',q.args)).rows.map(r=>r.id);};
   assert.deepEqual(await read(['tender']),['31109693','curly','native','singular']);
-  assert.deepEqual(await read(['erplain']),['missing','other']);
-  assert.deepEqual(await read(['erplain','temu','amazon_standard','shopify_boutique']),['amazon','missing','other','shopify','temu']);
-  assert.equal((await read(['erplain','tender','temu'])).length,7);
+  assert.deepEqual(await read(['erplain']),[],'Erplain is an import source, not a manager');
+  assert.deepEqual(await read(['Commercial','Non renseigné']),['missing','other']);
+  assert.deepEqual(await read(['Commercial','Non renseigné','temu','amazon_standard','shopify_boutique']),['amazon','missing','other','shopify','temu']);
+  assert.equal((await read(['Commercial','Non renseigné','tender','temu'])).length,7);
   assert.equal((await read([])).length,9);
-  const q=orderQuery(new URLSearchParams('channel=erplain&channel=temu'));
+  const q=orderQuery(new URLSearchParams('channel=Commercial&channel=Non+renseign%C3%A9&channel=temu'));
   const count=(await db.query('SELECT count(*)::int AS n FROM orders '+q.where,q.args)).rows[0].n;
   assert.equal(count,3);
   const paged=(await db.query('SELECT id FROM orders '+q.where+' ORDER BY id LIMIT 2 OFFSET 2',q.args)).rows;

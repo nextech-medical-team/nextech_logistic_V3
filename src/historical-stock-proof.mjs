@@ -149,7 +149,7 @@ export function verifyHistoricalStock(bc, evidence,{bl=null,blEvidence=[],pendin
 
 // Erplain emits initial stock without a document and balanced pairs when
 // reallocating stock to lots. Neither may hide an unbalanced BC/BL movement.
-function assertHistoricalLogIdentity(logs,variant,created){
+export function assertHistoricalLogIdentity(logs,variant,created){
  const fail=()=>{throw Error('Journal de stock historique incomplet : mouvement non identifié');};
  const ids=new Set(),groups=new Map();
  for(const row of logs){
@@ -165,6 +165,20 @@ function assertHistoricalLogIdentity(logs,variant,created){
   const key=String(row.location.id)+':'+date;
   if(!groups.has(key))groups.set(key,[]);
   groups.get(key).push(row);
+ }
+ // Erplain can timestamp the reversal and reapplication one second apart.
+ // Match only consecutive IDs with the exact opposite movement at the same
+ // location; a missing half or an ambiguous sequence must still block.
+ const singletons=new Map([...groups].filter(([,rows])=>rows.length===1).map(([key,rows])=>[Number(rows[0].id),[key,rows]]));
+ for(const [key,rows] of groups){
+  if(rows.length!==1)continue;
+  const row=rows[0],date=Number(key.slice(key.lastIndexOf(':')+1));
+  const matches=[singletons.get(Number(row.id)-1),singletons.get(Number(row.id)+1)].filter(Boolean).filter(([otherKey,other])=>groups.has(otherKey)&&otherKey!==key&&other.length===1&&
+   String(other[0].location.id)===String(row.location.id)&&
+   Math.abs(Number(other[0].id)-Number(row.id))===1&&
+   Math.abs(Number(otherKey.slice(otherKey.lastIndexOf(':')+1))-date)<=1000&&
+   other[0].on_hand_diff+row.on_hand_diff===0);
+  if(matches.length===1){rows.push(matches[0][1][0]);groups.delete(matches[0][0]);}
  }
  for(const [key,rows] of groups){
   const date=Number(key.slice(key.lastIndexOf(':')+1));

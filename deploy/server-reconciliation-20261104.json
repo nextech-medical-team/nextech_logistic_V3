@@ -1,0 +1,115 @@
+{
+  "baseCommit": "faa625bd96ec1fb519763790170892ecc9299302",
+  "serverBaselineCommit": "ab630e90b8bf8a473891f14607cf5125d86c03ec",
+  "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+  "scope": "application_sources_only",
+  "serverCodeChanged": false,
+  "businessWrites": 0,
+  "decisions": [
+    {
+      "path": "public/app.js",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "2843b39ce413c3b592907ffdc98ad2fe813047110778a2250a8d1fb575952c1e",
+      "candidateSha256": "2843b39ce413c3b592907ffdc98ad2fe813047110778a2250a8d1fb575952c1e",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "public/improvements.js",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "5193be0e7d21cc2c7eb9172e4bbc461be321f025e8519cf984a8656e328fb33b",
+      "candidateSha256": "5193be0e7d21cc2c7eb9172e4bbc461be321f025e8519cf984a8656e328fb33b",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "public/review.js",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "a3b00cf5aa9a87b7c5c68124a111b68b5ad349ba37dc2df09d514fa74f75d3b9",
+      "candidateSha256": "a3b00cf5aa9a87b7c5c68124a111b68b5ad349ba37dc2df09d514fa74f75d3b9",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/account-manager.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "638c29fcaac3454c20f0fee2967ade954e682e39d91d8dd128bf60208e052abf",
+      "candidateSha256": "638c29fcaac3454c20f0fee2967ade954e682e39d91d8dd128bf60208e052abf",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/historical-stock-proof.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "5de263ed85da9aabf32b19d211f7217d83fdedb47e8c60aa2877948c840a7af5",
+      "candidateSha256": "5de263ed85da9aabf32b19d211f7217d83fdedb47e8c60aa2877948c840a7af5",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/missing-bc-recovery.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "a3d7d6e1e63e0643a3fabbe382fd9484987ef6e9dea71bef6c2722afbce0a1fc",
+      "candidateSha256": "a3d7d6e1e63e0643a3fabbe382fd9484987ef6e9dea71bef6c2722afbce0a1fc",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/order-query.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "de86206bdf7c889973deb9aae9d74548919fc686dffff1d3c653975455912f48",
+      "candidateSha256": "de86206bdf7c889973deb9aae9d74548919fc686dffff1d3c653975455912f48",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/partial-deliveries-tender-preserved.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "a920f2589f3a24b675e48425a91a5fccd8f6958174f5533e45d1c098f17a1c4f",
+      "candidateSha256": "a920f2589f3a24b675e48425a91a5fccd8f6958174f5533e45d1c098f17a1c4f",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/partial-parent-lots.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "41d88c9e6cc24564d26a2c141e415d3c5721a0baf22405725a6da3925de443b8",
+      "candidateSha256": "41d88c9e6cc24564d26a2c141e415d3c5721a0baf22405725a6da3925de443b8",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/recover-paid-temu-label.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "96642d05cd9b58dc6030f9300eaffa5450f70615ec6174535595179af7f9037b",
+      "candidateSha256": "96642d05cd9b58dc6030f9300eaffa5450f70615ec6174535595179af7f9037b",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/stock-substitution.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "76772a4fe88078e443decf93a07cacc6b453dbf77acc1c55cb83359ab998978c",
+      "candidateSha256": "c57aab3cf6e20c94c0f58c5e749eccbe51fe9e5047b872772fafd3998a2bb6c0",
+      "decision": "preserve_server_fix_and_mapping_guard"
+    },
+    {
+      "path": "src/substitution-recovery.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "3c7e89f458cd730c1ed55bc177e544ddc3e66e5f4cd6086e55628f46a32e4ed5",
+      "candidateSha256": "3c7e89f458cd730c1ed55bc177e544ddc3e66e5f4cd6086e55628f46a32e4ed5",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/temu-local.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "956d540c778e58cf2c7952949418a3444cbdc8fd37def9ab6c156913ebbe6d98",
+      "candidateSha256": "956d540c778e58cf2c7952949418a3444cbdc8fd37def9ab6c156913ebbe6d98",
+      "decision": "preserve_server_exact"
+    },
+    {
+      "path": "src/tender-label-fields.mjs",
+      "sourceCommit": "d1fea40de4ef72d83fcbb29a21cb15345ae4ac66",
+      "serverSha256": "e25218df0e735f428a6ddf557603d5811c1f2f26cd92812734161d66cd8d971e",
+      "candidateSha256": "e25218df0e735f428a6ddf557603d5811c1f2f26cd92812734161d66cd8d971e",
+      "decision": "preserve_server_exact"
+    }
+  ],
+  "plannedChanges": [
+    {
+      "path": "src/stock-substitution.mjs",
+      "before": "76772a4fe88078e443decf93a07cacc6b453dbf77acc1c55cb83359ab998978c",
+      "after": "c57aab3cf6e20c94c0f58c5e749eccbe51fe9e5047b872772fafd3998a2bb6c0"
+    }
+  ]
+}

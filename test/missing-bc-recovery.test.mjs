@@ -10,6 +10,7 @@ test('BC recovery request requires explicit confirmation, scope, provider and ex
 });
 const original={id:'o',channel:'temu',reference:'PO-original',received_at:'2026-10-16T00:00:00.000Z',erp_live:{phase:'bc_created',bc:{id:'10',label:'C0016034',status:'unpublished'},customer:{id:'20'},customerNumber:'RECORDED',pricing:{status:'pending'}},issue:'BC Erplain introuvable : aucune donnée locale remplacée',source_payload:{sourceShop:'shop'},archived:false,partial_mode:false,simulation:false,suspension:{},label_status:'ready',tracking_status:'not_shipped'};
 const options={bcId:'10',reference:'PO-original',confirmed:true,resolutionId:'self'};
+original.erp_live.bc.line_items=[{id:'100',type:'normal',variant:{id:'200'},quantity:1}];
 async function fixture(){
  const e=new PGlite();await e.exec(`CREATE TABLE orders(id text PRIMARY KEY,channel text,reference text,received_at text,erp_live jsonb,issue text,source_payload jsonb,archived boolean,partial_mode boolean,simulation boolean,suspension jsonb,label_status text,tracking_status text);
  CREATE TABLE erp_live_jobs(order_id text,status text,error text);CREATE TABLE resolution_jobs(id text,order_id text,status text,action text);CREATE TABLE correction_jobs(order_id text,status text);CREATE TABLE partial_deliveries(order_id text);CREATE TABLE carrier_jobs(order_id text,status text,result jsonb);CREATE TABLE audit(user_email text,action text,detail jsonb);CREATE TABLE labels(order_id text,pdf text);`);

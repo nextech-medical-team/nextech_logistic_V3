@@ -1,3 +1,4 @@
+import {recoverPaidTemuLabel} from './recover-paid-temu-label.mjs';
 import {hasCreatedBl} from './created-bl-label.mjs';
 import {recordedBlQuantityData} from './temu-bl-quantity-data.mjs';
 import {usesRecordedBc} from './existing-bc-execution.mjs';
@@ -101,7 +102,11 @@ export function temuLocalService(db,directory,{apiFactory=temuApi,shopLoader=loa
    if(!forceQuote&&old?.status==='ready'&&!old.error&&old.plan?.expiresAt>Date.now()+60000&&(!hasCreatedBl(o)||old.plan.blAuthority?.blId===String(o.erp_live.bl.id))&&old.plan.orderFingerprint===info.fingerprint&&old.plan.request?.sendRequestList?.[0]?.weight===temuParcelWeight(o)&&!excludedTemuCarrier(old.plan.offers?.find(offer=>offer.channelId===old.plan.selected)))return {reference,status:'ready',plan:old.plan};
    try{const plan=await service.prepare(reference,channel,{detail,shipments});return {reference,status:'ready',plan};}
    catch(e){if(isTemuReadDeferred(e))return fail(o,e);const error=directError(e);await db.query("INSERT INTO temu_label_jobs(reference,status,error,result) VALUES($1,'to_buy',$2,$3) ON CONFLICT(reference) DO UPDATE SET status='to_buy',error=excluded.error,result=excluded.result,updated_at=now()",[reference,error,JSON.stringify({source:'temu_direct',observedAt:now})]);return {reference,status:'to_buy',error};}
-  }catch(e){return fail(o,e);}
+  }catch(e){
+   try{const recovered=await recoverPaidTemuLabel(db,service,o,directError(e));if(recovered)return recovered;}
+   catch(recoveryError){console.error('Récupération de l’étiquette TEMU existante différée : '+directError(recoveryError));}
+   return fail(o,e);
+  }
  }
 
  async function resolveExcelShop(o,lines){
