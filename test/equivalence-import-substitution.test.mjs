@@ -33,6 +33,7 @@ for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-
  `);
  const wrap=e=>({query:(s,p=[])=>e.query(s,p),exec:s=>e.exec(s)}),db={...wrap(pg),transaction:f=>pg.transaction(tx=>f(wrap(tx)))};
  await initializeEquivalences(db);
+ for(const channel of ['shopify','temu'])for(const sku of ['B','D'])await db.query('INSERT INTO mappings(channel,source_sku,target_sku,source_qty,target_qty) VALUES($1,$2,$2,1,1)',[channel,sku]);
  const variant=(sku,id)=>({id:String(id),sku,active:true,track_inventory:true,weight_amount:.01,weight_unit:'kg',tax_codes:[],product:{id:String(id),label:sku,active:true},stock_levels:{data:[{location:{id:'1'},available:100,on_hand:100}],paginatorInfo:{hasMorePages:false}}});
  const variants={A:variant('A',1),B:variant('B',2),C:variant('C',3),D:variant('D',4)};
  const line=(id,sku,qty,price=1)=>({id:String(id),type:'normal',variant:variants[sku],location:{id:'1'},quantity:qty,price,tax_amount:0,tax_codes:[],discount:0,discount_rule_amount:0,ecotax:0});
@@ -50,6 +51,12 @@ for(const scenario of ['batch','stock-review','bc-amounts','lost-response-price-
   const o=(await db.query("SELECT * FROM orders WHERE id='o'")).rows[0],b={id:'o',requestId:randomUUID(),sku,replacementSku,replaceQuantity:quantity,replacementQuantity,scope:'order'};
   const preview=scenario.startsWith('single-action')?null:await substitution(db,api,o,b,{preserveBcAmounts});
   Object.assign(b,scenario.startsWith('single-action')?{confirmEquivalent:true,verifyAndApply:true}:{confirmEquivalent:true,previewFingerprint:preview.previewFingerprint});
+  // Recheck at execution even if the target was mapped during preview.
+  const mapping=(await db.query('DELETE FROM mappings WHERE channel=$1 AND target_sku=$2 RETURNING *',[o.channel,replacementSku])).rows;
+  const beforeMappingBlock=structuredClone(bc),beforeMappingWrites=writes;
+  await assert.rejects(substitution(db,api,o,b,{apply:true,deferResume,preserveBcAmounts}),/absent du mapping/);
+  assert.equal(writes,beforeMappingWrites);assert.deepEqual(bc,beforeMappingBlock);
+  for(const m of mapping)await db.query('INSERT INTO mappings(channel,source_sku,target_sku,source_qty,target_qty) VALUES($1,$2,$3,$4,$5)',[m.channel,m.source_sku,m.target_sku,m.source_qty,m.target_qty]);
   if(scenario.includes('shared-stock-drift')){
    // Another order restores the shared source stock between preview and worker.
    if(scenario==='legacy-shared-stock-drift'){

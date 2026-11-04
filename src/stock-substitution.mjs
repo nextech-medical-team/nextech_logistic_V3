@@ -73,6 +73,12 @@ export async function substitution(db,api,o,b,{apply=false,stage=async()=>{},dir
  validateSubstitution(b,apply);
  if(o.archived||o.erp_live?.bl?.id||o.erp_live?.stockDocument||/^(creating|publishing)/.test(o.erp_live?.phase||'')||(o.source_payload?.marketplacePendingCorrection&&!(o.channel==='shopify'&&o.partial_mode===true))||['shipped','delivered','in_transit','delivered_simulated'].includes(o.tracking_status))throw Error('Commande livrée, fractionnée ou modifiée : rapprochement requis avant remplacement');
  if(!o.erp_live?.bc?.id)throw Error('Créer ou retrouver le BC LIVE avant de remplacer ses produits');
+ // A replacement must already be a mapped Erplain target for this manager.
+ // Read only: never align the recorded BC or its prices to marketplace data.
+ if(['amazon','shopify','temu','rakuten'].includes(o.channel)&&!o.source_payload?.erplainImported){
+  const replacementMapping=await db.query('SELECT target_sku FROM mappings WHERE channel=$1 AND target_sku=$2 LIMIT 1',[o.channel,b.replacementSku.trim()]);
+  if(!replacementMapping.rows.length)throw Error('Produit de remplacement ['+b.replacementSku.trim()+'] absent du mapping du gestionnaire ['+o.channel+']. Complétez le mapping avant de remplacer le produit. BC non modifié.');
+ }
  if(o.partial_mode&&b.scope!=='order')throw Error('Remplacement du reliquat limité à cette commande');
  const partials=o.partial_mode?(await db.query('SELECT id,status,selection,bl,error FROM partial_deliveries WHERE order_id=$1',[o.id])).rows:null;
  const jobs=(await db.query("SELECT status FROM erp_live_jobs WHERE order_id=$1 AND status='processing' UNION ALL SELECT status FROM carrier_jobs WHERE order_id=$1 AND status<>'ready' AND (status NOT IN ('failed','superseded') OR result IS NOT NULL OR jsonb_array_length(tracking)>0)",[o.id])).rows;
