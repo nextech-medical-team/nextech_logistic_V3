@@ -1,28 +1,13 @@
-# Réconciliation des remplacements — 4 novembre 2026
+﻿# Réconciliation des sources de production — 4 novembre 2026
 
-Le déploiement de `faa625bd96ec1fb519763790170892ecc9299302` a été refusé
-avant installation : `src/stock-substitution.mjs` différait de la référence
-enregistrée sur le serveur. La comparaison fraîche a confirmé deux modules
-liés, sans inclure les autres écarts de production.
+Le déploiement de la PR #312 (faa625b) a été refusé avant installation : stock-substitution.mjs différait de sa référence enregistrée. Une vérification complète a identifié douze fichiers divergents et deux modules supplémentaires nécessaires à leurs corrections. La clôture de la demande échouée exige de rapprocher tous ces écarts, pas uniquement le premier fichier signalé.
 
-Le commit de provenance `6ca5d92` conserve les octets exacts de ces modules :
+Le commit de provenance d1fea40 contient les octets exacts des quatorze fichiers du serveur. Le manifeste deploy/server-reconciliation-20261104.json associe chaque chemin à son SHA-256 serveur et candidat. Les données privées, PDF, environnement, dépendances et fichiers non applicatifs sont exclus.
 
-| Fichier | SHA-256 serveur |
-| --- | --- |
-| src/stock-substitution.mjs | 76772a4fe88078e443decf93a07cacc6b453dbf77acc1c55cb83359ab998978c |
-| src/substitution-recovery.mjs | 3c7e89f458cd730c1ed55bc177e544ddc3e66e5f4cd6086e55628f46a32e4ed5 |
+Les corrections préservées portent sur les PDF des BL associés, les filtres par représentant Erplain, les mouvements historiques de stock, la récupération des BC absents, les lots hérités du BC parent, les étiquettes TEMU déjà payées et les noms GLS. Les protections de reprise des remplacements historiques sont conservées : aperçu enregistré avant mutation et réutilisé après interruption, refus des preuves modifiées. Le contrôle du mapping de la PR #312 reste placé avant tout appel fournisseur. Aucune correction des prix ou des commandes réelles n’est incluse.
 
-Le candidat final conserve ces protections : enregistrement de l'aperçu
-historique avant écriture, récupération sans tâche de prévisualisation séparée,
-et nouvelle prévisualisation après refus de lots uniquement si le BC et les
-preuves de stock restent inchangés. Il conserve aussi le contrôle du mapping
-de la PR #312 avant tout appel fournisseur. Aucun changement de calcul des
-prix, de données de commande ou de configuration privée n'est inclus.
+Le planificateur installé doit vérifier la fusion à trois voies de toutes ces sources. Le candidat reprend treize fichiers exactement ; seul stock-substitution.mjs ajoute le contrôle du mapping aux octets serveur.
 
-Avant publication, Section 7 doit vérifier sous le verrou de déploiement
-que les octets serveur sont toujours ceux du commit de provenance, faire
-valider le candidat par la fusion à trois voies de `reconcile_overlay_sources`,
-sauvegarder la référence puis enregistrer uniquement ces deux overlays avec
-leur provenance Git. La référence de commit déployé ne doit pas être avancée
-à cette étape. Une divergence supplémentaire doit bloquer l'opération.
-La publication reste confiée au workflow manuel avec ses tests et sauvegardes.
+Avant publication, Section 7 doit acquérir le verrou de déploiement, vérifier chaque octet contre le commit de provenance Git, valider le candidat avec reconcile_overlay_sources, sauvegarder la référence, puis enregistrer uniquement les overlays vérifiés. Le commit déployé ne doit pas être avancé à cette étape. Toute nouvelle divergence bloque l’opération.
+
+La demande échouée doit ensuite recevoir un certificat serveur réel via restoration_certificate : empreintes, environnement, services et HTTP. Le rapport d’échec original est conservé. La publication passe enfin par le workflow manuel et ses tests, sauvegardes et contrôles de fin.
