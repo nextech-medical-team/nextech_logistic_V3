@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {recordedSubstitutionPlan,findRecordedSubstitution} from '../src/substitution-recovery.mjs';
+import {recordedSubstitutionPlan,findRecordedSubstitution,persistHistoricalPreview} from '../src/substitution-recovery.mjs';
 import {PGlite} from '@electric-sql/pglite';
 import {resolutionIncident} from '../src/resolution-incident.mjs';
 
@@ -23,6 +23,38 @@ test('uncertain failures and missing previews remain blocked',()=>{
   const f=fixture();f.failed.error='Remplacement historique à rapprocher : '+error;
   assert.throws(()=>recordedSubstitutionPlan(f.bc,f.request,f.failed,f.preview,{},f.stock));
  }
+});
+
+test('missing-lot rejection permits a new preview only with unchanged commercial and stock proofs',()=>{
+ const error='Remplacement historique à rapprocher : Batch numbers have not been defined for all line items in this document.';
+ const f=fixture();f.failed.error=error;
+ assert.equal(recordedSubstitutionPlan(f.bc,f.request,f.failed,f.preview,{},f.stock),null);
+ for(const change of [f=>f.bc.line_items[0].price=11,f=>f.stock.evidence=[]]){
+  const f=fixture();f.failed.error=error;change(f);
+  assert.throws(()=>recordedSubstitutionPlan(f.bc,f.request,f.failed,f.preview,{},f.stock));
+ }
+});
+
+test('direct historical preview is persisted once and recovered without a separate preview job',async t=>{
+ const db=new PGlite();t.after(()=>db.close());
+ await db.exec('CREATE TABLE resolution_jobs(id text,order_id text,request_id text,action text,status text,error text,payload jsonb,result jsonb,created_at timestamptz,updated_at timestamptz)');
+ const f=fixture();f.bc.created_at='2026-10-20T00:00:00Z';
+ const b={...f.request,id:'o',requestId:'r',verifyAndApply:true};
+ const plan={...f.preview.result,originalSku:'OLD',replacementSku:'NEW',replaceQuantity:1,replacementQuantity:1};
+ const order={id:'o',erp_live:{bc:{id:'1'}}};
+ await db.query("INSERT INTO resolution_jobs VALUES('failed','o','r','replace-equivalent','running',null,$1,null,'2026-10-21',now())",[JSON.stringify(b)]);
+ await assert.rejects(persistHistoricalPreview(db,order,{...b,replacementSku:'OTHER'},plan),/différent/);
+ assert.equal((await db.query('SELECT payload FROM resolution_jobs')).rows[0].payload.historicalPreview,undefined);
+ await persistHistoricalPreview(db,order,b,plan);
+ assert.deepEqual((await db.query('SELECT payload FROM resolution_jobs')).rows[0].payload.historicalPreview,plan);
+ await assert.rejects(persistHistoricalPreview(db,order,b,plan),/non enregistré/);
+ await db.query("UPDATE resolution_jobs SET status='review',error=$1",[f.failed.error]);
+ let reads=0;
+ const api={request:async q=>{assert.match(q,/^query V3HistoricalStockLogs/);reads++;return {InventoryLogs:{data:f.stock.evidence[0].order,paginatorInfo:{hasMorePages:false}}};}};
+ const retry={...b,requestId:'retry'};
+ assert.equal(await findRecordedSubstitution(db,order,retry,f.bc,api),null);assert.equal(reads,1);
+ await db.query("UPDATE resolution_jobs SET payload=jsonb_set(payload,'{historicalPreview,previewFingerprint}','\"other\"'::jsonb)");
+ await assert.rejects(findRecordedSubstitution(db,order,retry,f.bc,api),/Aperçu/);
 });
 test('replacement already applied is reconciled without another mutation',()=>{
  const f=fixture();f.failed.id='failed';
