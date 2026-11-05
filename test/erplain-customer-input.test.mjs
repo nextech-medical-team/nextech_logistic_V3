@@ -100,3 +100,21 @@ test('explicit customer number disambiguates tender accounts and never creates a
  const missing=tenderOrder('not-found');missing.source_payload.numerodeclient='NO-SUCH-CLIENT';
  await assert.rejects(reuseTenderCustomer({request:async()=>customerPage([])},missing,async()=>assert.fail('must block')),/introuvable/);
 });
+
+test('same tender name prefers classic customer numbers then the actual oldest account',async()=>{
+ const {chooseTenderCustomer,reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const c=(id,number,date,active=true)=>({id,label:'CENTRE HOSPITALIER',customer_number:number,created_at:date,active});
+ const legacy=c('1','V3:old','2020-01-01 10:00:00');
+ const newer=c('3','C00000001','2024-01-01 10:00:00');
+ const oldest=c('2','C00009999','2022-01-01 10:00:00');
+ const inactive=c('0','C00000000','2010-01-01 10:00:00',false);
+ assert.equal(chooseTenderCustomer([newer,legacy,oldest,inactive]).id,'2');
+ assert.equal(chooseTenderCustomer([legacy,c('4','V3:new','2025-01-01 10:00:00')]).id,'1');
+ assert.equal(chooseTenderCustomer([c('10','C10','2022-01-01 10:00:00'),c('2','C2','2022-01-01 10:00:00')]).id,'2');
+ assert.throws(()=>chooseTenderCustomer([oldest,c('5','C5',null)]),/Date de création/);
+ assert.throws(()=>chooseTenderCustomer([inactive]),/inactif/);
+ const o=tenderOrder('choose-oldest');
+ assert.equal(await reuseTenderCustomer({request:async(q)=>{assert.match(q,/created_at/);return customerPage([newer,legacy,oldest,inactive]);}},o,async()=>{}),true);
+ assert.equal(o.erp_live.customer.id,'2');assert.equal(o.erp_live.customerReuse.selectionPolicy,'classic_number_then_oldest');
+ assert.equal(o.erp_live.customerReuse.candidateCount,4);
+});
