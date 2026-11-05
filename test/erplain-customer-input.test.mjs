@@ -34,3 +34,57 @@ test('production worker no longer invokes number generation and keeps customer r
  assert.match(source,/mutationBlock\(fresh/);
  assert.match(source,/'CreateCustomer',erplainCustomerInput/);
 });
+
+const tenderOrder=id=>({id,channel:'tender',recipient:'Site de livraison',source_payload:{client:'CENTRE HOSPITALIER'},erp_live:{}});
+const customerPage=(data,hasMorePages=false)=>({Customers:{data,paginatorInfo:{hasMorePages}}});
+test('tender orders for the same client reuse its existing Erplain account across imports',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ let calls=0,saves=0;
+ const api={request:async(q,v)=>{calls++;assert.match(q,/^query /);assert.equal(v.where.column,'LABEL');assert.equal(v.where.value,'CENTRE HOSPITALIER');return customerPage([{id:'client-7',label:'CENTRE HOSPITALIER',active:true,customer_number:'C7'}]);}};
+ for(const id of ['first-import','second-import']){
+  const o=tenderOrder(id);
+  assert.equal(await reuseTenderCustomer(api,o,async()=>{saves++;}),true);
+  assert.equal(o.erp_live.customer.id,'client-7');assert.equal(o.erp_live.phase,'customer_created');
+  assert.equal(await reuseTenderCustomer(api,o,async()=>assert.fail('already saved')),false);
+ }
+ assert.equal(calls,2);assert.equal(saves,2);
+});
+test('tender lookup completes pagination and blocks ambiguous, inactive or incomplete results',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const c={id:'1',label:'CENTRE HOSPITALIER',active:true};
+ for(const pages of [
+  [customerPage([c],true),customerPage([{...c,id:'2'}])],
+  [customerPage([{...c,active:false}])],
+  [{Customers:{data:[]}}],
+  [customerPage([c],true),customerPage([c])],
+  [customerPage([],true)],
+  [customerPage([{...c,label:'AUTRE CLIENT'}])]
+ ]){
+  const o=tenderOrder('blocked');let index=0;
+  await assert.rejects(reuseTenderCustomer({request:async()=>pages[index++]},o,async()=>assert.fail('no persistence on invalid lookup')));
+  assert.equal(o.erp_live.customer,undefined);
+ }
+ const missing=tenderOrder('missing');delete missing.source_payload.client;
+ await assert.rejects(reuseTenderCustomer({},missing,()=>{}),/Nom du client absent/);
+});
+test('tender lookup allows creation only after confirmed absence and leaves other channels unchanged',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ assert.equal(await reuseTenderCustomer({request:async()=>customerPage([])},tenderOrder('new'),()=>assert.fail('no existing customer')),false);
+ for(const channel of ['temu','shopify','amazon','samples','erplain']){
+  assert.equal(await reuseTenderCustomer({request:()=>assert.fail('other channels unchanged')},{...tenderOrder(channel),channel},()=>{}),false);
+ }
+});
+
+test('concurrent tender creation paths search again under the shared lock before creating',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const {withShipmentLock}=await import('../src/shipment-lock.mjs');
+ let created=0,customers=[];
+ const api={request:async()=>customerPage(customers)};
+ const orders=[tenderOrder('parallel-1'),tenderOrder('parallel-2')];
+ await Promise.all(orders.map(o=>withShipmentLock(async()=>{
+  if(await reuseTenderCustomer(api,o,async()=>{}))return;
+  await new Promise(resolve=>setTimeout(resolve,5));
+  created++;customers=[{id:'shared',label:'CENTRE HOSPITALIER',active:true}];o.erp_live.customer=customers[0];
+ },['erplain-tender-customers'])));
+ assert.equal(created,1);assert.equal(orders[0].erp_live.customer.id,orders[1].erp_live.customer.id);
+});
