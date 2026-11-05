@@ -57,12 +57,19 @@ export async function parseAmazonAuditReport({filename,content,reportedAt},now=n
  if(!rows.length)throw Error('Aucune commande non expédiée exploitable dans ce rapport');
  return {filename,hash:createHash('sha256').update(bytes).digest('hex'),reportedAt:new Date(stamp).toISOString(),loadedAt:now.toISOString(),rows,errors,excluded,repeated,lineCount:table.length};
 }
-export function matchAuditOrders(row,orders){
- return orders.filter(o=>o.channel===row.channel&&[o.reference,o.source_reference].some(r=>auditReference(r)===auditReference(row.reference))&&(!row.shop||row.channel==='amazon'||!(row.channel==='temu'?o.source_payload?.mallId:o.source_payload?.sourceShop)||String(row.channel==='temu'?o.source_payload.mallId:o.source_payload.sourceShop)===row.shop));
+function auditOrderIdentity(row,o){
+ if(o.channel!==row.channel||![o.reference,o.source_reference].some(r=>auditReference(r)===auditReference(row.reference)))return 'none';
+ if(row.channel==='amazon')return 'confirmed';
+ const shop=String(row.channel==='temu'?o.source_payload?.mallId??'':o.source_payload?.sourceShop??'').trim();
+ if(!shop||!String(row.shop??'').trim())return 'uncertain';
+ return shop===String(row.shop).trim()?'confirmed':'none';
 }
+export function matchAuditOrders(row,orders){return orders.filter(o=>auditOrderIdentity(row,o)==='confirmed');}
+export function uncertainAuditOrders(row,orders){return orders.filter(o=>auditOrderIdentity(row,o)==='uncertain');}
 export function diagnoseAuditRow(row){
  if(row.flags?.some(f=>['pending_buyer_cancellation','pending_buyer_address_change'].includes(f)))return 'Demande client à examiner';
  if(row.sourceChanged)return 'Statut plateforme modifié : à rapprocher';
+ if(row.v3Uncertain?.length)return 'Identité boutique V3 non confirmée : rapprochement à vérifier';
  if(!row.v3?.length)return 'Absente de V3'+(row.bc?.length?' ; BC Erplain retrouvé':'');
  if(row.v3.length>1)return 'Plusieurs fiches V3 à rapprocher';
  if(row.v3[0].suspended)return 'Commande suspendue';
