@@ -100,3 +100,28 @@ test('explicit customer number disambiguates tender accounts and never creates a
  const missing=tenderOrder('not-found');missing.source_payload.numerodeclient='NO-SUCH-CLIENT';
  await assert.rejects(reuseTenderCustomer({request:async()=>customerPage([])},missing,async()=>assert.fail('must block')),/introuvable/);
 });
+
+test('duplicate tender names reuse the active account with the strongest matching contact and address',async()=>{
+ const {reuseTenderCustomer,bestTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const account=(id,email,phone,street='1 rue Test')=>({id,label:'CENTRE HOSPITALIER',active:true,email,customer_number:id,addresses:{data:[{address_1:street,postal_code:'27000',city:'Évreux',country:'FR',phone}],paginatorInfo:{hasMorePages:false}}});
+ const o=tenderOrder('ranked');o.address={street:'1 rue Test',postal:'27000',city:'EVREUX',country:'FR',phone:'0232338116',email:'charlotte@example.invalid'};
+ const alexandra=account('alexandra','alexandra@example.invalid','0232338449');
+ const charlotte=account('charlotte','charlotte@example.invalid','+33 2 32 33 81 16');
+ const inactive={...charlotte,id:'inactive',active:false};
+ assert.equal(bestTenderCustomer(o,[alexandra,charlotte,inactive]).customer.id,'charlotte');
+ assert.equal(await reuseTenderCustomer({request:async()=>customerPage([alexandra,charlotte,inactive])},o,async()=>{}),true);
+ assert.equal(o.erp_live.customer.id,'charlotte');assert.equal(o.erp_live.customerReuse.matchedBy,'coordinates');
+ assert.ok(o.erp_live.customerReuse.evidence.includes('email'));assert.ok(o.erp_live.customerReuse.evidence.includes('phone'));
+ assert.equal(bestTenderCustomer({...tenderOrder('phone'),address:{country:'FR',phone:'0033232338116'}},[alexandra,charlotte]).customer.id,'charlotte');
+});
+test('tender comparison rejects ties, missing evidence, incomplete addresses and never sums different addresses',async()=>{
+ const {bestTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const c=id=>({id,active:true,addresses:{data:[],paginatorInfo:{hasMorePages:false}}});
+ const o={...tenderOrder('tie'),address:{street:'1 rue A',postal:'27000',city:'Evreux',country:'FR'}};
+ assert.throws(()=>bestTenderCustomer(o,[c('1'),c('2')]),/meilleure correspondance/);
+ assert.throws(()=>bestTenderCustomer(o,[{...c('1'),addresses:{data:[],paginatorInfo:{hasMorePages:true}}},c('2')]),/incomplètes/);
+ const full={...c('full'),addresses:{data:[{address_1:'1 rue A',postal_code:'27000',city:'Evreux',country:'FR'}],paginatorInfo:{hasMorePages:false}}};
+ const fragmented={...c('fragmented'),addresses:{data:[{address_1:'1 rue A',country:'FR'},{postal_code:'27000',city:'Evreux',country:'FR'}],paginatorInfo:{hasMorePages:false}}};
+ assert.equal(bestTenderCustomer(o,[fragmented,full]).customer.id,'full');
+ assert.throws(()=>bestTenderCustomer(o,[full,{...full,id:'same'}]),/meilleure correspondance/);
+});
