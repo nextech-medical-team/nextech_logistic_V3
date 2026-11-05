@@ -28,6 +28,7 @@ import {selectProblemOrders,paginateProblemOrders} from './problem-typology.mjs'
 import {currentProblemClassifier} from './problem-typology-reader.mjs';
 import {initializeStockResumeWatch,stockResumeWorker} from './stock-resume-watch.mjs';
 import {initializeShopifyObservation,shopifyObservationWorker,shopifyObservationRoutes} from './shopify-observation.mjs';
+import {initializeUnshippedAudit,unshippedAuditService,unshippedAuditRoutes} from './unshipped-audit.mjs';
 import {readingService} from './temu-reading.mjs';
 import {initializeEquivalences,equivalenceApi} from './equivalence-catalog.mjs';
 import {stockInformationService} from './stock-information.mjs';
@@ -138,6 +139,7 @@ await db.withLocks(['schema'],()=>initializePlatformCancellationReports(db));
 await db.withLocks(['schema'],()=>initializeStockResumeWatch(db,{resumeReadLeases:config.background}));
 await db.withLocks(['schema'],()=>initializeV2Followup(db));
 await db.withLocks(['schema'],()=>initializeShopifyObservation(db));
+await db.withLocks(['schema'],()=>initializeUnshippedAudit(db,{recover:config.background}));
 await db.withLocks(['schema'],()=>initializeProductWeightMaintenance(db));
 await db.withLocks(['schema'],()=>initializeManualReview(db));
 const importApprovals=importAuthorization(db);
@@ -164,6 +166,7 @@ const verifyPrices=priceVerification(db,directory);
 const correctPrice=priceCorrection(db,directory,verifyPrices);
 const verifyMissingOrders=missingOrdersVerification(db,directory);
 const shopifyObservation=shopifyObservationWorker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>shopifyObservation.run(),10000,'shopify-observation');
+const unshippedAudit=unshippedAuditService(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>unshippedAudit.run(),1000,'unshipped-audit');
 const events=liveEvents(db,{authenticate});if(config.http)await events.start();
 
 
@@ -296,7 +299,7 @@ const server=http.createServer(async(req,res)=>{
     }
 
     if(req.method==='GET'&&/^\/flags\/[A-Z]{2}\.svg$/.test(p)){try{const bytes=await readFile(path.join(root,'public',p.slice(1)));res.writeHead(200,{'Content-Type':'image/svg+xml','Cache-Control':'public,max-age=86400'});res.end(bytes);}catch{res.writeHead(404);res.end();}return;}
-    if(req.method==='GET'&&['/','/manual-platform-cancellation.js','/price-verification.css','/price-verification.js','/missing-orders-verification.js','/stock-information.js','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
+    if(req.method==='GET'&&['/','/unshipped-audit.js','/unshipped-audit.css','/manual-platform-cancellation.js','/price-verification.css','/price-verification.js','/missing-orders-verification.js','/stock-information.js','/receptions.html','/receipt-recovery.js','/receipt-recovery.css','/movement-watch.js','/platform-observations.css','/tracking-sync.js','/temu-excel-import.js','/temu-excel-preparation.js','/tracking-sync.css','/order-suspension.js','/problem-deferral.js','/order-suspension.css','/lecture-shopify.js','/temu-reading.js','/temu-reading.css','/equivalence-catalog.js','/equivalence-import.js','/v2-followup.js','/label-sku-copy.js','/migration-preparation.js','/signup.js','/live-events.js','/import-safety.js','/order-priority.js','/erplain-refresh.js','/lifecycle-ui.js','/comments-1030.js','/margins.js','/purchases.js','/comments-october.js','/diagnostics.js','/compact-problems.js','/shopify-rules.js','/comments-1651.js','/comments-2005.js','/problem-corrections.js','/import-corrections.js','/app.js','/workspace.js','/review.js','/partial.js','/temu.js','/improvements.js','/parity-audit.json','/style.css'].includes(p)){
 
       const file=p==='/'?'index.html':p.slice(1);res.setHeader('Content-Type',p.endsWith('.json')?'application/json':p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(await readFile(path.join(root,'public',file)));return;
 
@@ -448,6 +451,7 @@ const server=http.createServer(async(req,res)=>{
     if(await labelTools({p,req,res,db,user,body,json,audit,permitted}))return;
     if(await verifyMissingOrders({p,req,res,user,permitted,body,json}))return;
     if(await shopifyObservationRoutes({p,url,req,res,db,json,user,permitted}))return;
+    if(await unshippedAuditRoutes({p,url,req,res,service:unshippedAudit,user,permitted,body,json}))return;
     if(await v2Routes({p,url,req,res,db,json,user,permitted}))return;
     if(await temuRoutes({p,url,req,res,db,service:temuService,local:temuLocal,sync:temuSync,user,json,body,permitted,audit}))return;
     if(await trackingSyncRoutes({p,url,req,res,service:statusSync,user,body,json,permitted}))return;
