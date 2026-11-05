@@ -88,3 +88,15 @@ test('concurrent tender creation paths search again under the shared lock before
  },['erplain-tender-customers'])));
  assert.equal(created,1);assert.equal(orders[0].erp_live.customer.id,orders[1].erp_live.customer.id);
 });
+
+test('explicit customer number disambiguates tender accounts and never creates a missing numbered client',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const o=tenderOrder('explicit');o.source_payload.numerodeclient='C00007717';
+ assert.equal(await reuseTenderCustomer({request:async(q,v)=>{
+  assert.deepEqual(v.where,{column:'CUSTOMER_NUMBER',operator:'EQ',value:'C00007717'});
+  return customerPage([{id:'chosen',label:'CENTRE HOSPITALIER',active:true,customer_number:'C00007717'}]);
+ }},o,async()=>{}),true);
+ assert.equal(o.erp_live.customer.id,'chosen');assert.equal(o.erp_live.customerReuse.matchedBy,'customer_number');
+ const missing=tenderOrder('not-found');missing.source_payload.numerodeclient='NO-SUCH-CLIENT';
+ await assert.rejects(reuseTenderCustomer({request:async()=>customerPage([])},missing,async()=>assert.fail('must block')),/introuvable/);
+});
