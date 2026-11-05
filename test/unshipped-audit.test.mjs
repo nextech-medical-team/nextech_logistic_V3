@@ -41,6 +41,8 @@ test('Amazon : regroupement, quantités restantes et exclusion des lignes déjà
  const noStatus=await parseAmazonAuditReport(amazonInput('order-id\tpurchase-date\n123-1234567-1234567\t2026-10-20'),now());assert.equal(noStatus.rows[0].sourceStatus,'Non expédié selon le rapport');
  await assert.rejects(parseAmazonAuditReport(amazonInput('ref\tdate\nX\t2026-10-20'),now()),/Colonnes/);
  const bad=await parseAmazonAuditReport(amazonInput('order-id\tpurchase-date\n123-1234567-1234567\t20 mars'),now());assert.equal(bad.rows[0].date,null);assert.ok(bad.rows[0].errors.length);
+ const invalidDay=await parseAmazonAuditReport(amazonInput('order-id\tpurchase-date\n123-1234567-1234567\t2026-02-31'),now());assert.equal(invalidDay.rows[0].date,null);
+ const partial=await parseAmazonAuditReport(amazonInput('order-id\tpurchase-date\torder-status\n123-1234567-1234567\t2026-10-20\tPartiallyShipped'),now());assert.match(partial.rows[0].errors.join(' '),/quantités restantes/);
  await assert.rejects(parseAmazonAuditReport({...amazonInput(reportText),reportedAt:'2030-01-01'},now()),/Date du rapport/);
 });
 test('rapprochement par canal, référence et boutique ; pas de faux doublon inter-boutiques',()=>{

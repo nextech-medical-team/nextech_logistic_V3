@@ -42,11 +42,14 @@ export async function parseAmazonAuditReport({filename,content,reportedAt},now=n
   if(['shipped','fulfilled','cancelled','canceled','expedie','expediee','annule','annulee'].includes(status)||remaining==='0'){excluded++;continue;}
   const key=JSON.stringify(Object.entries(r).filter(([k])=>k!=='row'));if(seen.has(key)){repeated++;continue;}seen.add(key);
   const rawDate=r[column('date')],date=rawDate instanceof Date?rawDate.toISOString():String(rawDate||'').trim();
-  const validDate=/^\d{4}-\d{2}-\d{2}(?:T.*(?:Z|[+-]\d{2}:?\d{2}))?$/.test(date)&&Number.isFinite(Date.parse(date));
+  const day=/^(\d{4})-(\d{2})-(\d{2})/.exec(date),calendar=day?new Date(Date.UTC(Number(day[1]),Number(day[2])-1,Number(day[3]))):null;
+  const validDate=/^\d{4}-\d{2}-\d{2}(?:T.*(?:Z|[+-]\d{2}:?\d{2}))?$/.test(date)&&Number.isFinite(Date.parse(date))&&calendar?.toISOString().slice(0,10)===date.slice(0,10);
   const o=groups.get(ref)||{channel:'amazon',reference:ref,shop:'Rapport Amazon',date:validDate?new Date(date).toISOString():null,sourceStatus:column('status')?String(r[column('status')]||'Non communiqué'):'Non expédié selon le rapport',sourceKind:'Rapport Amazon',sourceAt:new Date(stamp).toISOString(),flags:[],parcels:[],lines:[],errors:[]};
   if(!validDate)o.errors.push('Date d’achat absente ou invalide : ancienneté non vérifiable');
   if(validDate&&o.date&&o.date!==new Date(date).toISOString())o.errors.push('Dates d’achat différentes pour la même commande');
   if(status&&!['unshipped','partiallyshipped','pending','nonexpedie','nonexpediee','partiellementexpedie','partiellementexpediee','enattente'].includes(status))o.errors.push('Statut du rapport à vérifier : '+String(r[column('status')]));
+  if(column('status')){o.sourceStatuses=[...new Set([...(o.sourceStatuses||[]),String(r[column('status')]||'Non communiqué')])];o.sourceStatus=o.sourceStatuses.join(' / ');if(o.sourceStatuses.length>1)o.errors.push('Statuts différents entre les lignes du rapport');}
+  if(['partiallyshipped','partiellementexpedie','partiellementexpediee'].includes(status)&&!remaining)o.errors.push('Commande partiellement expédiée : quantités restantes non précisées');
   if(remaining&&!/^\d+$/.test(remaining))o.errors.push('Quantité restante invalide');
   o.lines.push({sku:column('sku')?String(r[column('sku')]||''):'',remaining:remaining&&/^\d+$/.test(remaining)?Number(remaining):null});groups.set(ref,o);
  }
