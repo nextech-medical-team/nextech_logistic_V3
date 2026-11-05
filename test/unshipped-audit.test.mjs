@@ -92,3 +92,34 @@ test('droits des routes et export CSV filtré, horodaté et protégé des formul
  for(const p of ['/api/unshipped-audit','/api/unshipped-audit/reports'])await assert.rejects(unshippedAuditRoutes({p,url:new URL('http://local'+p),req:{method:'POST'},res,service,user:{role:'viewer'},permitted,body:async()=>({}),json(){}}),/Accès interdit/);
  await unshippedAuditRoutes({p:'/api/unshipped-audit/export',url:new URL('http://local/api/unshipped-audit/export?channel=shopify'),req:{method:'GET'},res,service,user,permitted,json(){}});assert.match(res.headers['Content-Type'],/csv/);assert.match(res.value,/'=1\+1/);assert.match(res.value,/API Shopify/);assert.match(res.value,/2026-11-05/);
 });
+
+ test('missing shop identity never confirms V3 presence across shops',async()=>{
+ const {matchAuditOrders,uncertainAuditOrders,diagnoseAuditRow}=await import('../src/unshipped-audit-core.mjs');
+ for(const channel of ['shopify','temu']){
+  const o={id:'legacy',channel,reference:'#100',source_payload:{}};
+  for(const shop of ['shop-a','shop-b']){
+   const row={channel,reference:'#100',shop};
+   assert.equal(matchAuditOrders(row,[o]).length,0);
+   assert.equal(uncertainAuditOrders(row,[o]).length,1);
+   assert.match(diagnoseAuditRow({...row,v3:[],v3Uncertain:[o]}),/boutique V3 non confirmée/);
+  }
+ }
+});
+ test('uncertain legacy match cannot contribute parcels or blockers',async()=>{
+ const db=await database();try{
+  await db.query("INSERT INTO orders(id,channel,reference,issue) VALUES('legacy','temu',$1,'unrelated blocker')",[ref]);
+  await db.query("INSERT INTO carrier_jobs VALUES('legacy','gofo','ready',$1,NULL,'production')",[JSON.stringify(['GFFR000001'])]);
+  let trackingCalls=0;
+  const service=unshippedAuditService(db,'/unused',{now,workerAvailable:async()=>true,sourceFactory:readers({tracking:async()=>{trackingCalls++;return [];}})});
+  const job=await service.start({channels:['temu']},user);await service.run();const s=await service.read(job.id),row=s.rows[0];
+  assert.equal(row.v3.length,0);assert.equal(row.v3Uncertain.length,1);assert.equal(row.parcels.length,0);assert.equal(trackingCalls,0);
+  assert.equal(row.labelAvailable,undefined);assert.equal(s.status,'partial');assert.match(row.diagnosis,/boutique V3 non confirmée/);
+ }finally{await db.close();}
+});
+
+test('CSV keeps uncertain shop identity distinct from absent V3 orders',async()=>{
+ const snapshot={id:'run',status:'partial',startedAt:now().toISOString(),options:{minAgeDays:3},rows:[{channel:'shopify',reference:'#100',v3:[],v3Uncertain:[{id:'legacy'}],parcels:[],errors:[]}]};
+ const res={setHeader(){},end(value){this.value=value;}};
+ await unshippedAuditRoutes({p:'/api/unshipped-audit/export',url:new URL('http://local/api/unshipped-audit/export'),req:{method:'GET'},res,service:{read:async()=>snapshot},user,permitted(){},json(){}});
+ assert.match(res.value,/Identité boutique non confirmée/);
+});

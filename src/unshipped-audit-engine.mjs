@@ -1,6 +1,6 @@
 import {aggregateParcels} from './status-policy.mjs';
 import {erplainObservation} from './shopify-observation.mjs';
-import {auditAge,auditReference,includeAuditRow,matchAuditOrders,temuAuditRow,shopifyAuditRow,diagnoseAuditRow} from './unshipped-audit-core.mjs';
+import {auditAge,auditReference,includeAuditRow,matchAuditOrders,uncertainAuditOrders,temuAuditRow,shopifyAuditRow,diagnoseAuditRow} from './unshipped-audit-core.mjs';
 import {pendingShopifyQuery} from './unshipped-audit-sources.mjs';
 
 const message=e=>String(e?.message||e).slice(0,500);
@@ -66,7 +66,7 @@ export async function collectUnshippedAudit({db,snapshot:s,sources,amazonReport,
   const partials=ids.length?(await db.query("SELECT order_id,carrier,status,tracking,error,environment FROM partial_deliveries WHERE order_id=ANY($1::text[]) AND status<>'cancelled'",[ids])).rows:[];
   const extras=ids.length?(await db.query("SELECT order_id,carrier,status,tracking,environment FROM extra_parcels WHERE order_id=ANY($1::text[]) AND status<>'failed'",[ids])).rows:[];
   const resolutions=ids.length?(await db.query('SELECT DISTINCT ON(order_id) order_id,status,stage,error FROM resolution_jobs WHERE order_id=ANY($1::text[]) ORDER BY order_id,created_at DESC,id DESC',[ids])).rows:[];
-  for(const row of s.rows){const matches=matchAuditOrders(row,orders);row.v3At=stamp();row.v3=matches.map(o=>{
+  for(const row of s.rows){row.v3Uncertain=uncertainAuditOrders(row,orders).map(o=>({id:o.id,reference:o.reference}));if(row.v3Uncertain.length)row.errors.push('Boutique absente du rapprochement V3 : les fiches candidates ne prouvent ni présence, ni étiquette, ni blocage de cette commande');const matches=matchAuditOrders(row,orders);row.v3At=stamp();row.v3=matches.map(o=>{
    const cs=jobs.filter(c=>c.order_id===o.id),r=resolutions.find(r=>r.order_id===o.id),blocker=o.issue||o.erp_job_error||cs.find(c=>c.error)?.error||(['review','waiting'].includes(r?.status)?r.error:null);
    row.parcels.push(...[...cs,...partials.filter(c=>c.order_id===o.id),...extras.filter(c=>c.order_id===o.id)].filter(c=>c.environment==='production').flatMap(c=>(Array.isArray(c.tracking)?c.tracking:[c.tracking]).filter(Boolean).map(tracking=>({carrier:c.carrier,tracking,origin:'V3'}))));
    if(cs.some(c=>c.status==='ready'&&c.environment==='production'))row.labelAvailable=true;
