@@ -5,7 +5,7 @@ const stamp='2026-11-05T12:00:00Z';
 const row=(channel,reference,extra={})=>({channel,shop:channel==='temu'?'mall-fr':'test.myshopify.com',country:'FR',reference,date:'2026-10-28T10:00:00Z',ageDays:8,deadline:'2026-10-31T12:00:00Z',overdue:true,sourceKind:channel==='amazon'?'Rapport Amazon':'API '+channel.toUpperCase(),sourceStatus:channel==='temu'?'Non expédié':'UNFULFILLED',sourceAt:stamp,v3:[],bc:[],bl:[],parcels:[],errors:[],diagnosis:'Absente de V3',...extra});
 async function setup(page){
  const errors=[],requests=[];page.on('pageerror',e=>errors.push(e.message));let report=false;
- const rows=[row('temu','PO-069-1234567890',{v3:[{id:'one',labelStatus:'production_ready',blocker:null}],labelAvailable:true,bc:[{label:'C000001',status:'active'}],bl:[{label:'SHO000001',status:'ready_to_ship'}],erpAt:stamp,diagnosis:'Étiquette disponible ; suivi non confirmé',parcels:[{carrier:'gofo',tracking:'GFFR1234567890',observation:'unavailable',error:'API suivi · HTTP 429',lastKnown:{status:'delivered',checkedAt:'2026-10-20T12:00:00Z'}}]}),row('shopify','#13050'),row('amazon','123-1234567-1234567')];
+ const rows=[row('temu','PO-069-1234567890',{v3:[{id:'one',labelStatus:'production_ready',blocker:null}],labelAvailable:true,bc:[{label:'C000001',status:'active'}],bl:[{label:'SHO000001',status:'ready_to_ship'}],erpAt:stamp,diagnosis:'Étiquette disponible ; suivi non confirmé',parcels:[{carrier:'gofo',tracking:'GFFR1234567890',observation:'unavailable',error:'API suivi · HTTP 429',lastKnown:{status:'delivered',checkedAt:'2026-10-20T12:00:00Z'}}]}),row('shopify','#13050',{v3Uncertain:[{id:'legacy',reference:'#13050'}],diagnosis:'Identité boutique V3 non confirmée : rapprochement à vérifier',errors:['Boutique absente du rapprochement V3']}),row('amazon','123-1234567-1234567')];
  await page.route('**/api/unshipped-audit**',async route=>{
   const req=route.request(),url=new URL(req.url());
   if(url.pathname.endsWith('/reports')){
@@ -22,9 +22,10 @@ async function setup(page){
 for(const width of [1440,390])test('module non expédiées : résultats, limites et filtres à '+width,async({page})=>{
  await page.setViewportSize({width,height:1000});const f=await setup(page);
  await expect(page.locator('#ua-rows')).toContainText('PO-069-1234567890');await expect(page.locator('#ua-rows')).toContainText('Suivi non confirmé');await expect(page.locator('#ua-rows')).toContainText('Dernière observation V3');await expect(page.locator('#ua-state')).toContainText('lectures incomplètes');
- await page.locator('#ua-channel').selectOption('shopify');await expect(page.locator('#ua-rows tr')).toHaveCount(1);await expect(page.locator('#ua-export')).toHaveAttribute('href',/channel=shopify/);
+ await page.locator('#ua-channel').selectOption('shopify');await expect(page.locator('#ua-rows tr')).toHaveCount(1);await expect(page.locator('#ua-export')).toHaveAttribute('href',/channel=shopify/);await expect(page.locator('#ua-rows')).toContainText('Identité boutique non confirmée');await expect(page.locator('#ua-rows')).not.toContainText('Absente de V3');await expect(page.locator('#ua-rows [data-ua-order]')).toHaveCount(0);
  await page.locator('#ua-channel').selectOption('');await page.locator('#ua-search').fill('13050');await expect(page.locator('#ua-rows tr')).toHaveCount(1);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+ await page.locator('#ua-rows td').filter({hasText:'Identité boutique non confirmée'}).scrollIntoViewIfNeeded();
  await page.screenshot({path:'/tmp/nextech-unshipped-audit-'+width+'.png',fullPage:true});expect(f.errors).toEqual([]);
 });
 test('rapport Amazon : chargement de contrôle, puis seuil et canaux transmis sans import métier',async({page})=>{
