@@ -34,3 +34,87 @@ test('production worker no longer invokes number generation and keeps customer r
  assert.match(source,/mutationBlock\(fresh/);
  assert.match(source,/'CreateCustomer',erplainCustomerInput/);
 });
+
+const tenderOrder=id=>({id,channel:'tender',recipient:'Site de livraison',source_payload:{client:'CENTRE HOSPITALIER'},erp_live:{}});
+const customerPage=(data,hasMorePages=false)=>({Customers:{data,paginatorInfo:{hasMorePages}}});
+test('tender orders for the same client reuse its existing Erplain account across imports',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ let calls=0,saves=0;
+ const api={request:async(q,v)=>{calls++;assert.match(q,/^query /);assert.equal(v.where.column,'LABEL');assert.equal(v.where.value,'CENTRE HOSPITALIER');return customerPage([{id:'client-7',label:'CENTRE HOSPITALIER',active:true,customer_number:'C7'}]);}};
+ for(const id of ['first-import','second-import']){
+  const o=tenderOrder(id);
+  assert.equal(await reuseTenderCustomer(api,o,async()=>{saves++;}),true);
+  assert.equal(o.erp_live.customer.id,'client-7');assert.equal(o.erp_live.phase,'customer_created');
+  assert.equal(await reuseTenderCustomer(api,o,async()=>assert.fail('already saved')),false);
+ }
+ assert.equal(calls,2);assert.equal(saves,2);
+});
+test('tender lookup completes pagination and blocks ambiguous, inactive or incomplete results',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const c={id:'1',label:'CENTRE HOSPITALIER',active:true};
+ for(const pages of [
+  [customerPage([c],true),customerPage([{...c,id:'2'}])],
+  [customerPage([{...c,active:false}])],
+  [{Customers:{data:[]}}],
+  [customerPage([c],true),customerPage([c])],
+  [customerPage([],true)],
+  [customerPage([{...c,label:'AUTRE CLIENT'}])]
+ ]){
+  const o=tenderOrder('blocked');let index=0;
+  await assert.rejects(reuseTenderCustomer({request:async()=>pages[index++]},o,async()=>assert.fail('no persistence on invalid lookup')));
+  assert.equal(o.erp_live.customer,undefined);
+ }
+ const missing=tenderOrder('missing');delete missing.source_payload.client;
+ await assert.rejects(reuseTenderCustomer({},missing,()=>{}),/Nom du client absent/);
+});
+test('tender lookup allows creation only after confirmed absence and leaves other channels unchanged',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ assert.equal(await reuseTenderCustomer({request:async()=>customerPage([])},tenderOrder('new'),()=>assert.fail('no existing customer')),false);
+ for(const channel of ['temu','shopify','amazon','samples','erplain']){
+  assert.equal(await reuseTenderCustomer({request:()=>assert.fail('other channels unchanged')},{...tenderOrder(channel),channel},()=>{}),false);
+ }
+});
+
+test('concurrent tender creation paths search again under the shared lock before creating',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const {withShipmentLock}=await import('../src/shipment-lock.mjs');
+ let created=0,customers=[];
+ const api={request:async()=>customerPage(customers)};
+ const orders=[tenderOrder('parallel-1'),tenderOrder('parallel-2')];
+ await Promise.all(orders.map(o=>withShipmentLock(async()=>{
+  if(await reuseTenderCustomer(api,o,async()=>{}))return;
+  await new Promise(resolve=>setTimeout(resolve,5));
+  created++;customers=[{id:'shared',label:'CENTRE HOSPITALIER',active:true}];o.erp_live.customer=customers[0];
+ },['erplain-tender-customers'])));
+ assert.equal(created,1);assert.equal(orders[0].erp_live.customer.id,orders[1].erp_live.customer.id);
+});
+
+test('explicit customer number disambiguates tender accounts and never creates a missing numbered client',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const o=tenderOrder('explicit');o.source_payload.numerodeclient='C00007717';
+ assert.equal(await reuseTenderCustomer({request:async(q,v)=>{
+  assert.deepEqual(v.where,{column:'CUSTOMER_NUMBER',operator:'EQ',value:'C00007717'});
+  return customerPage([{id:'chosen',label:'CENTRE HOSPITALIER',active:true,customer_number:'C00007717'}]);
+ }},o,async()=>{}),true);
+ assert.equal(o.erp_live.customer.id,'chosen');assert.equal(o.erp_live.customerReuse.matchedBy,'customer_number');
+ const missing=tenderOrder('not-found');missing.source_payload.numerodeclient='NO-SUCH-CLIENT';
+ await assert.rejects(reuseTenderCustomer({request:async()=>customerPage([])},missing,async()=>assert.fail('must block')),/introuvable/);
+});
+
+test('same tender name prefers classic customer numbers then the actual oldest account',async()=>{
+ const {chooseTenderCustomer,reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const c=(id,number,date,active=true)=>({id,label:'CENTRE HOSPITALIER',customer_number:number,created_at:date,active});
+ const legacy=c('1','V3:old','2020-01-01 10:00:00');
+ const newer=c('3','C00000001','2024-01-01 10:00:00');
+ const oldest=c('2','C00009999','2022-01-01 10:00:00');
+ const inactive=c('0','C00000000','2010-01-01 10:00:00',false);
+ assert.equal(chooseTenderCustomer([newer,legacy,oldest,inactive]).id,'2');
+ assert.equal(chooseTenderCustomer([legacy,c('4','V3:new','2025-01-01 10:00:00')]).id,'1');
+ assert.equal(chooseTenderCustomer([c('10','C10','2022-01-01 10:00:00'),c('2','C2','2022-01-01 10:00:00')]).id,'2');
+ assert.throws(()=>chooseTenderCustomer([oldest,c('5','C5',null)]),/Date de création/);
+ assert.throws(()=>chooseTenderCustomer([inactive]),/inactif/);
+ const o=tenderOrder('choose-oldest');
+ assert.equal(await reuseTenderCustomer({request:async(q)=>{assert.match(q,/created_at/);return customerPage([newer,legacy,oldest,inactive]);}},o,async()=>{}),true);
+ assert.equal(o.erp_live.customer.id,'2');assert.equal(o.erp_live.customerReuse.selectionPolicy,'classic_number_then_oldest');
+ assert.equal(o.erp_live.customerReuse.candidateCount,4);
+});
