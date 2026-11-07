@@ -1,3 +1,4 @@
+import {manualPlatformCancellation} from '../src/manual-platform-cancellation.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
@@ -39,6 +40,33 @@ test('empty scan completes without application and transient errors are retried'
   const reports=platformCancellationReports(db,{async next(){if(fail){fail=false;throw Error('offline');}return {done:true};},async apply(){assert.fail('empty report');}});
   const worker=automaticPlatformCancellation(db,reports,{now:()=>new Date('2026-11-07T10:00:00Z')});
   await assert.rejects(()=>worker.run(),/offline/);await worker.run();await worker.run();
+  assert.equal((await db.query('SELECT phase FROM automatic_platform_cancellation')).rows[0].phase,'complete');
+ }finally{await db.close();}
+});
+
+
+test('archived row is retained for review while the next row and day complete',async()=>{
+ const db=new PGlite();
+ try{
+  await initializePlatformCancellationReports(db);await initializeAutomaticPlatformCancellation(db);
+  let audit=0,applied=[];
+  const missing=manualPlatformCancellation({async query(sql){
+   if(sql.startsWith('SELECT * FROM orders'))return {rows:[]};
+   assert.match(sql,/INSERT INTO audit/);audit++;return {rows:[]};
+  }},'unused',{}, {shopify:{async cancel(){assert.fail('no provider call');}},connect:async()=>assert.fail('no provider call')});
+  const reports=platformCancellationReports(db,{
+   async next(){assert.fail('seeded scan is complete');},
+   async apply(input,user){applied.push(input.id);return input.id==='a'?missing.apply(input,user):{result:{id:input.id,applied:true}};}
+  });
+  await db.query("INSERT INTO platform_cancellation_reports(id,owner,scope,scan_complete) VALUES('r','test','{}',true)");
+  for(const id of ['a','b'])await db.query('INSERT INTO platform_cancellation_report_rows(report_id,order_id,checked) VALUES($1,$2,$3)',['r',id,JSON.stringify({id,platformCancelled:true})]);
+  await db.query("INSERT INTO automatic_platform_cancellation(day,report_id,phase) VALUES('2026-11-07','r','applying')");
+  const worker=automaticPlatformCancellation(db,reports,{now:()=>new Date('2026-11-07T09:00:00Z')});
+  await worker.run();await worker.run();await worker.run();await worker.run();
+  assert.deepEqual(applied,['a','b']);assert.equal(audit,1);
+  const report=await reports.read('r');
+  assert.equal(report.results[0].status,'review');assert.equal(report.results[0].applied,false);
+  assert.equal(report.results[0].platformCancelled,true);assert.equal(report.results[1].applied,true);
   assert.equal((await db.query('SELECT phase FROM automatic_platform_cancellation')).rows[0].phase,'complete');
  }finally{await db.close();}
 });

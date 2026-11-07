@@ -60,7 +60,13 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
   if(bounds.createdFrom!=null&&bounds.createdTo!=null&&bounds.createdFrom>bounds.createdTo)throw Error('La date de fin doit suivre la date de début');
   if(apply&&(typeof input?.id!=='string'||!input.id))throw Error('Commande requise');
   const order=(await db.query(apply?"SELECT * FROM orders WHERE archived=false AND id=$1 AND channel=ANY($2::text[])":"SELECT * FROM orders WHERE archived=false AND channel=ANY($2::text[]) AND id>$1 ORDER BY id LIMIT 1",[apply?input.id:input?.cursor||'',channels])).rows[0];
-  if(apply&&!order)throw Error('Commande archivée ou inaccessible');
+  if(apply&&!order){
+   // This refusal happens before any provider call or cancellation. Persist a
+   // review result so a daily report can continue with its remaining rows.
+   const result={id:input.id,status:'review',applied:false,error:'Commande archivée ou inaccessible'};
+   await db.query('INSERT INTO audit(user_email,action,detail) VALUES($1,$2,$3)',[user.email,'order.manual_platform_cancellation',JSON.stringify(result)]);
+   return {done:false,cursor:input.id,result};
+  }
   if(!order)return {done:true};
   if(!apply&&(bounds.createdFrom!=null||bounds.createdTo!=null)){
    const created=cancellationOrderCreatedAt(order);
