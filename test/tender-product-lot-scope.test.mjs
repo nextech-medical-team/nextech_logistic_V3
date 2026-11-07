@@ -40,13 +40,13 @@ test('mixed BL checks only shared variants, deduplicates them, and uses effectiv
  assert.deepEqual(api.calls.filter(c=>c.query.includes('V3BlBatchVariant')).map(c=>c.v.id),['20']);
 });
 test('tender order blocks every product even if not previously sold under that manager',async()=>{
- const api=fixture({orders:()=>assert.fail('No membership read for tender BL'),tracked:false});
+ const api=fixture({orders:()=>assert.fail('No membership read for tender BL'),tracked:false,batches:false});
  await assert.rejects(assertBlBatchNumbers(api,{channel:'tender'},[line('10'),line('20')]),error=>/SKU-10/.test(error.message)&&/SKU-20/.test(error.message));
- assert.equal(api.calls.length,2);
+ assert.equal(api.calls.length,4);
 });
 for(const label of ["Appel d'offres",' APPELS D’OFFRES ','Appels d’offrés'])test('Erplain manager identifies tender BL: '+label,async()=>{
- const api=fixture({tracked:false});await assert.rejects(assertBlBatchNumbers(api,{channel:'erplain',erp_live:{bc:{account_representative:{label}}}},[line()]),/activer la gestion des lots/);
- assert.equal(api.calls.length,1);
+ const api=fixture({tracked:false,batches:false});await assert.rejects(assertBlBatchNumbers(api,{channel:'erplain',erp_live:{bc:{account_representative:{label}}}},[line()]),/numéro de lot absent/);
+ assert.equal(api.calls.length,2);
 });
 test('membership scans subsequent pages and accepts historical tender orders',async()=>{
  const api=fixture({orders:v=>v.page===1?page([bc('retail','10','Boutique')],1,true):page([{...bc('historical'),status:'completed'}],2),tracked:false});
