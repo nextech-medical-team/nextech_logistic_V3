@@ -45,6 +45,22 @@ test('saved report reopens and application saves the same report',async()=>{
  assert.equal(f.find('platform-cancellation-apply').disabled,true);
  assert.ok(!calls.some(([url])=>url.endsWith('/refresh-platform-cancellations')));
 });
+test('saved report displays only platform cancellations still missing from V3',async()=>{
+ const f=fixture();
+ const results=[
+  {id:'a',channel:'temu',reference:'PENDING',status:'cancelled',platformCancelled:true,v3Cancelled:false},
+  {id:'b',channel:'shopify',reference:'DONE',status:'cancelled',platformCancelled:true,v3Cancelled:true},
+  {id:'c',channel:'temu',reference:'ACTIVE',status:'unchanged',platformCancelled:false,v3Cancelled:false},
+  {id:'d',channel:'shopify',reference:'UNKNOWN',status:'review',platformCancelled:null,v3Cancelled:false},
+  {id:'e',channel:'shopify',reference:'APPLIED',status:'cancelled',platformCancelled:true,applied:true},
+  {id:'f',channel:'shopify',reference:'REVIEW',status:'review',platformCancelled:true,v3Cancelled:false,error:'Check stock'}
+ ];
+ f.context.api=async()=>({id:'saved',created_at:'2026-11-07T07:30:00Z',scope:{channels:['temu','shopify']},scan_complete:true,issues:[],results});
+ const history=f.find('platform-cancellation-history');history.value='saved';await history.onchange();
+ const rows=f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children;
+ assert.deepEqual(Array.from(rows,r=>r.children[1].textContent),['PENDING','REVIEW']);
+});
+
 test('missing application surface does not throw or call sources',()=>{const f=fixture({hasMain:false});assert.equal(f.find('platform-cancellations-menu'),undefined);assert.deepEqual(f.calls,[]);});
 
 test('report table is visible before verification with headings and an empty state',()=>{
@@ -59,7 +75,7 @@ test('table remains visible while verification is running and displays the resul
  const f=fixture();let finish;f.context.api=()=>new Promise(resolve=>{finish=resolve;});
  const pending=f.find('platform-cancellation-refresh').onclick();
  assert.match(f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children[0].textContent,/Vérification en cours/);
- f.context.api=async()=>({done:true});finish({done:false,cursor:'a',result:{channel:'shopify',reference:'REF-42',status:'review',error:'Stock à rapprocher'}});await pending;
+ f.context.api=async()=>({done:true});finish({done:false,cursor:'a',result:{channel:'shopify',reference:'REF-42',platformCancelled:true,v3Cancelled:false,status:'review',error:'Stock à rapprocher'}});await pending;
  const cells=f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children;
  assert.equal(cells[0].textContent,'Shopify');assert.equal(cells[1].textContent,'REF-42');assert.equal(cells[5].children[0].textContent,'À vérifier');assert.equal(cells[6].textContent,'Stock à rapprocher');
 });
@@ -76,7 +92,7 @@ for(const [selection,channels] of [['temu',['temu']],['shopify',['shopify']],['b
  });
 }
 test('Excel button downloads displayed results without running verification again',async()=>{
- const f=fixture();let count=0;f.context.api=async()=>count++===0?{done:false,cursor:'a',result:{channel:'temu',reference:'REF',status:'review',error:'À vérifier'}}:{done:true};
+ const f=fixture();let count=0;f.context.api=async()=>count++===0?{done:false,cursor:'a',result:{channel:'temu',reference:'REF',platformCancelled:true,v3Cancelled:false,status:'review',error:'À vérifier'}}:{done:true};
  await f.find('platform-cancellation-refresh').onclick();
  let payload,downloaded=false;f.context.fetch=async(url,options)=>{assert.equal(url,'/api/orders/platform-cancellations/export');payload=JSON.parse(options.body);return {ok:true,blob:async()=>({})};};
  f.context.URL={createObjectURL:()=> 'blob:export',revokeObjectURL(){}};f.context.setTimeout=fn=>fn();f.context.document.body={append(link){link.click=()=>{downloaded=true;assert.match(link.download,/\.xlsx$/);};link.remove=()=>{};}};
@@ -90,7 +106,7 @@ test('refresh previews cancellations and Apply alone calls the application endpo
  const detail=()=>f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children[6].textContent;
  assert.match(detail(),/appliquer/);
  let writes=0;f.context.api=async(url,input)=>{writes++;assert.equal(url,'/api/orders/apply-platform-cancellations');assert.equal(input.id,'a');assert.deepEqual(Array.from(input.channels),['temu']);return {result:{id:'a',channel:'temu',reference:'REF',status:'cancelled',applied:true}};};
- await apply.onclick();assert.equal(writes,1);assert.equal(apply.disabled,true);assert.match(detail(),/appliqu.e dans V3/);
+ await apply.onclick();assert.equal(writes,1);assert.equal(apply.disabled,true);assert.equal(f.find('platform-cancellation-export').disabled,true);
  await apply.onclick();assert.equal(writes,1);
 });
 
@@ -115,7 +131,8 @@ test('already cancelled V3 orders are counted separately and cannot be applied a
  f.context.api=async()=>page++===0?{done:false,cursor:'a',result:{id:'a',channel:'temu',reference:'REF',status:'cancelled',platformCancelled:true,v3Cancelled:true}}:{done:true};
  await f.find('platform-cancellation-refresh').onclick();
  const cells=f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children;
- assert.equal(cells[5].children[0].textContent,'Annulée dans V3');
+ assert.match(cells[0].textContent,/filtre/);
+ assert.equal(f.find('platform-cancellation-export').disabled,true);
  assert.match(f.find('platform-cancellation-report').children[0].textContent,/1 annulées dans V3/);
  assert.equal(f.find('platform-cancellation-apply').disabled,true);
 });
@@ -147,6 +164,6 @@ test('status filter shows only cancellations and retains full French country nam
  const filter=f.find('platform-cancellation-status');filter.value='cancelled';filter.onchange();
  const body=()=>f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody');
  assert.equal(body().children.length,1);assert.equal(body().children[0].children[1].textContent,'CANCEL');assert.equal(body().children[0].children[2].textContent,'Italie');
- filter.value='all';filter.onchange();assert.equal(body().children.length,2);assert.equal(body().children[1].children[2].textContent,'Pays-Bas');
+ filter.value='all';filter.onchange();assert.equal(body().children.length,1);assert.equal(body().children[0].children[1].textContent,'CANCEL');
  filter.value='review';filter.onchange();assert.match(body().children[0].children[0].textContent,/filtre/);
 });
