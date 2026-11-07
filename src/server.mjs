@@ -1,3 +1,4 @@
+import {initializeAutomaticPlatformCancellation,automaticPlatformCancellation} from './automatic-platform-cancellation.mjs';
 import {recoverDocumentsAndLabels} from './recovered-bl-label.mjs';
 import {priceCorrection} from './price-correction.mjs';
 import {partialTemuLabelService} from './partial-temu-label.mjs';
@@ -136,6 +137,7 @@ await db.withLocks(['schema'],()=>initializeReceiptRecovery(db));
 await db.withLocks(['schema'],()=>initializeEquivalences(db));
 await db.withLocks(['schema'],()=>initializeEquivalenceImports(db));
 await db.withLocks(['schema'],()=>initializePlatformCancellationReports(db));
+await db.withLocks(['schema'],()=>initializeAutomaticPlatformCancellation(db));
 await db.withLocks(['schema'],()=>initializeStockResumeWatch(db,{resumeReadLeases:config.background}));
 await db.withLocks(['schema'],()=>initializeV2Followup(db));
 await db.withLocks(['schema'],()=>initializeShopifyObservation(db));
@@ -158,6 +160,8 @@ const runtime=createRuntime(db,{role:config.role});await runtime.start();
 await db.withLocks(['schema'],()=>initializeOrderRecheckMonitor(db,{afterPublication:config.background}));
 let taskSequence=0;
 function backgroundInterval(fn,ms,name){return config.background?runtime.schedule(name||'background-'+(++taskSequence),fn,ms):{unref(){}};}
+const automaticCancellations=automaticPlatformCancellation(db,platformCancellationRefresh,{timeZone:process.env.PLATFORM_CANCELLATION_TIMEZONE||'Europe/Paris',shouldStop:()=>runtime.stopping});
+backgroundInterval(()=>automaticCancellations.run(),1000,'platform-cancellation');
 const statusSync=trackingSyncService(db,process.env.CREDENTIALS_DIR||directory,{shouldStop:()=>runtime.stopping});
 backgroundInterval(()=>statusSync.run(),1000,'tracking-sync');
 const v2Followup=v2Worker(db,directory,{shouldStop:()=>runtime.stopping});backgroundInterval(()=>v2Followup.run(),10000,'v2-followup');

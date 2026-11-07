@@ -25,3 +25,9 @@ Un résultat Erplain incertain est uniquement vérifié lors d'un nouveau passag
 Accès : opérateur, responsable ou administrateur. Chaque résultat est enregistré dans l'audit, avec l'utilisateur ; la preuve source est conservée dans `source_payload.manualPlatformCancellation`.
 
 Validation locale : `node --test test/manual-platform-cancellation.test.mjs test/order-suspension-experience.test.mjs`.
+
+## Traitement quotidien automatique
+
+Le worker lance une vérification Temu et Shopify chaque jour à 7 h 30 (Europe/Paris ; configurable par `PLATFORM_CANCELLATION_TIMEZONE`). Un démarrage après cet horaire déclenche le passage du jour. Après vérification complète du rapport, les annulations confirmées sont appliquées avec relecture des plateformes et contrôles Erplain existants. Les refus restent visibles dans le rapport. Les rapports automatiques sont accessibles dans le même historique que les rapports manuels.
+
+La progression est conservée en base et reprend après redémarrage. Un passage terminé ne se répète pas le même jour. Le traitement peut être suspendu par `platform-cancellation` dans les interrupteurs des tâches. Un worker actif est nécessaire. Ce traitement quotidien fonctionne indépendamment de la page manuelle.
