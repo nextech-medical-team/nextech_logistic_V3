@@ -11,7 +11,8 @@ function platformStatusHtml(o){
  const isTemu=v.channel==='temu',hasCode=raw!==null&&raw!==undefined&&String(raw).trim()!=='';
  const text=v.channel==='shopify'?({unfulfilled:'Non expédiée',fulfilled:'Expédiée',partial:'Partiellement expédiée',partially_fulfilled:'Partiellement expédiée'})[raw]||raw:isTemu?(hasCode?'Code '+raw:'Statut TEMU indisponible'):raw;
  const message=isTemu&&hasCode?'<br><span data-temu-status-label>'+esc(temuLabels[String(raw)]||'Statut non reconnu')+'</span>':'';
- return '<span class="badge" title="Information du canal de vente, sans effet sur la préparation. Le suivi logistique indique l’évolution physique du colis.">'+esc(text||'Statut non renseigné')+message+esc(!isTemu&&v.cancelled?' · Annulée':'')+esc(v.financialStatus==='refunded'?' · Remboursée':'')+'</span><small>'+esc(v.observedAt?'Lu le '+new Date(v.observedAt).toLocaleString('fr-FR'):'Date de lecture non disponible')+'</small>'+(v.error?'<small>Lecture indisponible · dernière observation conservée</small>':'');
+ const notice=isTemu&&v.cancelled&&v.cancellationNotice?'<small class="temu-cancellation-notice" data-temu-cancellation-notice role="status"><strong>'+esc(v.cancellationNotice.title)+'</strong><br>'+esc(v.cancellationNotice.message)+'</small>':'';
+ return '<span class="badge" title="Information du canal de vente, sans effet sur la préparation. Le suivi logistique indique l’évolution physique du colis.">'+esc(text||'Statut non renseigné')+message+esc(!isTemu&&v.cancelled?' · Annulée':'')+esc(v.financialStatus==='refunded'?' · Remboursée':'')+'</span><small>'+esc(v.observedAt?'Lu le '+new Date(v.observedAt).toLocaleString('fr-FR'):'Date de lecture non disponible')+'</small>'+(v.error?'<small>Lecture indisponible · dernière observation conservée</small>':'')+notice;
 }
 
 function erplainTrackingHtml(o){

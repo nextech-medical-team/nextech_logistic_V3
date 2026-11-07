@@ -90,4 +90,5 @@ groups.push(['--test','test/native-bc-debit-recovery.test.mjs','test/shopify-doc
 groups.push(['--test','test/cancelled-import-scope.test.mjs','test/pg-advisory-locks.test.mjs','test/existing-bl-label.test.mjs','test/recovered-delivery-display.test.mjs','test/partial-extra-parcels.test.mjs','test/partial-parcel-migration.test.mjs']);
 groups.push(['--test','test/historical-initial-stock.test.mjs','test/historical-substitution-lots.test.mjs']);
 groups.push(['--test','test/unshipped-audit.test.mjs']);
+groups.push(['--test','test/temu-cancellation-notice.test.mjs']);
 process.exitCode=runTestGroups(groups);

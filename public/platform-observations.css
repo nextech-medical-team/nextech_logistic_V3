@@ -6,3 +6,5 @@
 
 /* Keep the TEMU message beneath its code even when badges use flex. */
 #view-orders .orders-with-margins td[data-platform-status] .badge:has(> [data-temu-status-label]){display:block!important;}
+
+#view-orders .temu-cancellation-notice{padding:8px;border:1px solid #e1b46c;border-radius:5px;background:#fff2da;color:#784800;white-space:normal;overflow-wrap:anywhere;line-height:1.5}
