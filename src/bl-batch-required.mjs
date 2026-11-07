@@ -47,13 +47,14 @@ export async function assertBlBatchNumbers(api,order,lines){
  if(!variants.size)throw Error(prefix+' : aucun produit à contrôler');
  const failures=[];
  for(const [id,{sku,exempt}] of variants){
-  if(exempt)continue;
+  if(exempt&&!tender)continue;
   try{
   const fail=reason=>Error(prefix+' · '+sku+' : '+reason+' — création BL bloquée');
   if(!tender&&!await usedInTenderOrder(api,id))continue;
   const v=(await api.request('query V3BlBatchVariant($id:ID!){Variant(id:$id){id sku has_batch_numbers}}',{id})).Variant;
   if(String(v?.id)!==id||typeof v.has_batch_numbers!=='boolean')throw fail('traçabilité non vérifiable');
-  if(!v.has_batch_numbers)throw fail('activer la gestion des lots et renseigner un numéro de lot dans Erplain');
+  // Existing named lots satisfy the tender gate; usable stock is checked separately.
+  if(!v.has_batch_numbers&&!tender)throw fail('activer la gestion des lots et renseigner un numéro de lot dans Erplain');
   let found=false;
   for(let page=1;page<=100;page++){
    const result=await api.request('query V3BlBatchNumbers($where:QueryBatchNumbersWhereWhereConditions!,$page:Int!){BatchNumbers(first:100,page:$page,where:$where){data{id label variant_id} paginatorInfo{hasMorePages}}}',{where:{column:'VARIANT_ID',operator:'EQ',value:id},page});
