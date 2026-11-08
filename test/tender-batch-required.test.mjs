@@ -8,21 +8,21 @@ const line=(id='10')=>({variant:{id,sku:'SKU-'+id},quantity:2});
 const batch=(id='10')=>({id:'100',label:'LOT-2026',variant_id:id});
 const exemptSkus=['2311859-02','2311860-02','2311858-02','2311861-02','27817-02','27818-02','27819-02','270123','271602','271603','2318021'];
 test('explicit SKU exceptions bypass only the BL lot gate across supported channels',async()=>{
- for(const channel of ['tender','amazon','temu','shopify']){
+ for(const channel of ['amazon','temu','shopify']){
   const api={async request(){throw Error('Exempt products must not request lots or tender history');}};
   await assertTenderBatchNumbers(api,{channel},exemptSkus.map((sku,i)=>({variant:{id:String(i+1),sku},quantity:1})));
  }
 });
 test('an exempt product does not exempt other lines or similar SKU names',async()=>{
  for(const sku of ['OTHER','2311859-020','X2311859-02','2311859']){
-  const api=fixture({tracked:false});
-  await assert.rejects(()=>assertTenderBatchNumbers(api,order,[{variant:{id:'1',sku:'2311859-02'}},{variant:{id:'2',sku}}]),/activer la gestion des lots/);
-  assert.deepEqual(api.calls.map(c=>c.v.id),['2']);
+  const api=fixture({tracked:false,pages:()=>({data:[],paginatorInfo:{hasMorePages:false}})});
+  await assert.rejects(()=>assertTenderBatchNumbers(api,order,[{variant:{id:'1',sku:'2311859-02'}},{variant:{id:'2',sku}}]),/numéro de lot absent/);
+  assert.deepEqual(api.calls.filter(c=>c.q.includes('V3BlBatchVariant')).map(c=>c.v.id),['1','2']);
  }
 });
 test('description cannot grant an exemption and unidentified products still block',async()=>{
- const api=fixture({tracked:false});
- await assert.rejects(()=>assertTenderBatchNumbers(api,order,[{variant:{id:'2'},description:'2311859-02'}]),/activer la gestion des lots/);
+ const api=fixture({tracked:false,pages:()=>({data:[],paginatorInfo:{hasMorePages:false}})});
+ await assert.rejects(()=>assertTenderBatchNumbers(api,order,[{variant:{id:'2'},description:'2311859-02'}]),/numéro de lot absent/);
  await assert.rejects(()=>assertTenderBatchNumbers(api,order,[{variant:{sku:'2311859-02'}}]),/produit non identifié/);
 });
 function fixture({tracked=true,pages,variant}={}){
@@ -42,9 +42,9 @@ test('a missing batch on the second product blocks the order with its SKU',async
  const api=fixture({pages:v=>({data:v.where.value==='10'?[batch()]:[],paginatorInfo:{hasMorePages:false}})});
  await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line(),line('20')]),/SKU-20.*numéro de lot absent.*BL bloquée/);
 });
-test('a product without batch tracking is blocked',async()=>{
- const api=fixture({tracked:false});await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line()]),/activer la gestion des lots/);
- assert.equal(api.calls.length,1);
+test('a product without tracking and without a named batch is blocked',async()=>{
+ const api=fixture({tracked:false,pages:()=>({data:[],paginatorInfo:{hasMorePages:false}})});await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line()]),/numéro de lot absent/);
+ assert.equal(api.calls.length,2);
 });
 for(const [name,value] of Object.entries({missing:undefined,blank:'  ',null:null,numeric:123}))test('batch label '+name+' cannot satisfy the gate',async()=>{
  const api=fixture({pages:()=>({data:[{...batch(),label:value}],paginatorInfo:{hasMorePages:false}})});
@@ -74,7 +74,7 @@ test('API failure blocks and a later attempt rereads Erplain',async()=>{
 test('every tender product requires named batches before BL creation',async()=>{
  for(const o of [{channel:'tender'},...['Appel d’offres',"Appels d'offres",' APPELS D’OFFRES '].map(label=>({channel:'erplain',erp_live:{bc:{account_representative:{label}}}}))]){
   const api=fixture();await assertTenderBatchNumbers(api,o,[line()]);assert.equal(api.calls.length,2);
-  await assert.rejects(()=>assertTenderBatchNumbers(fixture({tracked:false}),o,[line()]),/activer la gestion des lots/);
+  await assert.rejects(()=>assertTenderBatchNumbers(fixture({tracked:false,pages:()=>({data:[],paginatorInfo:{hasMorePages:false}})}),o,[line()]),/numéro de lot absent/);
  }
 });
 test('missing products block; non-product lines do not require batches',async()=>{
@@ -96,7 +96,7 @@ test('partial delivery checks only selected products before creating its draft',
 });
 
 test('batch validation reports every blocked SKU in one read-only check',async()=>{
- const api=fixture({tracked:false});
+ const api=fixture({tracked:false,pages:()=>({data:[],paginatorInfo:{hasMorePages:false}})});
  await assert.rejects(()=>assertTenderBatchNumbers(api,order,[line('10'),line('20')]),error=>error.message.includes('SKU-10')&&error.message.includes('SKU-20'));
- assert.equal(api.calls.length,2);
+ assert.equal(api.calls.length,4);
 });
