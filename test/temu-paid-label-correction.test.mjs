@@ -15,6 +15,13 @@ test('unavailable GOFO cannot replace existing carrier; never choose Cainiao',()
 test('required signature prevents unsupported GOFO substitution',()=>{
  const chosen=chooseCorrectionOffer({onlineChannelDtoList:[offer('colissimo',10,'4.84',{signServiceId:1}),offer('GOFO',11,'2.67')]},parcel,{signature:true});assert.equal(chosen.channelId,10);
 });
+test('GOFO-only mode never falls back to an address change with the existing carrier',()=>{
+ const raw={onlineChannelDtoList:[offer('colissimo',10,'4.84'),offer('GOFO',11,'2.67',{unavailableReason:'Outside area'})]};
+ assert.equal(chooseCorrectionOffer(raw,parcel,{gofoOnly:true}),null);
+ assert.equal(chooseCorrectionOffer(raw,parcel).channelId,10);
+ const eligible=chooseCorrectionOffer({onlineChannelDtoList:[offer('colissimo',10,'4.84'),offer('GOFO',11,'2.67')]},parcel,{gofoOnly:true});
+ assert.equal(eligible.channelId,11);
+});
 test('no eligible service returns no proposal',()=>{
  assert.equal(chooseCorrectionOffer({onlineChannelDtoList:[offer('CAINIAO',12,'1.00')]},parcel),null);
 });

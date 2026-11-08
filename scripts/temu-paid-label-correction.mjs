@@ -12,14 +12,14 @@ const mall='670702094848591',warehouse='WH-07213277470860591',morcourt='WH-03738
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const carrierName=p=>String(p.shippingCompanyName||p.carrier||'');
-export function chooseCorrectionOffer(raw,parcel,{signature=false,deadline=Date.now()+86400000}={}){
+export function chooseCorrectionOffer(raw,parcel,{signature=false,deadline=Date.now()+86400000,gofoOnly=false}={}){
  const base={warehouseId:warehouse,weight:parcel.weight,weightUnit:parcel.weightUnit,length:parcel.length,width:parcel.width,height:parcel.height,dimensionUnit:parcel.dimensionUnit};
  const info={lines:parcel.orderSendInfoList,signature,deadline};
  const valid=(raw.onlineChannelDtoList||[]).flatMap(offer=>{
   try{return [{...offer,...offerParcel(offer,base,info)}];}catch{return [];}
  }).filter(o=>o.currency==='EUR');
  return valid.filter(o=>/\bGOFO\b/i.test(carrierName(o))).sort((a,b)=>a.amount-b.amount)[0]
-  ||valid.find(o=>o.channelId===parcel.channelId&&o.shipCompanyId===parcel.shipCompanyId)
+  ||(!gofoOnly&&valid.find(o=>o.channelId===parcel.channelId&&o.shipCompanyId===parcel.shipCompanyId))
   ||null;
 }
 export function assertCorrectionParcel(parcel,reference){
@@ -30,7 +30,7 @@ export function assertCorrectionParcel(parcel,reference){
 }
 
 // Explicit manifest, direct authorized API access, one mutation per parcel. Never retry a purchase.
-export async function correctPaidLabels({references,directory,auditDirectory,apply=false,log=console.log}){
+export async function correctPaidLabels({references,directory,auditDirectory,minimumOrderDate='2026-11-06T08:00:00Z',gofoOnly=false,apply=false,log=console.log}){
  if(!Array.isArray(references)||!references.length||references.some(r=>!/^PO-\d+(?:-\d+)+$/.test(r))||new Set(references).size!==references.length)throw Error('Liste de références explicite et unique requise');
  await mkdir(auditDirectory,{recursive:true,mode:0o700});
  const config=await loadTemuShopConfig(directory),api=temuApi(config,{relay:null});
@@ -42,7 +42,7 @@ export async function correctPaidLabels({references,directory,auditDirectory,app
   const json=async(name,value,options={})=>writeFile(path.join(folder,name+'.json'),JSON.stringify(value,null,2),{mode:0o600,...options});
   try{const outcome=await db.withLocks(['stock-mutations'],async()=>{
    const o=(await db.query('SELECT * FROM orders WHERE reference=$1',[reference])).rows[0];
-   if(!o||o.archived||o.tracking_status!=='not_shipped'||o.partial_mode||o.transport_choice||o.source_payload?.mallId?.toString()!==mall||Date.parse(o.source_date)<Date.parse('2026-11-06T08:00:00Z'))throw Error('Commande hors périmètre France/date/non expédiée');
+   if(!o||o.archived||o.tracking_status!=='not_shipped'||o.partial_mode||o.transport_choice||o.source_payload?.mallId?.toString()!==mall||(minimumOrderDate&&Date.parse(o.source_date)<Date.parse(minimumOrderDate)))throw Error('Commande hors périmètre France/date/non expédiée');
    const job=(await db.query('SELECT * FROM temu_label_jobs WHERE reference=$1',[reference])).rows[0];
    if(job?.status!=='complete'||job.packages?.length!==1)throw Error('Étiquette payée unique complète requise');
    const packageSn=job.packages[0];
@@ -55,9 +55,11 @@ export async function correctPaidLabels({references,directory,auditDirectory,app
    // Completed records are verified on resume; no second carrier purchase.
    let completed;try{completed=JSON.parse(await readFile(path.join(folder,'completed.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
    if(completed){if(p.trackingNumber!==completed.tracking||p.warehouseId!==warehouse)throw Error('Résultat terminé a changé');return {...completed,status:'already_complete'};}
+   if(gofoOnly&&!/(colissimo|chronopost)/i.test(carrierName(p)))return {reference,packageSn,carrier:carrierName(p),tracking:p.trackingNumber,warehouse:p.warehouseName,status:'unchanged',reason:'Transporteur actuel hors périmètre Colissimo/Chronopost'};
    assertCorrectionParcel(p,reference);
    const raw=await api.read('bg.logistics.shippingservices.get',{warehouseId:warehouse,weight:p.weight,weightUnit:p.weightUnit,length:p.length,width:p.width,height:p.height,dimensionUnit:p.dimensionUnit,shipOrderInfoList:p.orderSendInfoList,signatureOnDelivery:!!p.signServiceId});
-   const chosen=chooseCorrectionOffer(raw,p,{signature:!!p.signServiceId,deadline:Number(parent.expectShipLatestTime)*1000});
+   const chosen=chooseCorrectionOffer(raw,p,{signature:!!p.signServiceId,deadline:Number(parent.expectShipLatestTime)*1000,gofoOnly});
+   if(!chosen&&gofoOnly)return {reference,packageSn,carrier:carrierName(p),tracking:p.trackingNumber,warehouse:p.warehouseName,status:'unchanged',reason:'GOFO indisponible : aucune modification de transporteur ou d’adresse'};
    if(!chosen)throw Error('GOFO et transporteur actuel indisponibles depuis Rozay');
    const proposal={reference,packageSn,previousWarehouse:p.warehouseName,previousCarrier:carrierName(p),previousTracking:p.trackingNumber,previousAmount:p.estimatedAmount,warehouseId:warehouse,carrier:carrierName(chosen),channelId:chosen.channelId,shipCompanyId:chosen.shipCompanyId,amount:chosen.amount,currency:chosen.currency};
    await json('proposal',proposal);
