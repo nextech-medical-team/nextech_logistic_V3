@@ -1,3 +1,4 @@
+import {selectTemuWarehouse} from './temu-warehouse-policy.mjs';
 import {randomUUID} from 'node:crypto';
 import {hash,inspectTemu,offerParcel,readTemuShipments,temuParcelWeight} from './temu-shipping.mjs';
 import {hasPartialCreatedBl} from './created-bl-label.mjs';
@@ -105,7 +106,7 @@ export function partialTemuLabelService(db,local,erplain,{enabled=()=>true,prese
   const selectedDetail={...detail,orderList:lines.map(l=>({...detail.orderList.find(i=>String(i.orderSn)===l.orderSn),quantity:l.quantity,packageSnInfo:[]}))};const info=inspectTemu(selectedDetail,o.reference);
   const weights=(await db.query('SELECT sku,weight_kg FROM products WHERE sku=ANY($1::text[])',[d.selection.map(l=>l.sku)])).rows;
   const weight=partialLabelWeight(d,o,weights).weight;
-  const raw=await api.read('bg.logistics.warehouse.list.get',{returnEnableBuyShippingLabelOnly:true}),warehouses=(raw.warehouseList||[]).filter(w=>w.enableBuyShippingLabel!==false),defaults=warehouses.filter(w=>w.defaultWarehouse),warehouse=defaults.length===1?defaults[0]:warehouses.length===1?warehouses[0]:null;if(!warehouse?.warehouseId)throw Error('TEMU · Entrepôt absent ou ambigu');
+  const raw=await api.read('bg.logistics.warehouse.list.get',{returnEnableBuyShippingLabelOnly:true}),warehouse=selectTemuWarehouse(raw.warehouseList||[]);
   const base={warehouseId:warehouse.warehouseId,weight:temuParcelWeight({weight_kg:weight}),weightUnit:'kg',length:'10.00',width:'8.00',height:'0.50',dimensionUnit:'cm'};
   const offered=await api.read('bg.logistics.shippingservices.get',{...base,shipOrderInfoList:lines,signatureOnDelivery:info.signature});const offers=[];
   for(const o of offered.onlineChannelDtoList||[])try{offers.push({...o,...offerParcel(o,base,info)});}catch{}
