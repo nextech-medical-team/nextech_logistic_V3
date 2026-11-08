@@ -91,4 +91,5 @@ groups.push(['--test','test/cancelled-import-scope.test.mjs','test/pg-advisory-l
 groups.push(['--test','test/historical-initial-stock.test.mjs','test/historical-substitution-lots.test.mjs']);
 groups.push(['--test','test/unshipped-audit.test.mjs']);
 groups.push(['--test','test/temu-warehouse-policy.test.mjs']);
+groups.push(['--test','test/temu-paid-label-correction.test.mjs']);
 process.exitCode=runTestGroups(groups);
