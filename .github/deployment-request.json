@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "deploy": true,
+  "branch": "main",
+  "baseCommit": "73b1525b58408cf1c8c0dc0eec034e0460e731a6",
+  "reason": "Demande explicite de l'utilisateur le 8 novembre 2026 : déclencher le déploiement des corrections TEMU France et du code main sur le serveur."
+}

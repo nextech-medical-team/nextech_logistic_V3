@@ -1,6 +1,9 @@
-name: Déployer V3 manuellement
+name: Déployer V3
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/deployment-request.json]
 permissions:
   contents: read
 concurrency:
@@ -9,12 +12,27 @@ concurrency:
 jobs:
   verify:
     name: Préparation publication V3
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Valider la demande versionnée
+        if: github.event_name == 'push'
+        env:
+          EXPECTED_BASE: ${{ github.event.before }}
+        run: |
+          python3 <<'PY'
+          import json, os
+          from pathlib import Path
+          request = json.loads(Path('.github/deployment-request.json').read_text())
+          assert request.get('schemaVersion') == 1, 'Version de demande invalide'
+          assert request.get('deploy') is True, 'Demande de déploiement explicite absente'
+          assert request.get('branch') == 'main', 'Seule main peut être publiée'
+          assert request.get('baseCommit') == os.environ['EXPECTED_BASE'], 'Demande préparée pour un autre état de main'
+          assert request.get('reason'), 'Motif de la demande absent'
+          PY
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
@@ -40,7 +58,7 @@ jobs:
           path: publication-packet.json
   deploy:
     name: Publication V3 (Section 7)
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
     needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 60
