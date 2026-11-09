@@ -13,10 +13,13 @@ import {recoverCompletedTemuResumeHolds} from './transient-resume-hold.mjs';
 
 export async function recordTransientFailure(db,o,message,error){
  const old=o.erp_live?.transientRecovery||{};
- const readRateLimited=error?.httpStatus===429&&error?.erplainReadOnly===true;
- const state={...old,originalError:old.originalError||message,lastError:transientErpError(message)?message:customerGuard(o,message)?customerRecoveryError(o,message):null,lastFailureAt:new Date().toISOString(),readRateLimited,
-  requestNotSent:error?.erplainRequestNotSent===true,providerRateLimited:error?.httpStatus===429&&(error?.erplainRequestNotSent!==true||error?.erplainProviderRateLimited===true),
-  nextReadCheckAt:customerGuard(o,message)&&old.nextReadCheckAt?old.nextReadCheckAt:readRateLimited||canRetryCustomerCreation(o,erplainCustomerInput(o).customer_number)?quotaReadRetryAt(error):null};
+ // A refresh's uncertain-BC guard reports no new provider outcome. Keep the
+ // pending transient cause so recovery can search the immutable identity first.
+ const bcGuard=message===legacyBcCreationMessage&&o.erp_live?.phase==='creating_bc'&&!o.erp_live?.bc?.id&&!o.erp_live?.bl?.id&&transientErpError(old.lastError);
+ const readRateLimited=bcGuard?old.readRateLimited===true:error?.httpStatus===429&&error?.erplainReadOnly===true;
+ const state={...old,originalError:old.originalError||message,lastError:bcGuard?old.lastError:transientErpError(message)?message:customerGuard(o,message)?customerRecoveryError(o,message):null,lastFailureAt:bcGuard?old.lastFailureAt:new Date().toISOString(),readRateLimited,
+  requestNotSent:bcGuard?old.requestNotSent===true:error?.erplainRequestNotSent===true,providerRateLimited:bcGuard?old.providerRateLimited===true:error?.httpStatus===429&&(error?.erplainRequestNotSent!==true||error?.erplainProviderRateLimited===true),
+  nextReadCheckAt:bcGuard?old.nextReadCheckAt||null:customerGuard(o,message)&&old.nextReadCheckAt?old.nextReadCheckAt:readRateLimited||canRetryCustomerCreation(o,erplainCustomerInput(o).customer_number)?quotaReadRetryAt(error):null};
  await db.query("UPDATE orders SET erp_live=jsonb_set(erp_live,'{transientRecovery}',$2::jsonb) WHERE id=$1",[o.id,JSON.stringify(state)]);
  o.erp_live.transientRecovery=state;
  if(!state.lastError)return message;

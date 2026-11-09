@@ -5,9 +5,41 @@ import {resumeTransientErplain,recordTransientFailure} from '../src/erplain-tran
 import {customerCreationStarted,customerCreationFailed,canRetryCustomerCreation} from '../src/customer-creation-recovery.mjs';
 import {retryDecision,transientErpError} from '../src/erp-transient-policy.mjs';
 import {erplainBatchError} from '../src/erplain-accounts.mjs';
+import {legacyBcCreationMessage} from '../src/customer-creation-recovery.mjs';
 
 const old=new Date(Date.now()-600000).toISOString();
 const order=state=>({id:'o',reference:'PO-069-1',channel:'temu',archived:false,partial_mode:false,resolution_pending_resume:false,source_payload:{},erp_live:state});
+
+test('refresh preserves an active transient BC failure for reconciliation without authorizing a mutation replay',async()=>{
+ const prior={originalError:'Erplain HTTP 429',lastError:'Erplain HTTP 429',attempts:0,lastFailureAt:old,requestNotSent:true,providerRateLimited:false,readRateLimited:false,nextReadCheckAt:null};
+ const o=order({phase:'creating_bc',customer:{id:'1'},transientRecovery:prior}),writes=[];
+ const message=await recordTransientFailure({query:async(q,p)=>writes.push({q,p})},o,legacyBcCreationMessage,new Error(legacyBcCreationMessage));
+ assert.match(message,/reprise automatique en attente \(0\/3\)/);
+ assert.equal(o.erp_live.phase,'creating_bc');assert.equal(o.erp_live.bc,undefined);
+ assert.deepEqual(o.erp_live.transientRecovery,prior);
+ assert.equal(writes.length,1);assert.match(writes[0].q,/UPDATE orders SET erp_live=jsonb_set/);
+ assert.equal(retryDecision(o,o.erp_live.transientRecovery.lastError,old),true);
+});
+
+test('a BC guard cannot revive an old cleared failure or hide a new business error',async()=>{
+ for(const [lastError,message] of [[null,legacyBcCreationMessage],['Erplain HTTP 429','BC · Prix invalide']]){
+  const o=order({phase:'creating_bc',customer:{id:'1'},transientRecovery:{originalError:'Erplain HTTP 429',lastError}});
+  assert.equal(await recordTransientFailure({query:async()=>{}},o,message,new Error(message)),message);
+  assert.equal(o.erp_live.transientRecovery.lastError,null);
+ }
+});
+
+test('refresh keeps the quota cooldown and retry count of a pending BC reconciliation',async()=>{
+ const retryAt=new Date(Date.now()+60000).toISOString();
+ const prior={lastError:'Erplain HTTP 429',attempts:2,lastFailureAt:old,readRateLimited:true,requestNotSent:false,providerRateLimited:true,nextReadCheckAt:retryAt};
+ const o=order({phase:'creating_bc',customer:{id:'1'},transientRecovery:prior});
+ await recordTransientFailure({query:async()=>{}},o,legacyBcCreationMessage,new Error(legacyBcCreationMessage));
+ assert.equal(o.erp_live.transientRecovery.attempts,2);
+ assert.equal(o.erp_live.transientRecovery.nextReadCheckAt,retryAt);
+ assert.equal(o.erp_live.transientRecovery.readRateLimited,true);
+ assert.equal(o.erp_live.transientRecovery.providerRateLimited,true);
+ assert.equal(retryDecision(o,o.erp_live.transientRecovery.lastError,old),false);
+});
 
 test('transient failures before BC creation are eligible but protected orders stay blocked',()=>{
  for(const state of [{},{phase:'creating_customer',customerNumber:'C1'},{phase:'customer_created',customer:{id:'1'}}]){

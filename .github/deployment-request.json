@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "deploy": true,
   "branch": "main",
-  "baseCommit": "73b1525b58408cf1c8c0dc0eec034e0460e731a6",
-  "reason": "Demande explicite de l'utilisateur le 8 novembre 2026 : déclencher le déploiement des corrections TEMU France et du code main sur le serveur."
+  "baseCommit": "f8916846ad7e301edc7dd31472a4f6bc4d4f6960",
+  "reason": "Correction du blocage de reprise BC : conserver la cause Erplain HTTP 429 quand une actualisation affiche le contrôle de création incertaine, sans rejouer les écritures."
 }
