@@ -93,4 +93,5 @@ groups.push(['--test','test/unshipped-audit.test.mjs']);
 groups.push(['--test','test/temu-warehouse-policy.test.mjs']);
 groups.push(['--test','test/temu-paid-label-correction.test.mjs']);
 groups.push(['--test','test/temu-label-bl.test.mjs']);
+groups.push(['--test','test/amazon-department-delivery.test.mjs','test/amazon-department-routing-db.test.mjs']);
 process.exitCode=runTestGroups(groups);

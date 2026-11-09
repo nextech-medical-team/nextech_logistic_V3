@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "deploy": true,
   "branch": "main",
-  "baseCommit": "531a627aa725d78818aadfe792299cab7afa7049",
-  "reason": "Ajouter le numéro du BL Erplain confirmé sur les étiquettes TEMU téléchargées dans V3, y compris les colis groupés et livraisons partielles."
+  "baseCommit": "6ab0e5b6ce13eb6c82b03453802b34e141f458df",
+  "reason": "Ajouter pour Amazon les exclusions GOFO par département avec bascule GLS et une grille configurable de délais estimés par transporteur, entrepôt et département. Réglages vides par défaut, expéditions existantes conservées."
 }
