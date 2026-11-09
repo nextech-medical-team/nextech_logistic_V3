@@ -1,4 +1,5 @@
 import {savedSkuCopy} from './label-sku-copy.mjs';
+import {addTemuBlNumbers,temuBlReferences} from './temu-label-bl.mjs';
 import {PDFDocument,StandardFonts,PDFName,PDFNumber,rgb} from 'pdf-lib';
 
 const positive=value=>Number.isFinite(Number(value))&&Number(value)>0;
@@ -113,20 +114,21 @@ export async function addTemuPreparationFooter(bytes,details){
 }
 
 export async function currentTemuPdf(db,bytes,reference,packageSn){
- const saved=await savedSkuCopy(db,bytes,'temu:'+reference+':'+packageSn);if(saved)return saved;
  const order=(await db.query("SELECT o.*,j.result AS label_result FROM orders o LEFT JOIN temu_label_jobs j ON j.reference=o.reference WHERE o.channel='temu' AND o.reference=$1",[reference])).rows[0];
  if(!order)throw Error('Commande TEMU introuvable pour compléter le PDF');
- const lines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1 ORDER BY l.source_line,l.id',[order.id,'temu'])).rows;
  const parcel=order.label_result?.packageInfoResultList?.find(p=>p.packageSn===packageSn),refs=[...new Set((parcel?.orderSendInfoList||[]).map(l=>l.parentOrderSn))].sort();
- if(refs.length<2)return addTemuPreparationFooter(bytes,temuPreparationLines(order,lines,order.label_result,packageSn));
- if(!refs.includes(reference))throw Error('Colis TEMU d’une autre commande');
- const grouped=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=ANY($1::text[])",[refs])).rows;
+ if(refs.length>1&&!refs.includes(reference))throw Error('Colis TEMU d’une autre commande');
+ const grouped=refs.length>1?(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=ANY($1::text[])",[refs])).rows:[order];
+ const notes=temuBlReferences(grouped);
+ const saved=await savedSkuCopy(db,bytes,'temu:'+reference+':'+packageSn);if(saved)return addTemuBlNumbers(saved,notes);
+ const lines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1 ORDER BY l.source_line,l.id',[order.id,'temu'])).rows;
+ if(refs.length<2)return addTemuBlNumbers(await addTemuPreparationFooter(bytes,temuPreparationLines(order,lines,order.label_result,packageSn)),notes);
  const groupedLines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=ANY($1::text[]) ORDER BY l.source_line,l.id',[grouped.map(o=>o.id),'temu'])).rows;
  for(const ref of refs.filter(ref=>!grouped.some(o=>o.reference===ref))){const remote=(order.label_result?.groupedOrderLines||[]).filter(l=>l.reference===ref);if(!remote.length)throw Error('Articles TEMU du colis groupé à actualiser : '+ref);
   const id='temu-grouped:'+ref;grouped.push({id,channel:'temu',reference:ref});const mapping=new Map((await db.query("SELECT * FROM mappings WHERE channel='temu' AND source_sku=ANY($1::text[])",[remote.map(l=>l.source_sku)])).rows.map(m=>[m.source_sku,m]));
   groupedLines.push(...remote.map(l=>{const m=mapping.get(l.source_sku);return {...l,order_id:id,mapped_sku:m?.target_sku,source_qty:m?.source_qty,target_qty:m?.target_qty};}));
  }
- return addTemuPreparationFooter(bytes,temuGroupedPreparation(grouped,groupedLines,order.label_result,packageSn));
+ return addTemuBlNumbers(await addTemuPreparationFooter(bytes,temuGroupedPreparation(grouped,groupedLines,order.label_result,packageSn)),notes);
 }
 
 export function temuGroupedPreparation(orders,lines,result,packageSn){

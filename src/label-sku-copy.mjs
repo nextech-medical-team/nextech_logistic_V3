@@ -1,8 +1,13 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {addTemuBlNumbers,temuBlReferences} from './temu-label-bl.mjs';
 import {PDFDocument,PDFArray,PDFRef,PDFRawStream,decodePDFRawStream,PDFName,StandardFonts} from 'pdf-lib';
 export const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 export async function pdfToken(bytes){const doc=await PDFDocument.load(bytes,{updateMetadata:false});doc.setCreationDate(new Date(0));doc.setModificationDate(new Date(0));return digest(Buffer.from(await doc.save()));}
-export async function currentPartialSkuPdf(db,bytes,id,index){return await savedSkuCopy(db,bytes,'partial:'+id+':'+index)||Buffer.from(bytes);}
+export async function currentPartialSkuPdf(db,bytes,id,index){
+ const current=await savedSkuCopy(db,bytes,'partial:'+id+':'+index)||Buffer.from(bytes);
+ const d=(await db.query('SELECT o.channel,o.reference,p.carrier,p.bl FROM partial_deliveries p JOIN orders o ON o.id=p.order_id WHERE p.id=$1',[id])).rows[0];
+ return d?.channel==='temu'&&d.carrier==='temu'?addTemuBlNumbers(current,temuBlReferences([d])):current;
+}
 export async function initializeSkuCopies(db){await db.exec(`CREATE TABLE IF NOT EXISTS label_sku_copies(id TEXT PRIMARY KEY,document_key TEXT NOT NULL,order_id TEXT NOT NULL,source_hash TEXT NOT NULL,context_hash TEXT NOT NULL,before_pdf BYTEA NOT NULL,pdf BYTEA NOT NULL,replacements JSONB NOT NULL,user_email TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE INDEX IF NOT EXISTS label_sku_copies_document ON label_sku_copies(document_key,created_at DESC);`);}
 export async function skuContextHash(db,orderId){
  const r=(await db.query(`SELECT jsonb_build_object(

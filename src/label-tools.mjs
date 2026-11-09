@@ -28,7 +28,7 @@ export async function labelTools({p,req,res,db,user,body,json,audit,permitted}){
   }
   for(const id of [...new Set(deliveryIds)]){
    const d=(await db.query('SELECT d.order_id,o.reference FROM partial_deliveries d JOIN orders o ON o.id=d.order_id WHERE d.id=$1',[id])).rows[0];if(!d)throw new Error('Livraison introuvable');if(ids.includes(d.order_id))continue;
-   const rows=(await db.query("SELECT p.pdf,p.delivery_id,p.document_index FROM partial_documents p JOIN partial_deliveries d ON d.id=p.delivery_id WHERE d.id=$1 AND d.status='ready' ORDER BY p.document_index",[id])).rows;if(!rows.length)missing.push(d.reference+' (livraison partielle)');else documents.push(...rows.map(r=>Buffer.from(r.pdf)));
+   const rows=(await db.query("SELECT p.pdf,p.delivery_id,p.document_index FROM partial_documents p JOIN partial_deliveries d ON d.id=p.delivery_id WHERE d.id=$1 AND d.status='ready' ORDER BY p.document_index",[id])).rows;if(!rows.length)missing.push(d.reference+' (livraison partielle)');else for(const r of rows)documents.push(await currentPartialSkuPdf(db,r.pdf,r.delivery_id,r.document_index));
   }
   for(const reference of [...new Set(temuReferences)]){
    const o=(await db.query("SELECT * FROM orders WHERE channel='temu' AND reference=$1",[reference])).rows[0];if(o&&ids.includes(o.id))continue;const before=documents.length;

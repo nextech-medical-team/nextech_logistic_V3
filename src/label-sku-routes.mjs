@@ -1,4 +1,4 @@
-import {pdfToken,saveSkuCopy,skuTextBlocks,savedSkuCopy,skuContextHash} from './label-sku-copy.mjs';
+import {pdfToken,saveSkuCopy,skuTextBlocks,currentPartialSkuPdf,skuContextHash} from './label-sku-copy.mjs';
 import {currentParcelPdf} from './parcel-pdf.mjs';
 import {currentTemuPdf} from './temu-label-pdf.mjs';
 import {labelAttachment} from './label-attachment.mjs';
@@ -8,7 +8,7 @@ export async function skuDocuments(db,id){
  for(const d of (await db.query('SELECT d.*,c.carrier,c.tracking FROM carrier_documents d JOIN carrier_jobs c ON c.order_id=d.order_id WHERE d.order_id=$1 ORDER BY document_index',[id])).rows)await add('carrier:'+id+':'+d.document_index,d.pdf,await currentParcelPdf(db,d.pdf,id,d.document_index),d.carrier,d.tracking?.[d.document_index]);
  for(const d of (await db.query('SELECT * FROM temu_label_documents WHERE reference=$1 ORDER BY package',[o.reference])).rows){const j=(await db.query('SELECT result FROM temu_label_jobs WHERE reference=$1',[o.reference])).rows[0],parcel=j?.result?.packageInfoResultList?.find(p=>p.packageSn===d.package),grouped=new Set((parcel?.orderSendInfoList||[]).map(l=>l.parentOrderSn)).size>1;await add('temu:'+o.reference+':'+d.package,d.pdf,await currentTemuPdf(db,d.pdf,o.reference,d.package),'temu',parcel?.trackingNumber,grouped);}
  for(const d of (await db.query("SELECT * FROM extra_parcels WHERE order_id=$1 AND pdf IS NOT NULL AND status='ready' ORDER BY created_at,id",[id])).rows)await add('extra:'+d.id,d.pdf,await currentParcelPdf(db,d.pdf,id,0,d.id),d.carrier,d.tracking);
- for(const d of (await db.query("SELECT d.*,p.carrier,p.tracking FROM partial_documents d JOIN partial_deliveries p ON p.id=d.delivery_id WHERE p.order_id=$1 AND p.status='ready' ORDER BY delivery_id,document_index",[id])).rows){const key='partial:'+d.delivery_id+':'+d.document_index;await add(key,d.pdf,await savedSkuCopy(db,d.pdf,key)||d.pdf,d.carrier,d.tracking?.[d.document_index]);}
+ for(const d of (await db.query("SELECT d.*,p.carrier,p.tracking FROM partial_documents d JOIN partial_deliveries p ON p.id=d.delivery_id WHERE p.order_id=$1 AND p.status='ready' ORDER BY delivery_id,document_index",[id])).rows){const key='partial:'+d.delivery_id+':'+d.document_index;await add(key,d.pdf,await currentPartialSkuPdf(db,d.pdf,d.delivery_id,d.document_index),d.carrier,d.tracking?.[d.document_index]);}
  if(contextHash!==await skuContextHash(db,id))throw Error('Commande modifiée pendant la lecture : actualisez avant de corriger les SKU.');return {order:o,docs};
 }
 export async function skuCopyRoutes(ctx){
