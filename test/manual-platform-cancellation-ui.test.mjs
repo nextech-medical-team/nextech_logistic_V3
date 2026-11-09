@@ -19,6 +19,27 @@ test('menu loads saved history without consulting platforms or applying cancella
  await menu.onclick();assert.equal(panel.hidden,false);assert.equal(f.oldView.hidden,true);assert.equal(f.context.currentView,'platform-cancellations');assert.equal(f.title.textContent,'Annulations Temu / Shopify');assert.deepEqual(f.calls,[['api','/api/orders/platform-cancellations/history']]);
  await f.context.show('products');assert.deepEqual(f.calls,[['api','/api/orders/platform-cancellations/history'],['show','products']]);
 });
+test('restored page loads recent reports without clicking the menu or consulting platforms',async()=>{
+ const f=fixture();
+ f.context.api=async(url)=>{
+  f.calls.push(['api',url]);assert.equal(url,'/api/orders/platform-cancellations/history');
+  return {rows:[{id:'daily',created_at:'2026-11-09T06:30:00Z',status:'complete'}]};
+ };
+ await f.context.show('platform-cancellations');
+ const history=f.find('platform-cancellation-history');
+ assert.equal(history.children.length,2);assert.equal(history.children[1].value,'daily');
+ assert.equal(f.calls.length,1);assert.equal(f.find('platform-cancellation-apply').disabled,true);
+ await f.context.show('orders');await f.context.show('platform-cancellations');
+ assert.equal(history.children.length,2);
+ assert.equal(f.calls.filter(call=>call[1]==='/api/orders/platform-cancellations/history').length,2);
+});
+
+test('restored page reports a failed history read',async()=>{
+ const f=fixture();f.context.api=async()=>{throw Error('History unavailable');};
+ await f.context.show('platform-cancellations');
+ assert.ok(f.find('platform-cancellation-report').children.some(el=>el.textContent==='History unavailable'));
+});
+
 test('verification starts only after clicking Actualiser on its page',async()=>{
  const f=fixture();await f.find('platform-cancellations-menu').onclick();await f.find('platform-cancellation-refresh').onclick();
  assert.equal(f.calls[1][0],'api');assert.equal(f.calls[1][1],'/api/orders/refresh-platform-cancellations');assert.equal(f.calls.length,2);assert.equal(f.find('platform-cancellation-refresh').disabled,false);
