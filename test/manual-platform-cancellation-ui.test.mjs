@@ -84,6 +84,43 @@ test('saved report displays only platform cancellations still missing from V3',a
 
 test('missing application surface does not throw or call sources',()=>{const f=fixture({hasMain:false});assert.equal(f.find('platform-cancellations-menu'),undefined);assert.deepEqual(f.calls,[]);});
 
+test('automatic switch loads persisted state and changes only the automatic cancellation task',async()=>{
+ const f=fixture();let enabled=true,writes=0;
+ f.context.api=async(url,input)=>{
+  if(url.endsWith('/history'))return {rows:[],automatic:{enabled,canManage:true}};
+  assert.equal(url,'/api/orders/platform-cancellations/automatic');assert.deepEqual(Object.keys(input),['enabled']);enabled=input.enabled;writes++;return {enabled,canManage:true};
+ };
+ await f.find('platform-cancellations-menu').onclick();
+ const toggle=f.find('platform-cancellation-automatic');assert.equal(toggle.disabled,false);assert.match(toggle.textContent,/Désactiver/);assert.equal(writes,0);
+ await toggle.onclick();assert.equal(enabled,false);assert.match(toggle.textContent,/Activer/);assert.equal(toggle.attributes['aria-pressed'],'false');
+ assert.match(f.find('platform-cancellation-automatic-status').textContent,/aucun nouveau traitement/);
+ await f.context.show('platform-cancellations');assert.match(toggle.textContent,/Activer/);assert.equal(writes,1);
+ await toggle.onclick();assert.equal(enabled,true);assert.equal(writes,2);
+});
+
+test('automatic switch cannot write without management rights or after an uncertain save',async()=>{
+ const f=fixture();let writes=0,canManage=false;
+ f.context.api=async(url)=>{if(url.endsWith('/history'))return {rows:[],automatic:{enabled:true,canManage}};writes++;throw Error('Connexion interrompue');};
+ await f.context.show('platform-cancellations');const toggle=f.find('platform-cancellation-automatic');
+ assert.equal(toggle.disabled,true);await toggle.onclick();assert.equal(writes,0);
+ canManage=true;await f.context.show('platform-cancellations');await toggle.onclick();
+ assert.equal(toggle.disabled,true);assert.match(f.find('platform-cancellation-automatic-status').textContent,/Modification non confirmée/);
+ await toggle.onclick();assert.equal(writes,1);
+});
+
+test('unconfirmed Temu conflicts and historical checks are visible but cannot be applied',async()=>{
+ const f=fixture();
+ f.context.api=async()=>({id:'saved',created_at:'2026-11-10T07:30:00Z',scope:{channels:['temu']},scan_complete:true,issues:[],results:[{id:'a',channel:'temu',reference:'PO-069-00000000000000001',status:'review',platformCancelled:null,v3Cancelled:false,error:'Une expédition existe sur la plateforme.'}]});
+ f.find('platform-cancellation-history').value='saved';await f.find('platform-cancellation-history').onchange();
+ const cells=f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children[0].children;
+ assert.equal(cells[1].textContent,'PO-069-00000000000000001');
+ assert.equal(cells[3].textContent,'Non confirmé');
+ assert.equal(cells[5].children[0].textContent,'À vérifier');
+ assert.equal(f.find('platform-cancellation-apply').disabled,true);
+ f.find('platform-cancellation-status').value='review';f.find('platform-cancellation-status').onchange();
+ assert.equal(f.find('platform-cancellation-results').children.find(el=>el.tag==='tbody').children.length,1);
+});
+
 test('report table is visible before verification with headings and an empty state',()=>{
  const f=fixture(),table=f.find('platform-cancellation-results');assert.ok(table);
  const head=table.children.find(el=>el.tag==='thead').children[0];
