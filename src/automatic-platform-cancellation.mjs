@@ -1,3 +1,5 @@
+import {taskControls} from './background-controls.mjs';
+
 export async function initializeAutomaticPlatformCancellation(db){
  await db.exec(`CREATE TABLE IF NOT EXISTS automatic_platform_cancellation(
  day TEXT PRIMARY KEY,report_id TEXT,cursor TEXT NOT NULL DEFAULT '',
@@ -13,10 +15,12 @@ export function cancellationSchedule(now=new Date(),timeZone='Europe/Paris'){
 export function automaticPlatformCancellation(db,reports,{now=()=>new Date(),timeZone='Europe/Paris',shouldStop=()=>false}={}){
  const user={email:'automatic-platform-cancellation@system',role:'operator'};
  let running=false;
+ const allowed=async()=>!shouldStop()&&(await taskControls(db))['platform-cancellation']&&!shouldStop();
  return {async run(){
   if(running||shouldStop())return;
   running=true;
   try{
+   if(!await allowed())return;
    const schedule=cancellationSchedule(now(),timeZone);
    let job=(await db.query("SELECT * FROM automatic_platform_cancellation WHERE phase<>'complete' ORDER BY day LIMIT 1")).rows[0];
    if(!job&&schedule.due){
@@ -27,16 +31,28 @@ export function automaticPlatformCancellation(db,reports,{now=()=>new Date(),tim
    if(job.phase==='checking'){
     // A crash can occur after the report is completed but before the cursor is saved.
     const complete=job.report_id&&(await reports.read(job.report_id)).scan_complete;
+    if(!await allowed())return;
     const response=complete?{done:true,reportId:job.report_id}:await reports.next({reportId:job.report_id||undefined,cursor:job.cursor||undefined,channels:['temu','shopify']},user);
     await db.query('UPDATE automatic_platform_cancellation SET report_id=$2,cursor=$3,phase=$4,updated_at=now() WHERE day=$1',[job.day,response.reportId,response.done?'':response.cursor,response.done?'applying':'checking']);
     return;
    }
    const row=(await db.query(`SELECT order_id FROM platform_cancellation_report_rows
     WHERE report_id=$1 AND checked->>'platformCancelled'='true' AND applied IS NULL ORDER BY order_id LIMIT 1`,[job.report_id])).rows[0];
+   if(!await allowed())return;
    if(row){await reports.apply({reportId:job.report_id,id:row.order_id},user);return;}
    await reports.finish({reportId:job.report_id,issues:[]});
    await db.query("UPDATE platform_cancellation_reports SET status='complete',updated_at=now() WHERE id=$1",[job.report_id]);
    await db.query("UPDATE automatic_platform_cancellation SET phase='complete',updated_at=now() WHERE day=$1",[job.day]);
   }finally{running=false;}
  }};
+}
+export async function automaticCancellationControl(db,input,user){
+ if(!['admin','manager','operator'].includes(user?.role))throw Object.assign(Error('Droits insuffisants'),{status:403});
+ if(input!==undefined){
+  if(user.role!=='admin')throw Object.assign(Error('Réservé aux administrateurs'),{status:403});
+  if(!input||typeof input.enabled!=='boolean'||Object.keys(input).some(key=>key!=='enabled'))throw Error('Activation automatique invalide');
+ }
+ const tasks=await taskControls(db,input===undefined?undefined:{'platform-cancellation':input.enabled});
+ if(input!==undefined)await db.query('INSERT INTO audit(user_email,action,detail) VALUES($1,$2,$3)',[user.email,'order.automatic_platform_cancellation_control',JSON.stringify({enabled:tasks['platform-cancellation']})]);
+ return {enabled:tasks['platform-cancellation'],canManage:user.role==='admin'};
 }

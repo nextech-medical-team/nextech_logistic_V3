@@ -44,7 +44,22 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
   if(!api)throw Error('Boutique TEMU indisponible');
   const detail=await api.read('bg.order.detail.v2.get',{parentOrderSn:order.reference});
   const parent=detail?.parentOrderMap;
-  if(parent?.parentOrderSn!==order.reference||!Number.isInteger(Number(parent.parentOrderStatus))||Number(parent.parentOrderStatus)<1||Number(parent.parentOrderStatus)>7)throw Error('Identité ou statut TEMU non confirmé');
+  if(parent?.parentOrderSn!==order.reference||![1,2,3,4,5,6,7,41,51].includes(Number(parent.parentOrderStatus)))throw Error('Identité ou statut TEMU non confirmé');
+  if(confirmedTemuCancellation(order,detail)){
+   if(Number(parent.parentShippingTime)>0)throw Error('Annulation TEMU contradictoire : une date d’expédition est enregistrée sur la plateforme.');
+   if(['shipped','delivered','in_transit','delivered_simulated'].includes(order.tracking_status)||['shipped','delivered'].includes(order.erp_live?.bl?.status))throw Error('Annulation TEMU contradictoire : une expédition est déjà enregistrée dans V3. Vérifiez la commande dans TEMU.');
+   if(!Array.isArray(detail.orderList)||!detail.orderList.length)throw Error('Annulation TEMU à vérifier : articles indisponibles.');
+   const seen=new Set();
+   for(const line of detail.orderList){
+    if(!line.orderSn||seen.has(line.orderSn))throw Error('Annulation TEMU à vérifier : identité des articles incomplète.');
+    seen.add(line.orderSn);
+    if([4,5,41,51].includes(Number(line.orderStatus)))throw Error('Annulation TEMU contradictoire : un article est expédié. Vérifiez la commande dans TEMU.');
+    if(Number(line.orderStatus)!==3)throw Error('Annulation TEMU à vérifier : l’annulation de chaque article n’est pas confirmée.');
+    const shipment=await api.read('bg.logistics.shipment.v2.get',{parentOrderSn:order.reference,orderSn:line.orderSn});
+    if(!Array.isArray(shipment?.shipmentInfoDTO))throw Error('Annulation TEMU à vérifier : lecture des expéditions incomplète.');
+    if(shipment.shipmentInfoDTO.length)throw Error('Annulation TEMU à vérifier : une expédition existe sur la plateforme.');
+   }
+  }
   return {cancelled:confirmedTemuCancellation(order,detail),source:'temu',country:parent.regionName1||order.address?.country||countryByMall?.get(mall)||config?.TEMU_COUNTRIES?.[mall]||'',observation:{reference:order.reference,status:parent.parentOrderStatus,mallId:mall,observedAt:new Date().toISOString()}};
  }
  async function process(input,user,apply=false){
@@ -76,6 +91,7 @@ export function manualPlatformCancellation(db,directory,suspension,{shopify=shop
    let result={id:order.id,reference:order.reference,channel:order.channel,country:order.address?.country||'',status:'unchanged',platformCancelled:null,v3Cancelled:order.label_status==='cancelled'||order.tracking_status==='cancelled'||order.erp_live?.bc?.status==='cancelled'};
    try{
     const observed=await proof(order);
+    if(order.channel==='temu')result.cancellationProofVersion=2;
     result.platformCancelled=observed.cancelled;
     result.country=observed.country||result.country;
     await db.query('UPDATE orders SET source_payload=source_payload||$2::jsonb WHERE id=$1',[order.id,JSON.stringify({manualPlatformCancellation:{...observed,checkedAt:new Date().toISOString(),checkedBy:user.email}})]);

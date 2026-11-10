@@ -1,4 +1,4 @@
-import {initializeAutomaticPlatformCancellation,automaticPlatformCancellation} from './automatic-platform-cancellation.mjs';
+import {initializeAutomaticPlatformCancellation,automaticPlatformCancellation,automaticCancellationControl} from './automatic-platform-cancellation.mjs';
 import {recoverDocumentsAndLabels} from './recovered-bl-label.mjs';
 import {priceCorrection} from './price-correction.mjs';
 import {partialTemuLabelService} from './partial-temu-label.mjs';
@@ -387,7 +387,10 @@ const server=http.createServer(async(req,res)=>{
     }
     if(p==='/api/orders/suspension'&&req.method==='GET'){json(res,200,await suspensionService.context(url.searchParams.get('id'),url.searchParams.get('requestId')));return;}
     if(p==='/api/orders/platform-cancellations/history'&&req.method==='GET'){
-      permitted(user,operational);json(res,200,await platformCancellationRefresh.history());return;
+      permitted(user,operational);json(res,200,{...await platformCancellationRefresh.history(),automatic:await automaticCancellationControl(db,undefined,user)});return;
+    }
+    if(p==='/api/orders/platform-cancellations/automatic'&&['GET','POST'].includes(req.method)){
+      permitted(user,operational);json(res,200,await automaticCancellationControl(db,req.method==='POST'?await body(req):undefined,user));return;
     }
     if(p==='/api/orders/platform-cancellations/report'&&req.method==='GET'){
       permitted(user,operational);json(res,200,await platformCancellationRefresh.read(url.searchParams.get('id')));return;

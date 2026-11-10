@@ -8,10 +8,32 @@ function fixture({channel='shopify',cancelled=true,error=null,bc=true,shipped=fa
  const db={async query(sql,args){calls.push(sql);return {rows:sql.startsWith('SELECT *')?[order]:[]};}};
  const suspension={async context(){return {order};},async suspend(){calls.push('suspend');order.suspension={active:true,version:'v1'};},async cancelErplain(input){calls.push(input.verifyOnly?'verify':'cancel');if(documentError)throw Error(documentError);order.suspension.erplainCancellation={status:'complete'};}};
  const shopify={async cancel(){return {error,state:{status:error?'unavailable':'observed'},proof:{cancelled_at:cancelled?'2026-10-14T12:00:00Z':null,financial_status:'refunded'}};}};
- const connect=async()=>({clients:new Map([['42',{async read(){return {parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:cancelled?3:2}};}}]])});
+ const connect=async()=>({clients:new Map([['42',{async read(type){return type==='bg.logistics.shipment.v2.get'?{shipmentInfoDTO:[]}:{parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:cancelled?3:2},orderList:[{orderSn:'L1',orderStatus:cancelled?3:2}]};}}]])});
  return {order,calls,service:manualPlatformCancellation(db,'unused',suspension,{shopify,connect})};
 }
 const user={role:'operator',email:'test@example.test'};
+
+test('Temu cancellation conflicts and incomplete shipment reads cannot suspend or cancel any order',async()=>{
+ for(const mode of ['shipped','delivered','partiallyShipped','partiallyReceived','activeLine','shippingTime','shipment','missingLines','missingIdentity','incomplete','unavailable']){
+  const order={id:'a',reference:'PO-069-00000000000000001',channel:'temu',source_payload:{mallId:'42',manualPlatformCancellation:{cancelled:true,observation:{status:3}}}},calls=[],updates=[];
+  const api={async read(type){
+   calls.push(type);
+   if(type==='bg.order.detail.v2.get')return {parentOrderMap:{parentOrderSn:order.reference,parentOrderStatus:3,parentShippingTime:mode==='shippingTime'?1793631605:0},orderList:mode==='missingLines'?[]:[{orderSn:mode==='missingIdentity'?'':'L1',orderStatus:mode==='shipped'?4:mode==='delivered'?5:mode==='partiallyShipped'?41:mode==='partiallyReceived'?51:mode==='activeLine'?2:3}]};
+   if(mode==='unavailable')throw Error('Shipment API unavailable');
+   return mode==='incomplete'?{}:{shipmentInfoDTO:mode==='shipment'?[{parentOrderSn:order.reference,trackingNumber:'TRACK'}]:[]};
+  }};
+  const service=manualPlatformCancellation({query:async(sql,args)=>{calls.push(sql);if(sql.startsWith('UPDATE orders SET source_payload'))updates.push(JSON.parse(args[1]));return {rows:sql.startsWith('SELECT *')?[order]:[]};}},'unused',{context(){throw Error('Must not reach suspension');}},{connect:async()=>({clients:new Map([['42',api]])})});
+  for(const action of ['next','apply']){
+   const {result}=await service[action]({id:'a'},user);
+   assert.equal(result.status,'review',mode);
+   assert.equal(result.platformCancelled,null,mode);
+   assert.equal(result.applied,undefined,mode);
+   assert.ok(result.error,mode);
+  }
+  assert.ok(!calls.some(sql=>sql.includes("label_status='cancelled'")),mode);
+  assert.equal(updates.length,0,mode);
+ }
+});
 
 test('200 Temu checks reuse shop authorization but read every order status afresh',async()=>{
  const order={id:'a',reference:'REF',channel:'temu',source_payload:{mallId:'42'}};
@@ -19,9 +41,10 @@ test('200 Temu checks reuse shop authorization but read every order status afres
  const db={query:async sql=>({rows:sql.startsWith('SELECT *')?[order]:[]})};
  const service=manualPlatformCancellation(db,'unused',{}, {connect:async()=>{
   connections++;
-  return {clients:new Map([['42',{read:async()=>{
+  return {clients:new Map([['42',{read:async(type)=>{
+   if(type==='bg.logistics.shipment.v2.get')return {shipmentInfoDTO:[]};
    reads++;
-   return {parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:reads%2?3:2}};
+   return {parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:reads%2?3:2},orderList:[{orderSn:'L1',orderStatus:3}]};
   }}]])};
  }});
  for(let i=0;i<200;i++)assert.equal((await service.next({},user)).result.platformCancelled,i%2===0);
@@ -34,7 +57,7 @@ test('failed Temu shop initialization is retried on the next check',async()=>{
  let attempts=0;
  const service=manualPlatformCancellation({query:async sql=>({rows:sql.startsWith('SELECT *')?[order]:[]})},'unused',{}, {connect:async()=>{
   if(++attempts===1)throw Error('Temporary connection failure');
-  return {clients:new Map([['42',{read:async()=>({parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:3}})}]])};
+  return {clients:new Map([['42',{read:async type=>type==='bg.logistics.shipment.v2.get'?{shipmentInfoDTO:[]}:{parentOrderMap:{parentOrderSn:'REF',parentOrderStatus:3},orderList:[{orderSn:'L1',orderStatus:3}]}}]])};
  }});
  assert.equal((await service.next({},user)).result.status,'review');
  assert.equal((await service.next({},user)).result.status,'cancelled');

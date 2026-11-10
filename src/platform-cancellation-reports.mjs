@@ -1,5 +1,12 @@
 import {randomUUID} from 'node:crypto';
 
+// Historical Temu checks did not verify shipments. Keep their raw evidence but
+// do not present those observations as current, confirmed cancellations.
+function reviewedResult(row){
+ if(row.channel==='temu'&&row.platformCancelled===true&&row.cancellationProofVersion!==2&&!row.applied&&!row.v3Cancelled)return {...row,status:'review',platformCancelled:null,error:'Ancien contrôle TEMU sans vérification des expéditions. Actualisez les annulations.'};
+ return row;
+}
+
 export async function initializePlatformCancellationReports(db){
  await db.exec(`CREATE TABLE IF NOT EXISTS platform_cancellation_reports(
   id TEXT PRIMARY KEY,owner TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -41,7 +48,7 @@ export function platformCancellationReports(db,service){
  return {
   next:(input,user)=>process(input,user),apply:(input,user)=>process(input,user,true),
   history:async()=>({rows:(await db.query('SELECT id,owner,created_at,updated_at,status FROM platform_cancellation_reports ORDER BY created_at DESC LIMIT 25')).rows}),
-  async read(id){const report=await get(id);const rows=(await db.query('SELECT checked,applied FROM platform_cancellation_report_rows WHERE report_id=$1 ORDER BY order_id',[id])).rows;return {...report,results:rows.map(r=>({...r.checked,...r.applied})),checks:rows.map(r=>r.checked)};},
+  async read(id){const report=await get(id);const rows=(await db.query('SELECT checked,applied FROM platform_cancellation_report_rows WHERE report_id=$1 ORDER BY order_id',[id])).rows;return {...report,results:rows.map(r=>reviewedResult({...r.checked,...r.applied})),checks:rows.map(r=>r.checked)};},
   async finish(input){
    await get(input.reportId);
    if(!Array.isArray(input.issues)||input.issues.length>1000||input.issues.some(v=>typeof v!=='string'||v.length>2000))throw Error('Alertes invalides');

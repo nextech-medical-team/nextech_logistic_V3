@@ -3,12 +3,27 @@ import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import {initializePlatformCancellationReports,platformCancellationReports} from '../src/platform-cancellation-reports.mjs';
 
+test('all historical unverified Temu confirmations reopen as review without rewriting audit evidence',async()=>{
+ const db=new PGlite();
+ try{
+  await initializePlatformCancellationReports(db);
+  const checked={id:'a',channel:'temu',reference:'PO-069-00000000000000001',status:'cancelled',platformCancelled:true,v3Cancelled:false};
+  const reports=platformCancellationReports(db,{next:async()=>({done:true,result:checked})});
+  const {reportId}=await reports.next({},{email:'test@example.test'});
+  const saved=await reports.read(reportId);
+  assert.equal(saved.results[0].status,'review');
+  assert.equal(saved.results[0].platformCancelled,null);
+  assert.match(saved.results[0].error,/Actualisez/);
+  assert.equal(saved.checks[0].platformCancelled,true);
+ }finally{await db.close();}
+});
+
 test('reports survive reopening and retain checks alongside application results',async()=>{
  const db=new PGlite();
  try{
   await initializePlatformCancellationReports(db);
   const user={email:'operator@example.test'},calls=[];
-  const checked={id:'a',channel:'temu',reference:'REF',status:'cancelled',platformCancelled:true,v3Cancelled:false};
+  const checked={id:'a',channel:'temu',reference:'REF',status:'cancelled',platformCancelled:true,v3Cancelled:false,cancellationProofVersion:2};
   const service={async next(input){calls.push(input);return input.cursor?{done:true}:{done:false,cursor:'a',result:checked};},async apply(input){calls.push(input);return {done:false,cursor:'a',result:{...checked,status:'review',error:'Stock à rapprocher'}};}};
   let reports=platformCancellationReports(db,service);
   const first=await reports.next({channels:['temu'],createdFrom:'2026-10-14T00:00:00Z'},user),reportId=first.reportId;
