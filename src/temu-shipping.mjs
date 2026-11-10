@@ -1,3 +1,4 @@
+import {selectTemuWarehouse} from './temu-warehouse-policy.mjs';
 import {assertTemuLabelOrder,assertTemuLabelPurchaseOrder,positiveTemuClaimGuard} from './temu-label-order-policy.mjs';
 import {recoverMissingTemuPdfs} from './temu-pdf-archive.mjs';
 import {readConfirmedTemuShipments,temuLabelFailure} from './temu-shipment-remediation.mjs';
@@ -108,7 +109,7 @@ export function temuShipping(db,api,{quoteOrderPolicy=null,fixedWeight=null}={})
   if(info.packages.length||(existing.shipmentInfoDTO||[]).length)throw new Error('Une expédition existe déjà dans TEMU : utiliser Récupérer les étiquettes');
   if(!info.lines.length)throw new Error('Commande TEMU non entièrement à expédier');
   if(!warehouseCache||Date.now()-warehouseAt>300000){warehouseCache=(await api.read('bg.logistics.warehouse.list.get',{returnEnableBuyShippingLabelOnly:true})).warehouseList||[];warehouseAt=Date.now();}const warehouses=warehouseCache;
-  const usable=warehouses.filter(w=>w.enableBuyShippingLabel!==false),defaults=usable.filter(w=>w.defaultWarehouse);const warehouse=defaults.length===1?defaults[0]:usable.length===1?usable[0]:null;if(!warehouse?.warehouseId)throw new Error('Entrepôt TEMU absent ou ambigu');
+  const warehouse=selectTemuWarehouse(warehouses);
   const base={warehouseId:warehouse.warehouseId,weight:parcelWeight,weightUnit:'kg',length:'10.00',width:'8.00',height:'0.50',dimensionUnit:'cm'};
   const raw=await api.read('bg.logistics.shippingservices.get',{...base,shipOrderInfoList:info.lines,signatureOnDelivery:info.signature});
   const offers=(raw.onlineChannelDtoList||[]).map(o=>{try{return {...o,...offerParcel(o,base,info)};}catch(e){return {...o,unavailableReason:e.message};}});

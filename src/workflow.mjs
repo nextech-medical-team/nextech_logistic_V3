@@ -69,6 +69,8 @@ export async function prepareLabel(db,o){
   // Never round a positive sub-gram weight down to zero before routing.
   const r=chosenRoute(o,weight>0?parcelWeightKg(weight):weight,routing);
 
+  if(o.channel==='amazon')await db.query("UPDATE orders SET source_payload=coalesce(source_payload,'{}'::jsonb)||$2::jsonb WHERE id=$1",[o.id,JSON.stringify({amazonDepartmentRouting:r.gofoDepartmentExclusion||null})]);
+
   const tracking='SIM-'+o.id.slice(0,8).toUpperCase();
 
   await db.query('INSERT INTO labels(order_id,tracking,pdf) VALUES($1,$2,$3) ON CONFLICT(order_id) DO NOTHING',[o.id,tracking,simulatedPdf(o.reference,tracking)]);

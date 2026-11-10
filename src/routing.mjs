@@ -2,6 +2,7 @@ import {assertDirectCarrierAllowed} from './temu-label-policy.mjs';
 import {erplainTransportChannel} from './erplain-label-required.mjs';
 import {defaultShopifyServices,configuredShopifyMode} from './shopify-delivery.mjs';
 import {parcelWeightKg} from './weight-arithmetic.mjs';
+import {validateAmazonDelivery,applyAmazonDepartment,amazonDestination} from './amazon-delivery-policy.mjs';
 export const defaultInternational={product:'PARCEL',flexDelivery:true,incoterm:''};
 export const defaultRouting={maxParcelKg:30,shopifyServices:defaultShopifyServices,international:defaultInternational,rules:[
  {channel:'amazon',type:'threshold',threshold:3,below:'gofo',above:'gls'},
@@ -18,9 +19,9 @@ export function validateRouting(c){
  if(r.type==='fixed'){if(!carriers.includes(r.fixed))throw new Error('Transporteur invalide');}
  else if(r.type==='threshold'){if(!(Number(r.threshold)>0)||!carriers.includes(r.below)||!carriers.includes(r.above))throw new Error('Seuil ou transporteur invalide');}
  else throw new Error('Type de règle invalide');
- }const international={...defaultInternational,...c.international};if(international.product!=='PARCEL'||typeof international.flexDelivery!=='boolean'||!['','DAP','DDP'].includes(international.incoterm))throw Error('Paramètres GLS international invalides');const shopifyServices=c.shopifyServices??defaultShopifyServices;if(!Array.isArray(shopifyServices))throw Error('Services Shopify invalides');const names=new Set();for(const r of shopifyServices){const name=String(r.service||'').trim().toLowerCase();if(!name||names.has(name)||!['direct','relay'].includes(r.mode))throw Error('Service Shopify absent, dupliqué ou mode invalide');names.add(name);}return {maxParcelKg:Number(c.maxParcelKg),international,rules:c.rules,shopifyServices:shopifyServices.map(r=>({service:r.service.trim(),mode:r.mode}))};
+ }const international={...defaultInternational,...c.international};if(international.product!=='PARCEL'||typeof international.flexDelivery!=='boolean'||!['','DAP','DDP'].includes(international.incoterm))throw Error('Paramètres GLS international invalides');const shopifyServices=c.shopifyServices??defaultShopifyServices;if(!Array.isArray(shopifyServices))throw Error('Services Shopify invalides');const names=new Set();for(const r of shopifyServices){const name=String(r.service||'').trim().toLowerCase();if(!name||names.has(name)||!['direct','relay'].includes(r.mode))throw Error('Service Shopify absent, dupliqué ou mode invalide');names.add(name);}return {...validateAmazonDelivery(c),maxParcelKg:Number(c.maxParcelKg),international,rules:c.rules,shopifyServices:shopifyServices.map(r=>({service:r.service.trim(),mode:r.mode}))};
 }
-export function configuredRoute(channel,weight,config=defaultRouting,country='FR'){
+export function configuredRoute(channel,weight,config=defaultRouting,country='FR',postal=''){
  if(channel==='temu')return {carrier:'temu',weight:0.25,parcels:1};
  if(Number.isFinite(weight)&&weight>0)weight=parcelWeightKg(weight);
  if(channel==='tender'){
@@ -40,15 +41,16 @@ export function configuredRoute(channel,weight,config=defaultRouting,country='FR
  const carrier=r.type==='fixed'?r.fixed:(weight<=Number(r.threshold)?r.below:r.above);
  if(carrier==='temu')return {carrier,weight:0.25,parcels:1};
  if(!Number.isFinite(weight)||weight<=0)throw new Error('Poids produit Erplain manquant');
- return {carrier,weight,parcels:carrier.startsWith('gls')?Math.ceil(weight/config.maxParcelKg):1};
+ return applyAmazonDepartment({carrier,weight,parcels:carrier.startsWith('gls')?Math.ceil(weight/config.maxParcelKg):1},{channel,postal,country},config);
 }
 export async function loadRouting(db){
  const config=(await db.query("SELECT value FROM settings WHERE key='routing'")).rows[0]?.value||defaultRouting;
  // Upgrade the previous tender default without changing other routing rules.
- return {...config,rules:config.rules.map(r=>r.channel==='tender'?{channel:'tender',type:'fixed',fixed:'gls_pharma'}:r)};
+ return {...config,...validateAmazonDelivery(config),rules:config.rules.map(r=>r.channel==='tender'?{channel:'tender',type:'fixed',fixed:'gls_pharma'}:r)};
 }
 
 export function chosenRoute(order,weight,config=defaultRouting){
+ const destination=amazonDestination(order),finish=route=>applyAmazonDepartment(route,{channel:order.channel,...destination},config);
  if(order.channel==='temu'){
   if(order.transport_choice){assertDirectCarrierAllowed(order,order.transport_choice);return configuredRoute('manual',weight,{...config,rules:[{channel:'manual',type:'fixed',fixed:order.transport_choice}]},order.address?.country);}
   return configuredRoute('temu',weight,config,order.address?.country);
@@ -61,8 +63,8 @@ export function chosenRoute(order,weight,config=defaultRouting){
   if(mode==='relay')return configuredRoute('relay',weight,config,order.address?.country);
  }
  const carrier=order.transport_choice;
- if(!carrier)return configuredRoute(order.channel==='shopify'&&order.source_payload?.shopifyDeliveryMode==='relay'?'relay':channel,weight,config,order.address?.country);
+ if(!carrier)return finish(configuredRoute(order.channel==='shopify'&&order.source_payload?.shopifyDeliveryMode==='relay'?'relay':channel,weight,config,order.channel==='amazon'?destination.country:order.address?.country,order.channel==='amazon'?destination.postal:''));
  if(!['gls','gofo'].includes(carrier))throw Error('Choix transporteur non autorisé pour cette commande');
- if(carrier==='gofo'&&String(order.address?.country).trim().toUpperCase()!=='FR')throw Error('GOFO : livraison en France uniquement ; choisir GLS pour ce pays');
- return configuredRoute('manual',weight,{...config,rules:[{channel:'manual',type:'fixed',fixed:carrier}]},order.address?.country);
+ if(carrier==='gofo'&&String(order.channel==='amazon'?destination.country:order.address?.country).trim().toUpperCase()!=='FR')throw Error('GOFO : livraison en France uniquement ; choisir GLS pour ce pays');
+ return finish(configuredRoute('manual',weight,{...config,rules:[{channel:'manual',type:'fixed',fixed:carrier}]},order.channel==='amazon'?destination.country:order.address?.country));
 }

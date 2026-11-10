@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "deploy": true,
+  "branch": "main",
+  "baseCommit": "26c48ebb841dc740a4efaaa4cc992b0060249e90",
+  "reason": "Remplacer la saisie des exclusions GOFO Amazon par des cases à cocher comme dans V2, avec résumé et conservation des paramètres existants."
+}

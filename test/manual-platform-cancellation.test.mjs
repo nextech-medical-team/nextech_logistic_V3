@@ -182,7 +182,7 @@ test('apply requires a valid order and operational role',async()=>{
  const f=fixture();await assert.rejects(()=>f.service.apply({},user),/Commande requise/);
  await assert.rejects(()=>f.service.apply({id:'a'},{role:'viewer'}),/Droits/);
  const service=manualPlatformCancellation({query:async()=>({rows:[]})},'unused',{});
- await assert.rejects(()=>service.apply({id:'archived'},user),/inaccessible/);
+ assert.match((await service.apply({id:'archived'},user)).result.error,/inaccessible/);
 });
 
 test('shop clients expire after five minutes without caching order status',async t=>{
@@ -204,4 +204,17 @@ test('applying cancellation still waits for the stock mutation lock',async()=>{
  const pending=f.service.apply({id:'a'},user).then(r=>{done=true;return r;});
  try{await new Promise(resolve=>setTimeout(resolve,30));assert.equal(done,false);assert.ok(!f.calls.includes('suspend'));assert.ok(!f.calls.includes('cancel'));}finally{release();await stock;}
  assert.equal((await pending).result.applied,true);
+});
+
+
+test('inaccessible application is recorded for review before any provider or suspension call',async()=>{
+ const calls=[];
+ const service=manualPlatformCancellation({async query(sql,args){calls.push({sql,args});return {rows:[]};}},'unused',{
+  async context(){assert.fail('no suspension context');}
+ },{shopify:{async cancel(){assert.fail('no Shopify call');}},connect:async()=>assert.fail('no Temu call')});
+ const response=await service.apply({id:'archived'},user);
+ assert.equal(response.result.status,'review');assert.equal(response.result.applied,false);
+ assert.equal(response.result.id,'archived');assert.match(response.result.error,/archivée/);
+ assert.equal(calls.length,2);assert.match(calls[1].sql,/INSERT INTO audit/);
+ assert.equal(response.result.platformCancelled,undefined);
 });

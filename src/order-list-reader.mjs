@@ -1,3 +1,5 @@
+import {loadRouting} from './routing.mjs';
+import {amazonDeliveryEstimate} from './amazon-delivery-policy.mjs';
 import {orderQuery} from './order-query.mjs';
 import {orderPageDetails} from './order-page-details.mjs';
 import {projectCurrentDiagnostics} from './current-order-diagnostics.mjs';
@@ -42,6 +44,7 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
         row.total_price=amounts.length&&amounts.every(v=>v!==undefined&&v!==''&&Number.isFinite(Number(String(v).replace(',','.'))))?Math.round(amounts.reduce((n,v)=>n+Number(String(v).replace(',','.')),0)*100)/100:null;
 
         row.gofo_zone_refusal=row.source_payload?.gofoZoneRefusal||null;
+        row.amazon_department_routing=row.source_payload?.amazonDepartmentRouting||null;
         row.source_payload={shopifyDeliveryMode:row.source_payload?.shopifyDeliveryMode,...(row.source_payload?.erplainImported===true&&row.source_payload?.account==='live'?{erplainImported:true,account:'live'}:{})};
 
       }
@@ -65,6 +68,7 @@ export async function readOrdersPage(db,{p='/api/orders',url,connection,cachedOr
         rows=paginateProblemOrders(matched,page,pageSize).rows;
         await orderPageDetails(db,rows,'display');
       }
+      if(rows.some(r=>r.channel==='amazon')){const routing=await loadRouting(db);for(const row of rows)if(row.channel==='amazon')row.delivery_estimate=amazonDeliveryEstimate(row,routing);}
       for(const row of rows)projectCurrentDiagnostics(row);
       return {rows,transportStats,summary,total,page,pages:Math.max(1,Math.ceil(total/pageSize))};
       

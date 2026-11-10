@@ -15,7 +15,7 @@ export async function selectedPreparationRouting(db,orderId,plan){
    OR EXISTS(SELECT 1 FROM extra_parcels WHERE order_id=$1)
    OR EXISTS(SELECT 1 FROM partial_deliveries WHERE order_id=$1) AS protected`,[orderId,o.reference])).rows[0];
   if(typeof protectedRow?.protected!=='boolean')throw Error('Transport sélectionné : étiquettes existantes non vérifiables');
-  const attempted=job&&(job.environment!=='production'||job.status!=='pending'||Number(job.attempts)!==0||job.result!=null||job.reference||!Array.isArray(job.tracking)||job.tracking.length);
+  const attempted=job&&(job.environment!=='production'||job.status!=='pending'||job.creation_started_at||Number(job.attempts)!==0||job.result!=null||job.reference||!Array.isArray(job.tracking)||job.tracking.length);
   if(protectedRow.protected||attempted||['shipped','in_transit','delivered','delivered_simulated'].includes(o.tracking_status))return {preserved:true};
   if(plan.missing.length){
    await tx.query('UPDATE orders SET weight_kg=null WHERE id=$1',[orderId]);
@@ -25,6 +25,7 @@ export async function selectedPreparationRouting(db,orderId,plan){
   const route=chosenRoute(o,plan.weightKg,await loadRouting(tx));
   if(job&&route.carrier==='temu')throw Error('Transport sélectionné : étiquette transporteur en attente sur une commande TEMU');
   await tx.query('UPDATE orders SET weight_kg=$2,parcel_count=$3,carrier=$4 WHERE id=$1',[orderId,route.weight,route.parcels,route.carrier]);
+  if(o.channel==='amazon')await tx.query("UPDATE orders SET source_payload=coalesce(source_payload,'{}'::jsonb)||$2::jsonb WHERE id=$1",[orderId,JSON.stringify({amazonDepartmentRouting:route.gofoDepartmentExclusion||null})]);
   if(job)await tx.query('UPDATE carrier_jobs SET carrier=$2,updated_at=now() WHERE order_id=$1',[orderId,route.carrier.startsWith('gls')?'gls':route.carrier]);
   return route;
  });
