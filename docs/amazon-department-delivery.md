@@ -3,9 +3,12 @@ Amazon : départements GOFO et délais estimés
 
 Dans « Règles transporteurs », la section Amazon permet de renseigner :
 
-- les départements exclus de GOFO ;
+- les départements exclus de GOFO, avec des cases à cocher comme dans V2 ;
 - le code postal réel de départ pour GOFO et pour GLS ;
 - une grille de jours ouvrés par transporteur, départ et département destinataire.
+
+Cochez les départements à exclure, puis cliquez sur « Enregistrer les règles ».
+Le résumé affiche les codes cochés ; décocher un code retire son exclusion.
 
 Les réglages sont vides à l’installation. Aucun département ni délai commercial
 n’est inventé. Administrateurs et gestionnaires peuvent enregistrer la grille

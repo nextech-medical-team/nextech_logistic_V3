@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "deploy": true,
   "branch": "main",
-  "baseCommit": "6ab0e5b6ce13eb6c82b03453802b34e141f458df",
-  "reason": "Ajouter pour Amazon les exclusions GOFO par département avec bascule GLS et une grille configurable de délais estimés par transporteur, entrepôt et département. Réglages vides par défaut, expéditions existantes conservées."
+  "baseCommit": "26c48ebb841dc740a4efaaa4cc992b0060249e90",
+  "reason": "Remplacer la saisie des exclusions GOFO Amazon par des cases à cocher comme dans V2, avec résumé et conservation des paramètres existants."
 }
