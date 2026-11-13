@@ -1,5 +1,7 @@
 # Import des commandes Shopify
 
+Pour les nouveaux BC, le prix Shopify avant remise est envoyé dans sa base fiscale d’origine (TTC ou HT), avec une remise de ligne séparée (`discount_type: percentage`). Le pourcentage est calculé à partir de la somme des allocations Shopify, sans supposer un taux promotionnel arrondi. Les prix des cartons sont répartis sur les unités Erplain. Les règles de remise automatiques Erplain restent désactivées pour éviter une seconde remise. Les frais de livraison conservent le montant après remise fourni par Shopify. Les BC existants ne sont pas réécrits.
+
 Dans **Paramètres → Import Shopify · Excel**, choisir le fichier, analyser les commandes, puis valider la sélection. Cet écran est distinct des autres imports.
 
 Le menu et l’analyse sont accessibles aux administrateurs, managers et opérateurs avec ou sans `MIGRATION_PREPARATION=1`. Ce mode suspend seulement la validation des commandes ; il ne masque pas l’écran Shopify.

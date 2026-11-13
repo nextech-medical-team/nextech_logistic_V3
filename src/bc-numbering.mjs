@@ -1,4 +1,4 @@
-const fields='id label status update_stock total tax_type currency{label} line_items{type quantity reserved_quantity shipped_quantity location{id} variant{id sku track_inventory} tax_codes{id} price tax_amount ecotax discount discount_rule_amount}';
+const fields='id label status update_stock total tax_type currency{label} line_items{type quantity reserved_quantity shipped_quantity location{id} variant{id sku track_inventory} tax_codes{id} price tax_amount ecotax discount discount_type discount_rule_amount}';
 const numeric=v=>['number','string'].includes(typeof v)&&String(v).trim()!==''&&Number.isFinite(Number(v))&&Number(v)>=0;
 const lineQuantityError=l=>Error('BC · Quantité de ligne ou quantité expédiée invalide · SKU '+(l.variant.sku||l.variant.id||'inconnu')+' : commandées '+l.quantity+', réservées '+(l.reserved_quantity??'non reçues')+', expédiées '+(l.shipped_quantity??'non reçues'));
 // Human decision: reservation counters are observations, never an equality gate.
