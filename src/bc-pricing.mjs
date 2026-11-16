@@ -14,6 +14,7 @@ export function amount(v,field){
  const n=Number(String(v).trim().replace(',','.'));if(!Number.isFinite(n))throw Error('BC · '+field+' invalide');return n;
 }
 const cents=n=>Math.round((n+Number.EPSILON)*100);
+const discountPercent=(discount,total)=>total?Number((discount/total*100).toFixed(12)):0;
 const optional=(v,f)=>present(v)?amount(v,f):0;
 export const sourceCurrency=o=>isTemuExcel(o)?o.source_payload?.temuExcelCommercial?.currency||o.source_payload?.currency||'EUR':String((o.channel==='temu'?o.source_payload?.temuAmounts?.data?.parentOrderMap?.estimatedRevenue?.currency:null)||o.source_payload?.currency||o.source_payload?.devise||'EUR').toUpperCase();
 function taxCode(rate,codes){
@@ -112,9 +113,20 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
    if(applied.length&&(src.tax_exempt===true||raw.taxable===false))throw Error('Shopify · Taux TVA et exonération source contradictoires : '+label);
    add(product,total+(src.taxes_included?0:tax),tax,applied[0]?.rate||0,label,src.taxes_included?'gross':'net',src.taxes_included?grossCalculation:{...grossCalculation,additions:[...grossCalculation.additions,...taxes.map(t=>t.price)]});
   }
-  lines.forEach((l,i)=>{const r=l.source_payload||{};if(!Array.isArray(r.discount_allocations))throw Error('Shopify · Remises à actualiser : '+l.source_sku);const total=amount(r.price,'Prix Shopify')*Number(l.quantity)-r.discount_allocations.reduce((s,d)=>s+amount(d.amount,'Remise Shopify'),0);row(r,products[i],l.source_sku,total,{unit:amount(r.price,'Prix Shopify'),quantity:Number(l.quantity),discounts:r.discount_allocations.map(d=>amount(d.amount,'Remise Shopify')),additions:[]});});
+  lines.forEach((l,i)=>{
+   const r=l.source_payload||{};if(!Array.isArray(r.discount_allocations))throw Error('Shopify · Remises à actualiser : '+l.source_sku);
+   const unit=amount(r.price,'Prix Shopify'),before=unit*Number(l.quantity),discounts=r.discount_allocations.map(d=>amount(d.amount,'Remise Shopify')),discount=discounts.reduce((s,d)=>s+d,0);
+   if(discount>before)throw Error('Shopify · Remise supérieure au prix : '+l.source_sku);
+   row(r,products[i],l.source_sku,before-discount,{unit,quantity:Number(l.quantity),discounts,additions:[]});
+   const entry=entries.at(-1);
+   // Keep Shopify's original tax basis and allocate pack prices over ERP units.
+   // Percentage expresses the exact allocated discount, including cent rounding.
+   entry.item.price=before/Number(entry.item.quantity);
+   if(discount){entry.item.discount_type='percentage';entry.item.discount=discountPercent(discount,before);}
+   entry.shopifyBeforeDiscount=before;
+  });
   if(!Array.isArray(src.shipping_lines))throw Error('Shopify · Frais de livraison à actualiser');
-  for(const s of src.shipping_lines){const value=amount(s.discounted_price,'Prix livraison Shopify');if(value||s.tax_lines?.some(t=>Number(t.price)))row(s,null,'Livraison Shopify',value);}
+  for(const s of src.shipping_lines){const value=amount(s.discounted_price,'Prix livraison Shopify');if(value||s.tax_lines?.some(t=>Number(t.price))){row(s,null,'Livraison Shopify',value);entries.at(-1).item.price=value;}}
   expected=amount(src.total_price,'Total Shopify');
  }else if(order.channel==='amazon'){
   // A cancelled/reimported one-line equivalent retains the original Amazon totals.
@@ -184,11 +196,11 @@ export function buildBcPricing(order,lines,products,codes,{eurExchangeRate,prefe
  const total=cents(entries.reduce((s,e)=>s+e.gross,0))/100,tax=cents(entries.reduce((s,e)=>s+e.tax,0))/100;
  if(order.channel==='tender'){
  if(expected!==undefined&&!acceptedBcTotal({total},{total:expected,currency,eurExchangeRate}))throw Error('BC · Total source incohérent : détail '+total.toFixed(2)+' / attendu '+expected.toFixed(2)+' '+currency);
- return {version:2,currency,eurExchangeRate,tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:e.item.tax_codes.map(t=>String(t.id)).sort(),unitPrice:e.item.price,gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
+ return {version:2,currency,eurExchangeRate,tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:e.item.tax_codes.map(t=>String(t.id)).sort(),unitPrice:e.item.price,...(e.shopifyBeforeDiscount!==undefined?{beforeDiscount:e.shopifyBeforeDiscount}:{}),gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
  }
  if(commercialObservations.some(x=>x.code==='source_discount_supplier_rules'))for(const entry of entries)entry.item.apply_discount_rules=true;
  const sourceTotalObservation=expected===undefined?null:{received:expected,calculated:total,difference:total-expected,blocking:false};
- return {version:2,currency,eurExchangeRate,sourceTotalObservation,commercialObservations,taxSourceComplete:!entries.some(e=>e.taxUnspecified),tax_type:'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:(e.item.tax_codes||[]).map(t=>String(t.id)).sort(),taxUnspecified:e.taxUnspecified===true,unitPrice:e.item.price,gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
+ return {version:2,currency,eurExchangeRate,sourceTotalObservation,commercialObservations,taxSourceComplete:!entries.some(e=>e.taxUnspecified),tax_type:order.channel==='shopify'&&src.taxes_included?'inclusive':'exclusive',total:expected??total,sourceLinesTotal:total,tax,commercialBasis:order.channel==='temu'?temuCommercialSource(order,temuCountryAmounts(order))?.v3CommercialBasis:undefined,taxPolicy:order.channel==='temu'?temuDestinationVat(order).policy:'source',items:entries.map(e=>e.item),lineAmounts:entries.map(e=>({type:e.item.type||'normal',variantId:String(e.item.variant?.id||''),quantity:Number(e.item.quantity),taxCodes:(e.item.tax_codes||[]).map(t=>String(t.id)).sort(),taxUnspecified:e.taxUnspecified===true,unitPrice:e.item.price,...(e.shopifyBeforeDiscount!==undefined?{beforeDiscount:e.shopifyBeforeDiscount}:{}),gross:e.gross,grossDecimal:e.grossDecimal,grossCalculation:e.grossCalculation,tax:e.tax,rate:e.rate,basis:e.basis})),source:order.channel};
 }
 // User-authorized OR policy: strictly below EUR 0.50 or 5% of order total.
 // Currency rates retain Erplain's quote: foreign units per default EUR.
@@ -263,14 +275,18 @@ export function verifyBcPricing(actual,pricing){
    return Number(v);
   };
   const identity=l=>[l.type||'normal',String(l.variant?.id||''),Number(l.quantity),l.tax_codes.map(t=>String(t.id)).sort()];
-  const key=(l,source)=>JSON.stringify([...identity(l),...['discount','discount_rule_amount','ecotax'].map(k=>adjustment(l,k,source))]);
+  const key=(l,source)=>JSON.stringify([...identity(l),...['discount','discount_rule_amount','ecotax'].map(k=>adjustment(l,k,source)),...(Number(l.discount)?[l.discount_type]:[])]);
   const traced=Object.hasOwn(pricing,'lineAmounts');
   if(traced&&(!decimalNumber(pricing.sourceLinesTotal)||!Array.isArray(pricing.lineAmounts)||pricing.lineAmounts.length!==pricing.items.length))throw Error('BC · Montants des lignes source incomplets');
   const candidates=pricing.items.map((l,i)=>{
    const options=new Set([priceTicks(l.price)]);
    if(traced){const e=pricing.lineAmounts[i];
     if(!e||JSON.stringify([e.type,e.variantId,e.quantity,e.taxCodes])!==JSON.stringify(identity(l))||linePrice(e.unitPrice)!==linePrice(l.price)||!['net','gross'].includes(e.basis)||['gross','tax','rate'].some(k=>typeof e[k]!=='number'||!Number.isFinite(e[k])||e[k]<0)||e.tax>e.gross)throw Error('BC · Montants des lignes source incohérents');
-    if(e.basis==='gross'&&Math.abs((e.gross-(pricing.tax_type==='exclusive'?e.tax:0))/e.quantity-e.unitPrice)>Number.EPSILON*Math.max(1,e.unitPrice)*8)throw Error('BC · Prix source non relié à ses montants');
+    if(e.beforeDiscount!==undefined){
+     const c=e.grossCalculation;
+     if(pricing.source!=='shopify'||!decimalNumber(e.beforeDiscount)||!Array.isArray(c?.discounts)||e.beforeDiscount!==c.unit*c.quantity||e.unitPrice!==e.beforeDiscount/e.quantity||Number(l.discount||0)!==discountPercent(c.discounts.reduce((s,d)=>s+d,0),e.beforeDiscount)||Number(l.discount)&&l.discount_type!=='percentage')throw Error('BC · Remise Shopify non reliée à ses montants');
+    }
+    if(e.beforeDiscount===undefined&&e.basis==='gross'&&Math.abs((e.gross-(pricing.tax_type==='exclusive'?e.tax:0))/e.quantity-e.unitPrice)>Number.EPSILON*Math.max(1,e.unitPrice)*8)throw Error('BC · Prix source non relié à ses montants');
     if(Object.hasOwn(e,'grossDecimal')||Object.hasOwn(e,'grossCalculation')){
      const c=e.grossCalculation,valid=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0;
      if(!c||!valid(c.unit)||!valid(c.quantity)||!Array.isArray(c.discounts)||!Array.isArray(c.additions)||![...c.discounts,...c.additions].every(valid)||c.unit*c.quantity-c.discounts.reduce((s,v)=>s+v,0)+c.additions.reduce((s,v)=>s+v,0)!==e.gross||e.grossDecimal!==decimalTotal(c.unit,c.quantity,c.discounts,c.additions))throw Error('BC · Montant décimal source non relié à sa ligne');
@@ -278,7 +294,7 @@ export function verifyBcPricing(actual,pricing){
     // Gross-authoritative sources can describe historical unit prices through
     // TTC / quantity / rate. Preserve the source tax separately; this price
     // check never overrides the tax-code or source-tax guards.
-    if(e.basis==='gross')options.add(grossPriceTicks(e.grossDecimal??e.gross,e.quantity,e.rate,pricing.tax_type));
+    if(e.beforeDiscount===undefined&&e.basis==='gross')options.add(grossPriceTicks(e.grossDecimal??e.gross,e.quantity,e.rate,pricing.tax_type));
    }
    return {key:key(l,true),options};
   });

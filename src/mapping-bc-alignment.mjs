@@ -13,7 +13,7 @@ import {shippingProductLines} from './erplain-shipping-lines.mjs';
 
 const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-export const alignmentFields='id label created_at external_reference status update_stock total paid_amount invoices_count tax_type currency{label} line_items{id type quantity price discount discount_rule_amount ecotax tax_amount tax_codes{id} location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id status} paginatorInfo{hasMorePages}}';
+export const alignmentFields='id label created_at external_reference status update_stock total paid_amount invoices_count tax_type currency{label} line_items{id type quantity price discount discount_type discount_rule_amount ecotax tax_amount tax_codes{id} location{id} variant{id sku track_inventory}} shipping_orders(first:100){data{id status} paginatorInfo{hasMorePages}}';
 
 export function mappedDocumentQuantities(items){
 
