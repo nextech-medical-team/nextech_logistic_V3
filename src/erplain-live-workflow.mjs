@@ -79,7 +79,7 @@ function orderDate(value){if(/^\d{2}\/\d{2}\/\d{4}$/.test(value||'')){const [d,m
 export function newSalesBcInput(o,priceLevelId){
  const documentAddresses=o.channel==='shopify'?shopifyDocumentAddresses(o):{shipping:o.address,billing:o.address};
  const addresses=bcAddresses(documentAddresses.shipping,documentAddresses.billing);
- return {...o.documentMetadata,status:'unpublished',update_stock:true,customer:{id:String(o.erp_live.customer.id)},currency:o.currency,price_level:{id:String(priceLevelId)},dated_at:orderDate(o.source_date),...addresses,tax_type:o.pricing.tax_type,line_items:o.pricing.items,notes:o.channel==='tender'?String(o.source_payload?.notes??''):'Commande '+o.reference,internal_notes:technicalMarker(o)+(o.channel==='tender'?' Prix source contrôlés avant publication. [V3-PRICING:1]':' Origine V3 : '+o.channel+'. Montants calculés par Erplain. [V3-PRICING:1]')};
+ return {...o.documentMetadata,status:'unpublished',update_stock:true,...(o.channel==='tender'?{update_on_hand:false}:{}),customer:{id:String(o.erp_live.customer.id)},currency:o.currency,price_level:{id:String(priceLevelId)},dated_at:orderDate(o.source_date),...addresses,tax_type:o.pricing.tax_type,line_items:o.pricing.items,notes:o.channel==='tender'?String(o.source_payload?.notes??''):'Commande '+o.reference,internal_notes:technicalMarker(o)+(o.channel==='tender'?' Prix source contrôlés avant publication. [V3-PRICING:1]':' Origine V3 : '+o.channel+'. Montants calculés par Erplain. [V3-PRICING:1]')};
 }
 export function assertNewBcStockPolicy(o,bc){if(o.erp_live.bcReservationPolicy==='erplain_bc_bl'&&bc.update_stock!==true)throw Error('BC · Politique de réservation différente de la création : rapprochement requis');}
 export function creationResumeBlock(o){
