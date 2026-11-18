@@ -6,12 +6,37 @@ export function confirmedCancelledTemuLine(line){
   &&line.quantity!==null&&line.quantity!==undefined&&String(line.quantity).trim()!==''&&Number(line.quantity)===0
   &&Number.isSafeInteger(original)&&original>0&&cancelled===original;
 }
+
+function reconcileSinglePartialLine(order,raw,detail){
+ if(raw.orderList.length!==1||detail.orderList.length!==1)return raw;
+ const [line]=raw.orderList,[source]=detail.orderList,parent=raw.parentOrderMap;
+ const active=Number(source.quantity),original=Number(source.originalOrderQuantity),cancelled=Number(source.canceledQuantityBeforeShipment);
+ if(![active,original,cancelled].every(Number.isSafeInteger)||active<=0||cancelled<=0||active+cancelled!==original||Number(line.quantity)!==original)return raw;
+ if(!source.orderSn||line.orderSn!==source.orderSn||parent?.parentOrderSn!==order.reference||detail.parentOrderMap?.parentOrderSn!==order.reference)return raw;
+ const currency=parent.basePriceTotal?.currency;
+ if(!/^[A-Z]{3}$/.test(currency||''))return raw;
+ const read=value=>value?.currency===currency&&/^\d+$/.test(String(value.amount))&&Number.isSafeInteger(Number(value.amount))?Number(value.amount):NaN;
+ const unit=read(line.unitBasePrice),base=read(line.basePrice),deduction=read(parent.estimatedRevenueDeduction);
+ const shipping=read(parent.shippingAmountTotal),shipTax=read(line.shipTaxAmount),shipGross=read(line.shipAmountTotalTaxIncl);
+ const tax=read(parent.taxTotal),afterDiscount=read(parent.taxTotalAfterDiscount||parent.taxTotal);
+ const productTax=tax-shipTax,originalProductTax=read(line.productTaxAmount);
+ if(!(unit>0&&base===unit*original&&base===read(parent.basePriceTotal)&&deduction===unit*cancelled))return raw;
+ if(shipGross!==shipping+shipTax||productTax<0||productTax*original!==originalProductTax*active||afterDiscount!==tax)return raw;
+ const activeBase=base-deduction;
+ if(read(parent.estimatedRevenue)!==activeBase+shipping+tax)return raw;
+ const result=structuredClone(raw),money=amount=>({amount,currency});
+ Object.assign(result.orderList[0],{quantity:active,basePrice:money(activeBase),productTaxAmount:money(productTax)});
+ Object.assign(result.parentOrderMap,{basePriceTotal:money(activeBase),estimatedRevenueDeduction:money(0)});
+ result.v3PartialLineCancellation={orderSn:source.orderSn,original,active,cancelled,coveredSellerDeduction:deduction,currency};
+ return result;
+}
+
 export function temuActiveAmounts(order,raw){
  const detail=order.source_payload?.temuOrderDetail;
  if(!Array.isArray(raw?.orderList)||!Array.isArray(detail?.orderList))return raw;
  const cancelled=detail.orderList.filter(confirmedCancelledTemuLine),cancelledIds=new Set(cancelled.map(l=>String(l.orderSn)));
  const removed=raw.orderList.filter(l=>cancelledIds.has(String(l.orderSn)));
- if(!removed.length)return raw;
+ if(!removed.length)return reconcileSinglePartialLine(order,raw,detail);
  const fail=message=>{throw Error('TEMU · Annulation partielle : '+message);};
  const parent=raw.parentOrderMap;
  if(parent?.parentOrderSn!==order.reference||detail.parentOrderMap?.parentOrderSn!==order.reference)fail('identité de commande incohérente');

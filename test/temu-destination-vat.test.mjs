@@ -21,3 +21,23 @@ test('missing or unknown destination never silently uses France or the product d
  assert.equal(temuDestinationVat({address:{country:'EL'}}).rate,24);
  assert.equal(temuDestinationVat({address:{country:'UK'}}).rate,20);
 });
+
+test('reconciles a seller deduction for a partially cancelled TEMU line',()=>{
+ const reference='PO-1-2',orderSn='item';
+ const raw={
+  parentOrderMap:{parentOrderSn:reference,estimatedRevenue:m(772),basePriceTotal:m(774),shippingAmountTotal:m(249),taxTotal:m(136),taxTotalAfterDiscount:m(136),estimatedRevenueDeduction:m(387)},
+  orderList:[{orderSn,quantity:2,unitBasePrice:m(387),basePrice:m(774),productTaxAmount:m(172),shipAmountTotalTaxIncl:m(299),shipTaxAmount:m(50)}]
+ };
+ const order={channel:'temu',reference,address:{country:'FR'},source_payload:{
+  temuAmounts:{data:raw},
+  temuOrderDetail:{parentOrderMap:{parentOrderSn:reference},orderList:[{orderSn,quantity:1,originalOrderQuantity:2,canceledQuantityBeforeShipment:1}]}
+ }};
+ const original=structuredClone(order);
+ const data=temuCommercialSource(order);
+ assert.equal(data.orderList[0].quantity,1);
+ assert.equal(data.parentOrderMap.estimatedRevenue.amount,772);
+ assert.equal(data.v3PartialLineCancellation.coveredSellerDeduction,387);
+ assert.deepEqual(order,original);
+ raw.parentOrderMap.estimatedRevenueDeduction=m(386);
+ assert.throws(()=>temuCommercialSource(order),/Retenue sur revenu/);
+});

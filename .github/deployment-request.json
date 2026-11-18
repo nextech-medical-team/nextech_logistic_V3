@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "deploy": true,
   "branch": "main",
-  "baseCommit": "26c48ebb841dc740a4efaaa4cc992b0060249e90",
-  "reason": "Remplacer la saisie des exclusions GOFO Amazon par des cases à cocher comme dans V2, avec résumé et conservation des paramètres existants."
+  "baseCommit": "fbdcef3ac18f6ef9dcd8b4da4ccc506c13de0041",
+  "reason": "Rapprocher la retenue vendeur TEMU lorsqu’une annulation partielle laisse une quantité active sur une seule ligne."
 }
