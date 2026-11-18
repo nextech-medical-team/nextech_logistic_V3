@@ -17,8 +17,8 @@ GUARD='/usr/local/lib/nextech-cicd/runtime-guard.mjs'
 RUNUSER='/usr/sbin/runuser'
 BUILD_ROOT='/var/tmp'
 # Full isolated suite measured at 1261s on production hardware (20 October).
-# Keep a finite 30-minute budget with headroom for normal load variation.
-ISOLATED_TEST_TIMEOUT=1800
+# Keep a finite 45-minute budget for the expanded isolated suite.
+ISOLATED_TEST_TIMEOUT=2700
 SERVICES=['nextech-web','nextech-worker']
 GITHUB_READ_TOKEN=None
 
