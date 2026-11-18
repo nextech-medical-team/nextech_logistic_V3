@@ -19,6 +19,8 @@ for(const channel of ['tender','amazon','shopify','temu','relay','manual','other
  const source={id:'local',reference:'REF',channel,source_date:'08/10/2026',source_payload:{notes:'Note conservée'},erp_live:{customer:{id:'5'}},address:{name:'Client',street:'Rue',postalCode:'75001',city:'Paris',country:'FR'},currency:{id:'EUR',label:'EUR'},pricing:{tax_type:'exclusive',items:[{quantity:100000,price:.037,variant:{id:'642345'},location:{id:'100934'}}]},documentMetadata:{external_reference:'REF',update_stock:false}};
  const input=newSalesBcInput(source,'7');assert.equal(input.status,'unpublished');assert.equal(input.update_stock,true);assert.equal(input.line_items[0].quantity,100000);assert.equal(input.dated_at,'2026-10-08');assert.equal(input.price_level.id,'7');
  assert.equal(input.notes,channel==='tender'?'Note conservée':'Commande REF');
+ assert.equal(Object.hasOwn(input,'update_on_hand'),channel==='tender');
+ if(channel==='tender')assert.equal(input.update_on_hand,false);
  let current={...bc(),status:'unpublished',line_items:[{...line(),reserved_quantity:0,available:-12000}]},writes=0;
  const api={request:async(q,v)=>{
   if(q.includes('DocumentNumberingContext'))return {DocumentNumberingContext:{preview:'C00014930',manual_override_allowed_effective:true}};
