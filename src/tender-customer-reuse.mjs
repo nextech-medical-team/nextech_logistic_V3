@@ -1,4 +1,4 @@
-const nameKey=value=>String(value??'').normalize('NFC').trim().replace(/\s+/g,' ').toLocaleLowerCase('fr');
+const nameKey=value=>String(value??'').normalize('NFD').replace(/\p{M}/gu,'').trim().replace(/\s+/g,' ').toLocaleLowerCase('fr');
 
 // Names identify the candidate set. Only number class and creation date decide
 // between active duplicates; contact details never participate.

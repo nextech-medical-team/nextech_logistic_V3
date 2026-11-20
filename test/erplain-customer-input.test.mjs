@@ -118,3 +118,15 @@ test('same tender name prefers classic customer numbers then the actual oldest a
  assert.equal(o.erp_live.customer.id,'2');assert.equal(o.erp_live.customerReuse.selectionPolicy,'classic_number_then_oldest');
  assert.equal(o.erp_live.customerReuse.candidateCount,4);
 });
+
+test('tender lookup accepts the accent variants returned by Erplain and reuses the oldest account',async()=>{
+ const {reuseTenderCustomer}=await import('../src/tender-customer-reuse.mjs');
+ const order=tenderOrder('50/01744608');
+ order.source_payload.client='Hôpitaux Civils de Colmar';
+ const customers=[
+  {id:'older',label:'HOPITAUX CIVILS DE COLMAR',customer_number:'V3:older',active:true,created_at:'2026-11-04 16:08:57'},
+  {id:'newer',label:'Hôpitaux Civils de Colmar',customer_number:'V3:newer',active:true,created_at:'2026-11-16 15:21:53'}
+ ];
+ assert.equal(await reuseTenderCustomer({request:async()=>customerPage(customers)},order,async()=>{}),true);
+ assert.equal(order.erp_live.customer.id,'older');
+});
