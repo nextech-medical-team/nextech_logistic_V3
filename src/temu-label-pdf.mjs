@@ -6,6 +6,28 @@ const positive=value=>Number.isFinite(Number(value))&&Number(value)>0;
 const round=value=>Math.round(value*1e6)/1e6;
 const quantity=value=>new Intl.NumberFormat('fr-FR',{maximumFractionDigits:6,useGrouping:false}).format(value);
 
+// A partial Excel import can omit a line that is still present in the purchased
+// TEMU package. Recover PDF-only lines from verified direct TEMU evidence; never
+// change operational lines, the shipment, stock, or the carrier document.
+export function missingTemuPdfLines(order,lines,result,packageSn){
+ if(order?.erp_live?.equivalentOriginalLines)return [];
+ const parcels=(result?.packageInfoResultList||[]).filter(p=>p.packageSn===packageSn);
+ if(parcels.length!==1)return [];
+ const missing=(parcels[0].orderSendInfoList||[]).filter(a=>a.parentOrderSn===order.reference&&!lines.some(l=>l.source_line===a.orderSn));
+ if(!missing.length)return [];
+ const detail=order.source_payload?.temuOrderDetail;
+ if(order.source_payload?.temuDirect?.state!=='verified'||detail?.parentOrderMap?.parentOrderSn!==order.reference||!Array.isArray(detail.orderList))return [];
+ const recovered=[];
+ for(const a of missing){
+  const matches=detail.orderList.filter(l=>l.orderSn===a.orderSn&&String(l.skuId)===String(a.skuId));
+  if(matches.length!==1||!a.orderSn||!positive(a.quantity))return [];
+  const l=matches[0],products=l.productList;
+  if(!positive(l.quantity)||Number(a.quantity)>Number(l.quantity)||!Array.isArray(products)||products.length!==1||Number(products[0].soldFactor)!==1||!String(products[0].extCode||'').trim())return [];
+  recovered.push({order_id:order.id,source_line:a.orderSn,source_sku:String(products[0].extCode).trim(),quantity:Number(l.quantity),source_payload:{origin:'verified_temu_pdf_recovery'}});
+ }
+ return recovered;
+}
+
 // A package quantity is expressed in TEMU units. Convert it using the same
 // prepared line (or shared mapping) that supplies the Erplain SKU.
 export function assertWholeTemuPackage(order,originals,result,packageSn){
@@ -122,6 +144,13 @@ export async function currentTemuPdf(db,bytes,reference,packageSn){
  const notes=temuBlReferences(grouped);
  const saved=await savedSkuCopy(db,bytes,'temu:'+reference+':'+packageSn);if(saved)return addTemuBlNumbers(saved,notes);
  const lines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=$1 ORDER BY l.source_line,l.id',[order.id,'temu'])).rows;
+ if(refs.length<2){
+  const missing=missingTemuPdfLines(order,lines,order.label_result,packageSn);
+  if(missing.length){
+   const mappings=new Map((await db.query("SELECT source_sku,target_sku,source_qty,target_qty FROM mappings WHERE channel='temu' AND source_sku=ANY($1::text[])",[missing.map(l=>l.source_sku)])).rows.map(m=>[m.source_sku,m]));
+   lines.push(...missing.map(l=>{const m=mappings.get(l.source_sku);return {...l,mapped_sku:m?.target_sku,source_qty:m?.source_qty,target_qty:m?.target_qty};}));
+  }
+ }
  if(refs.length<2)return addTemuBlNumbers(await addTemuPreparationFooter(bytes,temuPreparationLines(order,lines,order.label_result,packageSn)),notes);
  const groupedLines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE l.order_id=ANY($1::text[]) ORDER BY l.source_line,l.id',[grouped.map(o=>o.id),'temu'])).rows;
  for(const ref of refs.filter(ref=>!grouped.some(o=>o.reference===ref))){const remote=(order.label_result?.groupedOrderLines||[]).filter(l=>l.reference===ref);if(!remote.length)throw Error('Articles TEMU du colis groupé à actualiser : '+ref);
