@@ -18,7 +18,12 @@ export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
  const {rows}=await db.query(`
  WITH deliveries AS (
   SELECT o.id AS order_id, o.reference, o.erp_live->'bl' AS bl, NULL::text AS partial_id,
-   COALESCE(c.tracking,'[]'::jsonb)||COALESCE(t.packages,'[]'::jsonb) AS tracking
+   COALESCE(c.tracking,'[]'::jsonb)||COALESCE((
+    SELECT jsonb_agg(pkg->>'trackingNumber')
+    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.result->'packageInfoResultList')='array'
+      THEN t.result->'packageInfoResultList' ELSE '[]'::jsonb END) pkg
+    WHERE t.packages ? (pkg->>'packageSn') AND nullif(pkg->>'trackingNumber','') IS NOT NULL
+   ),'[]'::jsonb) AS tracking
   FROM orders o
   LEFT JOIN carrier_jobs c ON c.order_id=o.id AND c.environment='production' AND c.status='ready'
   LEFT JOIN temu_label_jobs t ON o.channel='temu' AND t.reference=o.reference AND t.status='complete'
