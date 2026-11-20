@@ -9,7 +9,7 @@ test('retrouve le BL partiel correspondant précisément au colis',async()=>{
   await db.exec(`
    CREATE TABLE orders(id text,reference text,channel text,erp_live jsonb,archived boolean,partial_mode boolean,simulation boolean);
    CREATE TABLE carrier_jobs(order_id text,environment text,status text,tracking jsonb);
-   CREATE TABLE temu_label_jobs(reference text,status text,packages jsonb);
+   CREATE TABLE temu_label_jobs(reference text,status text,packages jsonb,result jsonb);
    CREATE TABLE extra_parcels(order_id text,delivery_id text,environment text,status text,tracking text);
    CREATE TABLE partial_deliveries(id text,order_id text,environment text,status text,bl jsonb,tracking jsonb);
    INSERT INTO orders VALUES('o1','404-1798613-2678742','amazon','{}',false,true,false);
@@ -30,6 +30,15 @@ test('retrouve le BL partiel correspondant précisément au colis',async()=>{
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'',bl:'',reference:'404-1798613-2678742'})).status,409);
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT0000000000000000',bl:'',reference:''})).status,404);
   assert.deepEqual(calls,['24','24']);
+  await db.exec(`
+   INSERT INTO orders VALUES('o2','PO-TEST','temu','{"bl":{"id":"24","label":"SHO00748928"}}',false,false,false);
+   INSERT INTO temu_label_jobs VALUES('PO-TEST','complete','["PK-123"]',
+    '{"packageInfoResultList":[{"packageSn":"PK-123","trackingNumber":"YT1234567890"},{"packageSn":"PK-999","trackingNumber":"YT9999999999"}]}');
+  `);
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT1234567890',bl:'',reference:''})).status,200);
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT9999999999',bl:'',reference:''})).status,404);
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT1234567890',bl:'SHO00748929',reference:''})).status,404);
+  assert.deepEqual(calls,['24','24','24']);
  }finally{await db.close();}
 });
 test('un appel sans le jeton dédié ne lit aucune donnée',async()=>{
