@@ -40,6 +40,7 @@ import {currentPartialSkuPdf} from './label-sku-copy.mjs';
 import {initializeSkuCopies} from './label-sku-copy.mjs';
 import {labelAttachment} from './label-attachment.mjs';
 import {erplainAccount} from './erplain-accounts.mjs';
+import {handleRelaisDeliveryLookup} from './relais-delivery-lookup.mjs';
 import {initializeManualReview} from './erplain-manual-validation.mjs';
 import {initializeTemuSync,temuSyncJobs} from './temu-sync-jobs.mjs';
 import {taskControls} from './background-controls.mjs';
@@ -293,6 +294,11 @@ const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url,origin),p=url.pathname;
 
     if(!['GET','POST'].includes(req.method)){json(res,405,{error:'Méthode interdite'});return;}
+
+    if(p==='/api/relais/delivery'&&await handleRelaisDeliveryLookup({
+      req,res,url,db,api:erplainAccount(directory,'live'),json,token:process.env.RELAIS_V3_TOKEN,
+    }))return;
+
 
     if(process.env.MIGRATION_PREPARATION==='1'&&p==='/webhooks/shopify'){json(res,423,{error:'Imports suspendus : attente du GO'});return;}
     if(p==='/webhooks/shopify'&&req.method==='POST'){await shopifyWebhook(req,res,db,directory);return;}
