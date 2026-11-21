@@ -162,6 +162,10 @@ export function assertHistoricalLogIdentity(logs,variant,created){
    !/^\d{4}-\d{2}-\d{2}[ T]/.test(raw)||!Number.isFinite(date)||
    typeof row.on_hand_diff!=='number'||!Number.isFinite(row.on_hand_diff)||row.on_hand_diff===0||
    row.available_diff!==row.on_hand_diff)fail();
+  // The provider explicitly identifies a standalone manual stock increase.
+  // Keep the exact document debit in the BC/BL evidence below.
+  if(row.type==='adjustment'&&row.context==='Updated inventory using batch update tool.'&&
+   row.link_document_id===null&&row.link_order_type===null&&row.on_hand_diff>0)continue;
   const key=String(row.location.id)+':'+date;
   if(!groups.has(key))groups.set(key,[]);
   groups.get(key).push(row);
@@ -201,7 +205,7 @@ export async function readHistoricalStock(api,bc,{additionalVariants=[],bl=null,
   if(!/^\d+$/.test(variant))throw Error('Variante historique invalide');
   const rows=[],shipping=[],allLogs=[];let complete=false;
   for(let page=1;page<=100;page++){
-   const r=await api.request('query V3HistoricalStockLogs($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id source order_type on_hand_diff available_diff variant{id sku} location{id} created_at} paginatorInfo{hasMorePages}}}',{page,where:{AND:[{column:'VARIANT_ID',operator:'EQ',value:variant},{column:'CREATED_AT',operator:'GTE',value:since}]}});
+   const r=await api.request('query V3HistoricalStockLogs($where:QueryInventoryLogsWhereWhereConditions!,$page:Int!){InventoryLogs(first:100,page:$page,where:$where){data{id document_id source order_type on_hand_diff available_diff variant{id sku} location{id} created_at type context link_document_id link_order_type} paginatorInfo{hasMorePages}}}',{page,where:{AND:[{column:'VARIANT_ID',operator:'EQ',value:variant},{column:'CREATED_AT',operator:'GTE',value:since}]}});
    const logs=r.InventoryLogs;if(!Array.isArray(logs?.data)||typeof logs.paginatorInfo?.hasMorePages!=='boolean')throw Error('Journal de stock historique incomplet');
    allLogs.push(...logs.data);
    rows.push(...logs.data.filter(l=>String(l.document_id)===String(bc.id)&&l.order_type==='Order'));

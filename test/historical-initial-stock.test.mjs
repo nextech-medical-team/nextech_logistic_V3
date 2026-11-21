@@ -75,3 +75,22 @@ test('unrelated lot pairs cannot cover a missing or duplicate debit of the BC',a
  let rows=[minus,plus];f.api.request=async()=>({InventoryLogs:{data:rows,paginatorInfo:{hasMorePages:false}}});await assert.rejects(()=>readHistoricalStock(f.api,f.bc),/quantités déjà déduites/);
  rows.push(f.debit,{...f.debit,id:f.debit.id+1});await assert.rejects(()=>readHistoricalStock(f.api,f.bc),/quantités déjà déduites/);
 });
+
+test('a provider-identified manual increase after the BC is separate from its exact debit',async()=>{
+ const f=fixture();
+ Object.assign(f.initial,{created_at:'2026-10-28 14:00:00',type:'adjustment',context:'Updated inventory using batch update tool.',link_document_id:null,link_order_type:null,on_hand_diff:1,available_diff:1});
+ assert.deepEqual((await readHistoricalStock(f.api,f.bc)).proof.logIds,[String(f.debit.id)]);
+
+ f.debit.on_hand_diff=-99;
+ f.debit.available_diff=-99;
+ await assert.rejects(()=>readHistoricalStock(f.api,f.bc),/quantités déjà déduites/);
+});
+
+for(const change of [
+ {type:'order'},{context:'Unknown update'},{link_document_id:2074255},
+ {link_order_type:'Order'},{link_order_type:undefined},{on_hand_diff:-1,available_diff:-1}
+])test('an unproven independent increase is rejected '+JSON.stringify(change),async()=>{
+ const f=fixture();
+ Object.assign(f.initial,{created_at:'2026-10-28 14:00:00',type:'adjustment',context:'Updated inventory using batch update tool.',link_document_id:null,link_order_type:null,on_hand_diff:1,available_diff:1},change);
+ await assert.rejects(()=>readHistoricalStock(f.api,f.bc),/mouvement non identifié/);
+});
