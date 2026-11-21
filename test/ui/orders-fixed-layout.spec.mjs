@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import {test,expect} from '@playwright/test';
 const order=id=>({id,reference:'UI-'+id,channel:'tender',account_manager:'appels_offres',recipient:'Destinataire fictif',address:{country:'FR',city:'Paris',postal:'75001'},source_date:'2026-10-13',source_payload:{},erp_live:{bc:{label:'BC-'+id,status:'active'}},document_count:0,label_status:'pending',tracking_status:'not_shipped',sku_lines:[{sku:'LONG-SKU-REFERENCE-TEST',quantity:3000,catalog_issue:'Stock insuffisant'}],line_count:1,item_quantity:3000,weight_kg:4.2,parcel_count:1,carrier:'gls_pharma',extra_parcels:[]});
-async function fixture(page){let rows=[order('A'),order('B')],tick=0,partials=[];const errors=[];page.on('pageerror',e=>errors.push(e.message));
+async function fixture(page,first=order('A')){let rows=[first,order('B')],tick=0,partials=[];const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.route(/\/api\/orders(?:\?|$)/,r=>r.fulfill({json:{rows:rows.map(o=>({...o,updated_at:String(++tick)})),total:rows.length,page:1,pages:1,summary:{total:rows.length,blocked:tick},transportStats:[]}}));
  await page.route('**/api/partial/visible',r=>r.fulfill({json:{rows:partials}}));
  await page.route('**/api/orders/processing',r=>r.fulfill({json:{at:new Date().toISOString(),rows:rows.map(o=>({id:o.id,stage:'Préparation à corriger',state:'blocked',since:'2026-10-13T10:00:00Z',reason:'Stock insuffisant',canPrioritize:true}))}}));
@@ -47,4 +47,19 @@ test('explanatory icons preserve names, show descriptions on hover and focus, an
  await page.setViewportSize({width:1440,height:1000});await fixture(page);const row=page.locator('[data-detail="A"]').locator('xpath=ancestor::tr'),bc=row.getByRole('button',{name:'Actualiser le BC Erplain',exact:true});
  await expect(bc.locator('svg')).toHaveCount(1);await expect(bc).toHaveAttribute('title','Actualiser le BC Erplain');await bc.scrollIntoViewIfNeeded();await bc.hover();await expect(page.getByRole('tooltip')).toContainText('Actualiser le BC Erplain');await bc.focus();await expect(page.getByRole('tooltip')).toBeVisible();
  await expect(row.locator('[data-order-more-info]')).toHaveText('▾');await row.locator('[data-order-more-info]').click();await expect(row.locator('[data-order-more-info]')).toHaveText('▴');await expect(row.getByRole('button',{name:'Suspendre la commande',exact:true}).locator('svg')).toHaveCount(1);await expect(row.getByRole('button',{name:'Différer le problème',exact:true}).locator('svg')).toHaveCount(1);await expect(bc).toBeVisible();await page.route('**/api/erplain/documents/refresh',r=>r.fulfill({status:503,json:{error:'Échec de lecture fictif'}}));await bc.click();await expect(bc).toBeEnabled();await expect(bc.locator('svg')).toHaveCount(1);await expect(bc).toHaveAttribute('aria-label','Actualiser le BC Erplain');
+});
+
+test('suspended order can expand and show who imported it', async ({page})=>{
+ const event={action:'import_held',user_email:'import@example.test',note:'Import Excel en attente',created_at:'2026-11-16T09:30:00Z'};
+ const first={...order('A'),suspension:{active:true,note:event.note,updatedBy:event.user_email,updatedAt:event.created_at}};
+ await page.route('**/api/orders/suspension?id=A',route=>route.fulfill({json:{order:first,history:[event]}}));
+ await fixture(page,first);
+ const row=page.locator('#order-rows tr').filter({has:page.locator('[data-detail="A"]')});
+ await expect(row.locator('input[data-id]')).toBeDisabled();
+ await row.getByRole('button',{name:'Déplier les informations de UI-A'}).click();
+ await expect(row).toHaveClass(/order-row-expanded/);
+ await row.getByRole('button',{name:'Voir la suspension / Réactiver'}).click();
+ const dialog=page.locator('dialog.order-suspension-dialog');
+ await dialog.getByText('Historique (1)',{exact:true}).click();
+ await expect(dialog.locator('details')).toContainText(event.user_email);
 });

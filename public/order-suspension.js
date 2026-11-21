@@ -88,12 +88,12 @@
   try{await load(button.dataset.orderSuspension);render();if(!dialog.open)dialog.showModal();}catch(error){alert('Impossible d’ouvrir la suspension : '+displayErrorMessage(error));}finally{opening=false;}
  });
  dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault();});
- // Keep historical PDFs readable; prevent selecting or starting suspended rows.
+ // Keep row details and historical documents accessible during suspension.
  function decorate(){
   for(const box of document.querySelectorAll('[data-suspension-order]')){
    if(box.dataset.suspensionProcessed||!box.querySelector('strong'))continue;box.dataset.suspensionProcessed='true';
    const row=box.closest('tr'),checkbox=row.querySelector('input[data-id]');if(checkbox){checkbox.checked=false;checkbox.disabled=true;selected.delete(checkbox.dataset.id);}
-   for(const button of row.querySelectorAll('button'))if(!button.hasAttribute('data-order-suspension')&&!button.hasAttribute('data-erplain-document-refresh')){button.disabled=true;button.title='Commande suspendue : réactiver avant de traiter';}
+   for(const button of row.querySelectorAll('button'))if(!button.matches('[data-order-suspension],[data-erplain-document-refresh],[data-order-more-info]')){button.disabled=true;button.title='Commande suspendue : réactiver avant de traiter';}
   }
  }
  new MutationObserver(decorate).observe($('order-rows'),{childList:true,subtree:true});decorate();
