@@ -96,4 +96,5 @@ groups.push(['--test','test/temu-label-bl.test.mjs']);
 groups.push(['--test','test/amazon-department-delivery.test.mjs','test/amazon-department-routing-db.test.mjs']);
 groups.push(['--test','test/shopify-bc-discounts.test.mjs']);
 groups.push(['--test','test/relais-delivery-lookup.test.mjs']);
+groups.push(['--test','test/temu-eur-pricing.test.mjs']);
 process.exitCode=runTestGroups(groups);

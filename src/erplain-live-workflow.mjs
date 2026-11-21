@@ -1,3 +1,5 @@
+import {isDeepStrictEqual} from 'node:util';
+import {convertTemuPricingToEur,assertTemuEurTotal} from './temu-eur-pricing.mjs';
 import {reconcileNativeBcDebit} from './native-bc-debit-recovery.mjs';
 import {withSalesBcPublicationLock} from './new-bc-stock-gate.mjs';
 import {reconcileShippingOrderReads} from './erplain-shipping-reconciliation.mjs';
@@ -164,13 +166,13 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    working=working.filter(o=>!o.failed);
    const currencies=JSON.parse(await readFile(path.join(directory,'currency-correspondence.json'),'utf8'));const references=JSON.parse(await readFile(path.join(directory,'live-workflow-references.json'),'utf8'));if(references.companyId!==100174||!references.locationId||!references.priceLevelId)throw Error('Références LIVE non vérifiées');
    const bindings=new Map((await db.query('SELECT * FROM erplain_product_bindings')).rows.map(b=>[b.sku,b]));
-   let taxCodes;
+   let taxCodes, liveCurrencies;
    const valid=[];
    for(const o of working){try{
  const lines=(await db.query('SELECT l.*,m.target_sku AS mapped_sku,m.source_qty,m.target_qty FROM lines l LEFT JOIN mappings m ON m.channel=$2 AND m.source_sku=l.source_sku WHERE order_id=$1',[o.id,o.channel])).rows;
  o.selectedSourceLines=lines;
  if(!usesRecordedBc(o))await restoreImportBcAmounts(db,o,lines);
- if(usesRecordedBc(o)&&!o.source_payload?.erplainImported){const execution=await readRecordedBc(api,o);if(o.channel!=='tender'&&execution.bc.status==='active')o._recordedBcExecution=execution;assertNewBcStockPolicy(o,execution.bc);o.items=execution.items;o.erp_live.bc={...o.erp_live.bc,...execution.bc};o.erp_live.pricing=execution.pricing;o.currency=execution.bc.currency;if(execution.bc.status==='unpublished')o.pricing=execution.pricing;await save(o);valid.push(o);continue;}
+ if(usesRecordedBc(o)&&!o.source_payload?.erplainImported){const execution=await readRecordedBc(api,o);const converted=o.erp_live.temuEurPricing;if(converted&&!o.erp_live.temuEurVerifiedBcId){assertTemuEurTotal(execution.bc,converted);verifySourceCommercialTotals(execution.bc,converted);if(execution.bc.status==='active')o.erp_live.temuEurVerifiedBcId=String(execution.bc.id);}if(o.channel!=='tender'&&execution.bc.status==='active')o._recordedBcExecution=execution;assertNewBcStockPolicy(o,execution.bc);o.items=execution.items;o.erp_live.bc={...o.erp_live.bc,...execution.bc};o.erp_live.pricing=execution.pricing;o.currency=execution.bc.currency;if(execution.bc.status==='unpublished')o.pricing=converted||execution.pricing;await save(o);valid.push(o);continue;}
  if(o.source_payload?.erplainImported){await refreshManualOrder(db,api,o);if(o.source_payload.account!=='live'||!o.erp_live?.bc?.id||!o.erp_live.importedItems?.length)throw Error('Actualiser la commande Erplain avant préparation');o.items=o.erp_live.importedItems;valid.push(o);continue;}
  if(o.erp_live?.equivalentItems){if(!o.erp_live.bc?.id)throw new Error('BC absent pour les équivalents');o.items=o.erp_live.equivalentItems;valid.push(o);continue;}
 
@@ -231,13 +233,23 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
      if(!taxCodes){const t=await api.request('query V3PricingTaxes {TaxCodes(first:200){data{id active tax_rates{rate}} paginatorInfo{hasMorePages}}}');if(!t.TaxCodes?.data||t.TaxCodes.paginatorInfo?.hasMorePages)throw Error('BC · Catalogue TVA incomplet');taxCodes=t.TaxCodes.data;}
      let eurExchangeRate;
      if(currencyCode!=='EUR'){
-      const result=await api.request('query V3PricingCurrencies {Currencies(first:200){data{id label exchange_rate default} paginatorInfo{hasMorePages}}}');
-      const list=result.Currencies;if(!list?.data||list.paginatorInfo?.hasMorePages||!list.data.some(c=>c.default&&c.label==='EUR'))throw Error('BC · Conversion en euros à vérifier dans Erplain');
+      liveCurrencies??=(await api.request('query V3PricingCurrencies {Currencies(first:200){data{id label exchange_rate default} paginatorInfo{hasMorePages}}}')).Currencies;
+      const list=liveCurrencies;if(!list?.data||list.paginatorInfo?.hasMorePages||!list.data.some(c=>c.default&&c.label==='EUR'))throw Error('BC · Conversion en euros à vérifier dans Erplain');
       const current=list.data.find(c=>String(c.id)===String(currency.liveId)&&c.label===currencyCode);
       if(!current||!(Number(current.exchange_rate)>0))throw Error('BC · Taux de change Erplain absent : '+currencyCode);
-      eurExchangeRate=Number(current.exchange_rate);
+      eurExchangeRate=o.erp_live.temuEurPricing?.conversion.rate??Number(current.exchange_rate);
      }
      o.pricing=o.channel==='temu'&&o.erp_live.bc?.id&&o.erp_live.equivalentOriginalLines?.length?temuSellerTotals(o):buildBcPricing(o,lines,items,taxCodes,{eurExchangeRate});
+     if(o.erp_live.temuEurPricing&&o.erp_live.temuEurPricing.conversion.currency!==currencyCode)throw Error('BC TEMU · Devise source modifiée depuis la conversion enregistrée');
+     if(o.channel==='temu'&&!o.erp_live.bc&&currencyCode!=='EUR'){
+      const euro=liveCurrencies.data.find(c=>c.default&&c.label==='EUR'&&c.id);
+      if(!euro)throw Error('BC TEMU · Devise EUR Erplain non confirmée');
+      const converted=convertTemuPricingToEur(o.pricing,eurExchangeRate);
+      if(o.erp_live.temuEurPricing&&!isDeepStrictEqual(o.erp_live.temuEurPricing,JSON.parse(JSON.stringify(converted))))throw Error('BC TEMU · Montants modifiés depuis la conversion enregistrée');
+      o.erp_live.temuEurPricing=converted;
+      o.pricing=converted;
+      o.currency={id:String(euro.id),label:'EUR'};
+     }
      o.erp_live.pricing={...o.pricing,items:undefined,status:'pending'};await save(o);
     }
     valid.push(o);
@@ -264,7 +276,12 @@ export function erplainLiveWorker(db,directory,{api=erplainAccount(directory,'li
    for(const o of working.filter(o=>o.pricing)){
     try{
      const historical=await readPreservedHistoricalBc(api,o,usesRecordedBc(o)?null:o.channel==='temu'?temuSellerTotals(o):null);
-     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing),lock:withSalesBcPublicationLock});
+     const actual=historical?.bc||await publishIncrementalBc(api,o.erp_live.bc.id,{preserveInstalled:o.channel==='tender',datedAt:orderDate(o.source_date),expectedStockPolicy:o.erp_live.bcReservationPolicy==='erplain_bc_bl'?true:undefined,verify:bc=>{if(o.pricing.conversion){assertTemuEurTotal(bc,o.pricing);return verifyBcPricing(bc,o.pricing);}return usesRecordedBc(o)?assertRecordedBc(o,bc):verifyBcPricing(bc,o.pricing);},lock:withSalesBcPublicationLock});
+     if(o.pricing.conversion){
+      assertTemuEurTotal(actual,o.pricing);
+      verifyBcPricing(actual,o.pricing);
+      o.erp_live.temuEurVerifiedBcId=String(actual.id);
+     }
      const confirmed=historical?.confirmed||await verifyRecordedOrSourceTotals(api,o,actual,()=>o.pricing);o.erp_live.bc={...o.erp_live.bc,id:actual.id,label:actual.label,status:actual.status};
      o.erp_live.pricing={...o.erp_live.pricing,status:'verified',error:null,confirmed,verifiedAt:new Date().toISOString()};await save(o);
     }catch(e){o.failed=true;o.erp_live.pricing={...o.erp_live.pricing,status:'blocked',error:e.message};await save(o);await fail(o,e);}
