@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {assertTemuEurTotal,convertTemuPricingToEur} from '../src/temu-eur-pricing.mjs';
+import {assertTemuEurTotal,convertTemuPricingToEur,verifyTemuEurRecovery} from '../src/temu-eur-pricing.mjs';
 import {verifyBcPricing} from '../src/bc-pricing.mjs';
 
 function pricing(currency, grossRows, vat) {
@@ -39,4 +39,29 @@ test('allocation conserves the rounded gross total and preserves freight',()=>{
  assert.deepEqual(convertTemuPricingToEur(source,converted.conversion.rate),converted);
  assert.throws(()=>convertTemuPricingToEur({...source,total:5},7.4758),/rapprocher/);
  assert.throws(()=>convertTemuPricingToEur(source,0),/invalide/);
+});
+
+test('recovered EUR creations validate saved totals and keep draft conversion',()=>{
+ const converted=convertTemuPricingToEur(pricing('DKK',[941.97],25),7.4758);
+ const order={erp_live:{temuEurPricing:converted}};
+ const bc={id:'7',status:'unpublished',currency:{label:'EUR'},total:126,line_items:[{tax_amount:25.20}]};
+ for(const status of ['active','unpublished']){
+  assert.throws(()=>verifyTemuEurRecovery(order,{...bc,status,currency:{label:'DKK'}}),/Devise/);
+  assert.throws(()=>verifyTemuEurRecovery(order,{...bc,status,total:127}),/total/);
+ }
+ assert.equal(verifyTemuEurRecovery(order,bc),converted);
+ assert.equal(order.erp_live.temuEurVerifiedBcId,undefined);
+ verifyTemuEurRecovery(order,{...bc,status:'active'});
+ assert.equal(order.erp_live.temuEurVerifiedBcId,'7');
+ assert.equal(verifyTemuEurRecovery(order,{...bc,total:127}),null);
+ assert.throws(()=>verifyTemuEurRecovery(order,{...bc,id:'8',total:127}),/total/);
+});
+test('historical BCs and existing BLs do not acquire commercial recovery gates',()=>{
+ const bc={id:'7',status:'active',currency:{label:'DKK'},total:999};
+ assert.equal(verifyTemuEurRecovery({erp_live:{}},bc),null);
+ for(const field of ['bl','stockDocument']){
+  const order={erp_live:{temuEurPricing:{total:126,currency:'EUR'},[field]:{id:'9'}}};
+  assert.equal(verifyTemuEurRecovery(order,bc),null);
+  assert.equal(order.erp_live.temuEurVerifiedBcId,undefined);
+ }
 });

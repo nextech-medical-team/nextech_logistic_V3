@@ -1,3 +1,4 @@
+import {verifySourceCommercialTotals} from './bc-pricing.mjs';
 const cents = amount => Math.round(amount * 100);
 
 // Allocate the converted gross total in cents, including freight. Send TTC
@@ -45,4 +46,15 @@ export function assertTemuEurTotal(bc, pricing) {
      cents(Number(bc.total)) !== cents(pricing.total)) {
   throw Error('BC TEMU · Devise ou total en euros différent de la conversion enregistrée');
  }
+}
+
+// A recovered creation uses its saved conversion until the BC is verified.
+// Existing BLs remain authoritative; commercial checks never gate their labels.
+export function verifyTemuEurRecovery(order, bc) {
+ const state=order.erp_live||{}, converted=state.temuEurPricing;
+ if(!converted||state.bl?.id||state.stockDocument?.id||String(state.temuEurVerifiedBcId||'')===String(bc.id))return null;
+ assertTemuEurTotal(bc,converted);
+ verifySourceCommercialTotals(bc,converted);
+ if(bc.status==='active')state.temuEurVerifiedBcId=String(bc.id);
+ return converted;
 }
