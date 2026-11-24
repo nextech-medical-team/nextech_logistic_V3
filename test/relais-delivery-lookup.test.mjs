@@ -26,6 +26,7 @@ test('retrouve le BL partiel correspondant précisément au colis',async()=>{
   }};
   const byTracking=await lookupRelaisDelivery(db,api,{tracking:'YT2600321616006363',bl:'',reference:''});
   assert.equal(byTracking.delivery.line_items[0].sku,'ABC');
+  assert.equal(byTracking.delivery.orderReference,'404-1798613-2678742');
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'GOFOEXTRA1',bl:'',reference:''})).status,200);
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'',bl:'',reference:'404-1798613-2678742'})).status,409);
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT0000000000000000',bl:'',reference:''})).status,404);

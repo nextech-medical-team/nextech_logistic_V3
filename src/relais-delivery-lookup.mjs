@@ -33,7 +33,7 @@ export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
   FROM partial_deliveries p JOIN orders o ON o.id=p.order_id
   WHERE NOT o.archived AND NOT o.simulation AND p.environment='production' AND p.status='ready'
  )
- SELECT DISTINCT d.bl->>'id' AS id,d.bl->>'label' AS label
+ SELECT DISTINCT d.bl->>'id' AS id,d.bl->>'label' AS label,d.reference AS order_reference
  FROM deliveries d WHERE d.bl->>'id' ~ '^[0-9]+$'
  AND ($1='' OR upper(d.bl->>'label')=$1)
  AND ($2='' OR upper(d.reference)=$2 OR upper(d.bl->>'external_reference')=$2)
@@ -53,7 +53,7 @@ export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
  if(!doc||String(doc.id)!==match.id||match.label&&doc.label!==match.label||!Array.isArray(doc.line_items)){
   return {status:409,error:'Le BL enregistré dans la V3 doit être rapproché avec Erplain.'};
  }
- return {status:200,delivery:doc};
+ return {status:200,delivery:{...doc,orderReference:match.order_reference}};
 }
 
 export async function handleRelaisDeliveryLookup({req,res,url,db,api,json,token}){
