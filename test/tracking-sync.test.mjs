@@ -43,6 +43,38 @@ test('application : intention, ecriture, relecture, confirmation locale',async()
  assert.equal(report.counts.updated,1);
  assert.deepEqual(h.calls,['verify','lock','tracking_sync.intent','write:20:delivered','local:delivered','tracking_sync.confirmed']);
 });
+test('application : le statut logistique V3 est publié avant la mutation Erplain',async()=>{
+ const calls=[];
+ const report=await synchronizeTracking({targets:[target],apply:true,
+  carrier:{read:async(c,e,n)=>[event(n)]},
+  gateway:{verifyLive:async()=>{},readBL:async()=>bl(calls.includes('erp')?'delivered':'shipped'),setBLStatus:async()=>calls.push('erp')},
+  store:{assertCurrent:async()=>{},updateLogistics:async(t,status)=>{assert.equal(status,'delivered');calls.push('v3');return true;},
+   withLock:async(t,fn)=>fn(),record:async()=>{},confirm:async()=>calls.push('confirmed')}});
+ assert.deepEqual(calls,['v3','erp','confirmed']);
+ assert.equal(report.rows[0].localUpdated,true);
+});
+
+test('TEMU sans événements : consulter GOFO pour le colis confirmé',async()=>{
+ const reference='PO-123-456';
+ const number='GFFR26327175481928';
+ const p={packageSn:'PK-123',trackingNumber:number,shippingCompanyName:'GOFO FRANCE',shippingLabelStatus:1,orderSendInfoList:[{parentOrderSn:reference}]};
+ const responses={
+  'bg.order.detail.v2.get':{parentOrderMap:{parentOrderSn:reference,parentOrderStatus:2},orderList:[{orderSn:'item-1'}]},
+  'bg.logistics.shipment.v2.get':{shipmentInfoDTO:[p]},
+  'bg.logistics.shipment.result.get':{packageInfoResultList:[p]}
+ };
+ const api={read:async type=>{
+  if(type==='temu.track.trackinginfo.get')throw Object.assign(Error('Suivi indisponible'),{code:'170070010'});
+  return responses[type];
+ }};
+ const evidence=await readTemuTracking(api,reference,[],async(provider,tracking)=>{
+  assert.equal(provider,'gofo');
+  assert.equal(tracking,number);
+  return [{...event(tracking),carrier:provider}];
+ });
+ assert.deepEqual(evidence.tracking,[number]);
+ assert.equal(evidence.events[0].carrier,'gofo');
+});
 test('erreur de lecture ou changement de commande : aucune mutation Erplain',async()=>{
  for(const options of [{readError:true},{current:false}]){
   const h=harness({apply:true,...options});const r=await h.run();

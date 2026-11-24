@@ -28,7 +28,7 @@ export async function loadTrackingTargets(db,orderId=null){
  return targets;
 }
 
-export function trackingSyncStore(db){
+export function trackingSyncStore(db,{shareLifecycleLock=false}={}){
  return {
   async assertCarrierAvailable(carrier){
    const row=(await db.query("SELECT until_at FROM carrier_tracking_cooldown WHERE carrier=$1 AND environment='production' AND until_at>now()",[carrier])).rows[0];
@@ -42,8 +42,10 @@ export function trackingSyncStore(db){
    if(!current||JSON.stringify(current)!==JSON.stringify(target))throw Error('Commande ou colis modifiés pendant la lecture : nouvel examen requis');
   },
   async withLock(target,fn){
-   const controls=(await db.query("SELECT value FROM settings WHERE key='background_tasks'")).rows[0]?.value||{};
-   if(controls.lifecycle!==false)throw Error('Le traitement lifecycle a été réactivé : synchronisation dédiée suspendue');
+   if(!shareLifecycleLock){
+    const controls=(await db.query("SELECT value FROM settings WHERE key='background_tasks'")).rows[0]?.value||{};
+    if(controls.lifecycle!==false)throw Error('Le traitement lifecycle a été réactivé : synchronisation dédiée suspendue');
+   }
    // Share the existing lifecycle lock so the two processes cannot write this BL together.
    await db.query(`INSERT INTO document_lifecycle(bl_id,order_id,partial_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[String(target.blId),target.orderId,target.partialId||null]);
    const claimed=await db.query(`UPDATE document_lifecycle SET locked=true WHERE bl_id=$1 AND order_id=$2 AND partial_id IS NOT DISTINCT FROM $3::text AND locked=false RETURNING bl_id`,[String(target.blId),target.orderId,target.partialId||null]);
@@ -53,9 +55,25 @@ export function trackingSyncStore(db){
   async record(action,detail){
    await db.query('INSERT INTO audit(user_email,action,detail) VALUES($1,$2,$3)',['system:tracking-sync',action,JSON.stringify(detail)]);
   },
+  async updateLogistics(target,status){
+   if(target.partialId||!['shipped','delivered','not_shipped','exception'].includes(status))return false;
+   const updated=await db.query(`UPDATE orders SET tracking_status=$2
+     WHERE id=$1 AND NOT archived AND NOT partial_mode
+     AND erp_live->'bl'->>'id' IS NOT DISTINCT FROM $3::text
+     AND erp_live->'bc'->>'id' IS NOT DISTINCT FROM $4::text
+     AND coalesce(erp_live->'bc'->>'status','')<>'cancelled' AND coalesce(erp_live->'bl'->>'status','')<>'cancelled'
+     AND coalesce(suspension->>'active','false')<>'true' AND NOT (coalesce(suspension,'{}'::jsonb) ? 'erplainCancellation')
+     AND tracking_status IS DISTINCT FROM $2 AND coalesce(tracking_status,'') NOT IN ('delivered','cancelled')
+     AND NOT (coalesce(tracking_status,'') IN ('shipped','in_transit') AND $2='not_shipped')
+     RETURNING id`,[target.orderId,status,target.blId||null,target.bcId||null]);
+   return updated.rows.length===1;
+  },
   async confirm(target,status){
    if(target.partialId)await db.query(`UPDATE partial_deliveries SET bl=jsonb_set(bl,'{status}',to_jsonb($2::text)) WHERE id=$1`,[target.partialId,status]);
-   else await db.query(`UPDATE orders SET erp_live=jsonb_set(erp_live,'{bl,status}',to_jsonb($2::text)),tracking_status=$2 WHERE id=$1`,[target.orderId,status]);
+   else{
+    await db.query(`UPDATE orders SET erp_live=jsonb_set(erp_live,'{bl,status}',to_jsonb($2::text)) WHERE id=$1 AND erp_live->'bl'->>'id'=$3`,[target.orderId,status,String(target.blId)]);
+    await this.updateLogistics(target,status);
+   }
   }
  };
 }

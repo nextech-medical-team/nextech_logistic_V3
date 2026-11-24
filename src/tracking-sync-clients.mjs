@@ -3,10 +3,11 @@ import {erplainAccount} from './erplain-accounts.mjs';
 import {erplainLifecycleGateway} from './erplain-lifecycle-gateway.mjs';
 import {temuApi} from './temu-api.mjs';
 import {trackingSyncConfig} from './tracking-sync-config.mjs';
+import {connectTemuShops} from './temu-shop-clients.mjs';
 
 export function trackingSyncClients(directory){
  const loadConfig=file=>trackingSyncConfig(directory,file);
- const shops=new Map();let connected=false;
+ const shops=new Map();let connected=false,vaultClients;
  const temuFor=async target=>{
   if(!connected){
    const config=await loadConfig('temu-production.json');
@@ -23,7 +24,21 @@ export function trackingSyncClients(directory){
    }
    connected=true;
   }
-  const api=shops.get(String(target.mallId));
+  const mallId=String(target.mallId);
+  if(!shops.has(mallId)){
+   vaultClients??=(await connectTemuShops(directory,{
+    apiFactory:config=>temuApi(config,{relay:null}),
+    configLoader:()=>loadConfig('temu-production.json'),
+    allowUnavailableApplications:true
+   })).clients;
+   const api=vaultClients.get(mallId);
+   if(api){
+    const identity=await api.read('bg.open.accesstoken.info.get',{});
+    if(String(identity.mallId)!==mallId)throw Error('TEMU : identité du coffre de boutique incohérente');
+    shops.set(mallId,api);
+   }
+  }
+  const api=shops.get(mallId);
   if(!api)throw Error('TEMU : accès manquant pour la boutique de cette commande');
   return api;
  };
