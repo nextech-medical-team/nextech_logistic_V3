@@ -19,6 +19,7 @@ test('retrouve le BL partiel correspondant précisément au colis',async()=>{
     ('p3','o1','test','ready','{"id":"26","label":"SHO00748930"}','["YT0000000000000000"]');
    INSERT INTO extra_parcels VALUES('o1','p1','production','ready','GOFOEXTRA1');
   `);
+  await db.exec("ALTER TABLE orders ADD COLUMN source_payload jsonb NOT NULL DEFAULT '{}';");
   const calls=[];
   const api={verify:async()=>{},async request(query,{id}){
    assert.match(query,/^query/);calls.push(id);
@@ -39,6 +40,19 @@ test('retrouve le BL partiel correspondant précisément au colis',async()=>{
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT9999999999',bl:'',reference:''})).status,404);
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT1234567890',bl:'SHO00748929',reference:''})).status,404);
   assert.deepEqual(calls,['24','24','24']);
+  await db.exec(`
+   UPDATE orders SET source_payload='{"externalLabel":{"active":true,"tracking":["GL00LDBJA3"]},
+    "historicalShipments":[{"tracking":["YT2600321616006540"]}]}'
+    WHERE id='o2';
+  `);
+  const byGls=await lookupRelaisDelivery(db,api,{tracking:'00LDBJA3',bl:'',reference:''});
+  assert.equal(byGls.delivery.orderReference,'PO-TEST');
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT2600321616006540',bl:'',reference:''})).status,200);
+  await db.exec(`
+   UPDATE orders SET erp_live=erp_live||'{"documentSource":{"shippingOrders":[{"id":"25","status":"shipped"}]}}'
+    WHERE id='o2';
+  `);
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT2600321616006540',bl:'',reference:''})).status,404);
  }finally{await db.close();}
 });
 test('un appel sans le jeton dédié ne lit aucune donnée',async()=>{

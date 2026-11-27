@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "deploy": true,
   "branch": "main",
-  "baseCommit": "fbdcef3ac18f6ef9dcd8b4da4ccc506c13de0041",
-  "reason": "Rapprocher la retenue vendeur TEMU lorsqu’une annulation partielle laisse une quantité active sur une seule ligne."
+  "baseCommit": "715e0ec17c73c25b82176a7ba884c068d292e0e3",
+  "reason": "Rapprocher les scans d’étiquettes transporteur avec le bon BL dans la V3."
 }

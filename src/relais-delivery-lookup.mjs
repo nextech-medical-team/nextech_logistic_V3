@@ -15,6 +15,9 @@ function identifiers(params){
 }
 
 export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
+ const trackingAliases=tracking?[tracking]:[];
+ if(/^00[A-Z0-9]{6}$/.test(tracking))trackingAliases.push('GL'+tracking);
+ if(/^GL00[A-Z0-9]{6}$/.test(tracking))trackingAliases.push(tracking.slice(2));
  const {rows}=await db.query(`
  WITH deliveries AS (
   SELECT o.id AS order_id, o.reference, o.erp_live->'bl' AS bl, NULL::text AS partial_id,
@@ -23,7 +26,25 @@ export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
     FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.result->'packageInfoResultList')='array'
       THEN t.result->'packageInfoResultList' ELSE '[]'::jsonb END) pkg
     WHERE t.packages ? (pkg->>'packageSn') AND nullif(pkg->>'trackingNumber','') IS NOT NULL
-   ),'[]'::jsonb) AS tracking
+   ),'[]'::jsonb)||CASE WHEN o.source_payload#>'{externalLabel,active}'='true'::jsonb
+      AND jsonb_typeof(o.source_payload#>'{externalLabel,tracking}')='array'
+    THEN o.source_payload#>'{externalLabel,tracking}' ELSE '[]'::jsonb END
+    ||COALESCE((
+     SELECT jsonb_agg(track.value)
+     FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.source_payload->'historicalShipments')='array'
+       THEN o.source_payload->'historicalShipments' ELSE '[]'::jsonb END) shipment
+     CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(shipment->'tracking')='array'
+       THEN shipment->'tracking' ELSE '[]'::jsonb END) track(value)
+     WHERE shipment#>>'{bl,id}'=o.erp_live#>>'{bl,id}'
+      OR (shipment#>>'{bl,id}' IS NULL AND NOT EXISTS (
+       SELECT 1 FROM jsonb_array_elements(
+        CASE WHEN jsonb_typeof(o.erp_live#>'{documentSource,shippingOrders}')='array'
+         THEN o.erp_live#>'{documentSource,shippingOrders}' ELSE '[]'::jsonb END
+        ||CASE WHEN jsonb_typeof(o.erp_live#>'{blIdentity,shippingOrders}')='array'
+         THEN o.erp_live#>'{blIdentity,shippingOrders}' ELSE '[]'::jsonb END) linked
+       WHERE linked->>'id' IS DISTINCT FROM o.erp_live#>>'{bl,id}'
+        AND linked->>'status' IS DISTINCT FROM 'unpublished'))
+    ),'[]'::jsonb) AS tracking
   FROM orders o
   LEFT JOIN carrier_jobs c ON c.order_id=o.id AND c.environment='production' AND c.status='ready'
   LEFT JOIN temu_label_jobs t ON o.channel='temu' AND t.reference=o.reference AND t.status='complete'
@@ -33,14 +54,16 @@ export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
   FROM partial_deliveries p JOIN orders o ON o.id=p.order_id
   WHERE NOT o.archived AND NOT o.simulation AND p.environment='production' AND p.status='ready'
  )
- SELECT DISTINCT d.bl->>'id' AS id,d.bl->>'label' AS label
+ SELECT d.bl->>'id' AS id,d.bl->>'label' AS label,
+  CASE WHEN count(DISTINCT d.reference)=1 THEN min(d.reference) END AS reference
  FROM deliveries d WHERE d.bl->>'id' ~ '^[0-9]+$'
  AND ($1='' OR upper(d.bl->>'label')=$1)
  AND ($2='' OR upper(d.reference)=$2 OR upper(d.bl->>'external_reference')=$2)
- AND ($3='' OR d.tracking ? $3 OR EXISTS(
+ AND (cardinality($3::text[])=0 OR d.tracking ?| $3::text[] OR EXISTS(
    SELECT 1 FROM extra_parcels x WHERE x.order_id=d.order_id AND x.delivery_id IS NOT DISTINCT FROM d.partial_id
-   AND x.environment='production' AND x.status='ready' AND x.tracking=$3))
- LIMIT 2`,[bl,reference,tracking]);
+   AND x.environment='production' AND x.status='ready' AND x.tracking=ANY($3::text[])))
+ GROUP BY 1,2
+ LIMIT 2`,[bl,reference,trackingAliases]);
  if(!rows.length)return {status:404,error:'Aucun BL correspondant dans la V3.'};
  if(rows.length!==1)return {status:409,error:'Plusieurs BL correspondent dans la V3. Ajoutez le numéro exact du BL.'};
  const match=rows[0];
@@ -53,7 +76,7 @@ export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
  if(!doc||String(doc.id)!==match.id||match.label&&doc.label!==match.label||!Array.isArray(doc.line_items)){
   return {status:409,error:'Le BL enregistré dans la V3 doit être rapproché avec Erplain.'};
  }
- return {status:200,delivery:doc};
+ return {status:200,delivery:{...doc,orderReference:match.reference}};
 }
 
 export async function handleRelaisDeliveryLookup({req,res,url,db,api,json,token}){
