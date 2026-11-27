@@ -21,6 +21,7 @@ export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
  const {rows}=await db.query(`
  WITH deliveries AS (
   SELECT o.id AS order_id, o.reference, o.erp_live->'bl' AS bl, NULL::text AS partial_id,
+   COALESCE(o.simulation,false) AS simulation, o.erp_status, COALESCE(c.tracking,'[]'::jsonb) AS production_tracking,
    COALESCE(c.tracking,'[]'::jsonb)||COALESCE((
     SELECT jsonb_agg(pkg->>'trackingNumber')
     FROM jsonb_array_elements(CASE WHEN jsonb_typeof(t.result->'packageInfoResultList')='array'
@@ -48,20 +49,25 @@ export async function lookupRelaisDelivery(db,api,{bl,reference,tracking}){
   FROM orders o
   LEFT JOIN carrier_jobs c ON c.order_id=o.id AND c.environment='production' AND c.status='ready'
   LEFT JOIN temu_label_jobs t ON o.channel='temu' AND t.reference=o.reference AND t.status='complete'
-  WHERE NOT o.archived AND NOT o.partial_mode AND NOT o.simulation
+  WHERE NOT o.archived AND NOT o.partial_mode
   UNION ALL
-  SELECT o.id,o.reference,p.bl,p.id,COALESCE(p.tracking,'[]'::jsonb)
+  SELECT o.id,o.reference,p.bl,p.id,COALESCE(o.simulation,false),o.erp_status,
+   COALESCE(p.tracking,'[]'::jsonb),COALESCE(p.tracking,'[]'::jsonb)
   FROM partial_deliveries p JOIN orders o ON o.id=p.order_id
-  WHERE NOT o.archived AND NOT o.simulation AND p.environment='production' AND p.status='ready'
+  WHERE NOT o.archived AND p.environment='production' AND p.status='ready'
  )
  SELECT d.bl->>'id' AS id,d.bl->>'label' AS label,
   CASE WHEN count(DISTINCT d.reference)=1 THEN min(d.reference) END AS reference
- FROM deliveries d WHERE d.bl->>'id' ~ '^[0-9]+$'
+ FROM deliveries d
+ CROSS JOIN LATERAL (SELECT EXISTS(
+   SELECT 1 FROM extra_parcels x WHERE x.order_id=d.order_id AND x.delivery_id IS NOT DISTINCT FROM d.partial_id
+   AND x.environment='production' AND x.status='ready' AND x.tracking=ANY($3::text[])
+  ) AS matches) extra
+ WHERE d.bl->>'id' ~ '^[0-9]+$'
+ AND (NOT d.simulation OR (d.erp_status='live_created' AND (d.production_tracking ?| $3::text[] OR extra.matches)))
  AND ($1='' OR upper(d.bl->>'label')=$1)
  AND ($2='' OR upper(d.reference)=$2 OR upper(d.bl->>'external_reference')=$2)
- AND (cardinality($3::text[])=0 OR d.tracking ?| $3::text[] OR EXISTS(
-   SELECT 1 FROM extra_parcels x WHERE x.order_id=d.order_id AND x.delivery_id IS NOT DISTINCT FROM d.partial_id
-   AND x.environment='production' AND x.status='ready' AND x.tracking=ANY($3::text[])))
+ AND (cardinality($3::text[])=0 OR d.tracking ?| $3::text[] OR extra.matches)
  GROUP BY 1,2
  LIMIT 2`,[bl,reference,trackingAliases]);
  if(!rows.length)return {status:404,error:'Aucun BL correspondant dans la V3.'};

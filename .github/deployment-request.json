@@ -2,6 +2,6 @@
   "schemaVersion": 1,
   "deploy": true,
   "branch": "main",
-  "baseCommit": "715e0ec17c73c25b82176a7ba884c068d292e0e3",
-  "reason": "Rapprocher les scans d’étiquettes transporteur avec le bon BL dans la V3."
+  "baseCommit": "65c1dcf4d7c0c0fc15bb32eed30a870c82c56321",
+  "reason": "Retrouver un BL réel par le suivi exact de son étiquette production malgré un indicateur de simulation historique."
 }

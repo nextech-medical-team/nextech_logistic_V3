@@ -20,6 +20,7 @@ test('retrouve le BL partiel correspondant précisément au colis',async()=>{
    INSERT INTO extra_parcels VALUES('o1','p1','production','ready','GOFOEXTRA1');
   `);
   await db.exec("ALTER TABLE orders ADD COLUMN source_payload jsonb NOT NULL DEFAULT '{}';");
+  await db.exec("ALTER TABLE orders ADD COLUMN erp_status text;");
   const calls=[];
   const api={verify:async()=>{},async request(query,{id}){
    assert.match(query,/^query/);calls.push(id);
@@ -40,6 +41,16 @@ test('retrouve le BL partiel correspondant précisément au colis',async()=>{
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT9999999999',bl:'',reference:''})).status,404);
   assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT1234567890',bl:'SHO00748929',reference:''})).status,404);
   assert.deepEqual(calls,['24','24','24']);
+  await db.exec(`
+   UPDATE orders SET simulation=true,erp_status='live_created' WHERE id='o2';
+   INSERT INTO carrier_jobs VALUES('o2','production','ready','["YT2600321616006537"]');
+  `);
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT2600321616006537',bl:'',reference:''})).status,200);
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'',bl:'SHO00748928',reference:'PO-TEST'})).status,404);
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT1234567890',bl:'',reference:''})).status,404);
+  await db.exec("UPDATE orders SET erp_status='simulated' WHERE id='o2'");
+  assert.equal((await lookupRelaisDelivery(db,api,{tracking:'YT2600321616006537',bl:'',reference:''})).status,404);
+  await db.exec("UPDATE orders SET simulation=false WHERE id='o2'");
   await db.exec(`
    UPDATE orders SET source_payload='{"externalLabel":{"active":true,"tracking":["GL00LDBJA3"]},
     "historicalShipments":[{"tracking":["YT2600321616006540"]}]}'
